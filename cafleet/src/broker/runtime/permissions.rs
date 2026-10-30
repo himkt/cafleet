@@ -734,7 +734,7 @@ mod tests {
             member,
         );
         let run = storage::create_run(&mut fixture.base.conn, &spec).unwrap();
-        fixture.base.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2,coverage='tested',profile_version='fixture-v1',profile_match='exact' WHERE run_id=?1",[run.run_id]).unwrap();
+        fixture.base.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2,coverage='tested',profile_version='fixture-v1' WHERE run_id=?1",[run.run_id]).unwrap();
         let owner = storage::get_run(&fixture.base.conn, run.run_id)
             .unwrap()
             .owner();

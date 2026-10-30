@@ -408,7 +408,7 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
                 Some(_) if rule.kind.is_annotation() => value,
                 Some(margin) => value
                     .split('\n')
-                    .map(|row| row.strip_prefix(margin.as_str()))
+                    .map(|row| row.strip_prefix(margin.as_str()).map(str::trim_end))
                     .collect::<Option<Vec<_>>>()?
                     .join("\n"),
             })
@@ -902,14 +902,82 @@ mod tests {
     use crate::runtime::runner::*;
     use serde_json::{Value, json};
 
+    /// The Claude auto-tip permission form; `padding` written spaces follow the question and
+    /// operation rows, as Claude leaves them when it repaints only the changed cells of a row
+    /// that was earlier wider.
+    fn auto_tip_form(padding: usize) -> ScreenSnapshot {
+        let pad = " ".repeat(padding);
+        let separator = "╌".repeat(120);
+        let rows = [
+            " Bash command".to_owned(),
+            " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below"
+                .to_owned(),
+            " Create empty file wp-mark".to_owned(),
+            separator.clone(),
+            format!(" touch wp-mark{pad}"),
+            separator,
+            format!(" Do you want to proceed?{pad}"),
+            " ❯ 1. Yes".to_owned(),
+            "   2. Yes, and always allow access to /tmp/x from this project".to_owned(),
+            "   3. Yes, and switch to auto mode · auto mode handles these prompts for you"
+                .to_owned(),
+            "   4. No".to_owned(),
+            String::new(),
+            " Esc to cancel · Tab to amend".to_owned(),
+        ];
+        let bytes = format!(
+            "\x1b[?1049h\x1b[2J\x1b[13;1H{}\x1b[20;2H",
+            rows.join("\r\n")
+        );
+        let mut terminal = TerminalState::new(TerminalSize {
+            rows: 35,
+            cols: 149,
+        })
+        .unwrap();
+        terminal.feed(bytes.as_bytes()).unwrap();
+        terminal.snapshot()
+    }
+
+    #[test]
+    fn bundled_claude_auto_tip_form_with_written_padding_rows_keeps_its_request_identity() {
+        let catalog = ProfileCatalog::bundled().unwrap();
+        let detector = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.308"));
+        let clean = detector.observe(&auto_tip_form(0)).unwrap();
+        assert_eq!(
+            clean.kind,
+            ObservationKind::Interaction(InteractionClass::PermissionRequest)
+        );
+        assert_eq!(clean.rule_id, "claude-bash-permission-auto-tip");
+        assert_eq!(clean.raw_evidence["operation"], "touch wp-mark");
+        let padded = detector.observe(&auto_tip_form(40)).unwrap();
+        assert_eq!(padded.kind, clean.kind, "padding keeps the form detected");
+        assert_eq!(padded.rule_id, clean.rule_id);
+        assert_eq!(
+            padded.raw_evidence["operation"],
+            clean.raw_evidence["operation"]
+        );
+        assert_eq!(
+            padded.raw_evidence["operation_rows"],
+            clean.raw_evidence["operation_rows"]
+        );
+        assert_eq!(
+            padded.raw_evidence["choices"],
+            clean.raw_evidence["choices"]
+        );
+        assert!(
+            padded.fingerprint == clean.fingerprint,
+            "written padding does not change the request identity"
+        );
+    }
+
     #[test]
     fn permission_inspection_answer_match_uses_complete_current_rule_choice_and_focus() {
         let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
-        let detector = Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1"));
+        let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
         let plan = catalog
             .answer_plan(
                 CodingAgent::Codex,
-                "synthetic-0.0.1",
+                "0.0.1-synthetic",
                 "synthetic-permission",
                 PermissionDecision::Allow,
             )
@@ -1022,22 +1090,22 @@ mod tests {
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
         let catalog = ProfileCatalog::bundled().unwrap();
-        for version in ["2.1.301", "2.1.306"] {
-            let fallback = Detector::new(&catalog, CodingAgent::Claude, Some(version))
-                .observe(&screen)
-                .unwrap();
-            assert_eq!(fallback.kind, observation.kind, "{version}");
-            assert_eq!(fallback.rule_id, observation.rule_id, "{version}");
-            assert_eq!(
-                fallback.profile_version, observation.profile_version,
-                "{version}"
-            );
-            assert_eq!(
-                fallback.raw_evidence["operation"], observation.raw_evidence["operation"],
-                "{version}"
-            );
-            assert_eq!(fallback.raw_evidence["native_version"], version);
-        }
+        let reused = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.308"))
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(reused.kind, observation.kind);
+        assert_eq!(reused.rule_id, observation.rule_id);
+        assert_eq!(reused.profile_version, observation.profile_version);
+        assert_eq!(
+            reused.raw_evidence["operation"],
+            observation.raw_evidence["operation"]
+        );
+        assert_eq!(reused.raw_evidence["native_version"], "2.1.308");
+        let below = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.301"))
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(below.kind, ObservationKind::Unknown);
+        assert_eq!(below.profile_version, None);
         let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
             .observe(&screen)
             .unwrap();
@@ -1667,18 +1735,18 @@ mod tests {
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
         let catalog = ProfileCatalog::bundled().unwrap();
-        for version in ["0.162.0", "0.164.0"] {
-            let fallback = Detector::new(&catalog, CodingAgent::Codex, Some(version))
-                .observe(&screen)
-                .unwrap();
-            assert_eq!(fallback.kind, observation.kind, "{version}");
-            assert_eq!(fallback.rule_id, observation.rule_id, "{version}");
-            assert_eq!(
-                fallback.profile_version, observation.profile_version,
-                "{version}"
-            );
-            assert_eq!(fallback.raw_evidence["native_version"], version);
-        }
+        let reused = Detector::new(&catalog, CodingAgent::Codex, Some("0.164.0"))
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(reused.kind, observation.kind);
+        assert_eq!(reused.rule_id, observation.rule_id);
+        assert_eq!(reused.profile_version, observation.profile_version);
+        assert_eq!(reused.raw_evidence["native_version"], "0.164.0");
+        let below = Detector::new(&catalog, CodingAgent::Codex, Some("0.162.0"))
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(below.kind, ObservationKind::Unknown);
+        assert_eq!(below.profile_version, None);
         let unprobed = Detector::new(&catalog, CodingAgent::Codex, None)
             .observe(&screen)
             .unwrap();

@@ -167,7 +167,7 @@ fn submission_context(run_id: i64, request: &SubmitInput) -> InputContext {
     }
 }
 
-fn submission_digest(run_id: i64, request: &SubmitInput) -> Result<String> {
+fn validate_submission_request(run_id: i64, request: &SubmitInput) -> Result<()> {
     validate_operation_key(&request.operation_key)?;
     usage(
         run_id > 0 && crate::input::valid_input(&request.literal),
@@ -188,9 +188,7 @@ fn submission_digest(run_id: i64, request: &SubmitInput) -> Result<String> {
             return Err(CafleetError::Usage("ordinary input kind required".into()));
         }
     }
-    Ok(crate::broker::runtime::input_payload_digest(
-        run_id, request,
-    ))
+    Ok(())
 }
 
 pub(crate) fn find_submission(
@@ -201,7 +199,7 @@ pub(crate) fn find_submission(
 ) -> std::result::Result<Option<InputOperation>, InputFailure> {
     let mut context = submission_context(identity.run_id, request);
     let result = (|| {
-        let digest = submission_digest(identity.run_id, request)?;
+        validate_submission_request(identity.run_id, request)?;
         with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction()?;
             let run = selected_run(&tx, identity.run_id)?;
@@ -212,6 +210,11 @@ pub(crate) fn find_submission(
             let retained = storage::find_input(&tx, identity.run_id, &request.operation_key)?;
             if let Some(input) = &retained {
                 context.input_id = Some(input.input_id);
+                let digest = storage::versioned_payload_digest(
+                    input.payload_digest_version,
+                    identity.run_id,
+                    request,
+                )?;
                 ensure(
                     input.kind == request.input_kind
                         && input.payload_digest == digest
@@ -232,6 +235,11 @@ pub(super) fn durable_outcome(
     input: &InputOperation,
 ) -> Option<(SubmissionStatus, SubmissionStage, Option<String>)> {
     match (input.state, input.disposition) {
+        (InputState::Ready, _) if input.deferred_at.is_some() => Some((
+            SubmissionStatus::Queued,
+            SubmissionStage::ZeroBytes,
+            input.defer_reason.clone(),
+        )),
         (InputState::Ready, _) => None,
         (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
             Some((SubmissionStatus::Accepted, SubmissionStage::Submitted, None))
@@ -255,6 +263,7 @@ fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
         stage,
         output_seq: None,
         reason,
+        delivery: input.delivery(),
     })
 }
 
@@ -301,6 +310,11 @@ fn validate_reply_against_durable(
                                 | (InputState::Settled, Some(InputDisposition::Submitted))
                         )
                 }
+                SubmissionStatus::Queued => {
+                    reply.stage == SubmissionStage::ZeroBytes
+                        && input.state == InputState::Ready
+                        && input.deferred_at.is_some()
+                }
                 SubmissionStatus::Uncertain => {
                     matches!(input.state, InputState::InProgress | InputState::Uncertain)
                 }
@@ -311,7 +325,10 @@ fn validate_reply_against_durable(
                                 && input.disposition != Some(InputDisposition::Submitted))
                 }
             };
-            ensure(consistent, contradiction)
+            ensure(
+                consistent && reply.delivery == input.delivery(),
+                contradiction,
+            )
         }
         (None, None) => ensure(
             matches!(
@@ -523,19 +540,46 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         };
         held.validate_binding(&settings.database_url, expected_placement)?;
         deadline.remaining()?;
-        let reply = host
-            .exchange(expected_run, &request, deadline.instant())
-            .map_err(CafleetError::from)?;
+        held.release()?;
+        let reply = host.exchange(expected_run, &request, deadline.instant());
+        let reply = reply.map_err(CafleetError::from)?;
         let InputControlReply::Submission(reply) = reply else {
             return Err(error("ordinary submission requires a submission reply"));
         };
         let recorded = find_submission(conn, &identity, attempt.request, deadline)
             .map_err(CafleetError::from)?;
         context.input_id = recorded.as_ref().map(|input| input.input_id);
-        with_database_budget(conn, deadline, |conn| {
+        let runner_owned = matches!(
+            reply.status,
+            SubmissionStatus::Accepted | SubmissionStatus::Queued
+        );
+        let bookkeeping = Deadline::until(
+            deadline
+                .instant()
+                .max(Instant::now() + std::time::Duration::from_secs(1)),
+        );
+        let reacquired = held.reacquire_within(bookkeeping)?;
+        if !reacquired && !runner_owned {
+            return Err(error(match context.input_id {
+                Some(input_id) => format!(
+                    "pane input lock remained busy after the runner reported {}; inspect the result with cafleet input show {input_id} --json",
+                    reply.status.as_str()
+                ),
+                None => format!(
+                    "pane input lock remained busy after the runner reported {}",
+                    reply.status.as_str()
+                ),
+            }));
+        }
+        let validate = |conn: &mut Connection| {
             held.validate_binding(&settings.database_url, expected_placement)?;
             validate_submission_target(conn, settings, expected_run, expected_placement)
-        })?;
+        };
+        if runner_owned {
+            crate::input::complete_database_budget(conn, deadline, validate)?;
+        } else {
+            with_database_budget(conn, deadline, validate)?;
+        }
         validate_reply_against_durable(
             &reply,
             recorded.as_ref(),
@@ -546,7 +590,9 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
                 "submission reply has no matching durable input",
             ],
         )?;
-        deadline.remaining()?;
+        if !runner_owned {
+            deadline.remaining()?;
+        }
         Ok(reply)
     })();
     result.map_err(|source| context.failure(source))
@@ -948,6 +994,7 @@ pub(super) fn projection(
             stage,
             output_seq: None,
             reason,
+            delivery: None,
         },
         member_id: run.member_id,
         run_id: run.run_id,
@@ -1391,7 +1438,7 @@ pub(crate) mod test_support {
                 )
                 .unwrap();
             assert_eq!(fixture.conn.execute(
-                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',profile_version='fixture-detector-v1',profile_match='exact',started_at=?1 WHERE run_id=?2",
+                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',profile_version='fixture-detector-v1',started_at=?1 WHERE run_id=?2",
                 rusqlite::params![NOW, fixture.run.run_id],
             ).unwrap(), 1);
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
@@ -3121,12 +3168,24 @@ mod tests {
                 "an explicit attempt uses only its declared exchanges"
             );
             assert_eq!(deadline, self.until);
-            assert!(
+            let client_holds_lock =
                 PaneLock::try_acquire(&self.settings.database_url, &self.placement)
                     .unwrap()
-                    .is_none(),
-                "the actual guard spans every exchange"
-            );
+                    .is_none();
+            if matches!(
+                request.operation,
+                InputControlOperation::SubmitPrompt(_) | InputControlOperation::SubmitExec(_)
+            ) {
+                assert!(
+                    !client_holds_lock,
+                    "a wrapped client awaits the runner's submission reply without the pane lock"
+                );
+            } else {
+                assert!(
+                    client_holds_lock,
+                    "the actual guard spans every receipt exchange"
+                );
+            }
             assert_eq!(
                 serde_json::to_value(&request.identity).unwrap(),
                 serde_json::to_value(ControlIdentity::from_run(run)).unwrap()
@@ -3174,6 +3233,11 @@ mod tests {
                     input_id: Some(i64::MAX),
                     output_seq: Some(1),
                     reason: None,
+                    delivery: Some(storage::DeliveryProjection {
+                        status: storage::DeliveryStatus::Submitted,
+                        method: Some(storage::DeliveryMethod::Profile),
+                        reason: None,
+                    }),
                 }));
             }
             let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)
@@ -4130,7 +4194,7 @@ mod tests {
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
             let request = ordinary(&run, "borrowed");
-            let until = outer.min(Instant::now() + Duration::from_secs(2));
+            let until = outer.min(Instant::now() + Duration::from_secs(10));
             let attempt =
                 PreparedSubmission::new(&request, until, &mut super::super::RealInputDeadlineClock)
                     .unwrap();
@@ -4224,6 +4288,87 @@ mod tests {
                     .count(),
                 1
             );
+        });
+    }
+
+    /// Takes the pane lock as soon as the runner replies, so the client cannot reacquire it.
+    struct LockTakingHost {
+        inner: SocketHost,
+        taken: Option<PaneLock>,
+    }
+
+    impl InputCommandHost for LockTakingHost {
+        fn lock(
+            &mut self,
+            settings: &Settings,
+            run: &RunRecord,
+            placement: &Placement,
+            deadline: Deadline,
+        ) -> std::result::Result<Option<PaneLock>, InputFailure> {
+            self.inner.lock(settings, run, placement, deadline)
+        }
+
+        fn health(
+            &mut self,
+            run: &RunRecord,
+            deadline: Instant,
+        ) -> std::result::Result<HealthSnapshot, InputFailure> {
+            self.inner.health(run, deadline)
+        }
+
+        fn exchange(
+            &mut self,
+            run: &RunRecord,
+            request: &InputControlRequest,
+            deadline: Instant,
+        ) -> std::result::Result<InputControlReply, InputFailure> {
+            let reply = self.inner.exchange(run, request, deadline)?;
+            self.taken = PaneLock::acquire_within(
+                &self.inner.settings.database_url,
+                &self.inner.placement,
+                Deadline::until(Instant::now() + Duration::from_secs(1)),
+            )
+            .unwrap();
+            assert!(self.taken.is_some(), "the released pane lock is taken");
+            Ok(reply)
+        }
+    }
+
+    #[test]
+    fn external_input_accepted_reply_succeeds_when_another_writer_takes_the_released_lock() {
+        with_input_service(|fixture, outer| {
+            let (settings, run, placement) = service_target(fixture);
+            let request = ordinary(&run, "lock-taken-after-reply");
+            let until = outer.min(Instant::now() + Duration::from_secs(4));
+            let attempt =
+                PreparedSubmission::new(&request, until, &mut super::super::RealInputDeadlineClock)
+                    .unwrap();
+            let held = PaneLock::try_acquire(&settings.database_url, &placement)
+                .unwrap()
+                .unwrap();
+            let mut inner = SocketHost::new(&settings, &placement, until);
+            inner.expiration = Some(attempt.expiration.monotonic_ns());
+            let mut host = LockTakingHost { inner, taken: None };
+            let result = submit_wrapped_input_under_pane_lock_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                &run,
+                &placement,
+                &held,
+                &attempt,
+                Deadline::until(until),
+                &mut host,
+            )
+            .expect("a submission the runner accepted succeeds without the reacquired lock");
+            let row =
+                storage::find_input(&fixture.fixture.conn, run.run_id, &request.operation_key)
+                    .unwrap()
+                    .expect("the runner committed the submission receipt");
+            assert_eq!(result.status, SubmissionStatus::Accepted);
+            assert_eq!(result.input_id, Some(row.input_id));
+            drop(host.taken.take());
+            drop(held);
+            wait_input_service_record(fixture, &request.literal, outer);
         });
     }
 
@@ -5608,7 +5753,6 @@ mod tests {
                             event_evidence: original.event_evidence,
                             native_version: original.native_version.clone(),
                             profile_version: None,
-                            profile_match: None,
                             coverage: Coverage::Unknown,
                             owner_pid: process.pid,
                             owner_start_identity: process.start_identity,

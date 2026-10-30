@@ -46,11 +46,15 @@ fn fold_visible(text: &str) -> String {
 pub(crate) fn notification_line(message: &broker::records::MessageRecord) -> String {
     format!(
         "{} {DISMISSED_PROMPT_NOTE}",
-        wrapped_notification_line(message)
+        canonical_preview_line(message)
     )
 }
 
-fn wrapped_notification_line(message: &broker::records::MessageRecord) -> String {
+pub(crate) fn fallback_preview_line(canonical: &str) -> String {
+    format!("{canonical} {DISMISSED_PROMPT_NOTE}")
+}
+
+pub(crate) fn canonical_preview_line(message: &broker::records::MessageRecord) -> String {
     let folded = fold_visible(&message.text);
     let body = if folded.chars().count() <= INLINE_BODY_LIMIT {
         folded
@@ -308,7 +312,11 @@ fn deliver_pending_with(
                 Err(error) => break storage_failure(member_id, candidate_id, error)?,
             }
         };
-        Ok(AttemptOutcome { sent, end })
+        Ok(AttemptOutcome {
+            sent,
+            end,
+            held_reason: None,
+        })
     })
 }
 
@@ -337,17 +345,19 @@ fn deliver_wrapped_pending(
 
     let mut guard = None;
     let mut sent = Vec::new();
+    let mut held_reason = None;
+    let mut skipped = attempted.clone();
     let mut operation_key = format!("preview:{}:{}", run.run_id, message.message_id);
     let mut known_input_id = None;
     let mut stage = Stage::Submission;
     let result = (|| {
-        let end = loop {
+        let end = 'drain: loop {
             deadline.remaining()?;
             let request = SubmitInput {
                 operation_key: operation_key.clone(),
                 input_kind: InputKind::Preview,
                 message_id: Some(message.message_id),
-                literal: wrapped_notification_line(&message),
+                literal: canonical_preview_line(&message),
             };
             let retained =
                 find_submission(conn, &identity, &request, deadline).map_err(CafleetError::from)?;
@@ -361,69 +371,90 @@ fn deliver_wrapped_pending(
             }
             let attempt =
                 PreparedSubmission::new(&request, deadline.instant(), &mut RealInputDeadlineClock)?;
-            if guard.is_none() {
-                guard = host
-                    .lock(settings, &run, placement, deadline)
-                    .map_err(CafleetError::from)?;
+            let accepted = 'submit: {
+                if retained.as_ref().is_some_and(|input| {
+                    input.state == InputState::Ready && input.deferred_at.is_some()
+                }) {
+                    break 'submit None;
+                }
                 if guard.is_none() {
-                    break AttemptEnd::Failed(notification_error(
-                        member.member_id,
-                        message.message_id,
-                        "pane input remained busy",
-                    ));
-                }
-            }
-            let held = guard.as_ref().expect("wrapped delivery owns its pane lock");
-            held.validate_binding(&settings.database_url, placement)?;
-            with_database_budget(conn, deadline, |conn| {
-                validate_submission_target(conn, settings, &run, placement)
-            })?;
-            let input_id = match retained.as_ref() {
-                Some(input)
-                    if matches!(input.state, InputState::Accepted | InputState::Settled) =>
-                {
-                    input.input_id
-                }
-                _ => {
-                    let result = submit_wrapped_input_under_pane_lock_with_host(
-                        conn, settings, &run, placement, held, &attempt, deadline, host,
-                    )
-                    .map_err(CafleetError::from)?;
-                    if !matches!(result.status, SubmissionStatus::Accepted) {
-                        break AttemptEnd::Held;
+                    guard = host
+                        .lock(settings, &run, placement, deadline)
+                        .map_err(CafleetError::from)?;
+                    if guard.is_none() {
+                        break 'drain AttemptEnd::Failed(notification_error(
+                            member.member_id,
+                            message.message_id,
+                            "pane input remained busy",
+                        ));
                     }
-                    result
-                        .input_id
-                        .expect("accepted Preview has its validated durable input ID")
                 }
+                let held = guard.as_ref().expect("wrapped delivery owns its pane lock");
+                held.validate_binding(&settings.database_url, placement)?;
+                with_database_budget(conn, deadline, |conn| {
+                    validate_submission_target(conn, settings, &run, placement)
+                })?;
+                let input_id = match retained.as_ref() {
+                    Some(input)
+                        if matches!(input.state, InputState::Accepted | InputState::Settled) =>
+                    {
+                        input.input_id
+                    }
+                    _ => {
+                        let result = submit_wrapped_input_under_pane_lock_with_host(
+                            conn, settings, &run, placement, held, &attempt, deadline, host,
+                        )
+                        .map_err(CafleetError::from)?;
+                        match result.status {
+                            SubmissionStatus::Accepted => {}
+                            SubmissionStatus::Queued => break 'submit None,
+                            SubmissionStatus::Held => {
+                                held_reason = result.reason;
+                                break 'drain AttemptEnd::Held;
+                            }
+                            SubmissionStatus::Rejected | SubmissionStatus::Uncertain => {
+                                break 'drain AttemptEnd::Held;
+                            }
+                        }
+                        result
+                            .input_id
+                            .expect("accepted Preview has its validated durable input ID")
+                    }
+                };
+                Some(input_id)
             };
-            known_input_id = Some(input_id);
-            let settled = with_database_budget(conn, deadline, |conn| {
-                validate_submission_target(conn, settings, &run, placement)?;
-                storage::settle_preview(conn, &run.owner(), input_id)
-            })
-            .map_err(|source| {
-                CafleetError::from(InputFailure {
-                    source,
-                    run_id: Some(run.run_id),
-                    interaction_id: None,
-                    input_id: Some(input_id),
-                    operation_key: Some(request.operation_key.clone()),
+            if let Some(input_id) = accepted {
+                let held = guard.as_ref().expect("wrapped delivery owns its pane lock");
+                known_input_id = Some(input_id);
+                let settled = complete_database_budget(conn, deadline, |conn| {
+                    validate_submission_target(conn, settings, &run, placement)?;
+                    storage::settle_preview(conn, &run.owner(), input_id)
                 })
-            })?;
-            sent.push(message.message_id);
-            stage = Stage::Retirement;
-            deadline.remaining()?;
-            held.validate_binding(&settings.database_url, placement)?;
-            with_database_budget(conn, deadline, |conn| {
-                validate_submission_target(conn, settings, &run, placement)
-            })?;
-            let retirement = attempt.retirement_request(&run, settled.input_id)?;
-            host.exchange(&run, &retirement, deadline.instant())
-                .map_err(CafleetError::from)?;
-            with_database_budget(conn, deadline, |conn| {
-                validate_submission_target(conn, settings, &run, placement)
-            })?;
+                .map_err(|source| {
+                    CafleetError::from(InputFailure {
+                        source,
+                        run_id: Some(run.run_id),
+                        interaction_id: None,
+                        input_id: Some(input_id),
+                        operation_key: Some(request.operation_key.clone()),
+                    })
+                })?;
+                sent.push(message.message_id);
+                stage = Stage::Retirement;
+                deadline.remaining()?;
+                held.validate_binding(&settings.database_url, placement)?;
+                with_database_budget(conn, deadline, |conn| {
+                    validate_submission_target(conn, settings, &run, placement)
+                })?;
+                let retirement = attempt.retirement_request(&run, settled.input_id)?;
+                host.exchange(&run, &retirement, deadline.instant())
+                    .map_err(CafleetError::from)?;
+                with_database_budget(conn, deadline, |conn| {
+                    validate_submission_target(conn, settings, &run, placement)
+                })?;
+            } else {
+                skipped.insert(message.message_id);
+            }
             deadline.remaining()?;
             stage = Stage::NextPreview;
             let Some((current, next)) = preview_snapshot(
@@ -431,7 +462,7 @@ fn deliver_wrapped_pending(
                 member.member_id,
                 Some(member.fleet_id),
                 deadline,
-                attempted,
+                &skipped,
             )?
             else {
                 break AttemptEnd::NoPending;
@@ -487,7 +518,11 @@ fn deliver_wrapped_pending(
             AttemptEnd::Failed(warning)
         }
     };
-    Ok(AttemptOutcome { sent, end })
+    Ok(AttemptOutcome {
+        sent,
+        end,
+        held_reason,
+    })
 }
 
 #[cfg(test)]
@@ -628,6 +663,9 @@ mod tests {
         retired: Vec<i64>,
         expire_retirement: bool,
         after_retirement: Option<Box<dyn FnMut()>>,
+        runner_held: Option<&'static str>,
+        take_lock_after_reply: bool,
+        taken: Option<PaneLock>,
     }
     impl DeliveryHost {
         fn new(
@@ -645,6 +683,9 @@ mod tests {
                 retired: Vec::new(),
                 expire_retirement: false,
                 after_retirement: None,
+                runner_held: None,
+                take_lock_after_reply: false,
+                taken: None,
             }
         }
         fn held(&self) {
@@ -694,7 +735,19 @@ mod tests {
         ) -> std::result::Result<InputControlReply, InputFailure> {
             self.calls[2] += 1;
             assert_eq!(deadline, self.until);
-            self.held();
+            if matches!(
+                request.operation,
+                InputControlOperation::SubmitPrompt(_) | InputControlOperation::SubmitExec(_)
+            ) {
+                assert!(
+                    PaneLock::try_acquire(&self.settings.database_url, &self.placement)
+                        .unwrap()
+                        .is_some(),
+                    "a wrapped delivery awaits the runner's submission reply without the pane lock"
+                );
+            } else {
+                self.held();
+            }
             assert_eq!(
                 serde_json::to_value(&request.identity).unwrap(),
                 serde_json::to_value(ControlIdentity::from_run(run)).unwrap()
@@ -744,8 +797,95 @@ mod tests {
                 request.operation,
                 InputControlOperation::SubmitPrompt(_)
             ));
-            self.inner.exchange(run, request, deadline)
+            if let Some(reason) = self.runner_held {
+                return Ok(InputControlReply::Submission(
+                    crate::runtime::runner::SubmissionResult::held(reason),
+                ));
+            }
+            let reply = self.inner.exchange(run, request, deadline)?;
+            if self.take_lock_after_reply {
+                self.taken =
+                    PaneLock::try_acquire(&self.settings.database_url, &self.placement).unwrap();
+                assert!(
+                    self.taken.is_some(),
+                    "another writer takes the released lock"
+                );
+            }
+            Ok(reply)
         }
+    }
+
+    #[test]
+    fn wrapped_send_is_submitted_and_stamped_when_another_writer_takes_the_released_lock() {
+        crate::runtime::runner::service::test_support::input_service::with_input_service(
+            |fixture, outer| {
+                let run = fixture.fixture.run.clone();
+                let settings = settings_for(&fixture.fixture.conn);
+                let placement = placement_of(&fixture.fixture.conn, run.member_id, run.fleet_id);
+                let message = broker::send_message(
+                    &mut fixture.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    "submitted before the lock is taken",
+                )
+                .unwrap();
+                let until = outer.min(Instant::now() + Duration::from_secs(5));
+                let mut host = DeliveryHost::new(&settings, &placement, until);
+                host.take_lock_after_reply = true;
+                let outcome = deliver_pending_with(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    run.member_id,
+                    Some(run.fleet_id),
+                    Deadline::until(until),
+                    &BTreeSet::new(),
+                    || panic!("wrapped delivery uses its runner, not a multiplexer"),
+                    &mut host,
+                )
+                .expect("a submission the runner accepted is a delivered send");
+                assert_eq!(outcome.sent, vec![message.message_id]);
+                assert!(
+                    preview_stamp(&fixture.fixture.conn, message.message_id).is_some(),
+                    "the submitted preview is stamped"
+                );
+                drop(host.taken.take());
+            },
+        );
+    }
+
+    #[test]
+    fn wrapped_delivery_reports_the_runner_held_reason() {
+        crate::runtime::runner::service::test_support::input_service::with_input_service(
+            |fixture, outer| {
+                let run = fixture.fixture.run.clone();
+                let settings = settings_for(&fixture.fixture.conn);
+                let placement = placement_of(&fixture.fixture.conn, run.member_id, run.fleet_id);
+                broker::send_message(
+                    &mut fixture.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    "held by the runner",
+                )
+                .unwrap();
+                let until = outer.min(Instant::now() + Duration::from_secs(5));
+                let mut host = DeliveryHost::new(&settings, &placement, until);
+                host.runner_held = Some("observer_unavailable");
+                let outcome = deliver_pending_with(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    run.member_id,
+                    Some(run.fleet_id),
+                    Deadline::until(until),
+                    &BTreeSet::new(),
+                    || panic!("wrapped delivery uses its runner, not a multiplexer"),
+                    &mut host,
+                )
+                .unwrap();
+                assert_eq!(outcome.end, AttemptEnd::Held);
+                assert_eq!(outcome.held_reason.as_deref(), Some("observer_unavailable"));
+                assert!(outcome.sent.is_empty());
+            },
+        );
     }
 
     fn assert_later_failure_preserves_committed_prefix(later_candidate: bool) {
@@ -1254,9 +1394,16 @@ mod tests {
                     preview_row(&fixture.fixture.conn, run.run_id, message.message_id).unwrap();
                 assert_eq!(row.kind, broker::runtime::InputKind::Preview);
                 assert_eq!(row.message_id, Some(message.message_id));
+                assert_eq!(row.payload_digest_version, 2);
                 assert_eq!(
                     row.payload_digest,
-                    preview_digest(run.run_id, message.message_id, &expected)
+                    crate::digest::sha256_hex(
+                        crate::digest::canonical_json(&serde_json::json!({
+                            "payload_digest_version":2,"run_id":run.run_id,"kind":"preview",
+                            "message_id":message.message_id,"literal":expected
+                        }))
+                        .as_bytes()
+                    )
                 );
                 assert_eq!(row.state, broker::runtime::InputState::Settled);
                 assert_eq!(
@@ -2236,292 +2383,216 @@ mod tests {
         );
     }
 
-    mod external_finite_wait {
+    mod deferred_preview {
         use super::*;
         use crate::broker::runtime::RunRecord;
         use crate::runtime::runner::service::test_support::ServiceFixture;
         use crate::runtime::runner::service::test_support::input_service::{
-            input_service_barrier, input_service_composer, input_service_records,
-            wait_input_service_record, with_input_service,
+            FORM_LINE, input_service_barrier, input_service_records, manual,
+            wait_input_service_record, with_detecting_input_service,
         };
         use crate::runtime::runner::*;
 
-        type Result<T> = std::result::Result<T, CafleetError>;
-
-        #[test]
-        fn external_finite_wait_retries_held_preview_after_actual_composer_recovery() {
-            use crate::receive::{
-                AttemptEnd, AttemptOutcome, BrokerReceiver, ReceiveIo, ReceiveSnapshot, SystemClock,
-            };
-            use std::collections::BTreeSet;
-
-            fn resize(
-                fixture: &ServiceFixture,
-                process: &ProcessIdentity,
-                size: rustix::termios::Winsize,
-            ) {
-                assert!(
-                    process.matches().unwrap(),
-                    "original owned runner generation"
-                );
-                rustix::termios::tcsetwinsize(&fixture.master, size).unwrap();
-                nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
-                    nix::sys::signal::Signal::SIGWINCH,
-                )
-                .unwrap();
+        /// Consumes the runtime-event notifications the detected interaction sends the
+        /// Director, so only the preview's own delivery is observed.
+        fn acknowledge_runtime_events(fixture: &mut ServiceFixture, run: &RunRecord) {
+            for pending in
+                crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id).unwrap()
+            {
+                assert_eq!(pending.from_member_id, run.member_id);
+                crate::broker::ack_message(&mut fixture.fixture.conn, pending.message_id).unwrap();
             }
+        }
 
-            struct ObservedReceiver<'a, 'b> {
-                receiver: BrokerReceiver<'a>,
-                fixture: &'b mut ServiceFixture,
-                run: RunRecord,
-                process: ProcessIdentity,
-                size: rustix::termios::Winsize,
-                until: Instant,
-                message_id: i64,
-                key: String,
-                line: String,
-                outcomes: Vec<AttemptOutcome>,
-            }
-            impl ObservedReceiver<'_, '_> {
-                fn untouched(&self) {
-                    assert!(
-                        storage::find_input(&self.fixture.fixture.conn, self.run.run_id, &self.key)
-                            .unwrap()
-                            .is_none()
-                    );
-                    let stamp: Option<String> = self
-                        .fixture
-                        .fixture
-                        .conn
-                        .query_row(
-                            "SELECT notified_at FROM messages WHERE message_id=?1",
-                            [self.message_id],
-                            |row| row.get(0),
-                        )
-                        .unwrap();
-                    assert!(stamp.is_none());
-                    assert!(
-                        input_service_records(self.fixture)
-                            .iter()
-                            .all(|record| record["line"].as_str() != Some(self.line.as_str()))
-                    );
-                }
-            }
-            impl ReceiveIo for ObservedReceiver<'_, '_> {
-                fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot> {
-                    self.receiver.check(deadline)
-                }
-                fn attempt(
-                    &mut self,
-                    member_id: i64,
-                    deadline: Deadline,
-                    attempted: &BTreeSet<i64>,
-                ) -> Result<AttemptOutcome> {
-                    assert_eq!(member_id, self.run.member_id);
-                    assert!(!attempted.contains(&self.message_id));
-                    let outcome = self.receiver.attempt(member_id, deadline, attempted)?;
-                    if self.outcomes.is_empty() {
-                        assert_eq!(
-                            outcome.end,
-                            AttemptEnd::Held,
-                            "actual first outcome={outcome:?}"
-                        );
-                        assert!(outcome.sent.is_empty());
-                        self.untouched();
-                        resize(self.fixture, &self.process, self.size);
-                        let until = self.until.min(deadline.instant());
-                        input_service_barrier(self.fixture, until);
-                        let health = input_service_composer(self.fixture, until);
-                        health.validate(&self.run).unwrap();
-                        let observation = health.observation.unwrap();
-                        assert_eq!(observation.eligibility, InputEligibility::ComposerEmpty);
-                        assert_eq!(observation.visibility, Visibility::NotVisible);
-                        assert!(!observation.degraded);
-                        assert_eq!(observation.pending_count, 0);
-                        assert!(!observation.pending_evidence);
-                        self.untouched();
-                        assert_eq!(
-                            input_service_records(self.fixture)
-                                .iter()
-                                .map(|record| record["line"].as_str().unwrap().to_owned())
-                                .collect::<Vec<_>>(),
-                            vec!["barrier"]
-                        );
-                    }
-                    self.outcomes.push(outcome.clone());
-                    Ok(outcome)
-                }
-            }
-
-            with_input_service(|fixture, until| {
-                let run =
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                let notifications =
-                    crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id)
-                        .unwrap();
-                assert_eq!(
-                    notifications.len(),
-                    1,
-                    "startup notifications={notifications:?}"
-                );
-                let notification = &notifications[0];
-                assert_eq!(notification.from_member_id, run.member_id);
-                assert_eq!(notification.to_member_id, run.director_member_id);
-                let event_id: i64 = fixture
+        fn stamp(fixture: &ServiceFixture, message_id: i64) -> Option<String> {
+            fixture
                 .fixture
                 .conn
                 .query_row(
-                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND message_id=?2 AND kind='coverage_unknown'",
-                    rusqlite::params![run.run_id, notification.message_id],
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message_id],
                     |row| row.get(0),
                 )
-                .unwrap();
-                let event = storage::get_event(&fixture.fixture.conn, event_id).unwrap();
-                assert_eq!(event.event.run_id, run.run_id);
-                assert_eq!(event.event.kind, storage::RuntimeEventKind::CoverageUnknown);
-                assert_eq!(event.event.message_id, Some(notification.message_id));
-                assert_eq!(event.run.run.owner(), run.owner());
-                assert_eq!(event.event.payload_json.to_string(), notification.text);
-                let acknowledged =
-                    crate::broker::ack_message(&mut fixture.fixture.conn, notification.message_id)
-                        .unwrap();
-                assert_eq!(acknowledged.message_id, notification.message_id);
-                assert_eq!(acknowledged.status.as_str(), "completed");
+                .unwrap()
+        }
+
+        #[test]
+        fn deferred_preview_during_a_detected_interaction_is_queued_then_drained_once_after_closure()
+         {
+            with_detecting_input_service(|fixture, until| {
+                let run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
                 let settings = Settings::for_database(
                     std::path::Path::new(fixture.fixture.conn.path().unwrap()),
                     None,
                 );
-                let size = rustix::termios::tcgetwinsize(&fixture.master).unwrap();
-                let process = ProcessIdentity::read(run.owner_pid).unwrap().unwrap();
-                assert_eq!(process.start_identity, run.owner_start_identity);
-                resize(
-                    fixture,
-                    &process,
-                    rustix::termios::Winsize {
-                        ws_row: 1,
-                        ws_col: 1,
-                        ws_xpixel: 0,
-                        ws_ypixel: 0,
-                    },
-                );
-                let mut previous = None;
+                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
                 loop {
-                    assert!(
-                        Instant::now() < until,
-                        "actual stable Hold setup within original fixture cap"
-                    );
+                    assert!(Instant::now() < until, "the detected interaction opens");
                     let health = NativeInputHost.health(&run, until).unwrap();
-                    health.validate(&run).unwrap();
                     let observation = health.observation.as_ref().unwrap();
-                    if matches!(observation.eligibility, InputEligibility::Hold(_))
-                        && !observation.degraded
+                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
                         && observation.pending_count == 0
                         && !observation.pending_evidence
                     {
-                        if previous == Some(health.output_seq) {
-                            break;
-                        }
-                        previous = Some(health.output_seq);
-                    } else {
-                        previous = None;
+                        break;
                     }
-                    std::thread::sleep(
-                        Duration::from_millis(2)
-                            .min(until.saturating_duration_since(Instant::now())),
-                    );
+                    std::thread::sleep(Duration::from_millis(2));
                 }
+                acknowledge_runtime_events(fixture, &run);
                 let message = crate::broker::send_message(
                     &mut fixture.fixture.conn,
                     run.director_member_id,
                     run.member_id,
-                    "actual external Held retry fixture",
+                    "deferred preview fixture",
                 )
                 .unwrap();
-                assert!(
-                    crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id)
-                        .unwrap()
-                        .is_empty()
-                );
-                assert!(input_service_records(fixture).is_empty());
-                let line = format!(
-                    "[cafleet msg {} from {} {}] {} [cafleet] Resume your work if something was still running.",
-                    message.message_id, message.from_member_id, message.created_at, message.text,
-                );
+                let line = canonical_preview_line(&message);
                 let key = format!("preview:{}:{}", run.run_id, message.message_id);
-                let timeout = Duration::from_secs(2);
-                assert!(
-                    until.saturating_duration_since(Instant::now()) > timeout,
-                    "original fixture cap contains the finite retry and cleanup"
-                );
-                let mut conn = crate::db::connect(&settings.database_url).unwrap();
-                let outcomes = with_database_budget(&mut conn, Deadline::until(until), |conn| {
-                    let mut io = ObservedReceiver {
-                        receiver: BrokerReceiver::new(conn, &settings, run.director_member_id),
-                        fixture: &mut *fixture,
-                        run: run.clone(),
-                        process,
-                        size,
-                        until,
-                        message_id: message.message_id,
-                        key: key.clone(),
-                        line: line.clone(),
-                        outcomes: Vec::new(),
-                    };
-                    let waited = crate::receive::wait(&SystemClock, &mut io, timeout);
-                    assert!(
-                        waited.is_ok(),
-                        "receive_error={:?}; actual_attempts={:?}",
-                        waited.as_ref().err(),
-                        io.outcomes
-                    );
-                    assert!(waited.unwrap().is_empty());
-                    Ok(io.outcomes)
-                })
+                let deadline = Deadline::until(until.min(Instant::now() + Duration::from_secs(5)));
+                let outcome = deliver_pending(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    run.member_id,
+                    None,
+                    deadline,
+                    &std::collections::BTreeSet::new(),
+                )
                 .unwrap();
-                assert_eq!(outcomes.len(), 2);
-                assert_eq!(outcomes[0].end, AttemptEnd::Held);
-                assert!(outcomes[0].sent.is_empty());
-                assert_eq!(outcomes[1].end, AttemptEnd::NoPending);
-                assert_eq!(outcomes[1].sent, vec![message.message_id]);
-                let input = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
+                assert!(outcome.sent.is_empty(), "{outcome:?}");
+                let queued = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
+                    .unwrap()
+                    .expect("the runner commits a durable receipt for the queued preview");
+                assert_eq!(queued.state, InputState::Ready);
+                assert!(queued.deferred_at.is_some());
+                assert_eq!(queued.defer_reason.as_deref(), Some("interaction_open"));
+                assert_eq!(queued.payload_digest_version, 2);
+                assert!(stamp(fixture, message.message_id).is_none());
+                assert!(
+                    input_service_records(fixture).is_empty(),
+                    "zero bytes while queued"
+                );
+
+                input_service_barrier(fixture, until);
+                wait_input_service_record(fixture, &line, until);
+                while stamp(fixture, message.message_id).is_none() {
+                    assert!(Instant::now() < until, "the drained preview is stamped");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let delivered = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
                     .unwrap()
                     .unwrap();
-                assert_eq!(input.kind, InputKind::Preview);
-                assert_eq!(input.message_id, Some(message.message_id));
-                assert_eq!(input.state, InputState::Settled);
-                assert_eq!(input.disposition, Some(InputDisposition::Submitted));
-                assert_eq!(input.evidence_ref, None);
-                let stamp: Option<String> = fixture
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT notified_at FROM messages WHERE message_id=?1",
-                        [message.message_id],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert!(stamp.is_some());
-                wait_input_service_record(fixture, &line, until);
+                assert_eq!(delivered.input_id, queued.input_id);
+                assert_eq!(delivered.payload_digest, queued.payload_digest);
+                assert!(matches!(
+                    delivered.state,
+                    InputState::Accepted | InputState::Settled
+                ));
                 assert_eq!(
                     input_service_records(fixture)
                         .iter()
                         .map(|record| record["line"].as_str().unwrap().to_owned())
                         .collect::<Vec<_>>(),
-                    vec!["barrier", line.as_str()]
+                    vec!["barrier".to_owned(), line],
+                    "the runner types the queued preview exactly once without another send or wait"
                 );
-                let records = input_service_records(fixture);
-                let native = records
-                    .iter()
-                    .find(|record| record["line"] == line)
+            });
+        }
+
+        #[test]
+        fn deferred_previews_sent_during_one_interaction_queue_separately_and_drain_in_order() {
+            with_detecting_input_service(|fixture, until| {
+                let run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                let settings = Settings::for_database(
+                    std::path::Path::new(fixture.fixture.conn.path().unwrap()),
+                    None,
+                );
+                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
+                loop {
+                    assert!(Instant::now() < until, "the detected interaction opens");
+                    let health = NativeInputHost.health(&run, until).unwrap();
+                    let observation = health.observation.as_ref().unwrap();
+                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
+                        && observation.pending_count == 0
+                        && !observation.pending_evidence
+                    {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                acknowledge_runtime_events(fixture, &run);
+                let mut sent = Vec::new();
+                for body in ["first deferred preview", "second deferred preview"] {
+                    let message = crate::broker::send_message(
+                        &mut fixture.fixture.conn,
+                        run.director_member_id,
+                        run.member_id,
+                        body,
+                    )
                     .unwrap();
-                assert!(
-                    native["inputs"]
-                        .as_array()
+                    let deadline =
+                        Deadline::until(until.min(Instant::now() + Duration::from_secs(5)));
+                    let outcome = deliver_pending(
+                        &mut fixture.fixture.conn,
+                        &settings,
+                        run.member_id,
+                        None,
+                        deadline,
+                        &std::collections::BTreeSet::new(),
+                    )
+                    .unwrap();
+                    assert!(outcome.sent.is_empty(), "{body}: {outcome:?}");
+                    let key = format!("preview:{}:{}", run.run_id, message.message_id);
+                    let queued = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
                         .unwrap()
+                        .unwrap_or_else(|| panic!("{body}: a durable queued receipt"));
+                    assert_eq!(queued.state, InputState::Ready, "{body}");
+                    let delivery = queued.delivery().unwrap();
+                    assert_eq!(
+                        delivery.status,
+                        broker::runtime::DeliveryStatus::Queued,
+                        "{body}"
+                    );
+                    assert_eq!(
+                        delivery.reason.as_deref(),
+                        Some("interaction_open"),
+                        "{body}: an open interaction is why each preview first queued"
+                    );
+                    sent.push((message, queued.input_id));
+                }
+                assert_ne!(sent[0].1, sent[1].1, "each preview has its own input ID");
+                assert!(
+                    input_service_records(fixture).is_empty(),
+                    "zero bytes while queued"
+                );
+
+                input_service_barrier(fixture, until);
+                let lines: Vec<String> = sent
+                    .iter()
+                    .map(|(message, _)| canonical_preview_line(message))
+                    .collect();
+                wait_input_service_record(fixture, &lines[1], until);
+                for (message, input_id) in &sent {
+                    while stamp(fixture, message.message_id).is_none() {
+                        assert!(Instant::now() < until, "each drained preview is stamped");
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    let delivered = storage::get_input(&fixture.fixture.conn, *input_id).unwrap();
+                    assert!(matches!(
+                        delivered.state,
+                        InputState::Accepted | InputState::Settled
+                    ));
+                }
+                let mut expected = vec!["barrier".to_owned()];
+                expected.extend(lines);
+                assert_eq!(
+                    input_service_records(fixture)
                         .iter()
-                        .any(|row| row["input_id"] == input.input_id)
+                        .map(|record| record["line"].as_str().unwrap().to_owned())
+                        .collect::<Vec<_>>(),
+                    expected,
+                    "both queued previews drain once, in order, without another send or wait"
                 );
             });
         }

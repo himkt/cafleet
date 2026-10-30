@@ -17,7 +17,103 @@ fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
         disposition: row.get("disposition")?,
         evidence_ref: row.get("evidence_ref")?,
         permission_response: None,
+        delivery_method: row.get("delivery_method")?,
+        delivery_reason: row.get("delivery_reason")?,
+        deferred_at: row.get("deferred_at")?,
+        defer_reason: row.get("defer_reason")?,
+        payload_digest_version: row.get("payload_digest_version")?,
     })
+}
+
+impl InputOperation {
+    pub(crate) fn delivery(&self) -> Option<DeliveryProjection> {
+        delivery_projection(self).expect("validated input receipts project their delivery")
+    }
+}
+
+const FALLBACK_REASONS: [&str; 2] = ["submission_plan_unavailable", "idle_timeout"];
+
+fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjection>, CafleetError> {
+    let unknown = || {
+        invalid(
+            "member_input_operations.delivery_method",
+            "unknown stored delivery combination",
+        )
+    };
+    if input.kind == InputKind::PermissionResponse {
+        require(
+            input.delivery_method.is_none()
+                && input.delivery_reason.is_none()
+                && input.deferred_at.is_none()
+                && input.payload_digest_version == 1,
+            "member_input_operations.delivery_method",
+            "permission responses carry no ordinary delivery metadata",
+        )?;
+        return Ok(None);
+    }
+    require(
+        input.payload_digest_version == 1
+            || (input.payload_digest_version == 2 && input.kind == InputKind::Preview),
+        "member_input_operations.payload_digest_version",
+        "unsupported digest version for this input kind",
+    )?;
+    let method = input.delivery_method;
+    let recorded = || match method {
+        Some(DeliveryMethod::Profile) if input.delivery_reason.is_none() => Ok(None),
+        Some(DeliveryMethod::Fallback)
+            if input
+                .delivery_reason
+                .as_deref()
+                .is_some_and(|reason| FALLBACK_REASONS.contains(&reason)) =>
+        {
+            Ok(input.delivery_reason.clone())
+        }
+        None if input.delivery_reason.is_none() => Ok(Some("method_unrecorded".to_owned())),
+        _ => Err(unknown()),
+    };
+    let (status, reason) = match (input.state, input.disposition) {
+        (InputState::Ready, _) if input.deferred_at.is_some() => {
+            require(
+                method.is_none() && input.delivery_reason.is_none(),
+                "member_input_operations.delivery_method",
+                "a queued input has no selected method",
+            )?;
+            (DeliveryStatus::Queued, input.defer_reason.clone())
+        }
+        (InputState::Ready, _) => {
+            require(
+                method.is_none() && input.delivery_reason.is_none(),
+                "member_input_operations.delivery_method",
+                "a ready input has no selected method",
+            )?;
+            (DeliveryStatus::Held, Some("zero_bytes_ready".to_owned()))
+        }
+        (InputState::InProgress | InputState::Uncertain, _)
+        | (InputState::Settled, Some(InputDisposition::AbandonedUncertain)) => {
+            (DeliveryStatus::Uncertain, recorded()?)
+        }
+        (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
+            (DeliveryStatus::Submitted, recorded()?)
+        }
+        (InputState::Settled, Some(InputDisposition::NotSubmitted)) => match method {
+            Some(_) => (DeliveryStatus::NotSubmitted, recorded()?),
+            None => (
+                DeliveryStatus::NotSubmitted,
+                Some(
+                    input
+                        .delivery_reason
+                        .clone()
+                        .unwrap_or_else(|| "method_unrecorded".to_owned()),
+                ),
+            ),
+        },
+        (InputState::Settled, None) => return Err(unknown()),
+    };
+    Ok(Some(DeliveryProjection {
+        status,
+        method,
+        reason,
+    }))
 }
 
 fn validate_input(
@@ -61,6 +157,7 @@ fn validate_input(
         )?;
     }
     input.permission_response = super::permissions::validate_input_response(conn, &run, &input)?;
+    delivery_projection(&input)?;
     Ok(input)
 }
 
@@ -71,6 +168,210 @@ pub(crate) fn input_payload_digest(
     let payload = json!({"run_id":run_id,"kind":input.input_kind.as_str(),
         "message_id":input.message_id,"literal":input.literal});
     crate::digest::sha256_hex(crate::digest::canonical_json(&payload).as_bytes())
+}
+
+pub(crate) fn preview_payload_digest_v2(
+    run_id: i64,
+    input: &crate::runtime::runner::SubmitInput,
+) -> String {
+    let payload = json!({"payload_digest_version":2,"run_id":run_id,"kind":input.input_kind.as_str(),
+        "message_id":input.message_id,"literal":input.literal});
+    crate::digest::sha256_hex(crate::digest::canonical_json(&payload).as_bytes())
+}
+
+/// The digest a stored receipt of `version` records for `input`.
+pub(crate) fn versioned_payload_digest(
+    version: i64,
+    run_id: i64,
+    input: &crate::runtime::runner::SubmitInput,
+) -> Result<String, CafleetError> {
+    match (version, input.input_kind) {
+        (1, _) => Ok(input_payload_digest(run_id, input)),
+        (2, InputKind::Preview) => Ok(preview_payload_digest_v2(run_id, input)),
+        _ => Err(invalid(
+            "member_input_operations.payload_digest_version",
+            "unsupported digest version for this input kind",
+        )),
+    }
+}
+
+/// How a new ordinary receipt is reserved: the delivery selected before its first byte, or a
+/// zero-byte queue admission with its defer reason, and its digest version.
+#[derive(Clone, Copy)]
+pub(crate) struct NewReservation<'a> {
+    pub(crate) selection: Option<(DeliveryMethod, Option<&'a str>)>,
+    pub(crate) defer_reason: Option<&'a str>,
+    pub(crate) payload_digest_version: i64,
+}
+
+#[cfg(test)]
+impl NewReservation<'_> {
+    pub(crate) const PLAIN: Self = Self {
+        selection: None,
+        defer_reason: None,
+        payload_digest_version: 1,
+    };
+}
+
+pub(crate) fn begin_deferred_attempt(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    method: DeliveryMethod,
+    reason: Option<&str>,
+) -> Result<InputOperation, CafleetError> {
+    owned_transaction(conn, owner, |conn, run| {
+        let input = owned_input(conn, run, input_id)?;
+        require(
+            input.state == InputState::Ready && input.deferred_at.is_some(),
+            "member_input_operations.state",
+            "a deferred attempt starts from its queued receipt",
+        )?;
+        let changed = conn.execute(
+            "UPDATE member_input_operations SET state='in_progress',updated_at=?1,delivery_method=?2,delivery_reason=?3 WHERE input_id=?4 AND state='ready'",
+            params![now_stamp(), method.as_str(), reason, input_id],
+        )?;
+        require(
+            changed == 1,
+            "member_input_operations.state",
+            "input CAS failed",
+        )?;
+        get_input(conn, input_id)
+    })
+}
+
+/// Whether an ordinary attempt of the run, deferred or immediate, may have written bytes and
+/// awaits reconciliation, which stops automatic ordinary dispatch until it settles.
+pub(crate) fn has_unresolved_ordinary_attempt(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<bool, CafleetError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM member_input_operations WHERE run_id=?1 AND kind<>'permission_response' AND state IN ('in_progress','uncertain'))",
+        [run_id],
+        |row| row.get(0),
+    )?)
+}
+
+/// Returns a reserved immediate request that wrote zero bytes to the queue, clearing its unexecuted
+/// selection and recording why it was deferred.
+pub(crate) fn requeue_zero_byte_immediate(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    defer_reason: &str,
+) -> Result<InputOperation, CafleetError> {
+    owned_transaction(conn, owner, |conn, run| {
+        let input = owned_input(conn, run, input_id)?;
+        require(
+            input.state == InputState::InProgress
+                && input.deferred_at.is_none()
+                && input.kind != InputKind::PermissionResponse,
+            "member_input_operations.state",
+            "only an immediate ordinary attempt returns to the queue",
+        )?;
+        let now = now_stamp();
+        let changed = conn.execute(
+            "UPDATE member_input_operations SET state='ready',updated_at=?1,delivery_method=NULL,delivery_reason=NULL,deferred_at=?1,defer_reason=?2 WHERE input_id=?3 AND state='in_progress'",
+            params![now, defer_reason, input_id],
+        )?;
+        require(
+            changed == 1,
+            "member_input_operations.state",
+            "input CAS failed",
+        )?;
+        get_input(conn, input_id)
+    })
+}
+
+/// The deferred inputs of a run whose first result is durable but whose result event is not, with
+/// the stage that event reports. Recovery publishes these after the live writer is gone.
+pub(crate) fn unpublished_delivery_results(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<Vec<(i64, &'static str)>, CafleetError> {
+    let mut statement = conn.prepare(
+        "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND deferred_at IS NOT NULL AND input_id NOT IN (SELECT json_extract(payload_json,'$.input_id') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result') ORDER BY input_id",
+    )?;
+    let ids = statement
+        .query_map([run_id], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut results = Vec::new();
+    for input_id in ids {
+        let delivery = get_input(conn, input_id)?
+            .delivery()
+            .expect("a deferred input is an ordinary input");
+        let stage = match delivery.status {
+            DeliveryStatus::Submitted => "submitted",
+            DeliveryStatus::NotSubmitted => "zero_bytes",
+            DeliveryStatus::Uncertain => "unknown",
+            DeliveryStatus::Queued | DeliveryStatus::Held | DeliveryStatus::NotApplicable => {
+                continue;
+            }
+        };
+        results.push((input_id, stage));
+    }
+    Ok(results)
+}
+
+/// Settles every queued receipt of a run whose runner was lost, after ownership fencing has
+/// established that its in-memory payload and writer are gone.
+pub(crate) fn settle_lost_deferred(
+    conn: &mut Connection,
+    owner: &RunOwner,
+) -> Result<(), CafleetError> {
+    owned_transaction(conn, owner, settle_lost_deferred_in_transaction)
+}
+
+/// `settle_lost_deferred` inside a caller's transaction that already holds the run's reconciler
+/// ownership.
+pub(crate) fn settle_lost_deferred_in_transaction(
+    conn: &Connection,
+    run: &RunRecord,
+) -> Result<(), CafleetError> {
+    require(
+        run.owner_kind == OwnerKind::Reconciler,
+        "owner_kind",
+        "lost queued input settles under reconciler ownership",
+    )?;
+    conn.execute(
+        "UPDATE member_input_operations SET state='settled',disposition='not_submitted',updated_at=?1,delivery_method=NULL,delivery_reason='runner_lost' WHERE run_id=?2 AND state='ready' AND deferred_at IS NOT NULL",
+        params![now_stamp(), run.run_id],
+    )?;
+    Ok(())
+}
+
+/// Settles a queued input that wrote zero bytes as not submitted with its outcome reason.
+pub(crate) fn settle_zero_byte_deferred(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    expected: InputState,
+    reason: &str,
+) -> Result<InputOperation, CafleetError> {
+    require(
+        matches!(expected, InputState::Ready | InputState::InProgress),
+        "member_input_operations.state",
+        "only a zero-byte deferred input is cancelled",
+    )?;
+    owned_transaction(conn, owner, |conn, run| {
+        let input = owned_input(conn, run, input_id)?;
+        require(
+            input.state == expected && input.deferred_at.is_some(),
+            "member_input_operations.state",
+            "deferred input state changed",
+        )?;
+        let changed = conn.execute(
+            "UPDATE member_input_operations SET state='settled',disposition='not_submitted',updated_at=?1,delivery_method=NULL,delivery_reason=?2 WHERE input_id=?3 AND state=?4",
+            params![now_stamp(), reason, input_id, expected.as_str()],
+        )?;
+        require(
+            changed == 1,
+            "member_input_operations.state",
+            "input CAS failed",
+        )?;
+        get_input(conn, input_id)
+    })
 }
 
 pub(crate) fn get_input(conn: &Connection, input_id: i64) -> Result<InputOperation, CafleetError> {
@@ -111,8 +412,12 @@ pub(crate) fn reserve_input(
     owner: &RunOwner,
     new: &NewInput,
 ) -> Result<InputOperation, CafleetError> {
-    reserve_input_with_provenance(conn, owner, new).map(|reservation| match reservation {
-        InputReservation::Inserted(operation) | InputReservation::Existing(operation) => operation,
+    reserve_input_with_provenance(conn, owner, new, NewReservation::PLAIN).map(|reservation| {
+        match reservation {
+            InputReservation::Inserted(operation) | InputReservation::Existing(operation) => {
+                operation
+            }
+        }
     })
 }
 
@@ -120,6 +425,7 @@ pub(crate) fn reserve_input_with_provenance(
     conn: &mut Connection,
     owner: &RunOwner,
     new: &NewInput,
+    reservation: NewReservation<'_>,
 ) -> Result<InputReservation, CafleetError> {
     require(
         new.kind != InputKind::PermissionResponse,
@@ -165,10 +471,22 @@ pub(crate) fn reserve_input_with_provenance(
         }
         require_capacity(conn, run.run_id)?;
         let now = now_stamp();
+        let selection = reservation.selection;
+        let deferred = reservation
+            .defer_reason
+            .map(|reason| (now.as_str(), reason));
+        require(
+            selection.is_none() || deferred.is_none(),
+            "delivery_method",
+            "a queued input selects its method when its attempt starts",
+        )?;
         conn.execute(
-            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id)
-             VALUES(?1,?2,?3,?4,'in_progress',?5,?5,?6)",
-            params![run.run_id,new.operation_key,new.kind.as_str(),new.payload_digest,now,new.message_id],
+            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,delivery_method,delivery_reason,deferred_at,defer_reason,payload_digest_version)
+             VALUES(?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11,?12)",
+            params![run.run_id,new.operation_key,new.kind.as_str(),new.payload_digest,
+                if deferred.is_some() { "ready" } else { "in_progress" },now,new.message_id,
+                selection.map(|(method, _)| method.as_str()),selection.and_then(|(_, reason)| reason),
+                deferred.map(|(at, _)| at),deferred.map(|(_, reason)| reason),reservation.payload_digest_version],
         )?;
         get_input(conn, conn.last_insert_rowid()).map(InputReservation::Inserted)
     })
@@ -219,10 +537,17 @@ pub(crate) fn record_input_state(
             "member_input_operations.state",
             "input state changed",
         )?;
-        let changed = conn.execute(
-            "UPDATE member_input_operations SET state=?1,updated_at=?2 WHERE input_id=?3 AND state=?4",
-            params![next.as_str(),now_stamp(),input_id,expected.as_str()],
-        )?;
+        let changed = if next == InputState::Ready {
+            conn.execute(
+                "UPDATE member_input_operations SET state=?1,updated_at=?2,delivery_method=NULL,delivery_reason=NULL WHERE input_id=?3 AND state=?4",
+                params![next.as_str(),now_stamp(),input_id,expected.as_str()],
+            )?
+        } else {
+            conn.execute(
+                "UPDATE member_input_operations SET state=?1,updated_at=?2 WHERE input_id=?3 AND state=?4",
+                params![next.as_str(),now_stamp(),input_id,expected.as_str()],
+            )?
+        };
         require(
             changed == 1,
             "member_input_operations.state",
@@ -355,12 +680,12 @@ fn stamp_preview(
     Ok(())
 }
 
-pub(crate) const UNRESOLVED_INPUT_STATES: &str = "('in_progress','accepted','uncertain')";
+pub(crate) const UNRESOLVED_INPUT: &str = "(state IN ('in_progress','accepted','uncertain') OR (state='ready' AND deferred_at IS NOT NULL))";
 
 pub(super) fn require_capacity(conn: &Connection, run_id: i64) -> Result<(), CafleetError> {
     let unresolved: i64 = conn.query_row(
         &format!(
-            "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN {UNRESOLVED_INPUT_STATES}"
+            "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND {UNRESOLVED_INPUT}"
         ),
         [run_id],
         |row| row.get(0),
@@ -673,6 +998,55 @@ mod tests {
             .is_err()
         );
         assert!(rows(&fixture.conn, "member_runtime_events").is_empty());
+    }
+
+    #[test]
+    fn reconciling_an_uncertain_receipt_with_a_recorded_method_not_submitted_reads_back() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        let input = fixture.input(&owner, "prompt:uncertain", InputKind::Prompt, None);
+        storage::requeue_zero_byte_immediate(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            "interaction_open",
+        )
+        .unwrap();
+        storage::begin_deferred_attempt(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            DeliveryMethod::Fallback,
+            Some("idle_timeout"),
+        )
+        .unwrap();
+        storage::record_input_state(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            InputState::InProgress,
+            InputState::Uncertain,
+        )
+        .unwrap();
+        let settled = storage::settle_input(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            InputState::Uncertain,
+            InputDisposition::NotSubmitted,
+            "audit:no-bytes-observed",
+        )
+        .unwrap();
+        let read = storage::get_input(&fixture.reopen(), input.input_id).unwrap();
+        assert_eq!(read, settled);
+        assert_eq!(read.state, InputState::Settled);
+        assert_eq!(read.disposition, Some(InputDisposition::NotSubmitted));
+        assert_eq!(read.delivery_method, Some(DeliveryMethod::Fallback));
+        assert_eq!(read.delivery_reason.as_deref(), Some("idle_timeout"));
+        let delivery = read
+            .delivery()
+            .expect("a settled receipt projects its delivery");
+        assert_eq!(delivery.status, DeliveryStatus::NotSubmitted);
     }
 
     #[test]

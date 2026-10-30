@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.308-exec-post-submit-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.308",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 7,
+  "cursor_row": 31,
+  "cursor_col": 2,
+  "lines": [
+    "",
+    " ▐▛███▛█   Claude Code v2.1.308",
+    "",
+    "",
+    "",
+    "",
+    "!  touch fx-mark",
+    "  ⎿  (Bash completed with no output)",
+    "",
+    "● The touch fx-mark command ran and created an empty file named fx-mark in the current working directory. It printed no",
+    "  output and no errors.",
+    "",
+    "  If you want it removed, I can delete it. I can also check where it landed with ls -l fx-mark.",
+    "",
+    "✻ Cogitated for 2s · done 9:25 PM",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "",
+    "",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent"
+  ],
+  "masked_rows": [
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 3,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 29,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 33,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 34,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

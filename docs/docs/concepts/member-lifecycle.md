@@ -10,7 +10,7 @@ Members confirm readiness, then poll their inbox. The Director can assign a memb
 
 ## Assignment and receiving
 
-Messages are point-to-point. Send individually to every selected recipient. Runner-managed members receive previews only through eligible native composer input; explicitly unwrapped members receive Escape-first previews. The root Director receives replies through its native inbox tools; [run a fleet](../how-to/mixed-backend-team.md#manual-lifecycle) explains reception and consumption.
+Messages are point-to-point. Send individually to every selected recipient. Runner-managed members receive previews through their runner: profile delivery into a verified empty composer; a queue while a native interaction is open or a composer with a measured plan holds a draft or a state the runner cannot classify, delivered when that clears or by fallback after 3 minutes; and Escape-first delivery fallback when no plan exists ([delivery methods](member-permission-events.md#deliver-generated-input)). Explicitly unwrapped members receive Escape-first previews. The root Director receives replies through its native inbox tools; [run a fleet](../how-to/mixed-backend-team.md#manual-lifecycle) explains reception and consumption.
 
 ## Command routing
 

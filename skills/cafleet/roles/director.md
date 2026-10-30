@@ -354,11 +354,11 @@ Ask the user through {decision_surface} under the [User Delegation Protocol](../
 
 ## Member Exec
 
-Authorize the required one-line command and call `cafleet member exec <member-id> COMMAND` or `--file PATH`. The CLI submits visible native shell input and returns dispatch metadata. Inspect `member capture` for output and completion. After completion evidence, send an explicit continuation prompt if the host has not resumed the member. On failed/uncertain dispatch, inspect before authorizing a retry. Follow [routing](../reference/prompt-routing.md).
+Authorize the required one-line command and call `cafleet member exec <member-id> COMMAND` or `--file PATH`. The CLI submits visible native shell input, or the runner queues it behind a detected interaction, and returns dispatch metadata with its delivery status and method. Inspect `member capture` for output and completion. After completion evidence, send an explicit continuation prompt if the host has not resumed the member. On failed/uncertain dispatch, inspect before authorizing a retry. Follow [routing](../reference/prompt-routing.md).
 
 ## Member Prompt
 
-Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Wrapped input requires a tested empty composer and reaches the child without Escape; unsafe input is rejected while the original native interaction stays intact. Explicitly unwrapped input retains Escape-first behavior, and both paths reject the Director’s own pane. Success means submission only. Before prompting an explicitly unwrapped member, run the open-prompt check in [Director-side dispatch](../reference/prompt-routing.md#director-side-dispatch).
+Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Wrapped input reaches a verified empty composer through the profile plan without Escape. The runner queues it with zero bytes while a native interaction is detected, or while a planned composer is not verified empty, and delivers it when that clears or by fallback after 3 minutes. Without a plan it uses Escape-first delivery fallback. Explicitly unwrapped input retains Escape-first behavior, and both paths reject the Director’s own pane. Success means submission or queue acceptance only; its `delivery` reports which. Before prompting an explicitly unwrapped member, run the open-prompt check in [Director-side dispatch](../reference/prompt-routing.md#director-side-dispatch).
 
 ## Member Press
 

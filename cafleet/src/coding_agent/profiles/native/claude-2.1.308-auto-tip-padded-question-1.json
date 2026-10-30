@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.308-auto-tip-padded-question-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.308",
+  "rows": 35,
+  "cols": 200,
+  "alternate_screen": true,
+  "screen_seq": 26278,
+  "cursor_row": 29,
+  "cursor_col": 1,
+  "lines": [
+    "",
+    "",
+    "!  stty size </dev/tty                                                                                                                                                                                  ",
+    "  ⎿  /bin/bash: line 1: /dev/tty: No such device or address",
+    "",
+    "● stty size は失敗しました。/dev/tty が存在しないため、この環境には制御端末がありません。端末サイズを取得する必要がなければ、このまま問題ありません。",
+    "",
+    "",
+    "",
+    "!  stty -F /dev/pts/47 size                                                                                                                                                                             ",
+    "  ⎿  35 200",
+    "",
+    "● 端末サイズは 35 行 × 200 列です (/dev/pts/47)。",
+    "",
+    "",
+    "",
+    "❯ Use your Bash tool to run exactly: touch rp-mark-b                                                                                                                                                    ",
+    "",
+    "● Creating empty file rp-mark-b in working directory",
+    "  ⎿  $ touch rp-mark-b",
+    "",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    " Bash command",
+    " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below",
+    " Create empty file rp-mark-b in working directory",
+    "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+    " touch rp-mark-b",
+    "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+    " Do you want to proceed?                                                                                                                                   ",
+    " ❯ 1. Yes",
+    "   2. Yes, and always allow access to /tmp/workspace from this project",
+    "   3. Yes, and switch to auto mode · auto mode handles these prompts for you",
+    "   4. No",
+    "  ",
+    " Esc to cancel · Tab to amend"
+  ],
+  "masked_rows": [
+    {
+      "row": 7,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 14,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

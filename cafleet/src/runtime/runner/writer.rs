@@ -624,14 +624,14 @@ pub(crate) mod test_support {
     use crate::broker::runtime::*;
     use crate::runtime::runner::test_support::Fixture;
     use std::sync::Condvar;
-    pub(crate) const VERSION: &str = "synthetic-0.0.1";
+    pub(crate) const VERSION: &str = "0.0.1-synthetic";
     pub(crate) const PROFILE: &str = "synthetic-profile-1";
     pub(crate) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
     pub(in crate::runtime::runner) use crate::coding_agent::profiles::catalog::test_support::{
         synthetic_catalog as catalog, synthetic_definitions as definitions,
     };
     pub(crate) fn configure(fixture: &mut WriterFixture) {
-        fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,profile_match='exact',coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
+        fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
         fixture.fixture.run =
             storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
     }

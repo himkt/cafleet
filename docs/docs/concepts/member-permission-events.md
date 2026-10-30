@@ -6,7 +6,7 @@ CAFleet runs new members inside an owned PTY runner. The runner observes native 
 
 Spawn members with the omitted `--permission-mode`, which selects each backend's default policy: native automatic approval where the backend offers it, and the deny-by-default preset on OpenCode. Pass `--permission-mode MODE` only when the user asks for another mode for that member. The [policy contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#launch-policy-and-capability-registry) owns choices, defaults and coverage; member launch mode is independent of the Director's decision policy. An interactive policy shows native permission forms: Claude's native `default`, Codex's native `on-request`, and OpenCode's `cafleet-ask`, whose agent preset asks for every shell command outside its allowlist instead of denying it. Automatic mode can still show a native form when the reviewer escalates an operation, and that form follows the same request flow.
 
-Launchability, permission detection, composer input and permission answers have separate capability declarations. A native version without its own bundled profile runs under the backend's newest bundled profile, recorded as `profile_match=fallback`; a backend with no profile permits manual terminal use, emits a coverage notification and holds generated input. A tested detector supplies no answer capability by itself. Native and managed rules remain authoritative.
+Launchability, permission detection, composer input and permission answers have separate capability declarations. Each bundled profile declares the minimum native version it supports, and a member runs under the profile with the greatest minimum version at or below its installed version, so later native releases reuse it without a warning. Creation refuses a native version below the backend's first profile. A failed version probe or a backend with no profile permits manual terminal use and emits a coverage notification; generated input then reaches the member through delivery fallback. A tested detector supplies no answer capability by itself. Native and managed rules remain authoritative.
 
 ## Automatic review observations
 
@@ -20,13 +20,13 @@ The runner reports an automatic refusal and unavailable automatic review as thei
 4. Resolve the Director session's current effective mode from host evidence. In verified auto mode the Director evaluates the risk and decides allow/deny; otherwise obtain the user's request-specific permission. Missing risk details require further inspection or user review, independently of a tested answer profile.
 5. Submit the complete request-bound `permission respond` command, or present that concrete command for the user to execute. Unknown answer capability preserves manual original-surface input. The [permission command contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#permission-commands) owns required snapshot/provenance flags and response outputs.
 6. Preserve the durable receipt and inspect native decision evidence, actual output/exit/error and resumed dependent work. A submitted hotkey, disappearing form or ACK establishes no missing execution result.
-7. Consume/ACK available records, then invoke finite `message wait DIRECTOR_ID --timeout SECONDS --json` to retry held previews. Repeat consumption/receive for each new batch; a busy composer keeps previews held.
+7. Consume/ACK available records. The runner delivers the previews, prompts and native commands it queued during the request once the interaction closes, and reports each deferred result as an `input_delivery_result` event; no further send or wait is needed for queued input.
 
 The listener produces stdout records under the [Director receive lifecycle](coding-agents.md#director-wake). Host interruption, goal activation and model consumption timing remain host-owned.
 
 ## Preserve a native request
 
-Candidate detection immediately holds previews and rejects explicit prompt/exec until a tested empty composer is observed. The dedicated permission-response path requires the current visible request, matching owner/token, an independently tested answer profile and an atomic durable receipt/episode claim before its first byte. It sends only the selected single-request allow/deny plan. Human terminal input continues independently of event storage.
+Candidate detection immediately queues previews and explicit prompt/exec with zero bytes, including zero Escape bytes, until the interaction closes. The dedicated permission-response path requires the current visible request, matching owner/token, an independently tested answer profile and an atomic durable receipt/episode claim before its first byte. It sends only the selected single-request allow/deny plan. Human terminal input continues independently of event storage.
 
 The request token is a random identity fence. A changed request, human input, obscuring, degraded observation or ownership loss invalidates it. Reinspect and reconcile the decision when a concrete command becomes stale. The runner exposes no arbitrary key injection or persistent/session-wide permission change.
 
@@ -34,8 +34,21 @@ A durable input receipt records answer submission separately from authorization 
 
 Metadata notifications intentionally omit command details. Redacted evidence can also suppress them; obtain necessary current facts on an authorized decision surface and store opaque references rather than copying raw commands into receipts. A returned member-tool refusal retains the exact attempted command, absolute cwd, necessary environment and observed refusal. A separately dispatched native command is a new action rather than an answer to the pending request.
 
+## Deliver generated input
+
+The runner chooses how each preview, `member prompt` and `member exec` reaches a wrapped member:
+
+| Member state | Delivery | Reported method |
+|---|---|---|
+| A detected interaction is open or a candidate, or earlier input is queued | Queued with no bytes; the runner retries after the interaction closes or the earlier input finishes | `null` while queued |
+| Empty composer and a measured submission plan for the operation | Text, a short settle, then the measured submit key, without Escape | `profile` |
+| Measured submission plan, but a draft or a composer state the runner cannot classify | Queued with no bytes until the composer empties, then delivered by profile; delivered by fallback after 3 minutes | `null` while queued, then `profile` or `fallback` |
+| No submission plan | Escape, settle, text, settle, Enter | `fallback` |
+
+Delivery fallback can interrupt work, mix text with a draft, or dismiss a native prompt the runner did not detect; its previews therefore carry the Escape-dismissal clause. Command output reports the status, method and reason of each delivery, and `input show INPUT_ID --json` reports a queued input's eventual result. The [delivery reporting contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#delivery-reporting) owns exact statuses and reasons.
+
 ## Inspect and recover
 
 `member show` reads recorded runtime state without a socket probe. `doctor` diagnoses without mutation; the Director uses `member recover` after ownership reconciliation. Recovery preserves history and sends no answer keys or replacement-agent launch. Members with `runtime: null` retain their unwrapped transport.
 
-The [member runtime contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#69-member-pty-runtime) defines identity fencing, bounded shutdown, evidence privacy and acceptance. Each claimed detector, composer and answer capability requires its declared fixtures and exact-version native evidence.
+The [member runtime contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#69-member-pty-runtime) defines identity fencing, bounded shutdown, evidence privacy and acceptance. Each claimed detector, composer and answer capability requires its declared fixtures and native evidence captured within its profile's version interval.

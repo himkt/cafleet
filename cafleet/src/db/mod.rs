@@ -1557,7 +1557,7 @@ mod tests {
 
             #[test]
             fn runtime_v6_event_kind_check_is_widened_to_the_specified_domain() {
-                let fixture = Fixture::new();
+                let fixture = Fixture::at_version(6);
                 let ddl = table_ddl(&fixture.conn, "member_runtime_events");
                 assert!(ddl.contains(WIDENED_KIND_CHECK), "{ddl}");
                 let run = fixture.run("running").unwrap();
@@ -1669,7 +1669,7 @@ mod tests {
 
             #[test]
             fn runtime_v6_profile_match_column_is_nullable_text_appended_to_member_runs() {
-                let fixture = Fixture::new();
+                let fixture = Fixture::at_version(6);
                 let columns = table_rows(
                     &fixture.conn,
                     "SELECT name,type,\"notnull\",dflt_value,pk FROM pragma_table_info('member_runs') ORDER BY cid",
@@ -1690,7 +1690,7 @@ mod tests {
             fn runtime_v6_backfills_profile_match_exact_for_every_profiled_v5_run() {
                 let mut fixture = Fixture::at_version(5);
                 let seeded = seed_v5(&mut fixture);
-                crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+                migrate_to_version(&mut fixture.conn, 6);
                 let profile_match = |run: i64| -> Option<String> {
                     fixture
                         .conn
@@ -1718,7 +1718,7 @@ mod tests {
 
             #[test]
             fn runtime_v6_profile_match_must_agree_with_profile_version() {
-                let fixture = Fixture::new();
+                let fixture = Fixture::at_version(6);
                 let unprofiled = fixture.run("exited").unwrap();
                 let profiled = fixture.run("running").unwrap();
                 assert_check_violation(
@@ -1771,24 +1771,6 @@ mod tests {
                     [profiled],
                 )
                 .unwrap();
-            }
-
-            #[test]
-            fn runtime_v6_runtime_event_kind_values_match_the_sql_domain() {
-                use crate::broker::runtime::RuntimeEventKind;
-                let mut values = RuntimeEventKind::VALUES.to_vec();
-                let mut expected = V6_EVENT_KINDS.to_vec();
-                values.sort_unstable();
-                expected.sort_unstable();
-                assert_eq!(values, expected);
-                for kind in ["automatic_refusal_observed", "automatic_review_unavailable"] {
-                    assert_eq!(RuntimeEventKind::try_from(kind).unwrap().as_str(), kind);
-                    assert_eq!(
-                        serde_json::to_value(RuntimeEventKind::try_from(kind).unwrap()).unwrap(),
-                        serde_json::Value::String(kind.into())
-                    );
-                }
-                assert!(RuntimeEventKind::try_from("automatic_review_available").is_err());
             }
 
             #[test]
@@ -1874,6 +1856,464 @@ mod tests {
                 crate::diagnosis::classify_schema(&fixture.conn, crate::db::head_version())
                     .require_current()
                     .unwrap();
+            }
+        }
+
+        mod minimum_version_delivery_migration {
+            use rusqlite::types::Value;
+
+            use super::*;
+
+            const V7_EVENT_KINDS: [&str; 11] = [
+                "coverage_unknown",
+                "interaction_opened",
+                "interaction_obscured",
+                "interaction_closed",
+                "permission_denied_observed",
+                "automatic_refusal_observed",
+                "automatic_review_unavailable",
+                "runner_degraded",
+                "runner_lost",
+                "runner_exited",
+                "input_delivery_result",
+            ];
+
+            fn columns(conn: &Connection, table: &str) -> Vec<String> {
+                conn.prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
+                    .unwrap()
+                    .query_map([table], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap()
+            }
+
+            type Snapshot = Vec<(String, String, Vec<Vec<Value>>)>;
+
+            fn snapshot_without_profile_match(conn: &Connection) -> Snapshot {
+                let tables = conn
+                    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name != 'refinery_schema_history' ORDER BY name")
+                    .unwrap()
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                tables
+                    .into_iter()
+                    .map(|table| {
+                        let selected = columns(conn, &table)
+                            .into_iter()
+                            .filter(|column| column != "profile_match")
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let rows =
+                            table_rows(conn, &format!("SELECT {selected} FROM {table} ORDER BY 1"));
+                        (table, selected, rows)
+                    })
+                    .collect()
+            }
+
+            fn insert_event(
+                fixture: &Fixture,
+                run: i64,
+                seq: i64,
+                kind: &str,
+            ) -> rusqlite::Result<i64> {
+                fixture.conn.execute(
+                    "INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,committed_at,
+                     payload_json,notification_state,archive_reason)
+                     VALUES(?1,?2,?3,?4,?4,'{\"schema_version\":2}','archived','member_inactive')",
+                    params![run, seq, kind, NOW],
+                )?;
+                Ok(fixture.conn.last_insert_rowid())
+            }
+
+            fn insert_input(
+                fixture: &Fixture,
+                run: i64,
+                key: &str,
+                kind: &str,
+                extra: &[(&str, rusqlite::types::Value)],
+            ) -> rusqlite::Result<i64> {
+                let names = extra
+                    .iter()
+                    .map(|(name, _)| format!(",{name}"))
+                    .collect::<String>();
+                let slots = (0..extra.len())
+                    .map(|index| format!(",?{}", index + 7))
+                    .collect::<String>();
+                let mut values: Vec<Value> = vec![
+                    Value::Integer(run),
+                    Value::Text(key.into()),
+                    Value::Text(kind.into()),
+                    Value::Text("d".repeat(64)),
+                    Value::Text("ready".into()),
+                    Value::Text(NOW.into()),
+                ];
+                values.extend(extra.iter().map(|(_, value)| value.clone()));
+                fixture.conn.execute(
+                    &format!(
+                        "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at{names})
+                         VALUES(?1,?2,?3,?4,?5,?6,?6{slots})"
+                    ),
+                    rusqlite::params_from_iter(values),
+                )?;
+                Ok(fixture.conn.last_insert_rowid())
+            }
+
+            fn text(value: &str) -> Value {
+                Value::Text(value.into())
+            }
+
+            struct Seeded {
+                profiled_run: i64,
+                event_high_water: i64,
+                input_high_water: i64,
+            }
+
+            fn seed_v6(fixture: &mut Fixture) -> Seeded {
+                let profiled_run = fixture.run("running").unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET native_version='2.1.302',profile_version='claude-2.1.302-auto-1',profile_match='exact' WHERE run_id=?1",
+                        [profiled_run],
+                    )
+                    .unwrap();
+                fixture.run("exited").unwrap();
+                let interaction = fixture
+                    .interaction(profiled_run, 1, "permission_request")
+                    .unwrap();
+                let opened = insert_event(fixture, profiled_run, 1, "interaction_opened").unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runtime_events SET interaction_id=?1 WHERE event_id=?2",
+                        params![interaction, opened],
+                    )
+                    .unwrap();
+                let discarded = insert_event(fixture, profiled_run, 2, "runner_degraded").unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "DELETE FROM member_runtime_events WHERE event_id=?1",
+                        [discarded],
+                    )
+                    .unwrap();
+                insert_input(fixture, profiled_run, "prompt:ready", "prompt", &[]).unwrap();
+                insert_input(fixture, profiled_run, "exec:settled", "exec", &[]).unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET state='settled',disposition='submitted' WHERE operation_key='exec:settled'",
+                        [],
+                    )
+                    .unwrap();
+                let message = crate::broker::send_message(
+                    &mut fixture.conn,
+                    fixture.director,
+                    fixture.member,
+                    "preview body 世界",
+                )
+                .unwrap();
+                insert_input(
+                    fixture,
+                    profiled_run,
+                    &format!("preview:{profiled_run}:{}", message.message_id),
+                    "preview",
+                    &[("message_id", Value::Integer(message.message_id))],
+                )
+                .unwrap();
+                let response = insert_input(
+                    fixture,
+                    profiled_run,
+                    "permission:allow",
+                    "permission_response",
+                    &[],
+                )
+                .unwrap();
+                fixture.conn.execute(
+                    "INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at) VALUES(?1,?2,?3,1,?4,'allow',?5,'auto','director-auto','fixture:mode','fixture:decision','claude-2.1.302-auto-1','claude-bash-allow-digit',?6)",
+                    params![response, opened, interaction, "a".repeat(64), fixture.director, NOW],
+                ).unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)",
+                        params![interaction, response],
+                    )
+                    .unwrap();
+                let deleted =
+                    insert_input(fixture, profiled_run, "deleted:high-water", "prompt", &[])
+                        .unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "DELETE FROM member_input_operations WHERE input_id=?1",
+                        [deleted],
+                    )
+                    .unwrap();
+                assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+                Seeded {
+                    profiled_run,
+                    event_high_water: discarded,
+                    input_high_water: deleted,
+                }
+            }
+
+            fn assert_check_rejects(
+                fixture: &Fixture,
+                result: rusqlite::Result<i64>,
+                context: &str,
+            ) {
+                match result {
+                    Err(rusqlite::Error::SqliteFailure(code, _)) => assert_eq!(
+                        code.extended_code,
+                        rusqlite::ffi::SQLITE_CONSTRAINT_CHECK,
+                        "{context}"
+                    ),
+                    other => panic!("expected a CHECK violation for {context}: {other:?}"),
+                }
+                assert!(fixture.conn.is_autocommit(), "{context}");
+            }
+
+            #[test]
+            fn runtime_v7_minimum_version_delivery_is_the_contiguous_successor_to_v6() {
+                let chain = crate::db::migration_chain();
+                assert!(
+                    chain.contains(&(7, "minimum_version_delivery".to_string())),
+                    "{chain:?}"
+                );
+                assert!(crate::db::head_version() >= 7);
+            }
+
+            #[test]
+            fn runtime_v7_upgrade_drops_profile_match_and_preserves_rows_sequences_and_references()
+            {
+                let mut fixture = Fixture::at_version(6);
+                let seeded = seed_v6(&mut fixture);
+                let before = snapshot_without_profile_match(&fixture.conn);
+                let sequences = table_rows(
+                    &fixture.conn,
+                    "SELECT name,seq FROM sqlite_sequence ORDER BY name",
+                );
+                let identity = table_rows(&fixture.conn, "SELECT * FROM runtime_database_identity");
+                crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+                assert!(
+                    !columns(&fixture.conn, "member_runs").contains(&"profile_match".to_owned())
+                );
+                for (table, selected, rows) in &before {
+                    assert_eq!(
+                        table_rows(
+                            &fixture.conn,
+                            &format!("SELECT {selected} FROM {table} ORDER BY 1")
+                        ),
+                        *rows,
+                        "{table}"
+                    );
+                }
+                assert_eq!(
+                    table_rows(
+                        &fixture.conn,
+                        "SELECT name,seq FROM sqlite_sequence ORDER BY name"
+                    ),
+                    sequences
+                );
+                assert_eq!(
+                    table_rows(&fixture.conn, "SELECT * FROM runtime_database_identity"),
+                    identity
+                );
+                assert_eq!(
+                    table_rows(
+                        &fixture.conn,
+                        "SELECT COUNT(*) FROM member_input_operations WHERE delivery_method IS NOT NULL OR delivery_reason IS NOT NULL OR deferred_at IS NOT NULL OR defer_reason IS NOT NULL OR payload_digest_version != 1"
+                    ),
+                    vec![vec![Value::Integer(0)]],
+                    "existing receipts keep null delivery metadata and digest version 1"
+                );
+                assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+                assert_eq!(
+                    table_rows(&fixture.conn, "PRAGMA integrity_check"),
+                    vec![vec![Value::Text("ok".into())]]
+                );
+                assert_eq!(
+                    insert_event(&fixture, seeded.profiled_run, 3, "input_delivery_result")
+                        .unwrap(),
+                    seeded.event_high_water + 1
+                );
+                assert_eq!(
+                    fixture.input(seeded.profiled_run, "after-upgrade").unwrap(),
+                    seeded.input_high_water + 1
+                );
+                crate::diagnosis::classify_schema(&fixture.conn, crate::db::head_version())
+                    .require_current()
+                    .unwrap();
+            }
+
+            #[test]
+            fn runtime_v7_input_delivery_metadata_and_digest_version_constraints() {
+                let mut fixture = Fixture::new();
+                let run = fixture.run("running").unwrap();
+                let message = crate::broker::send_message(
+                    &mut fixture.conn,
+                    fixture.director,
+                    fixture.member,
+                    "preview",
+                )
+                .unwrap();
+                let preview = |key: &str, version: i64| {
+                    insert_input(
+                        &fixture,
+                        run,
+                        key,
+                        "preview",
+                        &[
+                            ("message_id", Value::Integer(message.message_id)),
+                            ("payload_digest_version", Value::Integer(version)),
+                        ],
+                    )
+                };
+                let defaulted =
+                    insert_input(&fixture, run, "prompt:default", "prompt", &[]).unwrap();
+                assert_eq!(
+                    table_rows(
+                        &fixture.conn,
+                        &format!(
+                            "SELECT payload_digest_version FROM member_input_operations WHERE input_id={defaulted}"
+                        )
+                    ),
+                    vec![vec![Value::Integer(1)]]
+                );
+                preview("preview:v2", 2).unwrap();
+                for (key, method) in [("prompt:profile", "profile"), ("exec:fallback", "fallback")]
+                {
+                    let kind = key.split(':').next().unwrap();
+                    insert_input(
+                        &fixture,
+                        run,
+                        key,
+                        kind,
+                        &[("delivery_method", text(method))],
+                    )
+                    .unwrap_or_else(|error| panic!("{method}: {error}"));
+                }
+                insert_input(
+                    &fixture,
+                    run,
+                    "prompt:queued",
+                    "prompt",
+                    &[
+                        ("deferred_at", text(NOW)),
+                        ("defer_reason", text("interaction_open")),
+                    ],
+                )
+                .unwrap();
+
+                for (key, kind, extra) in [
+                    (
+                        "bad:method",
+                        "prompt",
+                        vec![("delivery_method", text("unwrapped"))],
+                    ),
+                    (
+                        "bad:deferred-at",
+                        "prompt",
+                        vec![("deferred_at", text(NOW))],
+                    ),
+                    (
+                        "bad:defer-reason",
+                        "exec",
+                        vec![("defer_reason", text("interaction_open"))],
+                    ),
+                    (
+                        "bad:deferred-response",
+                        "permission_response",
+                        vec![
+                            ("deferred_at", text(NOW)),
+                            ("defer_reason", text("interaction_open")),
+                        ],
+                    ),
+                    (
+                        "bad:v2-prompt",
+                        "prompt",
+                        vec![("payload_digest_version", Value::Integer(2))],
+                    ),
+                    (
+                        "bad:v2-response",
+                        "permission_response",
+                        vec![("payload_digest_version", Value::Integer(2))],
+                    ),
+                    (
+                        "bad:v3",
+                        "prompt",
+                        vec![("payload_digest_version", Value::Integer(3))],
+                    ),
+                    (
+                        "bad:v0",
+                        "exec",
+                        vec![("payload_digest_version", Value::Integer(0))],
+                    ),
+                ] {
+                    assert_check_rejects(
+                        &fixture,
+                        insert_input(&fixture, run, key, kind, &extra),
+                        key,
+                    );
+                }
+                assert_check_rejects(&fixture, preview("bad:preview-v3", 3), "preview version 3");
+                assert!(
+                    insert_input(
+                        &fixture,
+                        run,
+                        "bad:null-version",
+                        "prompt",
+                        &[("payload_digest_version", Value::Null)]
+                    )
+                    .is_err(),
+                    "the digest version is required"
+                );
+            }
+
+            #[test]
+            fn runtime_v7_event_kind_admits_input_delivery_result_and_matches_the_runtime_domain() {
+                use crate::broker::runtime::RuntimeEventKind;
+                let v6 = Fixture::at_version(6);
+                let old = v6.run("running").unwrap();
+                assert!(insert_event(&v6, old, 1, "input_delivery_result").is_err());
+                let fixture = Fixture::new();
+                let run = fixture.run("running").unwrap();
+                for (seq, kind) in (1..).zip(V7_EVENT_KINDS) {
+                    insert_event(&fixture, run, seq, kind)
+                        .unwrap_or_else(|error| panic!("{kind}: {error}"));
+                }
+                assert_check_rejects(
+                    &fixture,
+                    insert_event(&fixture, run, 99, "input_delivery_queued"),
+                    "unknown kind",
+                );
+                let mut values = RuntimeEventKind::VALUES.to_vec();
+                let mut expected = V7_EVENT_KINDS.to_vec();
+                values.sort_unstable();
+                expected.sort_unstable();
+                assert_eq!(values, expected);
+                let kind = RuntimeEventKind::try_from("input_delivery_result").unwrap();
+                assert_eq!(kind.as_str(), "input_delivery_result");
+                assert_eq!(
+                    serde_json::to_value(kind).unwrap(),
+                    serde_json::Value::String("input_delivery_result".into())
+                );
+            }
+
+            #[test]
+            fn runtime_v7_head_guard_refuses_a_v6_shape_recorded_as_v7() {
+                let fixture = Fixture::at_version(6);
+                fixture
+                    .conn
+                    .execute(
+                        "INSERT INTO refinery_schema_history(version,name,applied_on,checksum) VALUES(7,'minimum_version_delivery','2026-10-30T00:00:00Z','1')",
+                        [],
+                    )
+                    .unwrap();
+                assert!(!crate::db::schema_matches_version(&fixture.conn, 7).unwrap());
             }
         }
 
@@ -2040,7 +2480,7 @@ mod tests {
             for (table, expected) in [
                 (
                     "member_runs",
-                    "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version profile_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status profile_match",
+                    "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version profile_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status",
                 ),
                 (
                     "member_interactions",
@@ -2052,7 +2492,7 @@ mod tests {
                 ),
                 (
                     "member_input_operations",
-                    "input_id run_id operation_key kind payload_digest state created_at updated_at message_id disposition evidence_ref",
+                    "input_id run_id operation_key kind payload_digest state created_at updated_at message_id disposition evidence_ref delivery_method delivery_reason deferred_at defer_reason payload_digest_version",
                 ),
             ] {
                 let actual = fixture

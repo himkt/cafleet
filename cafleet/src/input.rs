@@ -75,8 +75,15 @@ struct DatabaseWaits {
 }
 
 impl DatabaseWaits {
+    /// The tightest deadline from the innermost completion scope inward, so mandatory finalization
+    /// after an irreversible effect is not bounded by an enclosing, already expired budget.
     fn innermost_deadline(&self) -> Option<Deadline> {
-        self.frames
+        let start = self
+            .frames
+            .iter()
+            .rposition(|frame| frame.completion)
+            .unwrap_or(0);
+        self.frames[start..]
             .iter()
             .map(|frame| frame.deadline)
             .min_by_key(|deadline| deadline.0)
@@ -368,6 +375,37 @@ impl PaneLock {
                 "cannot lock pane input {}: {error}",
                 path.display()
             ))),
+        }
+    }
+
+    /// Releases this held lock so the member's runner can write its staged input.
+    pub(crate) fn release(&self) -> Result<(), CafleetError> {
+        self.file.unlock().map_err(|error| {
+            CafleetError::App(format!(
+                "cannot release pane input {}: {error}",
+                self.path.display()
+            ))
+        })
+    }
+
+    /// Retakes a released lock, retrying every 50 ms until `lock_deadline`; `false` means it
+    /// stayed busy.
+    pub(crate) fn reacquire_within(&self, lock_deadline: Deadline) -> Result<bool, CafleetError> {
+        loop {
+            match self.file.try_lock() {
+                Ok(()) => return Ok(true),
+                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::Error(error)) => {
+                    return Err(CafleetError::App(format!(
+                        "cannot lock pane input {}: {error}",
+                        self.path.display()
+                    )));
+                }
+            }
+            let Ok(left) = lock_deadline.remaining() else {
+                return Ok(false);
+            };
+            std::thread::sleep(left.min(Duration::from_millis(50)));
         }
     }
 

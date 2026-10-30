@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.308-exec-typed-literal-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.308",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 6,
+  "cursor_row": 33,
+  "cursor_col": 16,
+  "lines": [
+    "",
+    " ▐▛███▛█   Claude Code v2.1.308",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "!  touch fx-mark",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ! for shell mode"
+  ],
+  "masked_rows": [
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 3,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 31,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

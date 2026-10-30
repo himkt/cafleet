@@ -143,16 +143,22 @@ pub(crate) fn get_event(
         "schema_version",
         "unsupported event schema",
     )?;
+    let delivery_result = event.kind == RuntimeEventKind::InputDeliveryResult;
     require(
-        !automatic_review(event.kind) || version == Some(2),
+        !(automatic_review(event.kind) || delivery_result) || version == Some(2),
         "schema_version",
-        "automatic review events use the v2 schema",
+        "automatic review and delivery result events use the v2 schema",
     )?;
     if event.kind == RuntimeEventKind::InteractionClosed {
         fields.push("close_reason");
     }
-    if source(event.kind) == "runner_lifecycle" {
+    if source(event.kind) == "runner_lifecycle"
+        && (!delivery_result || payload.get("cause").is_some())
+    {
         fields.push("cause");
+    }
+    if delivery_result {
+        fields.extend(["input_id", "message_id", "delivery", "stage"]);
     }
     if version == Some(2) {
         fields.push("director_action");
@@ -226,6 +232,9 @@ pub(crate) fn get_event(
             "invalid bound review action",
         )?;
     }
+    if delivery_result {
+        validate_delivery_result(conn, &event, payload)?;
+    }
     let serialized_payload = payload.to_string();
     require(
         serialized_payload.len() <= PAYLOAD_LIMIT,
@@ -266,6 +275,64 @@ pub(crate) fn get_event(
     Ok(view)
 }
 
+const DELIVERY_RESULT_STAGES: [&str; 4] = ["zero_bytes", "partial", "submitted", "unknown"];
+
+fn validate_delivery_result(
+    conn: &Connection,
+    event: &RuntimeEventRecord,
+    payload: &Value,
+) -> Result<(), CafleetError> {
+    let input_id = payload["input_id"]
+        .as_i64()
+        .ok_or_else(|| invalid("payload_json.input_id", "input identity required"))?;
+    let input = super::inputs::get_input(conn, input_id)?;
+    let delivery = input.delivery().ok_or_else(|| {
+        invalid(
+            "payload_json.input_id",
+            "delivery results describe ordinary inputs",
+        )
+    })?;
+    require(
+        input.run_id == event.run_id && input.deferred_at.is_some(),
+        "payload_json.input_id",
+        "delivery results describe this run's deferred inputs",
+    )?;
+    require(
+        payload["message_id"] == json!(input.message_id),
+        "payload_json.message_id",
+        "message identity must match the input receipt",
+    )?;
+    let published: DeliveryProjection = serde_json::from_value(payload["delivery"].clone())
+        .map_err(|_| invalid("payload_json.delivery", "delivery projection required"))?;
+    let consistent = if published.status == DeliveryStatus::Uncertain {
+        delivery.status != DeliveryStatus::Queued
+            && delivery.status != DeliveryStatus::Held
+            && delivery.method == published.method
+    } else {
+        matches!(
+            published.status,
+            DeliveryStatus::Submitted | DeliveryStatus::NotSubmitted
+        ) && published == delivery
+    };
+    require(
+        consistent,
+        "payload_json.delivery",
+        "delivery must match the input receipt's settled result",
+    )?;
+    require(
+        payload["stage"]
+            .as_str()
+            .is_some_and(|stage| DELIVERY_RESULT_STAGES.contains(&stage)),
+        "payload_json.stage",
+        "stage outside its domain",
+    )?;
+    require(
+        payload.get("cause").is_none() || delivery.status == DeliveryStatus::Uncertain,
+        "payload_json.cause",
+        "only an uncertain delivery result carries a cause",
+    )
+}
+
 pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, CafleetError> {
     let payload = &view.event.payload_json;
     let close_reason = payload
@@ -294,11 +361,34 @@ pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, Ca
         observed_at: view.event.observed_at.clone(),
         evidence_json: payload["evidence"].clone(),
         close_reason,
-        cause_json: payload
-            .get("cause")
-            .filter(|value| !value.is_null())
-            .cloned(),
+        cause_json: if view.event.kind == RuntimeEventKind::InputDeliveryResult {
+            let mut cause = json!({"kind":"input_delivery_result",
+                "input_id":payload["input_id"],"stage":payload["stage"]});
+            if let Some(diagnostic) = payload.get("cause") {
+                cause["cause"] = diagnostic.clone();
+            }
+            Some(cause)
+        } else {
+            payload
+                .get("cause")
+                .filter(|value| !value.is_null())
+                .cloned()
+        },
     })
+}
+
+/// The runner's internal record of a deferred input's first result: its input, its stage and
+/// an optional diagnostic cause, carried through the outbox as the transition's cause.
+pub(crate) fn input_delivery_result_cause(
+    input_id: i64,
+    stage: &str,
+    diagnostic: Option<Value>,
+) -> Value {
+    let mut cause = json!({"kind":"input_delivery_result","input_id":input_id,"stage":stage});
+    if let Some(diagnostic) = diagnostic {
+        cause["cause"] = diagnostic;
+    }
+    cause
 }
 
 pub(crate) fn validate_transition(
@@ -362,12 +452,51 @@ pub(crate) fn validate_transition(
             "episode_seq",
             "run-level events have no interaction",
         )?;
-        validate_cause(transition)?;
+        if transition.kind == RuntimeEventKind::InputDeliveryResult {
+            validate_delivery_cause(transition)?;
+        } else {
+            validate_cause(transition)?;
+        }
     } else {
         require(
             transition.cause_json.is_none(),
             "cause_json",
             "screen events carry only post-policy screen evidence",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_delivery_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
+    let cause = transition
+        .cause_json
+        .as_ref()
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid("cause_json", "delivery result record required"))?;
+    require(
+        cause
+            .keys()
+            .all(|key| ["kind", "input_id", "stage", "cause"].contains(&key.as_str()))
+            && cause.get("kind").and_then(Value::as_str) == Some("input_delivery_result")
+            && cause
+                .get("input_id")
+                .and_then(Value::as_i64)
+                .is_some_and(|id| id > 0)
+            && cause
+                .get("stage")
+                .and_then(Value::as_str)
+                .is_some_and(|stage| DELIVERY_RESULT_STAGES.contains(&stage)),
+        "cause_json",
+        "a delivery result names its input and stage",
+    )?;
+    if let Some(diagnostic) = cause.get("cause") {
+        require(
+            diagnostic
+                .get("kind")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| !kind.trim().is_empty()),
+            "cause_json.cause.kind",
+            "a delivery result cause names its kind",
         )?;
     }
     Ok(())
@@ -514,7 +643,9 @@ fn payload(
     if let Some(reason) = transition.close_reason {
         payload["close_reason"] = json!(reason.as_str());
     }
-    if let Some(cause) = &transition.cause_json {
+    if let Some(cause) = &transition.cause_json
+        && transition.kind != RuntimeEventKind::InputDeliveryResult
+    {
         payload["cause"] = cause.clone();
     }
     payload["director_action"] = director_action(
@@ -597,6 +728,37 @@ pub(crate) fn persist_transition_in_transaction(
     if archive_reason.is_none() {
         super::super::fleets::require_live_fleet(conn, run.fleet_id)?;
     }
+    let delivery_fields = if transition.kind == RuntimeEventKind::InputDeliveryResult {
+        let record = transition
+            .cause_json
+            .as_ref()
+            .expect("validated delivery results carry their record");
+        let input_id = record["input_id"]
+            .as_i64()
+            .expect("validated delivery result input");
+        let published: Option<i64> = conn
+            .query_row(
+                "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                params![run.run_id, input_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(id) = published {
+            return Ok((get_event(conn, id)?.event, false));
+        }
+        let input = super::inputs::get_input(conn, input_id)?;
+        require(
+            input.run_id == run.run_id && input.deferred_at.is_some(),
+            "input_id",
+            "delivery results describe this run's deferred inputs",
+        )?;
+        let delivery = input
+            .delivery()
+            .ok_or_else(|| invalid("input_id", "delivery results describe ordinary inputs"))?;
+        Some((record.clone(), input.message_id, delivery))
+    } else {
+        None
+    };
     let latest = latest_event_seq(conn, run.run_id)?;
     require(
         latest.is_none_or(|latest| transition.event_seq > latest),
@@ -629,7 +791,22 @@ pub(crate) fn persist_transition_in_transaction(
                 now_stamp(),notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
         )?;
     let event_id = conn.last_insert_rowid();
-    let payload = payload(run, transition, event_id, interaction_id)?.to_string();
+    let mut payload = payload(run, transition, event_id, interaction_id)?;
+    if let Some((record, message_id, delivery)) = delivery_fields {
+        let object = payload.as_object_mut().expect("event payload object");
+        let action = object
+            .remove("director_action")
+            .expect("payload carries its action");
+        if let Some(diagnostic) = record.get("cause") {
+            object.insert("cause".into(), diagnostic.clone());
+        }
+        object.insert("input_id".into(), record["input_id"].clone());
+        object.insert("message_id".into(), json!(message_id));
+        object.insert("delivery".into(), delivery.to_json());
+        object.insert("stage".into(), record["stage"].clone());
+        object.insert("director_action".into(), action);
+    }
+    let payload = payload.to_string();
     require(
         payload.len() <= PAYLOAD_LIMIT,
         "payload_json",
@@ -822,7 +999,7 @@ mod tests {
         impl RefreshFixture {
             fn new() -> Self {
                 let mut fixture = Fixture::new();
-                fixture.conn.execute("UPDATE member_runs SET profile_version='fixture-v1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+                fixture.conn.execute("UPDATE member_runs SET profile_version='fixture-v1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
                 let owner = fixture.activate();
                 let event = fixture.open(&owner);
                 let update = InteractionEvidenceUpdate {
@@ -1038,7 +1215,6 @@ mod tests {
             spec.runtime_path.push_str("-other");
             spec.launch_nonce = "b".repeat(64);
             spec.profile_version = Some("fixture-v1".into());
-            spec.profile_match = Some(ProfileMatch::Exact);
             spec.coverage = Coverage::Tested;
             let other = storage::create_run(&mut fixture.fixture.conn, &spec).unwrap();
             fixture.fixture.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2 WHERE run_id=?1",[other.run_id]).unwrap();
@@ -1295,7 +1471,7 @@ mod tests {
             .map(|table| {
                 let columns = conn
                     .prepare(&format!(
-                        "SELECT name FROM pragma_table_info('{table}') WHERE name != 'profile_match' ORDER BY cid"
+                        "SELECT name FROM pragma_table_info('{table}') ORDER BY cid"
                     ))
                     .unwrap()
                     .query_map([], |row| row.get::<_, String>(0))
@@ -1386,7 +1562,6 @@ mod tests {
                 crate::broker::deregister_member(&mut conn, member).unwrap();
             }
             let run = storage::get_run(&conn, run_id).unwrap();
-            assert_eq!(run.profile_match, None);
             let fixture = Fixture {
                 _dir: dir,
                 conn,
@@ -3134,6 +3309,183 @@ mod tests {
                 storage::get_event(&fixture.conn, event.event_id).is_err(),
                 "redacted={redacted}"
             );
+        }
+    }
+
+    mod input_delivery_result_events {
+        use super::*;
+
+        const SUBMITTED: &str = r#"{"status":"submitted","method":"profile","reason":null}"#;
+
+        fn envelope(
+            base: &Value,
+            input_id: i64,
+            message_id: Value,
+            delivery: Value,
+            stage: &str,
+        ) -> Value {
+            let mut object = base.as_object().unwrap().clone();
+            object.remove("cause");
+            object.remove("director_action");
+            object.insert("kind".into(), json!("input_delivery_result"));
+            object.insert("input_id".into(), json!(input_id));
+            object.insert("message_id".into(), message_id);
+            object.insert("delivery".into(), delivery);
+            object.insert("stage".into(), json!(stage));
+            object.insert("director_action".into(), Value::Null);
+            Value::Object(object)
+        }
+
+        fn deferred_result(fixture: &mut Fixture) -> (RuntimeEventRecord, i64, Value) {
+            let owner = fixture.activate();
+            fixture.reserve(&owner);
+            let input = fixture.input(&owner, "prompt:deferred", InputKind::Prompt, None);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET state='settled',disposition='submitted',delivery_method='profile',deferred_at=?1,defer_reason='interaction_open' WHERE input_id=?2",
+                    params![NOW, input.input_id],
+                )
+                .unwrap();
+            let transition = ObservedTransition {
+                kind: RuntimeEventKind::CoverageUnknown,
+                cause_json: Some(json!({"kind":"coverage_unknown"})),
+                ..native_exit(owner.run_id, 1)
+            };
+            let event = storage::persist_event(
+                &mut fixture.conn,
+                &owner,
+                &transition,
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runtime_events SET kind='input_delivery_result' WHERE event_id=?1",
+                    [event.event_id],
+                )
+                .unwrap();
+            let payload = envelope(
+                &event.payload_json,
+                input.input_id,
+                Value::Null,
+                serde_json::from_str(SUBMITTED).unwrap(),
+                "submitted",
+            );
+            replace_public_payload(&mut fixture.conn, &event, payload.clone());
+            (event, input.input_id, payload)
+        }
+
+        #[test]
+        fn input_delivery_result_envelope_appends_its_receipt_fields_before_a_null_action() {
+            let mut fixture = Fixture::new();
+            let (event, input_id, payload) = deferred_result(&mut fixture);
+            let view = storage::get_event(&fixture.conn, event.event_id)
+                .unwrap_or_else(|error| panic!("{}", error.message()));
+            assert_eq!(view.event.kind, RuntimeEventKind::InputDeliveryResult);
+            assert!(view.interaction.is_none());
+            let read = &view.event.payload_json;
+            assert_eq!(*read, payload);
+            assert_eq!(read["interaction_id"], Value::Null);
+            assert_eq!(read["classification"], Value::Null);
+            assert_eq!(read["source"], "runner_lifecycle");
+            assert_eq!(read["input_id"], input_id);
+            let keys = read
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                keys[keys.len() - 5..],
+                [
+                    "input_id",
+                    "message_id",
+                    "delivery",
+                    "stage",
+                    "director_action"
+                ]
+            );
+            assert_key_order(&read["delivery"], &["status", "method", "reason"]);
+        }
+
+        #[test]
+        fn input_delivery_result_reader_rejects_an_envelope_that_disagrees_with_its_receipt() {
+            let mut fixture = Fixture::new();
+            let (event, input_id, payload) = deferred_result(&mut fixture);
+            for (label, forged) in [
+                (
+                    "delivery differs from the stored receipt",
+                    envelope(
+                        &payload,
+                        input_id,
+                        Value::Null,
+                        json!({"status":"not_submitted","method":null,"reason":"runner_stopped"}),
+                        "submitted",
+                    ),
+                ),
+                (
+                    "unknown input",
+                    envelope(
+                        &payload,
+                        input_id + 1000,
+                        Value::Null,
+                        serde_json::from_str(SUBMITTED).unwrap(),
+                        "submitted",
+                    ),
+                ),
+                (
+                    "explicit input names a message",
+                    envelope(
+                        &payload,
+                        input_id,
+                        json!(event.message_id.unwrap()),
+                        serde_json::from_str(SUBMITTED).unwrap(),
+                        "submitted",
+                    ),
+                ),
+                (
+                    "stage outside its domain",
+                    envelope(
+                        &payload,
+                        input_id,
+                        Value::Null,
+                        serde_json::from_str(SUBMITTED).unwrap(),
+                        "done",
+                    ),
+                ),
+            ] {
+                replace_public_payload(&mut fixture.conn, &event, forged);
+                assert!(
+                    storage::get_event(&fixture.conn, event.event_id).is_err(),
+                    "{label}"
+                );
+            }
+            for (label, change) in [
+                (
+                    "non-null action",
+                    (
+                        "director_action",
+                        json!({"kind":"review_permission_request"}),
+                    ),
+                ),
+                ("literal payload", ("literal", json!("private prompt"))),
+                (
+                    "cause on a submitted result",
+                    ("cause", json!({"kind":"coverage_unknown"})),
+                ),
+            ] {
+                let mut forged = payload.clone();
+                forged[change.0] = change.1;
+                replace_public_payload(&mut fixture.conn, &event, forged);
+                assert!(
+                    storage::get_event(&fixture.conn, event.event_id).is_err(),
+                    "{label}"
+                );
+            }
+            replace_public_payload(&mut fixture.conn, &event, payload);
+            storage::get_event(&fixture.conn, event.event_id).unwrap();
         }
     }
 }

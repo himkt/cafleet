@@ -23,7 +23,7 @@ The flag means slightly different things per command:
   and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
 
-New members run through the CAFleet PTY runner with a declared detection-coverage state. Omitting `--permission-mode` selects the backend's default policy, its native automatic review where the backend has one; pass the flag only for another native mode the user asks for. Interactive native policies are eligible on every backend — OpenCode's through its `cafleet-ask` agent preset — with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Detector, composer and answer coverage are independent; unknown coverage holds generated input. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](member-permission-events.md) explains the workflow, and the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
+New members run through the CAFleet PTY runner with a declared detection-coverage state. Omitting `--permission-mode` selects the backend's default policy, its native automatic review where the backend has one; pass the flag only for another native mode the user asks for. Interactive native policies are eligible on every backend — OpenCode's through its `cafleet-ask` agent preset — with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Each bundled runner profile covers its backend from a minimum native version onward. Detector, composer and answer coverage are independent; without a measured submission plan, generated input uses Escape-first delivery fallback. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](member-permission-events.md) explains the workflow, and the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
 
 ## cafleet usage from a member pane
 
@@ -38,7 +38,7 @@ when the creator sets it.
 Each backend honors a leading-`!` shell shortcut on the coding agent's input line,
 including opencode `mini`; [backend capabilities](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities)
 compares their sandbox and shell-command posture.
-`cafleet member exec` submits a visible native command through a tested runner composer profile; explicitly unwrapped members retain Escape-first input. A member routes a
+`cafleet member exec` submits a visible native command through the runner, using the profile's measured native-exec plan or delivery fallback and queueing it while a detected native interaction is open; explicitly unwrapped members retain Escape-first input. A member routes a
 command its harness does not run through the Director — see
 [Command routing](member-lifecycle.md#command-routing). The
 [CLI specification](https://github.com/himkt/cafleet/blob/main/SPEC.md#63-cli)

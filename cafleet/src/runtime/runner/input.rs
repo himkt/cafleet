@@ -18,18 +18,25 @@ use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
 use crate::coding_agent::{AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, StageGate};
 use crate::coding_agent::{ComposerOperation, coding_agent};
 use crate::error::CafleetError;
-use crate::input::{Deadline, bounded_by_inherited, with_database_budget};
+use crate::input::{Deadline, PaneLock, bounded_by_inherited, with_database_budget};
 use rusqlite::{Connection, TransactionBehavior};
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub(crate) trait RequestTokenSource: Send {
     fn fill(&mut self, bytes: &mut [u8; 32]) -> Result<()>;
 }
 
 const RECEIPT_CACHE_CAPACITY: usize = 4096;
+const STAGE_SETTLE: Duration = Duration::from_millis(500);
+const STAGE_WRITE_MARGIN: Duration = Duration::from_millis(250);
+const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
+const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
+const COMPOSER_BUSY_BOUND: Duration = Duration::from_secs(180);
+const FALLBACK_ESCAPE: u8 = 0x1b;
+const FALLBACK_ENTER: u8 = 0x0d;
 
 pub(crate) enum InputBoundary {
     Reserved,
@@ -80,6 +87,61 @@ pub(crate) struct InputCoordinator {
     current_request: Option<(CurrentRequest, String)>,
     input_fenced: bool,
     observation_blocker: Option<String>,
+    database_url: String,
+    queue: std::collections::VecDeque<QueuedInput>,
+    finalization: Option<PendingFinalization>,
+    pending_stamp: Option<PendingStamp>,
+    deferred_failed: bool,
+}
+
+/// An accepted deferred preview whose notification stamp and settlement storage prevented; like
+/// a pending finalization it blocks later ordinary input and retries on the deferred timer.
+struct PendingStamp {
+    input_id: i64,
+    stage: SubmissionStage,
+}
+
+/// A deferred input's terminal zero-byte transaction that storage prevented; it holds only
+/// metadata, blocks every later ordinary input and retries on the deferred timer.
+struct PendingFinalization {
+    input_id: i64,
+    expected: storage::InputState,
+    reason: &'static str,
+}
+
+/// A transient storage obstacle that a later tick may clear; every other failure propagates.
+fn storage_failure(cause: &CafleetError) -> bool {
+    matches!(
+        cause,
+        CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded
+    )
+}
+
+/// Runner-owned ordinary input accepted with a durable ready receipt; its literal stays in
+/// memory only.
+#[derive(Clone)]
+struct QueuedInput {
+    input_id: i64,
+    request: storage::NewInput,
+    literal: String,
+    operation: ComposerOperation,
+    payload_digest_version: i64,
+    /// When the head first waited only on a composer that is not verified empty; the
+    /// `idle_timeout` bound runs from here and resets whenever an interaction blocks the head.
+    composer_busy_since: Option<Instant>,
+    attempt_deadline: Option<Instant>,
+    obstacle: &'static str,
+}
+
+type DeliverySelection = (
+    storage::DeliveryMethod,
+    Option<&'static str>,
+    Arc<[Arc<[u8]>]>,
+);
+
+struct DeferredAttempt {
+    queued: QueuedInput,
+    obstacle: &'static str,
 }
 
 #[derive(Clone)]
@@ -188,7 +250,11 @@ enum StageGateProgress {
 const GATE_FINALIZATION_RESERVE: std::time::Duration = std::time::Duration::from_millis(100);
 
 enum RetainedSelection {
-    Composer,
+    Composer {
+        method: storage::DeliveryMethod,
+        stages: Arc<[Arc<[u8]>]>,
+        next_stage: usize,
+    },
     Permission {
         selection: Arc<PermissionSelection>,
         next_stage: usize,
@@ -208,9 +274,74 @@ struct PendingInput {
     request: storage::NewInput,
     bytes: Arc<[u8]>,
     permission: Option<Arc<PermissionSelection>>,
+    composer: Option<ComposerDelivery>,
     deadline: Instant,
     phase: InputPhase,
     input_id: Option<i64>,
+}
+
+struct ComposerDelivery {
+    method: storage::DeliveryMethod,
+    reason: Option<&'static str>,
+    stages: Arc<[Arc<[u8]>]>,
+    written_stages: usize,
+    settle_until: Option<Instant>,
+    manual_generation: Option<u64>,
+    pane: Option<PaneLock>,
+    payload_digest_version: i64,
+    literal: String,
+    operation: ComposerOperation,
+    deferred: Option<DeferredAttempt>,
+}
+
+impl ComposerDelivery {
+    fn requires_empty_composer(&self) -> bool {
+        self.method == storage::DeliveryMethod::Profile && self.written_stages == 0
+    }
+}
+
+enum OrdinaryBlocker {
+    Interaction,
+    ObserverUnavailable,
+}
+
+fn ordinary_blocker(status: &super::ObservationStatus) -> Option<OrdinaryBlocker> {
+    use super::GateReason;
+    if matches!(
+        status.visibility,
+        Visibility::Visible | Visibility::Obscured
+    ) || matches!(
+        status.eligibility,
+        InputEligibility::Hold(GateReason::Candidate | GateReason::Interaction)
+    ) || status.retained_transition
+    {
+        return Some(OrdinaryBlocker::Interaction);
+    }
+    if matches!(
+        status.eligibility,
+        InputEligibility::Hold(GateReason::ObserverUnavailable | GateReason::Gap)
+    ) || status.diagnostic.is_some()
+    {
+        return Some(OrdinaryBlocker::ObserverUnavailable);
+    }
+    None
+}
+
+fn fallback_stages(prefix: &[u8], literal: &str) -> Result<Arc<[Arc<[u8]>]>> {
+    let size = prefix
+        .len()
+        .checked_add(literal.len())
+        .and_then(|size| size.checked_add(1))
+        .filter(|size| *size <= 65536)
+        .ok_or_else(|| error("native composer payload exceeds 65536 bytes"))?;
+    let mut text = Vec::with_capacity(size);
+    text.extend_from_slice(prefix);
+    text.extend_from_slice(literal.as_bytes());
+    Ok(Arc::from(vec![
+        Arc::from(&[FALLBACK_ESCAPE][..]),
+        Arc::from(text),
+        Arc::from(&[FALLBACK_ENTER][..]),
+    ]))
 }
 
 impl PendingInput {
@@ -356,12 +487,27 @@ impl InputGuard<'_> {
             "input write requires its retained reservation",
         )?;
         match &retained.selection {
-            RetainedSelection::Composer => transport.validate_input_drain(
-                self.proof
+            RetainedSelection::Composer {
+                method,
+                stages,
+                next_stage,
+            } => {
+                let proof = self
+                    .proof
                     .as_ref()
-                    .ok_or_else(|| error("native drain is absent"))?,
-                self.deadline,
-            )?,
+                    .ok_or_else(|| error("native drain is absent"))?;
+                ensure(
+                    stages
+                        .get(*next_stage)
+                        .is_some_and(|stage| stage.as_ref() == bytes),
+                    "composer stage selection changed",
+                )?;
+                if *method == storage::DeliveryMethod::Profile && *next_stage == 0 {
+                    transport.validate_input_drain(proof, self.deadline)?
+                } else {
+                    transport.validate_observation_drain(proof, self.deadline)?
+                }
+            }
             RetainedSelection::Permission {
                 selection,
                 next_stage,
@@ -417,7 +563,20 @@ impl InputGuard<'_> {
                     .ok_or_else(|| error("native input count exhausted"))?;
                 if *count == offered {
                     retained.stage = match &mut retained.selection {
-                        RetainedSelection::Composer => SubmissionStage::Submitted,
+                        RetainedSelection::Composer {
+                            stages, next_stage, ..
+                        } => {
+                            *next_stage = next_stage
+                                .checked_add(1)
+                                .ok_or_else(|| error("composer stage index exhausted"))?;
+                            match stages.get(*next_stage) {
+                                Some(stage) => {
+                                    retained.bytes = stage.clone();
+                                    SubmissionStage::Partial
+                                }
+                                None => SubmissionStage::Submitted,
+                            }
+                        }
                         RetainedSelection::Permission {
                             selection,
                             next_stage,
@@ -466,10 +625,42 @@ impl Drop for InputGuard<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum DrainRequirement {
+    Observation,
+    EmptyComposer,
+    NoBlockingInteraction,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WriteValidation {
     Ready,
     Contended,
+}
+
+#[cfg(test)]
+impl InputCoordinator {
+    /// Sets when the queued input began waiting only on a composer that is not verified empty.
+    pub(crate) fn set_queued_composer_busy_since(&mut self, input_id: i64, since: &str) {
+        let since = chrono::DateTime::parse_from_rfc3339(since).expect("RFC 3339 busy start");
+        let elapsed = chrono::Utc::now()
+            .signed_duration_since(since)
+            .to_std()
+            .expect("the busy start lies in the past");
+        let attempt = self
+            .pending
+            .as_mut()
+            .and_then(|pending| pending.composer.as_mut())
+            .and_then(|composer| composer.deferred.as_mut())
+            .map(|deferred| &mut deferred.queued);
+        let queued = self
+            .queue
+            .iter_mut()
+            .chain(attempt)
+            .find(|queued| queued.input_id == input_id)
+            .expect("the input is queued or in its deferred attempt");
+        queued.composer_busy_since = Some(Instant::now() - elapsed);
+    }
 }
 
 impl InputCoordinator {
@@ -624,10 +815,72 @@ impl InputCoordinator {
         })
     }
 
-    pub(crate) fn fence(&mut self, deadline: Instant) -> Result<()> {
+    /// Cancels queued work as `runner_stopped` and returns the settled input IDs, whose results
+    /// the caller publishes before the run's exit event.
+    pub(crate) fn fence(&mut self, deadline: Instant) -> Result<Vec<i64>> {
         self.current_request = None;
         self.input_fenced = true;
-        check_deadline(Instant::now(), deadline)
+        let mut settled = Vec::new();
+        if let Some((id, _, written)) = self.active_deferred() {
+            self.pending = None;
+            let mut conn = crate::db::connect(&self.database_url)?;
+            if written {
+                self.record_deferred_uncertain(&mut conn, id, deadline)?;
+            } else {
+                let operation = with_database_deadline(&mut conn, deadline, |conn| {
+                    storage::settle_zero_byte_deferred(
+                        conn,
+                        &self.run.owner(),
+                        id,
+                        storage::InputState::InProgress,
+                        "runner_stopped",
+                    )
+                })?;
+                let retained = self
+                    .operations
+                    .get_mut(&id)
+                    .expect("a deferred attempt retains its receipt");
+                retained.operation = operation;
+                retained.attempt_available = false;
+            }
+            settled.push(id);
+        }
+        if !self.queue.is_empty() || self.finalization.is_some() || self.pending_stamp.is_some() {
+            let mut conn = crate::db::connect(&self.database_url)?;
+            let owner = self.run.owner();
+            if let Some(pending) = self.pending_stamp.take() {
+                with_database_deadline(&mut conn, deadline, |conn| {
+                    storage::settle_preview(conn, &owner, pending.input_id)
+                })?;
+                settled.push(pending.input_id);
+            }
+            if let Some(pending) = self.finalization.take() {
+                with_database_deadline(&mut conn, deadline, |conn| {
+                    storage::settle_zero_byte_deferred(
+                        conn,
+                        &owner,
+                        pending.input_id,
+                        pending.expected,
+                        pending.reason,
+                    )
+                })?;
+                settled.push(pending.input_id);
+            }
+            while let Some(queued) = self.queue.pop_front() {
+                with_database_deadline(&mut conn, deadline, |conn| {
+                    storage::settle_zero_byte_deferred(
+                        conn,
+                        &owner,
+                        queued.input_id,
+                        storage::InputState::Ready,
+                        "runner_stopped",
+                    )
+                })?;
+                settled.push(queued.input_id);
+            }
+        }
+        check_deadline(Instant::now(), deadline)?;
+        Ok(settled)
     }
     fn permission_blocker(&self, observation: &ObservationController) -> Option<String> {
         let status = observation.status();
@@ -1065,6 +1318,7 @@ impl InputCoordinator {
                 },
                 bytes,
                 permission: Some(selection),
+                composer: None,
                 ready: history,
                 deadline,
                 phase: InputPhase::AwaitReservation,
@@ -1554,6 +1808,7 @@ impl InputCoordinator {
             stage,
             output_seq: retained.map(|point| point.output_seq),
             reason,
+            delivery: operation.delivery(),
         }
     }
 
@@ -1635,7 +1890,17 @@ impl InputCoordinator {
                 crate::input::valid_input(&input.literal),
                 "composer submission requires one nonempty line without control characters",
             )?;
-            let digest = storage::input_payload_digest(self.run.run_id, &input);
+            if input.input_kind == storage::InputKind::Preview {
+                let message_id = input.message_id.expect("validated preview message");
+                let message = with_database_deadline(conn, deadline, |conn| {
+                    crate::broker::get_message(conn, message_id)
+                })?;
+                ensure(
+                    message.to_member_id == self.run.member_id
+                        && crate::delivery::canonical_preview_line(&message) == input.literal,
+                    "preview literal must be its canonical preview",
+                )?;
+            }
             let retained = with_database_deadline(conn, deadline, |conn| {
                 ensure(
                     storage::database_identity(conn)? == self.run.database_identity_json,
@@ -1645,6 +1910,11 @@ impl InputCoordinator {
             })?;
             if let Some(retained) = retained {
                 known_input_id = Some(retained.input_id);
+                let digest = storage::versioned_payload_digest(
+                    retained.payload_digest_version,
+                    self.run.run_id,
+                    &input,
+                )?;
                 ensure(
                     retained.kind == input.input_kind
                         && retained.payload_digest == digest
@@ -1653,52 +1923,121 @@ impl InputCoordinator {
                 )?;
                 return Ok(Some(InputControlReply::Submission(self.result(&retained))));
             }
+            let payload_digest_version = if input.input_kind == storage::InputKind::Preview {
+                2
+            } else {
+                1
+            };
+            let digest =
+                storage::versioned_payload_digest(payload_digest_version, self.run.run_id, &input)?;
             request.identity.validate(&self.run)?;
-            if self.pending.is_some() || !Self::composer_eligible(observation) {
-                return Ok(Some(InputControlReply::Submission(SubmissionResult::held(
-                    "ordinary composer input is held",
-                ))));
+            let unresolved_deferred = with_database_deadline(conn, deadline, |conn| {
+                storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
+            })?;
+            let status = observation.status();
+            let defer_reason = match ordinary_blocker(&status) {
+                Some(OrdinaryBlocker::ObserverUnavailable) => {
+                    return Ok(Some(InputControlReply::Submission(SubmissionResult::held(
+                        "observer_unavailable",
+                    ))));
+                }
+                Some(OrdinaryBlocker::Interaction) => Some(
+                    if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
+                        "interaction_candidate"
+                    } else {
+                        "interaction_open"
+                    },
+                ),
+                None if self.pending.is_some()
+                    || !self.queue.is_empty()
+                    || self.finalization.is_some()
+                    || self.pending_stamp.is_some()
+                    || unresolved_deferred =>
+                {
+                    Some("earlier_input")
+                }
+                None => self
+                    .select_delivery(
+                        observation,
+                        composer_operation,
+                        input.input_kind,
+                        &input.literal,
+                        false,
+                    )?
+                    .is_none()
+                    .then_some("composer_busy"),
+            };
+            let new_input = storage::NewInput {
+                operation_key: input.operation_key.clone(),
+                kind: input.input_kind,
+                payload_digest: digest,
+                message_id: input.message_id,
+            };
+            if let Some(defer_reason) = defer_reason {
+                let reservation = with_database_deadline(conn, deadline, |conn| {
+                    self.validate_live(conn, run)?;
+                    storage::reserve_input_with_provenance(
+                        conn,
+                        &self.run.owner(),
+                        &new_input,
+                        storage::NewReservation {
+                            selection: None,
+                            defer_reason: Some(defer_reason),
+                            payload_digest_version,
+                        },
+                    )
+                })?;
+                let operation = match reservation {
+                    storage::InputReservation::Inserted(operation) => {
+                        self.queue.push_back(QueuedInput {
+                            input_id: operation.input_id,
+                            request: new_input,
+                            literal: input.literal,
+                            operation: composer_operation,
+                            payload_digest_version,
+                            composer_busy_since: None,
+                            attempt_deadline: None,
+                            obstacle: "delivery_budget_exhausted",
+                        });
+                        operation
+                    }
+                    storage::InputReservation::Existing(operation) => operation,
+                };
+                known_input_id = Some(operation.input_id);
+                return Ok(Some(InputControlReply::Submission(self.result(&operation))));
             }
             ensure(
                 self.operations.len() < RECEIPT_CACHE_CAPACITY,
                 "input receipt cache is at capacity",
             )?;
             with_database_deadline(conn, deadline, |conn| self.validate_live(conn, run))?;
-            let composer = match self.run.native_version.as_deref() {
-                Some(native) => {
-                    let backend = coding_agent(&self.run.backend)
-                        .ok_or_else(|| error("unknown input backend"))?;
-                    self.services
-                        .catalog
-                        .composer_plan(backend, native, composer_operation)
-                        .map(|plan| (native, backend, plan))
-                }
-                None => None,
-            };
-            let Some((native, backend, plan)) = composer else {
-                return Ok(Some(InputControlReply::Submission(SubmissionResult::held(
-                    "matching executable composer plan is unavailable",
-                ))));
-            };
-            ensure(
-                plan.backend() == backend
-                    && plan.native_version() == native
-                    && Some(plan.profile_version()) == self.run.profile_version.as_deref()
-                    && !plan.rule_ids().is_empty()
-                    && !plan.fixture_ids().is_empty(),
-                "composer plan provenance changed",
-            )?;
-            let bytes = Arc::from(plan.encode(&input.literal)?);
+            let (method, reason, stages) = self
+                .select_delivery(
+                    observation,
+                    composer_operation,
+                    input.input_kind,
+                    &input.literal,
+                    false,
+                )?
+                .expect("a busy composer queues the input before selection");
             self.pending = Some(PendingInput {
                 reservation: PendingReservation::Unreserved,
-                request: storage::NewInput {
-                    operation_key: input.operation_key,
-                    kind: input.input_kind,
-                    payload_digest: digest,
-                    message_id: input.message_id,
-                },
-                bytes,
+                request: new_input,
+                bytes: stages[0].clone(),
                 permission: None,
+                composer: Some(ComposerDelivery {
+                    method,
+                    reason,
+                    stages,
+                    written_stages: 0,
+                    settle_until: None,
+                    manual_generation: None,
+                    pane: None,
+                    payload_digest_version,
+                    literal: input.literal,
+                    operation: composer_operation,
+                    deferred: None,
+                }),
                 ready: None,
                 deadline,
                 phase: InputPhase::AwaitReservation,
@@ -1707,6 +2046,627 @@ impl InputCoordinator {
             Ok(None)
         })();
         result.map_err(|source| self.run_failure(source, None, known_input_id, known_key))
+    }
+
+    /// Chooses profile delivery for a verified empty composer with an executable plan, and
+    /// delivery fallback otherwise, rendering a fallback preview with its dismissal clause.
+    fn select_delivery(
+        &self,
+        observation: &ObservationController,
+        operation: ComposerOperation,
+        kind: storage::InputKind,
+        literal: &str,
+        idle_timeout: bool,
+    ) -> Result<Option<DeliverySelection>> {
+        let composer = match self.run.native_version.as_deref() {
+            Some(native) => {
+                let backend = coding_agent(&self.run.backend)
+                    .ok_or_else(|| error("unknown input backend"))?;
+                self.services
+                    .catalog
+                    .composer_plan(backend, native, operation)
+                    .map(|plan| (native, backend, plan))
+            }
+            None => None,
+        };
+        let prefix: &[u8] = match operation {
+            ComposerOperation::Prompt => b"",
+            ComposerOperation::Exec => b"! ",
+        };
+        let fallback_literal = if kind == storage::InputKind::Preview {
+            crate::delivery::fallback_preview_line(literal)
+        } else {
+            literal.to_owned()
+        };
+        Ok(Some(match composer {
+            Some((native, backend, plan)) => {
+                ensure(
+                    plan.backend() == backend
+                        && plan.native_version() == native
+                        && Some(plan.profile_version()) == self.run.profile_version.as_deref()
+                        && !plan.rule_ids().is_empty()
+                        && !plan.fixture_ids().is_empty(),
+                    "composer plan provenance changed",
+                )?;
+                if Self::composer_eligible(observation) {
+                    let [literal, submit] = plan.stages(literal)?;
+                    let stages: Arc<[Arc<[u8]>]> =
+                        Arc::from(vec![Arc::from(literal), Arc::from(submit)]);
+                    (storage::DeliveryMethod::Profile, None, stages)
+                } else if idle_timeout {
+                    (
+                        storage::DeliveryMethod::Fallback,
+                        Some("idle_timeout"),
+                        fallback_stages(prefix, &fallback_literal)?,
+                    )
+                } else {
+                    return Ok(None);
+                }
+            }
+            None => (
+                storage::DeliveryMethod::Fallback,
+                Some("submission_plan_unavailable"),
+                fallback_stages(prefix, &fallback_literal)?,
+            ),
+        }))
+    }
+
+    /// A started deferred attempt holds the pane and advances its stages on every tick.
+    pub(super) fn deferred_attempt_writing(&self) -> bool {
+        self.pending
+            .as_ref()
+            .and_then(|pending| pending.composer.as_ref())
+            .is_some_and(|composer| composer.deferred.is_some() && composer.pane.is_some())
+    }
+
+    /// A deferred terminal transaction failed permanently: ordinary input is fenced and the runner
+    /// must stop, so fenced recovery settles and publishes the receipt.
+    pub(super) fn deferred_failed(&self) -> bool {
+        self.deferred_failed
+    }
+
+    pub(super) fn has_deferred_work(&self) -> bool {
+        !self.queue.is_empty()
+            || self.finalization.is_some()
+            || self.pending_stamp.is_some()
+            || self
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.composer.as_ref())
+                .is_some_and(|composer| composer.deferred.is_some())
+    }
+
+    fn publish_result(observation: &ObservationController, input_id: i64, stage: SubmissionStage) {
+        observation.publish_delivery_result(storage::input_delivery_result_cause(
+            input_id,
+            stage.as_str(),
+            None,
+        ));
+    }
+
+    /// Settles queued or attempted zero-byte work as not submitted and publishes its result. When
+    /// storage prevents the transaction, it stays a pending finalization that later ticks retry.
+    fn cancel_deferred(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+        input_id: i64,
+        expected: storage::InputState,
+        reason: &'static str,
+    ) -> Result<()> {
+        let finalization = Instant::now() + DEFERRED_FINALIZATION;
+        let operation = match with_database_deadline(conn, finalization, |conn| {
+            storage::settle_zero_byte_deferred(conn, &self.run.owner(), input_id, expected, reason)
+        }) {
+            Ok(operation) => operation,
+            Err(cause) if storage_failure(&cause) => {
+                eprintln!(
+                    "member runtime: input {input_id} result is pending storage: {}",
+                    cause.message()
+                );
+                self.finalization = Some(PendingFinalization {
+                    input_id,
+                    expected,
+                    reason,
+                });
+                return Ok(());
+            }
+            Err(cause) => {
+                self.input_fenced = true;
+                self.deferred_failed = true;
+                return Err(cause);
+            }
+        };
+        if let Some(retained) = self.operations.get_mut(&input_id) {
+            retained.operation = operation;
+            retained.attempt_available = false;
+        }
+        Self::publish_result(observation, input_id, SubmissionStage::ZeroBytes);
+        Ok(())
+    }
+
+    /// Classifies the queued head's target before its first byte: `None` keeps it live, and a
+    /// reason settles it. Ownership loss and storage failures return an error.
+    fn deferred_target(&self, conn: &Connection, run: &RunRecord) -> Result<Option<&'static str>> {
+        ensure(
+            !self.manual_accounting_failed && !self.input_fenced,
+            "manual accounting failure fenced input",
+        )?;
+        if stable_run_identity(run) != stable_run_identity(&self.run) {
+            return Ok(Some("target_changed"));
+        }
+        let current = storage::validate_owner(conn, &self.run.owner())?;
+        ensure(
+            current.status == RunStatus::Running && current.owner_kind == OwnerKind::Runner,
+            "input coordinator no longer owns a running run",
+        )?;
+        if stable_run_identity(&current) != stable_run_identity(&self.run)
+            || current.native_version != self.run.native_version
+            || current.profile_version != self.run.profile_version
+        {
+            return Ok(Some("target_changed"));
+        }
+        if crate::broker::active_member_fleet(conn, self.run.member_id)? != Some(self.run.fleet_id)
+        {
+            return Ok(Some("target_inactive"));
+        }
+        let Some(member) = crate::broker::get_member(conn, self.run.member_id, self.run.fleet_id)?
+        else {
+            return Ok(Some("target_inactive"));
+        };
+        if member.kind != MemberKind::Member || member.placement.as_ref() != Some(&self.placement) {
+            return Ok(Some("target_changed"));
+        }
+        self.lock.validate(conn, &current.owner())?;
+        Ok(None)
+    }
+
+    /// Starts the queued head once no interaction blocks it, or settles it when its attempt
+    /// budget expires or its preview was consumed.
+    fn start_deferred(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        observation: &ObservationController,
+        deadline: Instant,
+    ) -> Result<()> {
+        if self.input_fenced {
+            return Ok(());
+        }
+        if let Some(pending) = self.finalization.take() {
+            self.cancel_deferred(
+                conn,
+                observation,
+                pending.input_id,
+                pending.expected,
+                pending.reason,
+            )?;
+            if self.finalization.is_some() {
+                return Ok(());
+            }
+        }
+        if let Some(pending) = self.pending_stamp.take() {
+            self.settle_accepted_preview(conn, observation, pending.input_id, pending.stage)?;
+            if self.pending_stamp.is_some() {
+                return Ok(());
+            }
+        }
+        if self.queue.is_empty() {
+            return Ok(());
+        }
+        let now = Instant::now();
+        match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+            storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
+        }) {
+            Ok(false) => {}
+            Ok(true) => return Ok(()),
+            Err(cause) if storage_failure(&cause) => {
+                self.queue.front_mut().expect("nonempty queue").obstacle = "storage_unavailable";
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
+        }
+        let head = self.queue.front_mut().expect("nonempty queue");
+        let blocker = ordinary_blocker(&observation.status());
+        if matches!(blocker, Some(OrdinaryBlocker::Interaction)) {
+            head.attempt_deadline = None;
+            head.composer_busy_since = None;
+            return Ok(());
+        }
+        if matches!(blocker, Some(OrdinaryBlocker::ObserverUnavailable)) {
+            head.obstacle = "observer_unavailable";
+        } else {
+            let (operation, kind, literal) =
+                (head.operation, head.request.kind, head.literal.clone());
+            let idle_timeout = head
+                .composer_busy_since
+                .is_some_and(|since| now.duration_since(since) >= COMPOSER_BUSY_BOUND);
+            let selection =
+                self.select_delivery(observation, operation, kind, &literal, idle_timeout)?;
+            let head = self.queue.front_mut().expect("queued head remains");
+            let Some(selection) = selection else {
+                head.composer_busy_since.get_or_insert(now);
+                head.attempt_deadline = None;
+                return Ok(());
+            };
+            return self.attempt_deferred(conn, run, observation, deadline, now, selection);
+        }
+        let attempt_deadline = *head
+            .attempt_deadline
+            .get_or_insert((now + DEFERRED_ATTEMPT_BUDGET).min(deadline));
+        if now >= attempt_deadline {
+            let input_id = head.input_id;
+            self.queue.pop_front();
+            return self.cancel_deferred(
+                conn,
+                observation,
+                input_id,
+                storage::InputState::Ready,
+                "observer_unavailable",
+            );
+        }
+        Ok(())
+    }
+
+    /// Starts the selected attempt for the queued head within its five-second budget.
+    fn attempt_deferred(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        observation: &ObservationController,
+        deadline: Instant,
+        now: Instant,
+        selection: DeliverySelection,
+    ) -> Result<()> {
+        let head = self.queue.front_mut().expect("queued head remains");
+        let attempt_deadline = *head
+            .attempt_deadline
+            .get_or_insert((now + DEFERRED_ATTEMPT_BUDGET).min(deadline));
+        let input_id = head.input_id;
+        let message_id = head.request.message_id;
+        if now >= attempt_deadline {
+            let obstacle = head.obstacle;
+            self.queue.pop_front();
+            return self.cancel_deferred(
+                conn,
+                observation,
+                input_id,
+                storage::InputState::Ready,
+                obstacle,
+            );
+        }
+        let target = match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+            if let Some(message_id) = message_id {
+                let message = crate::broker::get_message(conn, message_id)?;
+                if message.status != crate::broker::records::MessageStatus::InputRequired {
+                    return Ok(Some("message_consumed"));
+                }
+            }
+            self.deferred_target(conn, run)
+        }) {
+            Ok(target) => target,
+            Err(cause) if storage_failure(&cause) => {
+                self.queue
+                    .front_mut()
+                    .expect("queued head remains")
+                    .obstacle = "storage_unavailable";
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
+        };
+        if let Some(reason) = target {
+            self.queue.pop_front();
+            return self.cancel_deferred(
+                conn,
+                observation,
+                input_id,
+                storage::InputState::Ready,
+                reason,
+            );
+        }
+        let Some(pane) = PaneLock::try_acquire(&self.database_url, &self.placement)? else {
+            self.queue
+                .front_mut()
+                .expect("queued head remains")
+                .obstacle = "pane_input_busy";
+            return Ok(());
+        };
+        let settles =
+            u32::try_from(selection.2.len() - 1).expect("a plan has a bounded stage count");
+        if attempt_deadline.saturating_duration_since(now)
+            <= STAGE_SETTLE * settles + STAGE_WRITE_MARGIN
+        {
+            self.queue
+                .front_mut()
+                .expect("queued head remains")
+                .obstacle = "delivery_budget_exhausted";
+            return Ok(());
+        }
+        let (method, reason, stages) = selection;
+        let operation = match with_database_deadline(conn, attempt_deadline, |conn| {
+            storage::begin_deferred_attempt(conn, &self.run.owner(), input_id, method, reason)
+        }) {
+            Ok(operation) => operation,
+            Err(cause) if storage_failure(&cause) => {
+                self.queue
+                    .front_mut()
+                    .expect("queued head remains")
+                    .obstacle = "storage_unavailable";
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
+        };
+        let head = self.queue.pop_front().expect("queued head remains");
+        self.operations.insert(
+            input_id,
+            RetainedInput {
+                operation,
+                bytes: stages[0].clone(),
+                selection: RetainedSelection::Composer {
+                    method,
+                    stages: stages.clone(),
+                    next_stage: 0,
+                },
+                stage: SubmissionStage::ZeroBytes,
+                written_bytes: 0,
+                output_seq: 0,
+                attempt_available: false,
+                leased: false,
+            },
+        );
+        self.pending = Some(PendingInput {
+            reservation: PendingReservation::Installed,
+            request: head.request.clone(),
+            bytes: stages[0].clone(),
+            permission: None,
+            composer: Some(ComposerDelivery {
+                method,
+                reason,
+                stages,
+                written_stages: 0,
+                settle_until: None,
+                manual_generation: None,
+                pane: Some(pane),
+                payload_digest_version: head.payload_digest_version,
+                literal: head.literal.clone(),
+                operation: head.operation,
+                deferred: Some(DeferredAttempt {
+                    queued: head,
+                    obstacle: "delivery_budget_exhausted",
+                }),
+            }),
+            ready: None,
+            deadline: attempt_deadline,
+            phase: InputPhase::AwaitBeforeWrite,
+            input_id: Some(input_id),
+        });
+        self.checkpoint(input_id, InputBoundary::Reserved, attempt_deadline)
+    }
+
+    /// Handles a deferred attempt's interaction, expiry and obstacles before any write; `true`
+    /// means the attempt ended or returned to the queue.
+    fn deferred_preflight(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+    ) -> Result<bool> {
+        let Some(pending) = self.pending.as_ref() else {
+            return Ok(false);
+        };
+        let Some(composer) = pending.composer.as_ref() else {
+            return Ok(false);
+        };
+        if composer.deferred.is_none() {
+            return Ok(false);
+        }
+        let id = pending
+            .input_id
+            .expect("a deferred attempt has its receipt");
+        let zero_bytes = self
+            .operations
+            .get(&id)
+            .is_some_and(|retained| retained.stage == SubmissionStage::ZeroBytes)
+            && composer.written_stages == 0;
+        if !zero_bytes {
+            return Ok(false);
+        }
+        let interaction = matches!(
+            ordinary_blocker(&observation.status()),
+            Some(OrdinaryBlocker::Interaction)
+        );
+        let composer_busy = !interaction
+            && composer.requires_empty_composer()
+            && !Self::composer_eligible(observation);
+        let now = Instant::now();
+        let expired = now >= pending.deadline;
+        let requeue = interaction || composer_busy;
+        if !requeue && !expired {
+            return Ok(false);
+        }
+        if requeue {
+            match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+                storage::record_input_state(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    storage::InputState::InProgress,
+                    storage::InputState::Ready,
+                )
+            }) {
+                Ok(operation) => debug_assert_eq!(operation.state, storage::InputState::Ready),
+                Err(cause) if storage_failure(&cause) => {
+                    self.pending
+                        .as_mut()
+                        .and_then(|pending| pending.composer.as_mut())
+                        .and_then(|composer| composer.deferred.as_mut())
+                        .expect("deferred attempt")
+                        .obstacle = "storage_unavailable";
+                    return Ok(true);
+                }
+                Err(cause) => return Err(cause),
+            }
+        }
+        let mut pending = self.pending.take().expect("deferred pending input");
+        let composer = pending.composer.take().expect("deferred composer delivery");
+        let deferred = composer.deferred.expect("deferred attempt");
+        if requeue {
+            self.operations.remove(&id);
+            let mut queued = deferred.queued;
+            queued.attempt_deadline = None;
+            queued.composer_busy_since = if composer_busy {
+                queued.composer_busy_since.or(Some(now))
+            } else {
+                None
+            };
+            self.queue.push_front(queued);
+        } else {
+            self.cancel_deferred(
+                conn,
+                observation,
+                id,
+                storage::InputState::InProgress,
+                deferred.obstacle,
+            )?;
+            self.operations.remove(&id);
+        }
+        Ok(true)
+    }
+
+    /// Queues an immediate ordinary request that has written zero bytes once an interaction or a
+    /// composer that is not verified empty supersedes its selected method, replying `queued`.
+    fn immediate_preflight(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        observation: &ObservationController,
+        deadline: Instant,
+    ) -> Result<Option<InputControlReply>> {
+        let Some(pending) = self.pending.as_ref() else {
+            return Ok(None);
+        };
+        let Some(composer) = pending.composer.as_ref() else {
+            return Ok(None);
+        };
+        let zero_bytes = composer.written_stages == 0
+            && pending.input_id.is_none_or(|id| {
+                self.operations
+                    .get(&id)
+                    .is_some_and(|retained| retained.stage == SubmissionStage::ZeroBytes)
+            });
+        if composer.deferred.is_some() || pending.permission.is_some() || !zero_bytes {
+            return Ok(None);
+        }
+        let status = observation.status();
+        let defer_reason = match ordinary_blocker(&status) {
+            Some(OrdinaryBlocker::Interaction) => {
+                if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
+                    "interaction_candidate"
+                } else {
+                    "interaction_open"
+                }
+            }
+            None if composer.requires_empty_composer() && !Self::composer_eligible(observation) => {
+                "composer_busy"
+            }
+            _ => return Ok(None),
+        };
+        let mut pending = self.pending.take().expect("immediate pending input");
+        let composer = pending
+            .composer
+            .take()
+            .expect("immediate composer delivery");
+        let operation = match pending.input_id {
+            Some(id) => {
+                self.operations.remove(&id);
+                with_database_deadline(conn, deadline, |conn| {
+                    storage::requeue_zero_byte_immediate(conn, &self.run.owner(), id, defer_reason)
+                })?
+            }
+            None => {
+                let reservation = with_database_deadline(conn, deadline, |conn| {
+                    self.validate_live(conn, run)?;
+                    storage::reserve_input_with_provenance(
+                        conn,
+                        &self.run.owner(),
+                        &pending.request,
+                        storage::NewReservation {
+                            selection: None,
+                            defer_reason: Some(defer_reason),
+                            payload_digest_version: composer.payload_digest_version,
+                        },
+                    )
+                })?;
+                match reservation {
+                    storage::InputReservation::Inserted(operation) => operation,
+                    storage::InputReservation::Existing(operation) => {
+                        return Ok(Some(InputControlReply::Submission(self.result(&operation))));
+                    }
+                }
+            }
+        };
+        self.queue.push_front(QueuedInput {
+            input_id: operation.input_id,
+            request: pending.request,
+            literal: composer.literal,
+            operation: composer.operation,
+            payload_digest_version: composer.payload_digest_version,
+            composer_busy_since: None,
+            attempt_deadline: None,
+            obstacle: "delivery_budget_exhausted",
+        });
+        Ok(Some(InputControlReply::Submission(self.result(&operation))))
+    }
+
+    fn finish_deferred(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+        operation: &storage::InputOperation,
+    ) -> Result<()> {
+        let stage = self
+            .operations
+            .get(&operation.input_id)
+            .map_or(SubmissionStage::Unknown, |retained| retained.stage);
+        if operation.state == storage::InputState::Accepted
+            && operation.kind == storage::InputKind::Preview
+        {
+            return self.settle_accepted_preview(conn, observation, operation.input_id, stage);
+        }
+        Self::publish_result(observation, operation.input_id, stage);
+        Ok(())
+    }
+
+    /// Stamps and settles an accepted deferred preview, then publishes its result. A transient
+    /// storage failure keeps it as a pending stamp; a permanent one fences ordinary input.
+    fn settle_accepted_preview(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+        input_id: i64,
+        stage: SubmissionStage,
+    ) -> Result<()> {
+        match with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
+            storage::settle_preview(conn, &self.run.owner(), input_id)
+        }) {
+            Ok(settled) => {
+                self.operations.remove(&settled.input_id);
+                Self::publish_result(observation, input_id, stage);
+                Ok(())
+            }
+            Err(cause) if storage_failure(&cause) => {
+                eprintln!(
+                    "member runtime: input {input_id} notification stamp is pending storage: {}",
+                    cause.message()
+                );
+                self.pending_stamp = Some(PendingStamp { input_id, stage });
+                Ok(())
+            }
+            Err(cause) => {
+                self.input_fenced = true;
+                self.deferred_failed = true;
+                Err(cause)
+            }
+        }
     }
 
     fn retained_checkpoint(&self, input_id: i64) -> Result<InputCheckpoint> {
@@ -1742,6 +2702,20 @@ impl InputCoordinator {
         result
     }
 
+    fn drain_requirement(&self) -> DrainRequirement {
+        let pending = self.pending.as_ref();
+        if pending.and_then(|p| p.permission.as_ref()).is_some() {
+            DrainRequirement::Observation
+        } else if pending
+            .and_then(|p| p.composer.as_ref())
+            .is_some_and(|composer| !composer.requires_empty_composer())
+        {
+            DrainRequirement::NoBlockingInteraction
+        } else {
+            DrainRequirement::EmptyComposer
+        }
+    }
+
     fn fresh_drain(
         &mut self,
         transport: &mut Transport,
@@ -1752,37 +2726,61 @@ impl InputCoordinator {
         if let Some(permission) = permission {
             self.validate_permission_binding(permission, observation)?;
         }
+        let requirement = self.drain_requirement();
         let Some(proof) = transport.take_input_drain() else {
             return Ok(None);
         };
-        if !Self::validate_taken_drain(
-            transport,
-            &proof,
-            observation,
-            permission.is_some(),
-            deadline,
-        )? {
+        if !Self::validate_taken_drain(transport, &proof, observation, requirement, deadline)? {
+            self.note_observer_obstacle(observation);
             return Ok(None);
         }
         self.current_drain_seq(&proof, "input manual generation changed")
             .map(Some)
     }
 
-    /// A permission drain needs only a healthy observation; composer input also needs an
-    /// empty, eligible composer, and reports `false` when the composer is not eligible.
+    /// Records the zero-byte obstacle a started deferred attempt last met, which its expiry
+    /// reports.
+    fn note_deferred_obstacle(&mut self, obstacle: &'static str) {
+        if let Some(deferred) = self
+            .pending
+            .as_mut()
+            .and_then(|pending| pending.composer.as_mut())
+            .and_then(|composer| composer.deferred.as_mut())
+        {
+            deferred.obstacle = obstacle;
+        }
+    }
+
+    fn note_observer_obstacle(&mut self, observation: &ObservationController) {
+        if matches!(
+            ordinary_blocker(&observation.status()),
+            Some(OrdinaryBlocker::ObserverUnavailable)
+        ) {
+            self.note_deferred_obstacle("observer_unavailable");
+        }
+    }
+
+    /// Reports `false` when the observed state does not yet permit the drain's requirement.
     fn validate_taken_drain(
         transport: &Transport,
         proof: &DrainedInput,
         observation: &ObservationController,
-        permission: bool,
+        requirement: DrainRequirement,
         deadline: Instant,
     ) -> Result<bool> {
-        if permission {
-            transport.validate_observation_drain(proof, deadline)?;
-            Ok(true)
-        } else {
-            transport.validate_input_drain(proof, deadline)?;
-            Ok(Self::composer_eligible(observation))
+        match requirement {
+            DrainRequirement::Observation => {
+                transport.validate_observation_drain(proof, deadline)?;
+                Ok(true)
+            }
+            DrainRequirement::EmptyComposer => {
+                transport.validate_input_drain(proof, deadline)?;
+                Ok(Self::composer_eligible(observation))
+            }
+            DrainRequirement::NoBlockingInteraction => {
+                transport.validate_observation_drain(proof, deadline)?;
+                Ok(ordinary_blocker(&observation.status()).is_none())
+            }
         }
     }
 
@@ -1860,6 +2858,25 @@ impl InputCoordinator {
         result.map_err(|source| self.failure(source))
     }
 
+    /// Holds the concrete pane-input lock for a composer write; `false` while another writer
+    /// holds it, so the attempt writes nothing and retries.
+    fn hold_composer_pane(&mut self) -> Result<bool> {
+        let Some(composer) = self.pending.as_mut().and_then(|p| p.composer.as_mut()) else {
+            return Ok(true);
+        };
+        if let Some(pane) = &composer.pane {
+            pane.validate_binding(&self.database_url, &self.placement)?;
+            return Ok(true);
+        }
+        composer.pane = PaneLock::try_acquire(&self.database_url, &self.placement)?;
+        if composer.pane.is_none()
+            && let Some(deferred) = composer.deferred.as_mut()
+        {
+            deferred.obstacle = "pane_input_busy";
+        }
+        Ok(composer.pane.is_some())
+    }
+
     fn acquire_write_guard<'a>(
         &'a mut self,
         conn: &mut Connection,
@@ -1869,27 +2886,37 @@ impl InputCoordinator {
         deadline: Instant,
     ) -> std::result::Result<Option<InputGuard<'a>>, InputFailure> {
         let result = (|| {
-            let Some(pending) = self.pending.as_ref() else {
-                return Ok(None);
-            };
-            if pending.phase != InputPhase::Armed {
+            if self
+                .pending
+                .as_ref()
+                .is_none_or(|p| p.phase != InputPhase::Armed)
+            {
                 return Ok(None);
             }
             let effective = self.effective_deadline(conn, deadline)?;
+            if !self.hold_composer_pane()? {
+                return Ok(None);
+            }
+            let requirement = self.drain_requirement();
+            let pending = self.pending.as_ref().expect("armed pending input");
             let Some(proof) = transport.take_input_drain() else {
                 return Ok(None);
             };
             if let Some(permission) = &pending.permission {
                 self.validate_permission_binding(permission, observation)?;
             }
-            if !Self::validate_taken_drain(
-                transport,
-                &proof,
-                observation,
-                pending.permission.is_some(),
-                effective,
-            )? {
+            if !Self::validate_taken_drain(transport, &proof, observation, requirement, effective)?
+            {
+                self.note_observer_obstacle(observation);
                 return Ok(None);
+            }
+            if let Some(composer) = &pending.composer {
+                ensure(
+                    composer
+                        .manual_generation
+                        .is_none_or(|generation| generation == self.manual_generation),
+                    "human input arrived between composer stages",
+                )?;
             }
             if let Some(permission) = &pending.permission {
                 let retained = self
@@ -1935,6 +2962,7 @@ impl InputCoordinator {
                 .map_err(|failure| failure.source)?
                 == WriteValidation::Contended
             {
+                self.note_deferred_obstacle("storage_unavailable");
                 return Ok(None);
             }
             check_deadline(Instant::now(), effective)?;
@@ -1944,6 +2972,11 @@ impl InputCoordinator {
         let Some((id, proof, deadline, output_seq)) = result else {
             return Ok(None);
         };
+        if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer.as_mut()) {
+            composer
+                .manual_generation
+                .get_or_insert(self.manual_generation);
+        }
         let retained = self
             .operations
             .get_mut(&id)
@@ -1972,6 +3005,26 @@ impl InputCoordinator {
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
         let mut terminal_bookkeeping = false;
         let result = (|| {
+            if self.pending.is_none() {
+                self.start_deferred(conn, run, observation, deadline)?;
+                return Ok(None);
+            }
+            if self.deferred_preflight(conn, observation)? {
+                return Ok(None);
+            }
+            if let Some(reply) = self.immediate_preflight(conn, run, observation, deadline)? {
+                return Ok(Some(reply));
+            }
+            let deferred = self
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.composer.as_ref())
+                .is_some_and(|composer| composer.deferred.is_some());
+            let deadline = if deferred {
+                deadline.min(self.pending.as_ref().expect("pending input").deadline)
+            } else {
+                deadline
+            };
             let Some(pending) = self.pending.as_ref() else {
                 return Ok(None);
             };
@@ -2047,12 +3100,22 @@ impl InputCoordinator {
                             }
                         }
                     } else {
+                        let composer = pending
+                            .composer
+                            .as_ref()
+                            .ok_or_else(|| error("ordinary input has no composer delivery"))?;
+                        let reservation = storage::NewReservation {
+                            selection: Some((composer.method, composer.reason)),
+                            defer_reason: None,
+                            payload_digest_version: composer.payload_digest_version,
+                        };
                         let reservation = with_database_deadline(conn, effective, |conn| {
                             self.validate_live(conn, run)?;
                             storage::reserve_input_with_provenance(
                                 conn,
                                 &self.run.owner(),
                                 &pending.request,
+                                reservation,
                             )
                         })?;
                         match reservation {
@@ -2077,12 +3140,19 @@ impl InputCoordinator {
                     RetainedInput {
                         operation,
                         bytes: pending.bytes.clone(),
-                        selection: match &pending.permission {
-                            Some(selection) => RetainedSelection::Permission {
+                        selection: match (&pending.permission, &pending.composer) {
+                            (Some(selection), _) => RetainedSelection::Permission {
                                 selection: selection.clone(),
                                 next_stage: 0,
                             },
-                            None => RetainedSelection::Composer,
+                            (None, Some(composer)) => RetainedSelection::Composer {
+                                method: composer.method,
+                                stages: composer.stages.clone(),
+                                next_stage: 0,
+                            },
+                            (None, None) => {
+                                return Err(error("ordinary input has no composer delivery"));
+                            }
                         },
                         stage: SubmissionStage::ZeroBytes,
                         written_bytes: 0,
@@ -2107,6 +3177,26 @@ impl InputCoordinator {
                 if let StageGateProgress::Waiting = self.advance_stage_gate(observation)? {
                     return Ok(None);
                 }
+                if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer.as_ref())
+                    && let Some(settle_until) = composer.settle_until
+                {
+                    let interrupted = composer.manual_generation != Some(self.manual_generation)
+                        || self.manual_accounting_failed
+                        || ordinary_blocker(&observation.status()).is_some();
+                    if interrupted {
+                        terminal_bookkeeping = true;
+                        let deferred = composer.deferred.is_some();
+                        let reply = self.stop_composer_stages(conn, run, id, effective)?;
+                        if deferred {
+                            Self::publish_result(observation, id, SubmissionStage::Partial);
+                            return Ok(None);
+                        }
+                        return Ok(Some(reply));
+                    }
+                    if Instant::now() < settle_until {
+                        return Ok(None);
+                    }
+                }
                 let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
                     return Ok(None);
                 };
@@ -2119,6 +3209,22 @@ impl InputCoordinator {
                 self.pending.as_mut().expect("pending input").phase = InputPhase::Armed;
                 self.checkpoint(id, InputBoundary::BeforeWrite, effective)?;
                 return Ok(None);
+            }
+            if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer.as_ref())
+                && composer.written_stages > 0
+                && matches!(
+                    ordinary_blocker(&observation.status()),
+                    Some(OrdinaryBlocker::Interaction)
+                )
+            {
+                terminal_bookkeeping = true;
+                let deferred = composer.deferred.is_some();
+                let reply = self.stop_composer_stages(conn, run, id, effective)?;
+                if deferred {
+                    Self::publish_result(observation, id, SubmissionStage::Partial);
+                    return Ok(None);
+                }
+                return Ok(Some(reply));
             }
             let bytes = self
                 .pending
@@ -2206,9 +3312,13 @@ impl InputCoordinator {
                     .clone();
                 let pending = self.pending.as_mut().expect("pending multistage response");
                 ensure(
-                    pending.permission.is_some(),
-                    "nonfinal stage requires a permission plan",
+                    pending.permission.is_some() || pending.composer.is_some(),
+                    "nonfinal stage requires a staged plan",
                 )?;
+                if let Some(composer) = pending.composer.as_mut() {
+                    composer.written_stages += 1;
+                    composer.settle_until = Some(Instant::now() + STAGE_SETTLE);
+                }
                 pending.bytes = next_bytes;
                 pending.phase = InputPhase::AwaitBeforeWrite;
                 return Ok(None);
@@ -2257,6 +3367,15 @@ impl InputCoordinator {
             let operation = completed?;
             self.checkpoint(id, InputBoundary::TerminalState, effective)?;
             let pending = self.pending.as_ref().expect("completed input retained");
+            if pending
+                .composer
+                .as_ref()
+                .is_some_and(|composer| composer.deferred.is_some())
+            {
+                self.finish_deferred(conn, observation, &operation)?;
+                self.pending = None;
+                return Ok(None);
+            }
             let reply = match &pending.permission {
                 Some(selection) => InputControlReply::PermissionResponse(
                     self.permission_result(&selection.request.metadata, self.result(&operation)),
@@ -2267,6 +3386,10 @@ impl InputCoordinator {
             Ok(Some(reply))
         })();
         result.map_err(|source| {
+            if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer.as_mut()) {
+                composer.pane = None;
+            }
+            self.retire_failed_deferred(conn, observation);
             let source = if terminal_bookkeeping {
                 source
             } else {
@@ -2274,6 +3397,121 @@ impl InputCoordinator {
             };
             self.failure(source)
         })
+    }
+
+    /// The started deferred attempt's input and whether it may have written a child byte.
+    fn active_deferred(&self) -> Option<(i64, SubmissionStage, bool)> {
+        let pending = self.pending.as_ref()?;
+        pending.composer.as_ref()?.deferred.as_ref()?;
+        let id = pending
+            .input_id
+            .expect("a deferred attempt has its receipt");
+        let stage = self
+            .operations
+            .get(&id)
+            .expect("a deferred attempt retains its receipt")
+            .stage;
+        let written = pending
+            .composer
+            .as_ref()
+            .is_some_and(|composer| composer.written_stages > 0);
+        Some((id, stage, stage != SubmissionStage::ZeroBytes || written))
+    }
+
+    /// Records a still-`in_progress` deferred receipt as uncertain after a possible write and
+    /// returns the receipt as stored.
+    fn record_deferred_uncertain(
+        &mut self,
+        conn: &mut Connection,
+        id: i64,
+        deadline: Instant,
+    ) -> Result<storage::InputOperation> {
+        let current = with_database_deadline(conn, deadline, |conn| storage::get_input(conn, id))?;
+        let operation = if current.state == storage::InputState::InProgress {
+            with_database_deadline(conn, deadline, |conn| {
+                storage::record_input_state(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    storage::InputState::InProgress,
+                    storage::InputState::Uncertain,
+                )
+            })?
+        } else {
+            current
+        };
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("a deferred attempt retains its receipt");
+        retained.operation = operation.clone();
+        retained.attempt_available = false;
+        Ok(operation)
+    }
+
+    /// Ends a deferred attempt that failed after a possible write: its receipt becomes uncertain,
+    /// its result is published once and the queue waits for reconciliation. Without a durable
+    /// uncertain receipt, recovery publishes the result instead.
+    fn retire_failed_deferred(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+    ) {
+        let Some((id, stage, written)) = self.active_deferred() else {
+            return;
+        };
+        if !written {
+            return;
+        }
+        self.pending = None;
+        match self.record_deferred_uncertain(conn, id, Instant::now() + DEFERRED_FINALIZATION) {
+            Ok(operation) if operation.state == storage::InputState::Uncertain => {
+                Self::publish_result(observation, id, stage);
+            }
+            Ok(operation) => {
+                if let Err(cause) = self.finish_deferred(conn, observation, &operation) {
+                    eprintln!(
+                        "member runtime: input {id} result is pending recovery: {}",
+                        cause.message()
+                    );
+                }
+            }
+            Err(cause) => eprintln!(
+                "member runtime: input {id} result is pending recovery: {}",
+                cause.message()
+            ),
+        }
+    }
+
+    fn stop_composer_stages(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        id: i64,
+        effective: Instant,
+    ) -> Result<InputControlReply> {
+        let pending = self.pending.as_mut().expect("staged composer input");
+        pending.phase = InputPhase::Blocked;
+        if let Some(composer) = pending.composer.as_mut() {
+            composer.pane = None;
+        }
+        let operation = with_database_deadline(conn, effective, |conn| {
+            self.validate_live(conn, run)?;
+            storage::record_input_state(
+                conn,
+                &self.run.owner(),
+                id,
+                storage::InputState::InProgress,
+                storage::InputState::Uncertain,
+            )
+        })?;
+        let retained = self.operations.get_mut(&id).expect("staged input retained");
+        retained.operation = operation.clone();
+        retained.attempt_available = false;
+        self.checkpoint(id, InputBoundary::TerminalState, effective)?;
+        let reply = InputControlReply::Submission(self.result(&operation));
+        self.pending = None;
+        Ok(reply)
     }
 
     fn retain_permission_failure(
@@ -2332,7 +3570,12 @@ impl InputCoordinator {
         }
     }
 
+    /// Retires the pending immediate attempt; a started deferred attempt stays for `fence`,
+    /// which settles it by its written bytes.
     pub(super) fn finish_pending_attempt(&mut self) {
+        if self.active_deferred().is_some() {
+            return;
+        }
         if let Some(id) = self
             .pending
             .as_ref()
@@ -2383,6 +3626,11 @@ impl InputCoordinator {
             tx.commit()?;
             Ok(current)
         })?;
+        let database_url = format!(
+            "sqlite:///{}",
+            conn.path()
+                .ok_or_else(|| error("input coordinator database has no file path"))?
+        );
         let placement = with_database_deadline(conn, deadline, |conn| {
             let member = crate::broker::get_member(conn, run.member_id, run.fleet_id)?
                 .ok_or_else(|| error("input coordinator member is absent"))?;
@@ -2406,6 +3654,11 @@ impl InputCoordinator {
             current_request: None,
             input_fenced: false,
             observation_blocker: None,
+            database_url,
+            queue: std::collections::VecDeque::new(),
+            finalization: None,
+            pending_stamp: None,
+            deferred_failed: false,
         })
     }
 
@@ -2807,14 +4060,30 @@ mod tests {
             with_host(|h| {
                 let id = h.arm("prompt:fixture-complete");
                 assert!(h.advance().is_none());
-                assert!(h.pty.program.is_empty());
+                assert!(
+                    h.pty.offers.is_empty(),
+                    "no stage is written without a fresh drain"
+                );
                 h.drain();
-                let expected_seq = h.transport.snapshot().screen_seq;
-                let reply = submitted(h.advance().expect("actual completed write reply"));
+                let first_seq = h.transport.snapshot().screen_seq;
+                let reply = loop {
+                    assert!(
+                        Instant::now() < h.until,
+                        "the staged write completes in time"
+                    );
+                    if let Some(reply) = h.advance() {
+                        break submitted(reply);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                    h.drain();
+                };
                 assert!(matches!(reply.status, SubmissionStatus::Accepted));
                 assert!(matches!(reply.stage, SubmissionStage::Submitted));
                 assert_eq!(reply.input_id, Some(id));
-                assert_eq!(reply.output_seq, Some(expected_seq));
+                assert_eq!(
+                    h.pty.stage_bytes(),
+                    vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                );
                 assert_eq!(h.pty.program, vec![encoded()]);
                 assert!(matches!(
                     storage::get_input(&h.fixture.conn, id).unwrap().state,
@@ -2826,15 +4095,16 @@ mod tests {
                     retained.written_bytes,
                     u64::try_from(encoded().len()).unwrap()
                 );
-                assert_eq!(retained.output_seq, expected_seq);
+                assert!(retained.output_seq >= first_seq);
+                assert_eq!(reply.output_seq, Some(retained.output_seq));
                 let repeat = h.request("prompt:fixture-complete");
                 let replay = submitted(h.handle(repeat).unwrap().expect("retained key lookup"));
                 assert!(matches!(replay.status, SubmissionStatus::Accepted));
                 assert_eq!(replay.input_id, Some(id));
                 assert_eq!(h.pty.program.len(), 1);
                 assert_eq!(h.hooks.count("reserved"), 1);
-                assert_eq!(h.hooks.count("before"), 1);
-                assert_eq!(h.hooks.count("after"), 1);
+                assert!(h.hooks.count("before") >= 1);
+                assert!(h.hooks.count("after") >= 1);
             });
         }
 
@@ -2857,7 +4127,12 @@ mod tests {
                 ));
                 h.drain();
                 assert!(h.advance().is_none());
-                assert_eq!(h.pty.program, vec![encoded()]);
+                assert!(h.pty.program.is_empty());
+                assert_eq!(
+                    h.pty.stage_bytes(),
+                    vec![LITERAL.as_bytes().to_vec()],
+                    "a short literal stage is never followed by its submit stage"
+                );
                 assert_eq!(h.hooks.count("after"), 1);
                 let after = h
                     .hooks
@@ -2975,7 +4250,7 @@ mod tests {
                 let bytes = if wrong_bytes {
                     b"unselected bytes".to_vec()
                 } else {
-                    encoded()
+                    LITERAL.as_bytes().to_vec()
                 };
                 match other {
                     Some(other) => {
@@ -2988,7 +4263,7 @@ mod tests {
                 }
                 rejected(h.transport.write_programmatic(
                     &mut h.pty,
-                    &encoded(),
+                    LITERAL.as_bytes(),
                     &mut guard,
                     h.until,
                 ));
@@ -3034,14 +4309,16 @@ mod tests {
                         } else {
                             Instant::now() + Duration::from_millis(30)
                         };
-                        let effective = guard.begin_write(&h.transport, &encoded(), bound).unwrap();
+                        let effective = guard
+                            .begin_write(&h.transport, LITERAL.as_bytes(), bound)
+                            .unwrap();
                         assert!(effective <= bound);
                         if possible {
                             guard.mark_io_possible();
                         } else {
                             assert!(
                                 guard
-                                    .begin_write(&h.transport, &encoded(), h.until)
+                                    .begin_write(&h.transport, LITERAL.as_bytes(), h.until)
                                     .is_err(),
                                 "successful pre-I/O validation consumes the permit too"
                             );
@@ -3101,15 +4378,7 @@ mod tests {
             }
 
             fn complete(host: &mut Host, request: InputControlRequest) -> SubmissionResult {
-                assert!(host.handle(request).unwrap().is_none());
-                let reply = submitted(
-                    (0..3)
-                        .find_map(|_| {
-                            host.drain();
-                            host.advance()
-                        })
-                        .expect("operation completes through three genuine drained turns"),
-                );
+                let reply = settle(host, request);
                 assert_eq!(reply.status, SubmissionStatus::Accepted);
                 assert_eq!(reply.stage, SubmissionStage::Submitted);
                 reply
@@ -3167,12 +4436,11 @@ mod tests {
                     )
                     .unwrap();
                     let key = format!("preview:{}:{}", host.fixture.run.run_id, message.message_id);
-                    let input = request(
-                        host,
-                        key.clone(),
-                        storage::InputKind::Preview,
-                        Some(message.message_id),
-                    );
+                    let canonical = canonical_preview(&message);
+                    let mut program = canonical.as_bytes().to_vec();
+                    program.push(b'~');
+                    host.pty.expect_program(program);
+                    let input = preview_request(host, &message, &canonical);
                     let reply = complete(host, input);
                     let row =
                         storage::get_input(&host.fixture.conn, reply.input_id.unwrap()).unwrap();
@@ -3180,7 +4448,10 @@ mod tests {
                     assert_eq!(row.operation_key, key);
                     assert_eq!(row.message_id, Some(message.message_id));
                     assert_eq!(row.state, storage::InputState::Accepted);
-                    assert_eq!(host.pty.offers, vec![encoded()]);
+                    assert_eq!(
+                        host.pty.offers,
+                        vec![canonical.as_bytes().to_vec(), b"~".to_vec()]
+                    );
                     assert_eq!(
                         crate::broker::get_message(&host.fixture.conn, message.message_id).unwrap(),
                         message
@@ -3257,21 +4528,2050 @@ mod tests {
                     assert_eq!(row.operation_key, key);
                     assert_eq!(row.message_id, None);
                     assert_eq!(row.state, storage::InputState::Accepted);
-                    assert_eq!(host.pty.offers, vec![expected]);
-                });
-
-                let prompt_catalog = catalog();
-                let coverage = prompt_catalog.capabilities(CodingAgent::Codex, Some(VERSION));
-                assert_eq!(coverage.prompt_submission, storage::Coverage::Tested);
-                assert_eq!(coverage.native_exec_submission, storage::Coverage::Unknown);
-                with_catalog_host(prompt_catalog, encoded(), |host| {
-                    let input = request(
-                        host,
-                        format!("exec:{}:{}", host.fixture.run.run_id, "c".repeat(64)),
-                        storage::InputKind::Exec,
-                        None,
+                    let mut literal = b"! ".to_vec();
+                    literal.extend_from_slice(LITERAL.as_bytes());
+                    assert_eq!(host.pty.offers, vec![literal, b"kl".to_vec()]);
+                    assert_eq!(
+                        delivery_selection(host, row.input_id),
+                        (Some("profile".into()), None)
                     );
-                    refuse(host, input);
+                });
+            }
+        }
+
+        mod staged_delivery {
+            use super::*;
+            use crate::coding_agent::CodingAgent;
+
+            pub(super) const SETTLE: Duration = Duration::from_millis(500);
+            const ESCAPE: &[u8] = b"\x1b";
+
+            fn prompt_request(host: &Host, key: &str) -> InputControlRequest {
+                host.request(key)
+            }
+
+            fn exec_request(host: &Host, key: &str) -> InputControlRequest {
+                let mut request = host.request(key);
+                request.operation = InputControlOperation::SubmitExec(SubmitInput {
+                    operation_key: key.into(),
+                    input_kind: storage::InputKind::Exec,
+                    message_id: None,
+                    literal: LITERAL.into(),
+                });
+                request
+            }
+
+            fn fallback_program(prefix: &[u8]) -> Vec<u8> {
+                let mut bytes = ESCAPE.to_vec();
+                bytes.extend_from_slice(prefix);
+                bytes.extend_from_slice(LITERAL.as_bytes());
+                bytes.push(b'\r');
+                bytes
+            }
+
+            fn literal_with(prefix: &[u8]) -> Vec<u8> {
+                let mut bytes = prefix.to_vec();
+                bytes.extend_from_slice(LITERAL.as_bytes());
+                bytes
+            }
+
+            fn assert_settled_gaps(host: &Host, count: usize) {
+                let gaps = host.pty.stage_gaps();
+                assert_eq!(gaps.len(), count, "{gaps:?}");
+                for gap in gaps {
+                    assert!(gap >= SETTLE, "each stage follows a 500 ms settle: {gap:?}");
+                }
+            }
+
+            pub(super) fn permission_catalog() -> ProfileCatalog {
+                let mut definition =
+                    crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition();
+                let composer = catalog_definition();
+                definition["fixtures"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(composer["fixtures"][1].clone());
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(composer["profiles"][0]["rules"][0].clone());
+                definition["profiles"][0]["capabilities"]["composer"] =
+                    composer["profiles"][0]["capabilities"]["composer"].clone();
+                ProfileCatalog::from_definitions(&definition).unwrap()
+            }
+
+            /// Drives turns until the literal stage has been written, then returns.
+            fn until_literal_written(host: &mut Host, request: InputControlRequest) {
+                assert!(host.handle(request).unwrap().is_none());
+                while host.pty.stages.is_empty() {
+                    assert!(Instant::now() < host.until, "the literal stage is written");
+                    host.drain();
+                    assert!(host.advance().is_none(), "no reply before the submit stage");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            fn finish_after_interruption(host: &mut Host) -> SubmissionResult {
+                loop {
+                    assert!(Instant::now() < host.until, "the interrupted input replies");
+                    host.drain();
+                    if let Some(reply) = host.advance() {
+                        return submitted(reply);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            #[test]
+            fn staged_profile_delivery_writes_the_literal_then_its_submit_key_after_a_500ms_settle()
+            {
+                with_host(|host| {
+                    let reply = settle(host, prompt_request(host, "prompt:staged"));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(reply.stage, SubmissionStage::Submitted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                    );
+                    assert_settled_gaps(host, 1);
+                    assert!(!host.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
+                    assert_eq!(
+                        delivery_selection(host, reply.input_id.unwrap()),
+                        (Some("profile".into()), None)
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_fallback_without_an_operation_plan_escapes_settles_types_settles_and_enters()
+            {
+                with_catalog_host(catalog(), fallback_program(b"! "), |host| {
+                    let reply = settle(host, exec_request(host, "exec:fallback"));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![ESCAPE.to_vec(), literal_with(b"! "), b"\r".to_vec()]
+                    );
+                    assert_settled_gaps(host, 2);
+                    assert_eq!(
+                        delivery_selection(host, reply.input_id.unwrap()),
+                        (
+                            Some("fallback".into()),
+                            Some("submission_plan_unavailable".into())
+                        )
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_fallback_for_unknown_coverage_uses_the_missing_plan_reason() {
+                let profile = HostProfile {
+                    backend: CodingAgent::Claude,
+                    profile_version: None,
+                    ..HostProfile::metadata()
+                };
+                with_profile_host(catalog(), fallback_program(b""), profile, |host| {
+                    let reply = settle(host, prompt_request(host, "prompt:unknown-coverage"));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![ESCAPE.to_vec(), LITERAL.as_bytes().to_vec(), b"\r".to_vec()]
+                    );
+                    assert_eq!(
+                        delivery_selection(host, reply.input_id.unwrap()),
+                        (
+                            Some("fallback".into()),
+                            Some("submission_plan_unavailable".into())
+                        )
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_delivery_writes_zero_bytes_including_escape_while_an_interaction_is_open() {
+                with_profile_host(
+                    permission_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    |host| {
+                        super::super::permission_inspection_contracts::stable_form(host);
+                        let reply = submitted(
+                            host.handle(prompt_request(host, "prompt:blocked"))
+                                .unwrap()
+                                .expect("an open interaction queues the input immediately"),
+                        );
+                        assert_eq!(reply.status, SubmissionStatus::Queued);
+                        assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
+                        assert_eq!(
+                            reply
+                                .delivery
+                                .as_ref()
+                                .and_then(|delivery| delivery.reason.as_deref()),
+                            Some("interaction_open")
+                        );
+                        let receipt = storage::get_input(
+                            &host.fixture.conn,
+                            reply.input_id.expect("queued work has a durable input ID"),
+                        )
+                        .unwrap();
+                        assert_eq!(receipt.state, storage::InputState::Ready);
+                        assert!(receipt.deferred_at.is_some());
+                        assert_eq!(receipt.defer_reason.as_deref(), Some("interaction_open"));
+                        let until = Instant::now() + Duration::from_millis(1200);
+                        while Instant::now() < until {
+                            host.drain();
+                            host.advance();
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    },
+                );
+            }
+
+            #[test]
+            fn staged_human_input_during_the_settle_stops_the_submit_stage_with_uncertainty() {
+                with_host(|host| {
+                    until_literal_written(host, prompt_request(host, "prompt:human-race"));
+                    host.human.bytes.extend(b"h");
+                    let reply = finish_after_interruption(host);
+                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                    assert_eq!(reply.stage, SubmissionStage::Partial);
+                    assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
+                    let id = reply.input_id.unwrap();
+                    assert_eq!(
+                        storage::get_input(&host.fixture.conn, id).unwrap().state,
+                        storage::InputState::Uncertain
+                    );
+                    assert_eq!(
+                        delivery_selection(host, id),
+                        (Some("profile".into()), None),
+                        "the selected method survives the uncertain outcome"
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_new_interaction_during_the_settle_stops_the_submit_stage_with_uncertainty() {
+                with_profile_host(
+                    permission_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    |host| {
+                        until_literal_written(
+                            host,
+                            prompt_request(host, "prompt:interaction-race"),
+                        );
+                        super::super::permission_inspection_contracts::form(
+                            host,
+                            "write raced.txt",
+                            "synthetic-only",
+                        );
+                        let reply = finish_after_interruption(host);
+                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                        assert_eq!(reply.stage, SubmissionStage::Partial);
+                        assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
+                        assert!(!host.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
+                    },
+                );
+            }
+
+            #[test]
+            fn staged_new_interaction_after_the_settle_before_the_submit_write_is_uncertain() {
+                with_profile_host(
+                    permission_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    |host| {
+                        until_literal_written(host, prompt_request(host, "prompt:armed-race"));
+                        std::thread::sleep(SETTLE + Duration::from_millis(50));
+                        while host.pending_snapshot().4 != InputPhase::Armed {
+                            assert!(Instant::now() < host.until, "the submit stage arms");
+                            host.drain();
+                            assert!(host.advance().is_none());
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
+                        super::super::permission_inspection_contracts::form(
+                            host,
+                            "write raced.txt",
+                            "synthetic-only",
+                        );
+                        let reply = finish_after_interruption(host);
+                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                        assert_eq!(reply.stage, SubmissionStage::Partial);
+                        host.show(SCREEN.to_vec());
+                        super::composer_busy::hold_turns(host);
+                        assert_eq!(
+                            host.pty.stage_bytes(),
+                            vec![LITERAL.as_bytes().to_vec()],
+                            "no submit byte is written after the interaction closes"
+                        );
+                    },
+                );
+            }
+
+            fn placement(host: &Host) -> crate::broker::records::Placement {
+                crate::broker::get_member(
+                    &host.fixture.conn,
+                    host.fixture.run.member_id,
+                    host.fixture.run.fleet_id,
+                )
+                .unwrap()
+                .unwrap()
+                .placement
+                .expect("wrapped member placement")
+            }
+
+            #[test]
+            fn staged_runner_holds_the_pane_lock_across_the_settle_and_releases_it_after_submission()
+             {
+                with_host(|host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    let placement = placement(host);
+                    until_literal_written(host, prompt_request(host, "prompt:locked"));
+                    assert!(
+                        crate::input::PaneLock::try_acquire(&url, &placement)
+                            .unwrap()
+                            .is_none(),
+                        "the runner retains the pane lock between its stages"
+                    );
+                    let reply = finish_after_interruption(host);
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert!(
+                        crate::input::PaneLock::acquire_released(&url, &placement)
+                            .unwrap()
+                            .is_some(),
+                        "the runner releases the pane lock after the submit stage"
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_runner_writes_zero_bytes_while_another_writer_holds_the_pane_lock() {
+                with_host(|host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    let placement = placement(host);
+                    let held = crate::input::PaneLock::try_acquire(&url, &placement)
+                        .unwrap()
+                        .expect("the pane lock is free before submission");
+                    assert!(
+                        host.handle(prompt_request(host, "prompt:busy-lock"))
+                            .unwrap()
+                            .is_none()
+                    );
+                    let busy_until = Instant::now() + Duration::from_millis(300);
+                    while Instant::now() < busy_until {
+                        host.drain();
+                        assert!(host.advance().is_none());
+                        assert!(host.pty.offers.is_empty(), "no byte while the lock is busy");
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    drop(held);
+                    let reply = finish_after_interruption(host);
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(host.pty.program, vec![encoded()]);
+                });
+            }
+        }
+
+        mod deferred_queue {
+            use super::staged_delivery::permission_catalog;
+            use super::*;
+            use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
+            use crate::input::PaneLock;
+
+            pub(super) fn form(host: &mut Host) {
+                super::super::permission_inspection_contracts::stable_form(host);
+            }
+
+            pub(super) fn close(host: &mut Host) {
+                host.show(SCREEN.to_vec());
+            }
+
+            pub(super) fn with_permission_host(until: Duration, body: impl FnOnce(&mut Host)) {
+                with_profile_host_until(
+                    permission_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    Instant::now() + until,
+                    body,
+                );
+            }
+
+            pub(super) fn queued(
+                host: &mut Host,
+                request: InputControlRequest,
+                reason: &str,
+            ) -> i64 {
+                let reply = submitted(
+                    host.handle(request)
+                        .unwrap()
+                        .expect("queue acceptance replies immediately"),
+                );
+                assert_eq!(reply.status, SubmissionStatus::Queued);
+                assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
+                assert_eq!(
+                    reply.delivery,
+                    Some(DeliveryProjection {
+                        status: DeliveryStatus::Queued,
+                        method: None,
+                        reason: Some(reason.into()),
+                    })
+                );
+                reply.input_id.expect("queued work has a durable input ID")
+            }
+
+            /// Drives runner turns with no further request until `done` holds.
+            pub(super) fn turns_until(host: &mut Host, mut done: impl FnMut(&Host) -> bool) {
+                while !done(host) {
+                    assert!(Instant::now() < host.until, "queued work resolves in time");
+                    host.drain();
+                    host.advance();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            pub(super) fn row(host: &Host, input_id: i64) -> storage::InputOperation {
+                storage::get_input(&host.fixture.conn, input_id).unwrap()
+            }
+
+            fn settled(host: &Host, input_id: i64) -> bool {
+                matches!(
+                    row(host, input_id).state,
+                    storage::InputState::Accepted | storage::InputState::Settled
+                )
+            }
+
+            fn result_events(host: &Host, input_id: i64) -> i64 {
+                host.fixture
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                        rusqlite::params![host.fixture.run.run_id, input_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            }
+
+            fn assert_not_submitted(host: &Host, input_id: i64, reason: &str) {
+                let input = row(host, input_id);
+                assert_eq!(input.state, storage::InputState::Settled);
+                assert_eq!(
+                    input.disposition,
+                    Some(storage::InputDisposition::NotSubmitted)
+                );
+                assert_eq!(input.delivery_method, None);
+                assert_eq!(input.delivery_reason.as_deref(), Some(reason));
+            }
+
+            fn no_literal_persisted(host: &Host) {
+                let rows = crate::db::test_support::table_snapshot(&host.fixture.conn, |_| true);
+                for table in rows {
+                    for row in table.rows {
+                        for value in row {
+                            if let rusqlite::types::Value::Text(text) = value {
+                                assert!(!text.contains(LITERAL), "{}: {text}", table.name);
+                            }
+                        }
+                    }
+                }
+            }
+
+            #[test]
+            fn queue_admission_commits_a_durable_ready_receipt_and_keeps_the_literal_in_memory() {
+                with_permission_host(Duration::from_secs(5), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:queued"), "interaction_open");
+                    let input = row(host, id);
+                    assert_eq!(input.state, storage::InputState::Ready);
+                    assert!(input.deferred_at.is_some());
+                    assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+                    assert_eq!(input.delivery_method, None);
+                    assert!(host.pty.offers.is_empty());
+                    no_literal_persisted(host);
+                });
+            }
+
+            #[test]
+            fn queue_repeated_key_returns_its_queued_result_and_a_conflicting_digest_fails() {
+                with_permission_host(Duration::from_secs(5), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:repeat"), "interaction_open");
+                    assert_eq!(
+                        queued(host, host.request("prompt:repeat"), "interaction_open"),
+                        id
+                    );
+                    let mut conflicting = host.request("prompt:repeat");
+                    let InputControlOperation::SubmitPrompt(input) = &mut conflicting.operation
+                    else {
+                        panic!("prompt request")
+                    };
+                    input.literal = "different literal".into();
+                    assert!(host.handle(conflicting).is_err());
+                    let count: i64 = host
+                        .fixture
+                        .conn
+                        .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                            row.get(0)
+                        })
+                        .unwrap();
+                    assert_eq!(count, 1);
+                });
+            }
+
+            #[test]
+            fn queue_capacity_bounds_queued_plus_active_work_at_4096_with_a_zero_byte_error() {
+                with_permission_host(Duration::from_secs(120), |host| {
+                    form(host);
+                    for index in 0..RECEIPT_CACHE_CAPACITY {
+                        let reply = host.handle(host.request(&format!("prompt:capacity:{index}")));
+                        assert!(
+                            matches!(&reply, Ok(Some(_))),
+                            "request {index} is queued within the bound"
+                        );
+                    }
+                    assert!(
+                        host.handle(host.request("prompt:capacity:overflow"))
+                            .is_err(),
+                        "the 4097th unresolved input fails explicitly"
+                    );
+                    assert!(
+                        storage::find_input(
+                            &host.fixture.conn,
+                            host.fixture.run.run_id,
+                            "prompt:capacity:overflow"
+                        )
+                        .unwrap()
+                        .is_none()
+                    );
+                    assert!(host.pty.offers.is_empty());
+                });
+            }
+
+            #[test]
+            fn queue_drains_once_after_the_interaction_closes_without_another_request() {
+                with_permission_host(Duration::from_secs(8), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:after-close"), "interaction_open");
+                    close(host);
+                    turns_until(host, |host| {
+                        settled(host, id) && result_events(host, id) == 1
+                    });
+                    assert_eq!(host.pty.program, vec![encoded()]);
+                    let input = row(host, id);
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
+                    assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+                    for _ in 0..20 {
+                        host.drain();
+                        host.advance();
+                    }
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                    assert_eq!(host.pty.program.len(), 1, "no replay");
+                });
+            }
+
+            #[test]
+            fn queue_drains_after_a_candidate_clears() {
+                with_permission_host(Duration::from_secs(8), |host| {
+                    host.show(
+                        crate::coding_agent::profiles::catalog::test_support::inspection_fixture_form(
+                            "write candidate.txt",
+                            "synthetic-only",
+                        ),
+                    );
+                    assert_eq!(
+                        host.controller.health(&host.writer).eligibility,
+                        InputEligibility::Hold(GateReason::Candidate)
+                    );
+                    let id = queued(
+                        host,
+                        host.request("prompt:candidate"),
+                        "interaction_candidate",
+                    );
+                    close(host);
+                    turns_until(host, |host| settled(host, id));
+                    assert_eq!(host.pty.program, vec![encoded()]);
+                });
+            }
+
+            #[test]
+            fn queue_drains_behind_an_earlier_input_when_it_completes() {
+                with_host(|host| {
+                    assert!(host.handle(host.request("prompt:first")).unwrap().is_none());
+                    while host.pty.stages.is_empty() {
+                        assert!(Instant::now() < host.until);
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    let second = queued(host, host.request("prompt:second"), "earlier_input");
+                    turns_until(host, |host| settled(host, second));
+                    assert_eq!(host.pty.program, vec![encoded(), encoded()]);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![
+                            LITERAL.as_bytes().to_vec(),
+                            b"~".to_vec(),
+                            LITERAL.as_bytes().to_vec(),
+                            b"~".to_vec()
+                        ],
+                        "the queued input never interleaves with the active one"
+                    );
+                });
+            }
+
+            fn placement(host: &Host) -> crate::broker::records::Placement {
+                crate::broker::get_member(
+                    &host.fixture.conn,
+                    host.fixture.run.member_id,
+                    host.fixture.run.fleet_id,
+                )
+                .unwrap()
+                .unwrap()
+                .placement
+                .expect("wrapped member placement")
+            }
+
+            #[test]
+            fn queue_timer_retries_a_busy_pane_lock_without_child_output_and_delivers_once_free() {
+                with_permission_host(Duration::from_secs(10), |host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    form(host);
+                    let id = queued(host, host.request("prompt:busy"), "interaction_open");
+                    let held = PaneLock::try_acquire(&url, &placement(host))
+                        .unwrap()
+                        .unwrap();
+                    close(host);
+                    let busy_until = Instant::now() + Duration::from_secs(1);
+                    while Instant::now() < busy_until {
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    assert!(host.pty.offers.is_empty());
+                    assert_eq!(row(host, id).state, storage::InputState::Ready);
+                    drop(held);
+                    turns_until(host, |host| settled(host, id));
+                    assert_eq!(host.pty.program, vec![encoded()]);
+                });
+            }
+
+            #[test]
+            fn queue_attempt_deadline_with_a_busy_pane_lock_settles_not_submitted_and_publishes_once()
+             {
+                with_permission_host(Duration::from_secs(12), |host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    form(host);
+                    let id = queued(host, host.request("prompt:deadline"), "interaction_open");
+                    let _held = PaneLock::try_acquire(&url, &placement(host))
+                        .unwrap()
+                        .unwrap();
+                    close(host);
+                    let started = Instant::now();
+                    turns_until(host, |host| {
+                        row(host, id).state == storage::InputState::Settled
+                    });
+                    assert!(
+                        started.elapsed() >= Duration::from_secs(5),
+                        "the attempt keeps its five-second budget: {:?}",
+                        started.elapsed()
+                    );
+                    assert_not_submitted(host, id, "pane_input_busy");
+                    assert_eq!(
+                        row(host, id).defer_reason.as_deref(),
+                        Some("interaction_open")
+                    );
+                    assert!(host.pty.offers.is_empty());
+                    turns_until(host, |host| result_events(host, id) == 1);
+                });
+            }
+
+            #[test]
+            fn queued_preview_acknowledged_before_its_drain_settles_not_submitted_without_typing() {
+                with_permission_host(Duration::from_secs(8), |host| {
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "queued preview body",
+                    )
+                    .unwrap();
+                    form(host);
+                    let request = preview_request(host, &message, &canonical_preview(&message));
+                    let id = queued(host, request, "interaction_open");
+                    crate::broker::ack_message(&mut host.fixture.conn, message.message_id).unwrap();
+                    close(host);
+                    turns_until(host, |host| {
+                        row(host, id).state == storage::InputState::Settled
+                    });
+                    assert_not_submitted(host, id, "message_consumed");
+                    assert!(host.pty.offers.is_empty());
+                    let notified: Option<String> = host
+                        .fixture
+                        .conn
+                        .query_row(
+                            "SELECT notified_at FROM messages WHERE message_id=?1",
+                            [message.message_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
+                    assert!(notified.is_none());
+                });
+            }
+
+            #[test]
+            fn preview_receipts_use_the_versioned_canonical_digest_and_reject_another_literal() {
+                with_permission_host(Duration::from_secs(5), |host| {
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "digest preview body",
+                    )
+                    .unwrap();
+                    form(host);
+                    let other = preview_request(host, &message, "not the canonical preview");
+                    assert!(host.handle(other).is_err());
+                    let canonical = canonical_preview(&message);
+                    let id = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "interaction_open",
+                    );
+                    let input = row(host, id);
+                    assert_eq!(input.payload_digest_version, 2);
+                    let expected = crate::digest::sha256_hex(
+                        crate::digest::canonical_json(&serde_json::json!({
+                            "payload_digest_version":2,"run_id":host.fixture.run.run_id,
+                            "kind":"preview","message_id":message.message_id,"literal":canonical
+                        }))
+                        .as_bytes(),
+                    );
+                    assert_eq!(input.payload_digest, expected);
+                });
+            }
+
+            #[test]
+            fn queue_orderly_shutdown_settles_queued_work_not_submitted_without_bytes() {
+                with_permission_host(Duration::from_secs(5), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:shutdown"), "interaction_open");
+                    host.coordinator.finish_pending_attempt();
+                    let settled = host.coordinator.fence(host.until).unwrap();
+                    assert_eq!(settled, vec![id]);
+                    assert_not_submitted(host, id, "runner_stopped");
+                    for input_id in settled {
+                        host.controller.publish_delivery_result(
+                            storage::input_delivery_result_cause(
+                                input_id,
+                                SubmissionStage::ZeroBytes.as_str(),
+                                None,
+                            ),
+                        );
+                    }
+                    host.drain();
+                    assert_eq!(
+                        result_events(host, id),
+                        1,
+                        "the shutdown settlement publishes its deferred result"
+                    );
+                    assert!(host.pty.offers.is_empty());
+                    close(host);
+                    for _ in 0..10 {
+                        host.drain();
+                        host.advance();
+                    }
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "a stopped queue is never replayed"
+                    );
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                });
+            }
+
+            #[test]
+            fn queue_head_interrupted_between_stages_holds_the_next_input_until_reconciliation() {
+                with_permission_host(Duration::from_secs(90), |host| {
+                    form(host);
+                    let first =
+                        queued(host, host.request("prompt:interrupted"), "interaction_open");
+                    let next = queued(host, host.request("prompt:next"), "interaction_open");
+                    close(host);
+                    while host.pty.stages.is_empty() {
+                        assert!(Instant::now() < host.until, "the literal stage is written");
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    host.human.bytes.extend(b"h");
+                    turns_until(host, |host| {
+                        row(host, first).state == storage::InputState::Uncertain
+                    });
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        host.pty.offers,
+                        vec![LITERAL.as_bytes().to_vec(), b"h".to_vec()],
+                        "the next input receives zero bytes while the head is uncertain"
+                    );
+                    assert_eq!(row(host, next).state, storage::InputState::Ready);
+                    storage::settle_input(
+                        &mut host.fixture.conn,
+                        &host.fixture.run.owner(),
+                        first,
+                        storage::InputState::Uncertain,
+                        storage::InputDisposition::AbandonedUncertain,
+                        "audit:reconciled",
+                    )
+                    .unwrap();
+                    turns_until(host, |host| settled(host, next));
+                    assert_eq!(
+                        host.pty.offers[2..],
+                        [LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                    );
+                });
+            }
+
+            #[test]
+            fn queue_head_settles_target_changed_for_a_moved_placement_and_target_inactive_for_a_deregistered_member()
+             {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:moved"), "interaction_open");
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    close(host);
+                    turns_until(host, |host| settled(host, id));
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.disposition,
+                        Some(storage::InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(input.delivery_reason.as_deref(), Some("target_changed"));
+                });
+                with_permission_host(Duration::from_secs(60), |host| {
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE members SET status='deregistered',deregistered_at='2026-10-30T00:00:00Z' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        host.coordinator
+                            .deferred_target(&host.fixture.conn, &host.fixture.run)
+                            .unwrap(),
+                        Some("target_inactive")
+                    );
+                });
+            }
+
+            /// Drives turns until the queued head's literal stage is written.
+            fn until_head_literal(host: &mut Host) {
+                while host.pty.stages.is_empty() {
+                    assert!(
+                        Instant::now() < host.until,
+                        "the head's literal stage is written"
+                    );
+                    host.drain();
+                    host.advance();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            fn reconcile(host: &mut Host, input_id: i64) {
+                let reply = host
+                    .receipt(crate::runtime::runner::ReceiptAction::Reconcile {
+                        input_id,
+                        expected: storage::InputState::Uncertain,
+                        disposition: storage::InputDisposition::AbandonedUncertain,
+                        evidence_ref: "audit:inspected-pane".into(),
+                    })
+                    .unwrap();
+                assert!(
+                    matches!(
+                        reply,
+                        InputControlReply::Receipt(crate::runtime::runner::ReceiptReply::Settled {
+                            input_id: settled
+                        }) if settled == input_id
+                    ),
+                    "the coordinator reconciles the uncertain receipt"
+                );
+            }
+
+            #[test]
+            fn queue_head_failure_after_a_possible_write_is_uncertain_published_once_and_reconcilable()
+             {
+                for case in ["write_failure", "human_input_after_the_settle"] {
+                    with_permission_host(Duration::from_secs(60), |host| {
+                        form(host);
+                        let first =
+                            queued(host, host.request("prompt:failing"), "interaction_open");
+                        let next = queued(host, host.request("prompt:after"), "interaction_open");
+                        close(host);
+                        until_head_literal(host);
+                        if case == "write_failure" {
+                            host.pty.failure = Some(io::ErrorKind::BrokenPipe);
+                        } else {
+                            std::thread::sleep(
+                                super::staged_delivery::SETTLE + Duration::from_millis(100),
+                            );
+                            host.human.bytes.extend(b"h");
+                        }
+                        while row(host, first).state != storage::InputState::Uncertain {
+                            assert!(
+                                Instant::now() < host.until,
+                                "{case}: the head becomes uncertain"
+                            );
+                            host.drain();
+                            if let Err(failure) = host.try_advance() {
+                                assert_eq!(case, "write_failure", "{failure:?}");
+                                assert!(
+                                    failure
+                                        .source
+                                        .message()
+                                        .contains("injected PTY write failure"),
+                                    "{failure:?}"
+                                );
+                            }
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        host.pty.failure = None;
+                        turns_until(host, |host| result_events(host, first) > 0);
+                        super::composer_busy::hold_turns(host);
+                        assert_eq!(result_events(host, first), 1, "{case}");
+                        assert_eq!(row(host, next).state, storage::InputState::Ready, "{case}");
+                        reconcile(host, first);
+                        turns_until(host, |host| settled(host, next));
+                        assert_eq!(
+                            host.pty.offers[host.pty.offers.len() - 2..],
+                            [LITERAL.as_bytes().to_vec(), b"~".to_vec()],
+                            "{case}: the next queued input drains"
+                        );
+                        assert_eq!(result_events(host, first), 1, "{case}");
+                    });
+                }
+            }
+
+            #[test]
+            fn preview_after_an_uncertain_head_with_an_empty_queue_waits_for_reconciliation() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let head = queued(
+                        host,
+                        host.request("prompt:uncertain-head"),
+                        "interaction_open",
+                    );
+                    close(host);
+                    until_head_literal(host);
+                    host.pty.failure = Some(io::ErrorKind::BrokenPipe);
+                    while row(host, head).state != storage::InputState::Uncertain {
+                        assert!(Instant::now() < host.until, "the head becomes uncertain");
+                        host.drain();
+                        if let Err(failure) = host.try_advance() {
+                            assert!(
+                                failure
+                                    .source
+                                    .message()
+                                    .contains("injected PTY write failure"),
+                                "{failure:?}"
+                            );
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    host.pty.failure = None;
+                    let offers = host.pty.offers.len();
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "preview behind an uncertain head",
+                    )
+                    .unwrap();
+                    let canonical = canonical_preview(&message);
+                    let preview = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "earlier_input",
+                    );
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        host.pty.offers.len(),
+                        offers,
+                        "the preview receives zero bytes before reconciliation: {:?}",
+                        &host.pty.offers[offers..]
+                    );
+                    assert_eq!(row(host, preview).state, storage::InputState::Ready);
+                    reconcile(host, head);
+                    turns_until(host, |host| settled(host, preview));
+                    assert_eq!(
+                        host.pty.offers[offers..],
+                        [canonical.into_bytes(), b"~".to_vec()]
+                    );
+                });
+            }
+
+            #[test]
+            fn accepted_preview_stamp_failure_is_retried_and_published_once_without_retyping() {
+                use std::sync::{Arc, Mutex};
+                with_permission_host(Duration::from_secs(60), |host| {
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "preview whose stamp is busy once",
+                    )
+                    .unwrap();
+                    let canonical = canonical_preview(&message);
+                    form(host);
+                    let id = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "interaction_open",
+                    );
+                    let blocker = Arc::new(Mutex::new((
+                        rusqlite::Connection::open(host.fixture.conn.path().unwrap()).unwrap(),
+                        None::<Instant>,
+                    )));
+                    let observer = blocker.clone();
+                    host.fixture
+                        .conn
+                        .authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                            if matches!(
+                                context.action,
+                                rusqlite::hooks::AuthAction::Transaction {
+                                    operation: rusqlite::hooks::TransactionOperation::Begin
+                                }
+                            ) {
+                                let mut held = observer.lock().unwrap();
+                                let state: String = held
+                                    .0
+                                    .query_row(
+                                        "SELECT state FROM member_input_operations WHERE input_id=?1",
+                                        [id],
+                                        |row| row.get(0),
+                                    )
+                                    .unwrap();
+                                if held.1.is_none() && state == "accepted" {
+                                    held.0.execute_batch("BEGIN IMMEDIATE").unwrap();
+                                    held.1 = Some(Instant::now());
+                                }
+                            }
+                            rusqlite::hooks::Authorization::Allow
+                        }))
+                        .unwrap();
+                    close(host);
+                    let stamp = |host: &Host| -> Option<String> {
+                        host.fixture
+                            .conn
+                            .query_row(
+                                "SELECT notified_at FROM messages WHERE message_id=?1",
+                                [message.message_id],
+                                |row| row.get(0),
+                            )
+                            .unwrap()
+                    };
+                    let mut released = false;
+                    while stamp(host).is_none() || result_events(host, id) == 0 {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the stamp and result follow once storage recovers"
+                        );
+                        if !released {
+                            let held = blocker.lock().unwrap();
+                            if held
+                                .1
+                                .is_some_and(|since| since.elapsed() > Duration::from_millis(1200))
+                            {
+                                held.0.execute_batch("ROLLBACK").unwrap();
+                                released = true;
+                            }
+                        }
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(
+                        released,
+                        "storage was busy for the accepted preview's stamp"
+                    );
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                    assert_eq!(row(host, id).state, storage::InputState::Settled);
+                    assert_eq!(
+                        host.pty.offers,
+                        vec![canonical.into_bytes(), b"~".to_vec()],
+                        "the preview is typed once"
+                    );
+                    assert!(!host.coordinator.input_fenced);
+                });
+            }
+
+            #[test]
+            fn queue_head_interaction_after_its_zero_byte_attempt_expired_requeues_instead_of_settling()
+             {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(
+                        host,
+                        host.request("prompt:expired-then-form"),
+                        "interaction_open",
+                    );
+                    let queued_receipt = row(host, id);
+                    close(host);
+                    while row(host, id).state == storage::InputState::Ready {
+                        assert!(Instant::now() < host.until, "the deferred attempt starts");
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(host.pty.offers.is_empty());
+                    host.coordinator.pending.as_mut().unwrap().deadline =
+                        Instant::now() - Duration::from_millis(1);
+                    form(host);
+                    super::composer_busy::hold_turns(host);
+                    let requeued = row(host, id);
+                    assert_eq!(
+                        requeued.state,
+                        storage::InputState::Ready,
+                        "an open interaction requeues the expired zero-byte attempt"
+                    );
+                    assert_eq!(requeued.disposition, None);
+                    assert_eq!(requeued.delivery_method, None);
+                    assert_eq!(requeued.deferred_at, queued_receipt.deferred_at);
+                    assert_eq!(requeued.defer_reason.as_deref(), Some("interaction_open"));
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    close(host);
+                    turns_until(host, |host| settled(host, id));
+                    assert_eq!(
+                        host.pty.offers,
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()],
+                        "the requeued input drains once after closure"
+                    );
+                });
+            }
+
+            #[test]
+            fn preview_queued_behind_an_uncertain_immediate_attempt_waits_for_reconciliation() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    let first = host.request("prompt:immediate-uncertain");
+                    assert!(host.handle(first).unwrap().is_none());
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "preview behind an immediate attempt",
+                    )
+                    .unwrap();
+                    let canonical = canonical_preview(&message);
+                    let preview = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "earlier_input",
+                    );
+                    until_head_literal(host);
+                    host.human.bytes.extend(b"h");
+                    let reply = loop {
+                        assert!(Instant::now() < host.until, "the immediate attempt replies");
+                        host.drain();
+                        if let Some(reply) = host.advance() {
+                            break submitted(reply);
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    };
+                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                    let offers = host.pty.offers.len();
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        host.pty.offers.len(),
+                        offers,
+                        "the queued preview receives zero bytes: {:?}",
+                        &host.pty.offers[offers..]
+                    );
+                    assert_eq!(row(host, preview).state, storage::InputState::Ready);
+                    reconcile(host, reply.input_id.unwrap());
+                    turns_until(host, |host| settled(host, preview));
+                    assert_eq!(
+                        host.pty.offers[offers..],
+                        [canonical.into_bytes(), b"~".to_vec()]
+                    );
+                });
+            }
+
+            #[test]
+            fn deferred_attempt_expiring_after_storage_contention_settles_storage_unavailable() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:contended"), "interaction_open");
+                    close(host);
+                    while host
+                        .coordinator
+                        .pending
+                        .as_ref()
+                        .is_none_or(|pending| pending.phase != InputPhase::Armed)
+                    {
+                        assert!(Instant::now() < host.until, "the deferred attempt arms");
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(host.pty.offers.is_empty());
+                    let writer =
+                        rusqlite::Connection::open(host.fixture.conn.path().unwrap()).unwrap();
+                    host.drain();
+                    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+                    host.advance();
+                    writer.execute_batch("ROLLBACK").unwrap();
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "contended storage writes nothing: {:?}",
+                        host.pty.offers
+                    );
+                    assert_eq!(row(host, id).state, storage::InputState::InProgress);
+                    host.coordinator.pending.as_mut().unwrap().deadline =
+                        Instant::now() - Duration::from_millis(1);
+                    turns_until(host, |host| settled(host, id));
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    assert_not_submitted(host, id, "storage_unavailable");
+                    turns_until(host, |host| result_events(host, id) > 0);
+                    assert_eq!(result_events(host, id), 1);
+                });
+            }
+
+            /// Applies the runner's orderly shutdown order: settle and publish the fenced results.
+            fn shut_down(host: &mut Host) -> Vec<i64> {
+                host.coordinator.finish_pending_attempt();
+                let settled = host.coordinator.fence(host.until).unwrap();
+                for input_id in &settled {
+                    host.controller
+                        .publish_delivery_result(storage::input_delivery_result_cause(
+                            *input_id,
+                            SubmissionStage::ZeroBytes.as_str(),
+                            None,
+                        ));
+                }
+                host.drain();
+                settled
+            }
+
+            #[test]
+            fn queue_orderly_shutdown_settles_an_active_deferred_attempt_by_its_written_bytes() {
+                for written in [false, true] {
+                    with_permission_host(Duration::from_secs(60), |host| {
+                        form(host);
+                        let id = queued(host, host.request("prompt:active"), "interaction_open");
+                        close(host);
+                        if written {
+                            until_head_literal(host);
+                        } else {
+                            while row(host, id).state == storage::InputState::Ready {
+                                assert!(Instant::now() < host.until, "the attempt starts");
+                                host.drain();
+                                host.advance();
+                                std::thread::sleep(Duration::from_millis(5));
+                            }
+                            assert!(host.pty.offers.is_empty());
+                        }
+                        assert_eq!(row(host, id).state, storage::InputState::InProgress);
+                        assert_eq!(shut_down(host), vec![id], "written={written}");
+                        let input = row(host, id);
+                        if written {
+                            assert_eq!(input.state, storage::InputState::Uncertain);
+                        } else {
+                            assert_not_submitted(host, id, "runner_stopped");
+                        }
+                        assert_eq!(result_events(host, id), 1, "written={written}");
+                    });
+                }
+            }
+
+            #[test]
+            fn queue_head_terminal_commit_survives_a_temporary_storage_failure_and_publishes_once()
+            {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    let id = queued_for_a_moved_target(host);
+                    let writer =
+                        rusqlite::Connection::open(host.fixture.conn.path().unwrap()).unwrap();
+                    let advance_while_busy = |host: &mut Host| {
+                        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+                        host.advance();
+                        writer.execute_batch("ROLLBACK").unwrap();
+                    };
+                    while host.coordinator.finalization.is_none() {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the busy terminal transaction becomes a pending finalization"
+                        );
+                        host.drain();
+                        advance_while_busy(host);
+                    }
+                    let pending = host.coordinator.finalization.as_ref().unwrap();
+                    assert_eq!(pending.input_id, id);
+                    assert_eq!(pending.reason, "target_changed");
+                    advance_while_busy(host);
+                    assert!(
+                        host.coordinator.finalization.is_some(),
+                        "a retry while storage is still busy keeps the finalization pending"
+                    );
+                    assert_eq!(
+                        row(host, id).state,
+                        storage::InputState::Ready,
+                        "the failed terminal transaction keeps the head's receipt"
+                    );
+                    assert_eq!(result_events(host, id), 0);
+                    turns_until(host, |host| settled(host, id));
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.disposition,
+                        Some(storage::InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(input.delivery_reason.as_deref(), Some("target_changed"));
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    turns_until(host, |host| result_events(host, id) > 0);
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                });
+            }
+
+            /// Queues a head whose target placement then moves, so its next turn settles it
+            /// `target_changed` through the terminal zero-byte transaction.
+            fn queued_for_a_moved_target(host: &mut Host) -> i64 {
+                form(host);
+                let id = queued(host, host.request("prompt:storage"), "interaction_open");
+                host.fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
+                        [host.fixture.run.member_id],
+                    )
+                    .unwrap();
+                close(host);
+                id
+            }
+
+            #[test]
+            fn queue_head_permanent_settle_failure_surfaces_instead_of_retrying() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:storage"), "interaction_open");
+                    let later = queued(host, host.request("prompt:later"), "interaction_open");
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    close(host);
+                    host.fixture
+                        .conn
+                        .authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
+                            if matches!(
+                                context.action,
+                                rusqlite::hooks::AuthAction::Update {
+                                    table_name: "member_input_operations",
+                                    ..
+                                }
+                            ) {
+                                rusqlite::hooks::Authorization::Deny
+                            } else {
+                                rusqlite::hooks::Authorization::Allow
+                            }
+                        }))
+                        .unwrap();
+                    let failure = loop {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the permanent failure surfaces"
+                        );
+                        assert!(
+                            host.coordinator.finalization.is_none(),
+                            "a permanent failure never becomes a retried finalization"
+                        );
+                        host.drain();
+                        if let Err(failure) = host.try_advance() {
+                            break failure;
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    };
+                    assert!(
+                        failure.source.message().contains("not authorized"),
+                        "{failure:?}"
+                    );
+                    host.fixture
+                        .conn
+                        .authorizer(
+                            None::<
+                                fn(
+                                    rusqlite::hooks::AuthContext<'_>,
+                                )
+                                    -> rusqlite::hooks::Authorization,
+                            >,
+                        )
+                        .unwrap();
+                    assert!(
+                        host.coordinator.input_fenced,
+                        "a permanent failure fences ordinary input for recovery"
+                    );
+                    for _ in 0..40 {
+                        host.drain();
+                        let _ = host.try_advance();
+                    }
+                    assert_eq!(row(host, id).state, storage::InputState::Ready);
+                    assert_eq!(
+                        row(host, later).state,
+                        storage::InputState::Ready,
+                        "no later queued input is dispatched after the failure"
+                    );
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                });
+            }
+
+            #[test]
+            fn queue_head_acquiring_the_pane_lock_too_late_for_its_settles_writes_zero_bytes() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:late-lock"), "interaction_open");
+                    let placement = host.coordinator.placement.clone();
+                    let busy = PaneLock::try_acquire(&host.coordinator.database_url, &placement)
+                        .unwrap()
+                        .expect("another writer holds the pane lock");
+                    close(host);
+                    while host
+                        .coordinator
+                        .queue
+                        .front()
+                        .is_none_or(|head| head.attempt_deadline.is_none())
+                    {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the head starts its attempt budget"
+                        );
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    host.coordinator.queue.front_mut().unwrap().attempt_deadline =
+                        Some(Instant::now() + Duration::from_millis(300));
+                    drop(busy);
+                    turns_until(host, |host| settled(host, id));
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "a lock acquired with less than one settle left writes nothing: {:?}",
+                        host.pty.offers
+                    );
+                    assert_not_submitted(host, id, "delivery_budget_exhausted");
+                });
+            }
+
+            #[test]
+            fn queue_head_under_an_observer_outage_settles_within_the_observer_budget() {
+                with_permission_host(Duration::from_secs(90), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:outage"), "interaction_open");
+                    close(host);
+                    host.drain();
+                    let started = Instant::now();
+                    while !settled(host, id) {
+                        assert!(
+                            started.elapsed() < Duration::from_secs(60),
+                            "the 5 s observer_unavailable budget, not the 3-minute bound, settles the head"
+                        );
+                        host.controller
+                            .observer_failed(
+                                crate::runtime::runner::observation::ObservationFailure::Detector,
+                                &RealObservationClock,
+                            )
+                            .unwrap();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.disposition,
+                        Some(storage::InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(input.delivery_method, None);
+                    assert_eq!(
+                        input.delivery_reason.as_deref(),
+                        Some("observer_unavailable")
+                    );
+                });
+            }
+        }
+
+        mod method_rendering {
+            use super::deferred_queue::{queued, row, turns_until};
+            use super::*;
+            use crate::broker::runtime::DeliveryMethod;
+
+            const UNCLASSIFIED: &[u8] = b"\x1b[2J\x1b[1;1Hworking on something";
+
+            fn planless_catalog() -> ProfileCatalog {
+                let mut definition = catalog_definition();
+                definition["profiles"][0]["capabilities"]["composer"]["submission"] =
+                    serde_json::json!({"prompt":null,"exec":null});
+                ProfileCatalog::from_definitions(&definition).unwrap()
+            }
+
+            const DISMISSAL: &str = "[cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.";
+
+            fn message(host: &mut Host, body: &str) -> crate::broker::records::MessageRecord {
+                crate::broker::send_message(
+                    &mut host.fixture.conn,
+                    host.fixture.run.director_member_id,
+                    host.fixture.run.member_id,
+                    body,
+                )
+                .unwrap()
+            }
+
+            fn fallback_preview(canonical: &str) -> Vec<u8> {
+                let mut bytes = b"\x1b".to_vec();
+                bytes.extend_from_slice(format!("{canonical} {DISMISSAL}").as_bytes());
+                bytes.push(b'\r');
+                bytes
+            }
+
+            fn preview_digest(host: &Host, message: i64, canonical: &str) -> String {
+                crate::digest::sha256_hex(
+                    crate::digest::canonical_json(&serde_json::json!({
+                        "payload_digest_version":2,"run_id":host.fixture.run.run_id,
+                        "kind":"preview","message_id":message,"literal":canonical
+                    }))
+                    .as_bytes(),
+                )
+            }
+
+            #[test]
+            fn method_rendering_fallback_preview_appends_the_dismissal_clause_outside_its_digest() {
+                with_catalog_host(planless_catalog(), Vec::new(), |host| {
+                    let message = message(host, "fallback preview body");
+                    let canonical = canonical_preview(&message);
+                    host.pty.expect_program(fallback_preview(&canonical));
+                    let reply = settle(host, preview_request(host, &message, &canonical));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![
+                            b"\x1b".to_vec(),
+                            format!("{canonical} {DISMISSAL}").into_bytes(),
+                            b"\r".to_vec()
+                        ]
+                    );
+                    let input =
+                        storage::get_input(&host.fixture.conn, reply.input_id.unwrap()).unwrap();
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
+                    assert_eq!(
+                        input.delivery_reason.as_deref(),
+                        Some("submission_plan_unavailable")
+                    );
+                    assert_eq!(input.payload_digest_version, 2);
+                    assert_eq!(
+                        input.payload_digest,
+                        preview_digest(host, message.message_id, &canonical)
+                    );
+                });
+            }
+
+            #[test]
+            fn method_rendering_queued_fallback_keeps_one_input_id_across_composer_changes_and_retries()
+             {
+                with_catalog_host(catalog(), Vec::new(), |host| {
+                    let message = message(host, "queued fallback body");
+                    let canonical = canonical_preview(&message);
+                    host.pty.expect_program(fallback_preview(&canonical));
+                    host.show(UNCLASSIFIED.to_vec());
+                    let id = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "composer_busy",
+                    );
+                    let digest = row(host, id).payload_digest;
+                    host.show(b"\x1b[2J\x1b[1;1Hstill working".to_vec());
+                    let repeated = submitted(
+                        host.handle(preview_request(host, &message, &canonical))
+                            .unwrap()
+                            .expect("a repeated preview key replies from its receipt"),
+                    );
+                    assert_eq!(repeated.input_id, Some(id));
+                    assert!(host.pty.offers.is_empty());
+                    let expired = crate::time::format_utc(
+                        chrono::Utc::now() - chrono::Duration::seconds(181),
+                    );
+                    host.coordinator
+                        .set_queued_composer_busy_since(id, &expired);
+                    turns_until(host, |host| {
+                        matches!(
+                            row(host, id).state,
+                            storage::InputState::Accepted | storage::InputState::Settled
+                        )
+                    });
+                    host.show(SCREEN.to_vec());
+                    let after = submitted(
+                        host.handle(preview_request(host, &message, &canonical))
+                            .unwrap()
+                            .expect("a submitted preview key replies without typing"),
+                    );
+                    assert_eq!(after.input_id, Some(id));
+                    assert_eq!(after.status, SubmissionStatus::Accepted);
+                    for _ in 0..20 {
+                        host.drain();
+                        host.advance();
+                    }
+                    assert_eq!(host.pty.program, vec![fallback_preview(&canonical)]);
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.payload_digest, digest,
+                        "the digest ignores the method"
+                    );
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
+                    assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
+                    assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
+                    let rows: i64 = host
+                        .fixture
+                        .conn
+                        .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                            row.get(0)
+                        })
+                        .unwrap();
+                    assert_eq!(rows, 1);
+                });
+            }
+        }
+
+        mod composer_busy {
+            use super::deferred_queue::{queued, row, turns_until};
+            use super::*;
+            use crate::broker::runtime::DeliveryMethod;
+
+            const DRAFT: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic draft\r\nDraft end";
+
+            /// The prompt-plan catalog with a classified draft composer, so a draft is a busy
+            /// composer rather than an unclassifiable screen.
+            pub(super) fn busy_catalog() -> ProfileCatalog {
+                let mut definition = catalog_definition();
+                let empty = definition["profiles"][0]["rules"][0].clone();
+                with_draft_rule(&mut definition, empty);
+                ProfileCatalog::from_definitions(&definition).unwrap()
+            }
+
+            /// The permission-form catalog whose composer also classifies a draft as busy.
+            fn permission_busy_catalog() -> ProfileCatalog {
+                let mut definition =
+                    crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition();
+                let composer = catalog_definition();
+                definition["fixtures"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(composer["fixtures"][1].clone());
+                let empty = composer["profiles"][0]["rules"][0].clone();
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(empty.clone());
+                definition["profiles"][0]["capabilities"]["composer"] =
+                    composer["profiles"][0]["capabilities"]["composer"].clone();
+                with_draft_rule(&mut definition, empty);
+                ProfileCatalog::from_definitions(&definition).unwrap()
+            }
+
+            fn with_draft_rule(definition: &mut Value, empty: Value) {
+                let mut draft = empty;
+                draft["id"] = serde_json::json!("synthetic-composer-draft");
+                draft["observation"] = serde_json::json!("composer_draft");
+                draft["region"]["start_pattern"] = serde_json::json!("^Synthetic draft$");
+                draft["region"]["end_pattern"] = serde_json::json!("^Draft end$");
+                draft["matchers"] = serde_json::json!([{"id":"draft","scope":"line","pattern":"^Synthetic draft$"}]);
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(draft);
+                definition["profiles"][0]["capabilities"]["composer"]["rule_ids"] =
+                    serde_json::json!(["synthetic-composer-empty", "synthetic-composer-draft"]);
+            }
+
+            fn busy(host: &mut Host) {
+                host.show(DRAFT.to_vec());
+                assert_eq!(
+                    host.controller.health(&host.writer).eligibility,
+                    InputEligibility::Hold(GateReason::Draft)
+                );
+            }
+
+            fn fallback_program() -> Vec<u8> {
+                let mut bytes = b"\x1b".to_vec();
+                bytes.extend_from_slice(LITERAL.as_bytes());
+                bytes.push(b'\r');
+                bytes
+            }
+
+            /// Drives a fixed number of runner turns, enough for a misbehaving queue to write.
+            pub(super) fn hold_turns(host: &mut Host) {
+                for _ in 0..40 {
+                    host.drain();
+                    host.advance();
+                }
+            }
+
+            /// A host whose deadline only bounds a hang, so suite load cannot fail a delivery.
+            pub(super) fn with_busy_host(
+                catalog: ProfileCatalog,
+                expected_program: Vec<u8>,
+                body: impl FnOnce(&mut Host),
+            ) {
+                with_profile_host_until(
+                    catalog,
+                    expected_program,
+                    HostProfile::metadata(),
+                    Instant::now() + Duration::from_secs(60),
+                    body,
+                );
+            }
+
+            fn delivered(host: &Host, input_id: i64) -> bool {
+                matches!(
+                    row(host, input_id).state,
+                    storage::InputState::Accepted | storage::InputState::Settled
+                )
+            }
+
+            #[test]
+            fn composer_busy_queues_with_zero_bytes_and_drains_by_profile_when_the_composer_empties()
+             {
+                for screen in [DRAFT, b"\x1b[2J\x1b[1;1Hunclassifiable screen".as_slice()] {
+                    with_busy_host(busy_catalog(), encoded(), |host| {
+                        host.show(screen.to_vec());
+                        assert!(matches!(
+                            host.controller.health(&host.writer).eligibility,
+                            InputEligibility::Hold(GateReason::Draft | GateReason::Unknown)
+                        ));
+                        busy_then_profile(host);
+                    });
+                }
+            }
+
+            #[test]
+            fn composer_busy_selection_requeues_with_zero_bytes_when_the_screen_blocks_before_the_first_write()
+             {
+                type Case = (fn() -> ProfileCatalog, fn(&mut Host), &'static str);
+                let cases: [Case; 2] = [
+                    (
+                        super::staged_delivery::permission_catalog,
+                        super::deferred_queue::form,
+                        "interaction_open",
+                    ),
+                    (
+                        busy_catalog,
+                        |host| host.show(DRAFT.to_vec()),
+                        "composer_busy",
+                    ),
+                ];
+                for (catalog, block, reason) in cases {
+                    with_busy_host(catalog(), encoded(), |host| {
+                        let key = "prompt:blocked-after-selection";
+                        let request = host.request(key);
+                        assert!(
+                            host.handle(request).unwrap().is_none(),
+                            "{reason}: an eligible composer selects its method immediately"
+                        );
+                        block(host);
+                        hold_turns(host);
+                        assert!(
+                            host.pty.offers.is_empty(),
+                            "{reason}: no byte, Escape included: {:?}",
+                            host.pty.offers
+                        );
+                        let requeued =
+                            storage::find_input(&host.fixture.conn, host.fixture.run.run_id, key)
+                                .unwrap()
+                                .unwrap_or_else(|| panic!("{reason}: a durable requeued receipt"));
+                        assert_eq!(requeued.state, storage::InputState::Ready, "{reason}");
+                        assert_eq!(requeued.defer_reason.as_deref(), Some(reason));
+                        assert_eq!(requeued.delivery_method, None, "{reason}");
+                        host.show(SCREEN.to_vec());
+                        turns_until(host, |host| delivered(host, requeued.input_id));
+                        assert_eq!(host.pty.program, vec![encoded()], "{reason}");
+                    });
+                }
+            }
+
+            #[test]
+            fn composer_busy_does_not_hold_a_working_member_whose_composer_row_is_empty() {
+                let mut definition = catalog_definition();
+                let mut working = definition["profiles"][0]["rules"][0].clone();
+                working["id"] = serde_json::json!("synthetic-working");
+                working["observation"] = serde_json::json!("working");
+                working["priority"] = serde_json::json!(50);
+                working["verified_noninteraction"] = serde_json::json!(false);
+                working["region"]["start_pattern"] = serde_json::json!("^Working$");
+                working["region"]["end_pattern"] = serde_json::json!("^Working$");
+                working["matchers"] =
+                    serde_json::json!([{"id":"working","scope":"line","pattern":"^Working$"}]);
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(working);
+                definition["profiles"][0]["capabilities"]["detection"] = serde_json::json!({
+                    "rule_ids":["synthetic-working"],
+                    "fixture_ids":[definition["fixtures"][0]["id"].clone()]
+                });
+                let catalog = ProfileCatalog::from_definitions(&definition).unwrap();
+                with_busy_host(catalog, encoded(), |host| {
+                    host.show(
+                        b"\x1b[2J\x1b[21;1HWorking\x1b[23;1HSynthetic state\r\nState end".to_vec(),
+                    );
+                    let reply = settle(host, host.request("prompt:working-empty-row"));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()],
+                        "the native CLI queues profile input behind its current turn"
+                    );
+                    let input = row(host, reply.input_id.unwrap());
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
+                    assert_eq!(input.deferred_at, None);
+                });
+            }
+
+            fn busy_then_profile(host: &mut Host) {
+                let request = host.request("prompt:busy-composer");
+                let id = queued(host, request, "composer_busy");
+                hold_turns(host);
+                assert!(
+                    host.pty.offers.is_empty(),
+                    "a busy composer receives no byte, Escape included: {:?}",
+                    host.pty.offers
+                );
+                assert_eq!(row(host, id).state, storage::InputState::Ready);
+                host.show(SCREEN.to_vec());
+                turns_until(host, |host| delivered(host, id));
+                assert_eq!(
+                    host.pty.stage_bytes(),
+                    vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                );
+                let input = row(host, id);
+                assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
+                assert_eq!(input.delivery_reason, None);
+                assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
+            }
+
+            #[test]
+            fn composer_busy_requeues_a_started_deferred_attempt_with_zero_bytes_before_its_first_stage()
+             {
+                with_profile_host_until(
+                    permission_busy_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    Instant::now() + Duration::from_secs(60),
+                    |host| {
+                        super::deferred_queue::form(host);
+                        let request = host.request("prompt:busy-after-start");
+                        let id = queued(host, request, "interaction_open");
+                        let behind =
+                            queued(host, host.request("prompt:behind"), "interaction_open");
+                        host.show(SCREEN.to_vec());
+                        while row(host, id).state == storage::InputState::Ready {
+                            assert!(
+                                Instant::now() < host.until,
+                                "the deferred attempt starts on the verified empty composer"
+                            );
+                            host.drain();
+                            host.advance();
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        assert_eq!(row(host, id).state, storage::InputState::InProgress);
+                        assert!(host.pty.offers.is_empty());
+                        host.show(DRAFT.to_vec());
+                        hold_turns(host);
+                        assert!(
+                            host.pty.offers.is_empty(),
+                            "a draft before the first stage keeps zero bytes: {:?}",
+                            host.pty.offers
+                        );
+                        let requeued = row(host, id);
+                        assert_eq!(requeued.state, storage::InputState::Ready);
+                        assert_eq!(requeued.disposition, None);
+                        assert_eq!(requeued.delivery_method, None);
+                        assert_eq!(
+                            requeued.defer_reason.as_deref(),
+                            Some("interaction_open"),
+                            "defer_reason keeps why the input first entered the queue"
+                        );
+                        assert_eq!(row(host, behind).state, storage::InputState::Ready);
+                        host.show(SCREEN.to_vec());
+                        turns_until(host, |host| delivered(host, id));
+                        assert_eq!(
+                            row(host, behind).state,
+                            storage::InputState::Ready,
+                            "the requeued input keeps its head position"
+                        );
+                        assert_eq!(
+                            host.pty.offers,
+                            vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                        );
+                        assert_eq!(row(host, id).delivery_method, Some(DeliveryMethod::Profile));
+                    },
+                );
+            }
+
+            #[test]
+            fn composer_busy_bound_starts_when_an_interaction_deferred_head_meets_a_busy_composer()
+            {
+                with_profile_host_until(
+                    permission_busy_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    Instant::now() + Duration::from_secs(60),
+                    |host| {
+                        super::deferred_queue::form(host);
+                        let request = host.request("prompt:interaction-then-busy");
+                        let id = queued(host, request, "interaction_open");
+                        let long_queued = crate::time::format_utc(
+                            chrono::Utc::now() - chrono::Duration::seconds(181),
+                        );
+                        host.coordinator
+                            .set_queued_composer_busy_since(id, &long_queued);
+                        host.drain();
+                        host.advance();
+                        busy(host);
+                        hold_turns(host);
+                        assert!(
+                            host.pty.offers.is_empty(),
+                            "time queued behind an interaction does not count toward the bound: {:?}",
+                            host.pty.offers
+                        );
+                        assert_eq!(row(host, id).state, storage::InputState::Ready);
+                        host.show(SCREEN.to_vec());
+                        turns_until(host, |host| delivered(host, id));
+                        let input = row(host, id);
+                        assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
+                        assert_eq!(input.delivery_reason, None);
+                    },
+                );
+            }
+
+            #[test]
+            fn composer_busy_requeued_immediate_input_keeps_its_place_ahead_of_later_queued_input()
+            {
+                with_busy_host(busy_catalog(), encoded(), |host| {
+                    let first = host.request("prompt:first");
+                    assert!(
+                        host.handle(first).unwrap().is_none(),
+                        "the first input selects its method immediately"
+                    );
+                    let later = queued(host, host.request("prompt:later"), "earlier_input");
+                    busy(host);
+                    hold_turns(host);
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    let first = storage::find_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        "prompt:first",
+                    )
+                    .unwrap()
+                    .expect("the busy composer requeues the first input")
+                    .input_id;
+                    assert_eq!(row(host, first).state, storage::InputState::Ready);
+                    host.show(SCREEN.to_vec());
+                    turns_until(host, |host| {
+                        if delivered(host, later) {
+                            assert!(
+                                delivered(host, first),
+                                "the requeued first input drains before the later one"
+                            );
+                        }
+                        delivered(host, first) && delivered(host, later)
+                    });
+                });
+            }
+
+            #[test]
+            fn composer_busy_onset_survives_a_busy_requeue_and_still_reaches_idle_timeout() {
+                with_busy_host(busy_catalog(), fallback_program(), |host| {
+                    busy(host);
+                    let request = host.request("prompt:flickering-composer");
+                    let id = queued(host, request, "composer_busy");
+                    let near_bound = crate::time::format_utc(
+                        chrono::Utc::now() - chrono::Duration::seconds(178),
+                    );
+                    host.coordinator
+                        .set_queued_composer_busy_since(id, &near_bound);
+                    host.show(SCREEN.to_vec());
+                    while row(host, id).state == storage::InputState::Ready {
+                        assert!(
+                            Instant::now() < host.until,
+                            "a verified empty composer starts the attempt"
+                        );
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(host.pty.offers.is_empty());
+                    host.show(DRAFT.to_vec());
+                    hold_turns(host);
+                    assert_eq!(row(host, id).state, storage::InputState::Ready);
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "the busy requeue writes zero bytes: {:?}",
+                        host.pty.offers
+                    );
+                    turns_until(host, |host| delivered(host, id));
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![
+                            b"\x1b".to_vec(),
+                            LITERAL.as_bytes().to_vec(),
+                            b"\r".to_vec()
+                        ],
+                        "the retained onset reaches the 3-minute bound"
+                    );
+                    let input = row(host, id);
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
+                    assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
+                });
+            }
+
+            #[test]
+            fn composer_busy_falls_back_with_idle_timeout_three_minutes_after_busy_onset() {
+                with_busy_host(busy_catalog(), fallback_program(), |host| {
+                    busy(host);
+                    let request = host.request("prompt:idle-timeout");
+                    let id = queued(host, request, "composer_busy");
+                    let just_inside = crate::time::format_utc(
+                        chrono::Utc::now() - chrono::Duration::seconds(170),
+                    );
+                    host.coordinator
+                        .set_queued_composer_busy_since(id, &just_inside);
+                    hold_turns(host);
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "no Escape before the 3-minute bound"
+                    );
+                    let expired = crate::time::format_utc(
+                        chrono::Utc::now() - chrono::Duration::seconds(181),
+                    );
+                    host.coordinator
+                        .set_queued_composer_busy_since(id, &expired);
+                    turns_until(host, |host| delivered(host, id));
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![
+                            b"\x1b".to_vec(),
+                            LITERAL.as_bytes().to_vec(),
+                            b"\r".to_vec()
+                        ]
+                    );
+                    let input = row(host, id);
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
+                    assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
+                    assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
                 });
             }
         }
@@ -3426,13 +6726,25 @@ mod tests {
                         h.advance().is_none(),
                         "contention consumes the preceding drain"
                     );
-                    h.drain();
-                    let result =
-                        submitted(h.advance().expect("fresh real drain after SQLite release"));
+                    let result = loop {
+                        assert!(
+                            Instant::now() < h.until,
+                            "the released write completes in time"
+                        );
+                        h.drain();
+                        if let Some(reply) = h.advance() {
+                            break submitted(reply);
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    };
                     assert!(matches!(result.status, SubmissionStatus::Accepted));
                     assert_eq!(result.input_id, Some(id));
+                    assert_eq!(
+                        h.pty.stage_bytes(),
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                    );
                     assert_eq!(h.pty.program, vec![encoded()]);
-                    assert_eq!(h.hooks.count("before"), 1);
+                    assert!(h.hooks.count("before") >= 1);
                     assert_eq!(timeout(&h.fixture.conn), 600);
                 });
             }
@@ -3559,7 +6871,7 @@ mod tests {
 
             pub(super) const LITERAL: &str = "ordinary fixture λ";
             pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
-            pub(super) const VERSION: &str = "synthetic-0.0.1";
+            pub(super) const VERSION: &str = "0.0.1-synthetic";
             const PROFILE: &str = "synthetic-profile-1";
 
             pub(in crate::runtime::runner::input) fn catalog_definition() -> serde_json::Value {
@@ -3597,12 +6909,69 @@ mod tests {
                 bytes
             }
 
+            /// Submits `request`, then drives drained turns until its first reply.
+            pub(in crate::runtime::runner::input) fn settle(
+                host: &mut Host,
+                request: InputControlRequest,
+            ) -> SubmissionResult {
+                if let Some(reply) = host.handle(request).unwrap() {
+                    return submitted(reply);
+                }
+                loop {
+                    assert!(
+                        Instant::now() < host.until,
+                        "the submission replies in time"
+                    );
+                    host.drain();
+                    if let Some(reply) = host.advance() {
+                        return submitted(reply);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            pub(in crate::runtime::runner::input) fn canonical_preview(
+                message: &crate::broker::records::MessageRecord,
+            ) -> String {
+                crate::delivery::canonical_preview_line(message)
+            }
+
+            pub(in crate::runtime::runner::input) fn preview_request(
+                host: &Host,
+                message: &crate::broker::records::MessageRecord,
+                literal: &str,
+            ) -> InputControlRequest {
+                let key = format!("preview:{}:{}", host.fixture.run.run_id, message.message_id);
+                let mut request = host.request(&key);
+                request.operation = InputControlOperation::SubmitPrompt(SubmitInput {
+                    operation_key: key,
+                    input_kind: storage::InputKind::Preview,
+                    message_id: Some(message.message_id),
+                    literal: literal.into(),
+                });
+                request
+            }
+
+            pub(in crate::runtime::runner::input) fn delivery_selection(
+                host: &Host,
+                input_id: i64,
+            ) -> (Option<String>, Option<String>) {
+                host.fixture
+                    .conn
+                    .query_row(
+                        "SELECT delivery_method,delivery_reason FROM member_input_operations WHERE input_id=?1",
+                        [input_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap()
+            }
+
             pub(in crate::runtime::runner::input) struct HostProfile {
                 pub(crate) policy: storage::evidence::EvidencePolicy,
                 pub(crate) event_evidence: &'static str,
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'static str,
-                pub(crate) profile_version: &'static str,
+                pub(crate) profile_version: Option<&'static str>,
                 pub(crate) size: TerminalSize,
                 pub(crate) screen: Vec<u8>,
             }
@@ -3616,7 +6985,7 @@ mod tests {
                         event_evidence,
                         backend: crate::coding_agent::CodingAgent::Codex,
                         native_version: VERSION,
-                        profile_version: PROFILE,
+                        profile_version: Some(PROFILE),
                         size: TerminalSize { rows: 24, cols: 80 },
                         screen: SCREEN.to_vec(),
                     }
@@ -3665,6 +7034,15 @@ mod tests {
                         .id
                         .expect("actual durable input ID")
                 }
+                pub(crate) fn reserved_input_ids(&self) -> Vec<i64> {
+                    self.points
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|p| p.boundary == "reserved")
+                        .map(|p| p.id.expect("actual durable input ID"))
+                        .collect()
+                }
             }
             impl InputHooks for Hooks {
                 fn checkpoint(
@@ -3712,15 +7090,36 @@ mod tests {
                 }
             }
 
+            /// `program` holds each completed programmatic input; `stages` holds every
+            /// separately offered programmatic stage with its offer time, so settle intervals
+            /// between a literal and its submit key are observable.
             pub(in crate::runtime::runner::input) struct Pty {
                 pub(crate) child: Reader,
                 pub(crate) offers: Vec<Vec<u8>>,
                 pub(crate) program: Vec<Vec<u8>>,
+                pub(crate) stages: Vec<(Instant, Vec<u8>)>,
                 pub(crate) manual: Vec<u8>,
                 pub(crate) short: Option<usize>,
+                pub(crate) failure: Option<io::ErrorKind>,
                 expected_program: Vec<u8>,
+                program_offset: usize,
                 database_url: String,
                 hooks: Arc<Hooks>,
+            }
+            impl Pty {
+                pub(crate) fn expect_program(&mut self, bytes: Vec<u8>) {
+                    assert_eq!(self.program_offset, 0, "no partially written program");
+                    self.expected_program = bytes;
+                }
+                pub(crate) fn stage_bytes(&self) -> Vec<Vec<u8>> {
+                    self.stages.iter().map(|(_, bytes)| bytes.clone()).collect()
+                }
+                pub(crate) fn stage_gaps(&self) -> Vec<Duration> {
+                    self.stages
+                        .windows(2)
+                        .map(|pair| pair[1].0.duration_since(pair[0].0))
+                        .collect()
+                }
             }
             impl ByteInput for Pty {
                 fn try_read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
@@ -3731,13 +7130,27 @@ mod tests {
                 fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
                     assert!(!bytes.is_empty());
                     self.offers.push(bytes.to_vec());
-                    if bytes == self.expected_program {
+                    if let Some(kind) = self.failure {
+                        return Err(io::Error::new(kind, "injected PTY write failure"));
+                    }
+                    if self.expected_program[self.program_offset..].starts_with(bytes) {
                         let conn = crate::db::connect(&self.database_url).unwrap();
-                        let row = storage::get_input(&conn, self.hooks.input_id()).unwrap();
-                        assert!(matches!(row.state, storage::InputState::InProgress));
+                        assert!(
+                            self.hooks.reserved_input_ids().into_iter().any(|id| {
+                                storage::get_input(&conn, id).unwrap().state
+                                    == storage::InputState::InProgress
+                            }),
+                            "a programmatic stage writes only for an in-progress reservation"
+                        );
                         assert!(self.hooks.count("before") > 0);
-                        self.program.push(bytes.to_vec());
-                        Ok(self.short.unwrap_or(bytes.len()))
+                        self.stages.push((Instant::now(), bytes.to_vec()));
+                        let accepted = self.short.unwrap_or(bytes.len());
+                        self.program_offset += accepted;
+                        if self.program_offset == self.expected_program.len() {
+                            self.program.push(self.expected_program.clone());
+                            self.program_offset = 0;
+                        }
+                        Ok(accepted)
                     } else {
                         self.manual.extend_from_slice(bytes);
                         Ok(bytes.len())
@@ -3775,7 +7188,7 @@ mod tests {
             pub(in crate::runtime::runner::input) struct RunSelection {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'static str,
-                pub(crate) profile_version: &'static str,
+                pub(crate) profile_version: Option<&'static str>,
                 pub(crate) event_evidence: &'static str,
             }
 
@@ -3821,8 +7234,7 @@ mod tests {
                         let selected =
                             catalog.capabilities(selection.backend, Some(selection.native_version));
                         let coverage = selected.detection;
-                        let profile_match = selected.profile_match.map(|value| value.as_str());
-                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,profile_match=?4,coverage=?5,event_evidence=?6 WHERE run_id=?7",rusqlite::params![selection.backend.name(),selection.native_version,selection.profile_version,profile_match,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
+                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,coverage=?4,event_evidence=?5 WHERE run_id=?6",rusqlite::params![selection.backend.name(),selection.native_version,selection.profile_version,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
                         fixture
                             .conn
                             .execute(
@@ -4025,9 +7437,12 @@ mod tests {
                         },
                         offers: Vec::new(),
                         program: Vec::new(),
+                        stages: Vec::new(),
                         manual: Vec::new(),
                         short: None,
+                        failure: None,
                         expected_program,
+                        program_offset: 0,
                         database_url: url,
                         hooks: hooks.clone(),
                     };
@@ -4047,10 +7462,12 @@ mod tests {
                         child,
                     };
                     host.drain();
-                    assert!(matches!(
-                        host.controller.health(&host.writer).eligibility,
-                        InputEligibility::ComposerEmpty
-                    ));
+                    if profile_version.is_some() {
+                        assert!(matches!(
+                            host.controller.health(&host.writer).eligibility,
+                            InputEligibility::ComposerEmpty
+                        ));
+                    }
                     host
                 }
                 pub(crate) fn request(&self, key: &str) -> InputControlRequest {
@@ -4251,6 +7668,18 @@ mod tests {
             ) {
                 with_owned_host(Host::with_catalog(catalog, expected_program, profile), body);
             }
+            pub(in crate::runtime::runner::input) fn with_profile_host_until(
+                catalog: ProfileCatalog,
+                expected_program: Vec<u8>,
+                profile: HostProfile,
+                until: Instant,
+                body: impl FnOnce(&mut Host),
+            ) {
+                with_owned_host(
+                    Host::build(|| catalog, expected_program, profile, until),
+                    body,
+                );
+            }
             fn with_owned_host(mut host: Host, body: impl FnOnce(&mut Host)) {
                 let primary = catch_unwind(AssertUnwindSafe(|| body(&mut host)));
                 let cleanup = catch_unwind(AssertUnwindSafe(|| host.finish()));
@@ -4337,7 +7766,7 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Claude,
                     native_version: "2.1.302",
-                    profile_version: "claude-2.1.302-auto-1",
+                    profile_version: Some("claude-2.1.302-auto-1"),
                     size: crate::runtime::runner::TerminalSize {
                         rows: 36,
                         cols: 120,
@@ -4363,7 +7792,7 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Opencode,
                     native_version: "2.1.4",
-                    profile_version: "opencode-2.1.4-cafleet-ask-1",
+                    profile_version: Some("opencode-2.1.4-cafleet-ask-1"),
                     size: crate::runtime::runner::TerminalSize {
                         rows: 36,
                         cols: 120,
@@ -4896,7 +8325,7 @@ mod tests {
             use crate::runtime::runner::{TerminalSize, TerminalState};
             let catalog =
                 ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
-            let detector = Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1"));
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
             let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
             terminal
                 .feed(&inspection_fixture_form(
@@ -5110,7 +8539,9 @@ mod tests {
             for (case, block) in [
                 (
                     "fenced input",
-                    (|h: &mut Host| h.coordinator.fence(h.until).unwrap()) as fn(&mut Host),
+                    (|h: &mut Host| {
+                        h.coordinator.fence(h.until).unwrap();
+                    }) as fn(&mut Host),
                 ),
                 ("failed manual accounting", |h: &mut Host| {
                     h.coordinator.manual_generation = u64::MAX;
@@ -5293,7 +8724,7 @@ mod tests {
         type FormFeed = fn(&mut Host) -> (i64, i64, i64, i64);
 
         #[test]
-        fn a_preview_during_a_visible_claude_permission_form_is_held_without_child_bytes() {
+        fn a_preview_during_a_visible_claude_permission_form_is_queued_without_child_bytes() {
             let forms: [(&str, FormFeed); 2] = [
                 ("claude-2.1.302-default-permission-1", claude_blocked_form),
                 (
@@ -5331,7 +8762,7 @@ mod tests {
                             operation_key: key.clone(),
                             input_kind: storage::InputKind::Preview,
                             message_id: Some(message.message_id),
-                            literal: "preview during a permission form".into(),
+                            literal: crate::delivery::canonical_preview_line(&message),
                         });
                     let reply = h
                         .coordinator
@@ -5343,22 +8774,24 @@ mod tests {
                             h.until,
                         )
                         .unwrap();
-                    let Some(InputControlReply::Submission(held)) = reply else {
+                    let Some(InputControlReply::Submission(queued)) = reply else {
                         panic!(
                             "{fixture}: a preview during a visible form returns a Submission reply"
                         )
                     };
                     assert_eq!(
-                        (held.status, held.stage, held.input_id),
-                        (SubmissionStatus::Held, SubmissionStage::ZeroBytes, None),
+                        (queued.status, queued.stage),
+                        (SubmissionStatus::Queued, SubmissionStage::ZeroBytes),
                         "{fixture}"
                     );
                     assert_eq!(
-                        held.reason.as_deref(),
-                        Some("ordinary composer input is held"),
-                        "{fixture}: the visible form, not a missing composer plan, holds the preview"
+                        queued
+                            .delivery
+                            .as_ref()
+                            .and_then(|delivery| delivery.reason.as_deref()),
+                        Some("interaction_open"),
+                        "{fixture}: the visible form, not a missing composer plan, defers the preview"
                     );
-                    assert!(h.coordinator.pending.is_none(), "{fixture}");
                     assert_eq!(
                         h.pty.offers, offers,
                         "{fixture}: no child byte, Escape included, is offered"
@@ -5367,10 +8800,14 @@ mod tests {
                         h.pty.program, program,
                         "{fixture}: no program byte is written"
                     );
-                    assert!(
-                        storage::find_input(&h.fixture.conn, run.run_id, &key)
-                            .unwrap()
-                            .is_none(),
+                    let receipt = storage::find_input(&h.fixture.conn, run.run_id, &key)
+                        .unwrap()
+                        .unwrap_or_else(|| panic!("{fixture}: the queued preview has a receipt"));
+                    assert_eq!(Some(receipt.input_id), queued.input_id, "{fixture}");
+                    assert_eq!(receipt.state, storage::InputState::Ready, "{fixture}");
+                    assert_eq!(
+                        receipt.defer_reason.as_deref(),
+                        Some("interaction_open"),
                         "{fixture}"
                     );
                     let notified: Option<String> = h
@@ -5628,7 +9065,9 @@ mod tests {
         fn permission_rearm_reports_the_named_blocked_reason_before_live_validation() {
             for (block, reason) in [
                 (
-                    (|h: &mut Host| h.coordinator.fence(h.until).unwrap()) as fn(&mut Host),
+                    (|h: &mut Host| {
+                        h.coordinator.fence(h.until).unwrap();
+                    }) as fn(&mut Host),
                     "permission input is fenced",
                 ),
                 (
@@ -5993,9 +9432,21 @@ mod tests {
                 assert_eq!(reserved.kind, storage::InputKind::Prompt);
                 assert_eq!(reserved.state, storage::InputState::InProgress);
                 assert_ne!(reserved.input_id, id);
-                h.drain();
-                let Some(InputControlReply::Submission(submitted)) = h.advance() else {
-                    panic!("recovered ordinary writer returns its real completed submission")
+                let submitted = loop {
+                    assert!(
+                        Instant::now() < h.until,
+                        "recovered ordinary writer completes its staged submission"
+                    );
+                    h.drain();
+                    if let Some(reply) = h.advance() {
+                        let InputControlReply::Submission(submitted) = reply else {
+                            panic!(
+                                "recovered ordinary writer returns its real completed submission"
+                            )
+                        };
+                        break submitted;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
                 };
                 assert_eq!(
                     (submitted.status, submitted.stage, submitted.input_id),
@@ -6018,7 +9469,8 @@ mod tests {
                         b"!".to_vec(),
                         b"n".to_vec(),
                         b"\r".to_vec(),
-                        expected_bytes.clone()
+                        ordinary_literal.as_bytes().to_vec(),
+                        b"~".to_vec()
                     ]
                 );
                 let point = h
@@ -6846,7 +10298,7 @@ mod tests {
                     .catalog
                     .answer_plan(
                         CodingAgent::Codex,
-                        "synthetic-0.0.1",
+                        "0.0.1-synthetic",
                         "synthetic-permission",
                         input.decision,
                     )
@@ -7863,14 +11315,62 @@ mod tests {
     mod retirement_contracts {
         use super::super::*;
         use super::ordinary_prompt::support::{Host, with_host, with_host_until};
-        use crate::runtime::runner::{ReceiptAction, ReceiptReply, SubmitInput};
+        use crate::runtime::runner::{ReceiptAction, ReceiptReply};
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::time::Duration;
 
+        /// Fills the receipt cache with `count` completed entries modelled on the real retained
+        /// entry `template`, under input IDs no durable row uses.
+        fn prefill_completed(h: &mut Host, template: i64, count: usize) {
+            let real = h
+                .coordinator
+                .operations
+                .get(&template)
+                .expect("real completed template");
+            let RetainedSelection::Composer { method, stages, .. } = &real.selection else {
+                panic!("an ordinary prompt retains its composer selection")
+            };
+            let fillers = (0..count)
+                .map(|index| {
+                    let input_id = 1_000_000 + i64::try_from(index).unwrap();
+                    let mut operation = real.operation.clone();
+                    operation.input_id = input_id;
+                    operation.operation_key = format!("prompt:prefilled:{index}");
+                    (
+                        input_id,
+                        RetainedInput {
+                            operation,
+                            bytes: real.bytes.clone(),
+                            selection: RetainedSelection::Composer {
+                                method: *method,
+                                stages: stages.clone(),
+                                next_stage: stages.len(),
+                            },
+                            stage: real.stage,
+                            written_bytes: real.written_bytes,
+                            output_seq: real.output_seq,
+                            attempt_available: false,
+                            leased: false,
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            h.coordinator.operations.extend(fillers);
+        }
+
+        fn complete(h: &mut Host, key: &str) -> i64 {
+            let request = h.request(key);
+            let accepted = super::ordinary_prompt::support::settle(h, request);
+            assert_eq!(accepted.status, SubmissionStatus::Accepted);
+            assert_eq!(accepted.stage, SubmissionStage::Submitted);
+            assert!(h.coordinator.pending.is_none());
+            accepted.input_id.expect("actual completed input ID")
+        }
+
         #[test]
         fn completed_coordinator_settlement_and_retirement_exceeds_cache_capacity_without_replay() {
-            let until = Instant::now() + Duration::from_secs(120);
+            let until = Instant::now() + Duration::from_secs(30);
             with_host_until(until, |h| {
                 let run = h.fixture.run.clone();
                 let first_key = "prompt:capacity:0";
@@ -7878,46 +11378,36 @@ mod tests {
                 let expected_program = "ordinary fixture λ~".as_bytes();
                 let evidence = "owned completed coordinator input";
                 let mut first_settled = None;
-                for index in 0..4097 {
-                    let detailed = index == 0 || index == 4096;
-                    assert!(
-                        Instant::now() < until,
-                        "original batch cap at cycle {index}"
-                    );
-                    assert_eq!(h.until, until);
-                    assert!(h.coordinator.operations.is_empty());
-                    assert!(h.coordinator.pending.is_none());
-                    let request = h.request(&format!("prompt:capacity:{index}"));
-                    assert_eq!(request.expires_at_mono_ns, first_request.expires_at_mono_ns);
-                    assert!(h.handle_until(request, until).unwrap().is_none());
-                    let reply = (0..8)
-                        .find_map(|_| {
-                            h.drain();
-                            h.advance()
-                        })
-                        .expect("actual completion within finite drained turns");
-                    let InputControlReply::Submission(accepted) = reply else {
-                        panic!("actual Prompt submission reply")
-                    };
-                    assert_eq!(accepted.status, SubmissionStatus::Accepted);
-                    assert_eq!(accepted.stage, SubmissionStage::Submitted);
-                    let id = accepted.input_id.expect("actual completed input ID");
-                    assert_eq!(h.coordinator.operations.len(), 1);
-                    assert!(h.coordinator.pending.is_none());
-                    assert_eq!(h.pty.offers.len(), index + 1);
-                    assert_eq!(h.pty.program.len(), index + 1);
-                    if detailed {
+                for index in 0..3 {
+                    let detailed = index == 0;
+                    let id = complete(h, &format!("prompt:capacity:{index}"));
+                    if index == 0 {
                         let retained = cached(h, id);
                         assert_eq!(retained.0.state, storage::InputState::Accepted);
                         assert_eq!(retained.1, SubmissionStage::Submitted);
                         assert_eq!(retained.2, u64::try_from(expected_program.len()).unwrap());
                         assert!(!retained.4 && !retained.5);
-                        assert_eq!(h.pty.program.last().unwrap(), expected_program);
-                        assert!(h.pty.manual.is_empty());
-                        for boundary in ["reserved", "before", "after", "terminal"] {
-                            assert_eq!(h.hooks.count(boundary), 1, "cycle {index}: {boundary}");
-                        }
+                        prefill_completed(h, id, RECEIPT_CACHE_CAPACITY - 1);
+                        assert_eq!(h.coordinator.operations.len(), RECEIPT_CACHE_CAPACITY);
+                        let overflow = h.request("prompt:capacity:overflow");
+                        assert!(
+                            h.handle_until(overflow, until).is_err(),
+                            "a full receipt cache refuses a new input"
+                        );
+                        assert!(
+                            storage::find_input(
+                                &h.fixture.conn,
+                                run.run_id,
+                                "prompt:capacity:overflow"
+                            )
+                            .unwrap()
+                            .is_none()
+                        );
                     }
+                    assert_eq!(h.coordinator.operations.len(), RECEIPT_CACHE_CAPACITY);
+                    assert_eq!(h.pty.program.len(), index + 1);
+                    assert_eq!(h.pty.program.last().unwrap(), expected_program);
+                    assert!(h.pty.manual.is_empty());
                     let settled_reply = h
                         .receipt(ReceiptAction::Reconcile {
                             input_id: id,
@@ -7947,14 +11437,15 @@ mod tests {
                         h.receipt(ReceiptAction::Retire { input_id: id }).unwrap(),
                         id,
                     );
-                    assert!(h.coordinator.operations.is_empty());
+                    assert_eq!(
+                        h.coordinator.operations.len(),
+                        RECEIPT_CACHE_CAPACITY - 1,
+                        "retirement releases exactly its own cache slot"
+                    );
                     assert!(h.coordinator.pending.is_none());
-                    assert_eq!(h.pty.offers.len(), index + 1);
                     if let Some(settled) = settled {
                         assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
-                        if index == 0 {
-                            first_settled = Some(settled);
-                        }
+                        first_settled = Some(settled);
                     }
                     h.hooks.points.lock().unwrap().clear();
                 }
@@ -7962,7 +11453,7 @@ mod tests {
                 "SELECT COUNT(*),COUNT(CASE WHEN state IN ('in_progress','accepted','uncertain') THEN 1 END) FROM member_input_operations WHERE run_id=?1",
                 [run.run_id], |row| Ok((row.get(0)?, row.get(1)?)),
             ).unwrap();
-                assert_eq!((completed, unresolved), (4097, 0));
+                assert_eq!((completed, unresolved), (3, 0));
                 let first =
                     first_settled.expect("first real completed operation retained as history");
                 let changes = h.fixture.conn.total_changes();
@@ -7976,15 +11467,15 @@ mod tests {
                 assert_eq!(replayed.status, SubmissionStatus::Accepted);
                 assert_eq!(replayed.stage, SubmissionStage::Submitted);
                 assert_eq!(replayed.input_id, Some(first.input_id));
-                assert!(h.coordinator.operations.is_empty());
+                assert_eq!(h.coordinator.operations.len(), RECEIPT_CACHE_CAPACITY - 1);
                 assert!(h.coordinator.pending.is_none());
                 assert_eq!(h.fixture.conn.total_changes(), changes);
                 assert_eq!(
                     storage::get_input(&h.fixture.conn, first.input_id).unwrap(),
                     first
                 );
-                assert_eq!(h.pty.offers.len(), 4097);
-                assert_eq!(h.pty.program.len(), 4097);
+                assert_eq!(h.pty.offers.len(), 6, "three staged inputs, never replayed");
+                assert_eq!(h.pty.program.len(), 3);
                 assert!(h.pty.manual.is_empty());
                 assert!(h.hooks.points.lock().unwrap().is_empty());
             });
@@ -8283,24 +11774,13 @@ mod tests {
                     "retirement preview",
                 )
                 .unwrap();
-                let key = format!("preview:{}:{}", run.run_id, message.message_id);
-                let mut request = h.request(&key);
-                request.operation = InputControlOperation::SubmitPrompt(SubmitInput {
-                    operation_key: key.clone(),
-                    input_kind: storage::InputKind::Preview,
-                    message_id: Some(message.message_id),
-                    literal: "ordinary fixture λ".into(),
-                });
-                assert!(h.handle(request).unwrap().is_none());
-                let accepted = (0..8)
-                    .find_map(|_| {
-                        h.drain();
-                        h.advance()
-                    })
-                    .expect("actual Preview completes within finite drained turns");
-                let InputControlReply::Submission(accepted) = accepted else {
-                    panic!("actual Preview submission reply")
-                };
+                let canonical = super::ordinary_prompt::support::canonical_preview(&message);
+                let mut program = canonical.as_bytes().to_vec();
+                program.push(b'~');
+                h.pty.expect_program(program.clone());
+                let request =
+                    super::ordinary_prompt::support::preview_request(h, &message, &canonical);
+                let accepted = super::ordinary_prompt::support::settle(h, request);
                 assert!(matches!(accepted.status, SubmissionStatus::Accepted));
                 let id = accepted.input_id.expect("durable Preview ID");
                 let before = cached(h, id);
@@ -8308,10 +11788,7 @@ mod tests {
                 assert!(!before.4 && !before.5);
                 assert!(h.coordinator.pending.is_none());
                 let offers = h.pty.offers.clone();
-                assert_eq!(
-                    h.pty.program,
-                    vec!["ordinary fixture λ~".as_bytes().to_vec()]
-                );
+                assert_eq!(h.pty.program, vec![program.clone()]);
 
                 let Err(uncommitted) =
                     h.coordinator

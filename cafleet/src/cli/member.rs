@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::helpers::{available_mux, emit, nonblank, resolve_body, resolve_command_body};
 use crate::broker::records::MemberRecord;
+use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
 use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::{CodingAgent, ProfileCatalog, SpawnProbe, coding_agent};
@@ -139,8 +140,8 @@ pub(crate) enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Submit a native shell command to a member's pane: wrapped members receive it through
-    /// their runner without Escape; unwrapped members keep Escape-first input.
+    /// Submit a native shell command to a member's pane: a wrapped member's runner submits,
+    /// falls back to Escape-first delivery or queues it; unwrapped members keep Escape-first input.
     #[command(override_usage = "cafleet member exec [OPTIONS] <MEMBER_ID> <COMMAND|--file <PATH>>")]
     Exec {
         /// The target member.
@@ -410,7 +411,7 @@ fn create(
         &executable,
         deadline.min(Instant::now() + Duration::from_secs(2)),
     );
-    let native = crate::coding_agent::native_launch_identity(backend, probe, &catalog);
+    let native = crate::coding_agent::native_launch_identity(backend, probe, &catalog)?;
     if let Some(warning) = &native.warning {
         eprintln!("{warning}");
     }
@@ -469,7 +470,6 @@ fn create(
         event_evidence,
         native_version: native.native_version,
         profile_version: native.profile_version,
-        profile_match: native.profile_match,
         coverage: native.coverage,
     };
     let mut host = runner::NativeLaunchHost::new(&mux, &context);
@@ -679,7 +679,7 @@ fn dispatch_input(
     kind: crate::broker::runtime::InputKind,
     label: &str,
     deadline: crate::input::Deadline,
-) -> Result<Option<i64>, CafleetError> {
+) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
     let id = member.member_id;
     if let Some(runtime) = &member.runtime {
         use crate::runtime::runner::{InputFailure, SubmissionStatus, SubmitInput};
@@ -699,17 +699,29 @@ fn dispatch_input(
             conn, settings, run, placement, &request, deadline,
         )
         .map_err(CafleetError::from)?;
-        if result.status != SubmissionStatus::Accepted {
+        if !matches!(
+            result.status,
+            SubmissionStatus::Accepted | SubmissionStatus::Queued
+        ) {
             let description = match result.status {
                 SubmissionStatus::Held => "held",
                 SubmissionStatus::Rejected => "rejected",
                 SubmissionStatus::Uncertain => "uncertain",
-                SubmissionStatus::Accepted => unreachable!("accepted result returned below"),
+                SubmissionStatus::Accepted | SubmissionStatus::Queued => {
+                    unreachable!("submitted and queued results return below")
+                }
             };
             let mut reason = format!("{label} delivery to member {id} is {description}");
             if let Some(detail) = result.reason {
                 reason.push_str(": ");
                 reason.push_str(&detail);
+            }
+            if let Some(method) = result
+                .delivery
+                .as_ref()
+                .and_then(|delivery| delivery.method)
+            {
+                reason.push_str(&format!(" (method={})", method.as_str()));
             }
             return Err(InputFailure {
                 source: CafleetError::App(reason),
@@ -720,7 +732,10 @@ fn dispatch_input(
             }
             .into());
         }
-        return Ok(result.input_id);
+        let delivery = result
+            .delivery
+            .expect("validated submission replies carry their delivery");
+        return Ok((result.input_id, delivery));
     }
     let Some(locked) = crate::input::lock_member(conn, settings, member, deadline)? else {
         return Err(CafleetError::App(format!(
@@ -757,7 +772,16 @@ fn dispatch_input(
         if error.submission_started() { CafleetError::App(format!(
             "{label} delivery to member {id} is uncertain: {error}. Inspect the pane before retrying."
         )) } else { prewrite(error.to_string()) }
-    }).map(|()| None)
+    }).map(|()| {
+        (
+            None,
+            DeliveryProjection {
+                status: DeliveryStatus::Submitted,
+                method: Some(DeliveryMethod::Unwrapped),
+                reason: None,
+            },
+        )
+    })
 }
 
 struct Dispatch {
@@ -774,7 +798,7 @@ fn dispatch_to_member(
     text: &str,
     dispatch: Dispatch,
     deadline: crate::input::Deadline,
-) -> Result<(MemberRecord, String, Option<i64>), CafleetError> {
+) -> Result<(MemberRecord, String, Option<i64>, DeliveryProjection), CafleetError> {
     let member = crate::input::with_database_budget(conn, deadline, |conn| {
         load_member(conn, member_id, false)
     })?;
@@ -782,7 +806,7 @@ fn dispatch_to_member(
         return Err(CafleetError::App(dispatch.director_refusal.into()));
     }
     let pane = require_pane(&member, member_id, dispatch.command)?;
-    let input_id = dispatch_input(
+    let (input_id, delivery) = dispatch_input(
         conn,
         settings,
         &member,
@@ -791,7 +815,7 @@ fn dispatch_to_member(
         dispatch.label,
         deadline,
     )?;
-    Ok((member, pane, input_id))
+    Ok((member, pane, input_id, delivery))
 }
 
 fn prompt(
@@ -807,7 +831,7 @@ fn prompt(
             "text must be one non-empty line without control characters.".into(),
         ));
     }
-    let (member, pane, input_id) = dispatch_to_member(
+    let (member, pane, input_id, delivery) = dispatch_to_member(
         conn,
         settings,
         member_id,
@@ -822,8 +846,8 @@ fn prompt(
     )?;
     emit(
         json,
-        &json!({"member_id":member_id,"pane_id":pane,"text":text,"input_id":input_id}),
-        || format_member_prompt(text, &member.name, &pane, input_id),
+        &presentation::member_prompt(member_id, &pane, text, input_id, &delivery),
+        || format_member_prompt(member_id, text, &member.name, &pane, input_id, &delivery),
     );
     Ok(())
 }
@@ -840,7 +864,7 @@ fn exec(
         .command
         .as_deref()
         .expect("exec input was resolved before its deadline");
-    let (member, pane, input_id) = dispatch_to_member(
+    let (member, pane, input_id, delivery) = dispatch_to_member(
         conn,
         settings,
         member_id,
@@ -860,9 +884,8 @@ fn exec(
         .coding_agent;
     emit(
         json,
-        &json!({"member_id":member_id,"pane_id":pane,"coding_agent":agent,
-        "command":command,"dispatched":true,"input_id":input_id}),
-        || format_member_exec(member_id, &pane, input_id),
+        &presentation::member_exec(member_id, &pane, agent, command, input_id, &delivery),
+        || format_member_exec(member_id, &pane, input_id, &delivery),
     );
     Ok(())
 }
@@ -990,7 +1013,6 @@ mod tests {
                     event_evidence: EventEvidence::Metadata,
                     native_version: None,
                     profile_version: None,
-                    profile_match: None,
                     coverage: Coverage::Unknown,
                     owner_pid: process.pid,
                     owner_start_identity: process.start_identity.clone(),
@@ -1443,7 +1465,7 @@ mod tests {
                         if json {
                             let expected = if action == "prompt" {
                                 format!(
-                                    "{{\"member_id\":{},\"pane_id\":{},\"text\":{},\"input_id\":{}}}",
+                                    "{{\"member_id\":{},\"pane_id\":{},\"text\":{},\"input_id\":{},\"delivery\":{{\"status\":\"submitted\",\"method\":\"profile\",\"reason\":null}}}}",
                                     run.member_id,
                                     serde_json::to_string(pane).unwrap(),
                                     serde_json::to_string(&literal).unwrap(),
@@ -1451,7 +1473,7 @@ mod tests {
                                 )
                             } else {
                                 format!(
-                                    "{{\"member_id\":{},\"pane_id\":{},\"coding_agent\":{},\"command\":{},\"dispatched\":true,\"input_id\":{}}}",
+                                    "{{\"member_id\":{},\"pane_id\":{},\"coding_agent\":{},\"command\":{},\"dispatched\":true,\"input_id\":{},\"delivery\":{{\"status\":\"submitted\",\"method\":\"profile\",\"reason\":null}}}}",
                                     run.member_id,
                                     serde_json::to_string(pane).unwrap(),
                                     serde_json::to_string(&placement.coding_agent).unwrap(),
@@ -1476,7 +1498,10 @@ mod tests {
                                 )
                             };
                             assert!(
-                                stdout.contains(&format!("{original}\nInput: {}\n", row.input_id)),
+                                stdout.contains(&format!(
+                                    "{original}\nDelivery: status=submitted method=profile reason=-\nInput: {}\n",
+                                    row.input_id
+                                )),
                                 "{stdout:?}"
                             );
                         }

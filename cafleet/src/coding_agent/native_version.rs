@@ -1,7 +1,7 @@
 use super::{CodingAgent, ProfileCatalog};
-use crate::broker::runtime::{Coverage, ProfileMatch};
+use crate::broker::runtime::Coverage;
 use crate::error::CafleetError;
-use regex::Regex;
+use std::cmp::Ordering;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -9,12 +9,22 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const OUTPUT_BYTES: u64 = 4096;
-const VERSION_TOKEN: &str = r"^v?[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeVersion(semver::Version);
+
+impl NativeVersion {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        semver::Version::parse(text).ok().map(Self)
+    }
+    pub(crate) fn precedence(&self, other: &Self) -> Ordering {
+        self.0.cmp_precedence(&other.0)
+    }
+}
 
 pub(crate) struct NativeLaunchIdentity {
     pub(crate) native_version: Option<String>,
     pub(crate) profile_version: Option<String>,
-    pub(crate) profile_match: Option<ProfileMatch>,
     pub(crate) coverage: Coverage,
     pub(crate) warning: Option<String>,
 }
@@ -23,36 +33,33 @@ pub(crate) fn native_launch_identity(
     backend: CodingAgent,
     probe: Result<String, CafleetError>,
     catalog: &ProfileCatalog,
-) -> NativeLaunchIdentity {
+) -> Result<NativeLaunchIdentity, CafleetError> {
     match probe {
         Ok(version) => {
-            let capabilities = catalog.capabilities(backend, Some(&version));
-            let warning = match (capabilities.profile_match, &capabilities.profile_version) {
-                (Some(ProfileMatch::Fallback), Some(profile)) => Some(format!(
-                    "Warning: no bundled profile for {} {version}; using {profile} (profile_match=fallback).",
+            if let Some(minimum) = catalog.unsupported_minimum(backend, &version) {
+                return Err(CafleetError::App(format!(
+                    "unsupported native version for {}: {version}; minimum supported version is {minimum}",
                     backend.name()
-                )),
-                _ => None,
-            };
-            NativeLaunchIdentity {
+                )));
+            }
+            let capabilities = catalog.capabilities(backend, Some(&version));
+            Ok(NativeLaunchIdentity {
                 native_version: Some(version),
                 profile_version: capabilities.profile_version,
-                profile_match: capabilities.profile_match,
                 coverage: capabilities.detection,
-                warning,
-            }
+                warning: None,
+            })
         }
-        Err(cause) => NativeLaunchIdentity {
+        Err(cause) => Ok(NativeLaunchIdentity {
             native_version: None,
             profile_version: None,
-            profile_match: None,
             coverage: Coverage::Unknown,
             warning: Some(format!(
                 "Warning: native version unavailable for {}: {}; coverage unknown.",
                 backend.name(),
                 cause.message()
             )),
-        },
+        }),
     }
 }
 
@@ -137,13 +144,13 @@ impl CodingAgent {
 }
 
 pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {
-    let pattern = Regex::new(VERSION_TOKEN).expect("valid version token pattern");
     let tokens = line
         .split_whitespace()
-        .filter(|token| pattern.is_match(token))
+        .map(|token| token.strip_prefix('v').unwrap_or(token))
+        .filter(|token| NativeVersion::parse(token).is_some())
         .collect::<Vec<_>>();
     match tokens.as_slice() {
-        [version] => Ok(version.strip_prefix('v').unwrap_or(version)),
+        [version] => Ok(version),
         [] => Err("printed no version token"),
         _ => Err("printed several version tokens"),
     }
@@ -173,6 +180,37 @@ mod tests {
         );
         assert_eq!(
             version_token("opencode v2.1.4 v2.1.5"),
+            Err("printed several version tokens")
+        );
+    }
+
+    #[test]
+    fn version_token_accepts_semver_prerelease_and_build_metadata_together() {
+        for (line, expected) in [
+            ("v2.1.310-beta.1+build.5", "2.1.310-beta.1+build.5"),
+            ("codex-cli 1.0.0+exp.sha.5114f85", "1.0.0+exp.sha.5114f85"),
+        ] {
+            assert_eq!(version_token(line), Ok(expected), "{line}");
+        }
+    }
+
+    #[test]
+    fn version_token_requires_one_complete_canonical_semver_token() {
+        for line in [
+            "codex 2.1",
+            "codex 2.1.302.1",
+            "codex 01.2.3",
+            "codex 1.2.3-01",
+        ] {
+            assert_eq!(
+                version_token(line),
+                Err("printed no version token"),
+                "{line}"
+            );
+        }
+        assert_eq!(version_token("codex 2.1 build 2.1.302"), Ok("2.1.302"));
+        assert_eq!(
+            version_token("2.1.302 1.0.0-beta"),
             Err("printed several version tokens")
         );
     }
@@ -274,30 +312,88 @@ mod tests {
             );
         }
 
+        use crate::coding_agent::profiles::catalog::test_support::{
+            BUNDLED_BOUNDARIES, inspection_fixture_definition, thresholds,
+        };
+
+        fn launched(
+            backend: CodingAgent,
+            version: &str,
+            catalog: &ProfileCatalog,
+        ) -> NativeLaunchIdentity {
+            native_launch_identity(backend, Ok(version.into()), catalog)
+                .unwrap_or_else(|error| panic!("{backend:?} {version}: {}", error.message()))
+        }
+
         #[test]
-        fn native_launch_identity_selects_the_bundled_profile_or_records_unknown_with_a_warning() {
+        fn native_launch_identity_selects_the_boundary_profile_from_its_minimum_onwards() {
             let catalog = ProfileCatalog::bundled().unwrap();
-            let tested =
-                native_launch_identity(CodingAgent::Claude, Ok("2.1.302".into()), &catalog);
-            assert_eq!(tested.native_version.as_deref(), Some("2.1.302"));
+            for boundary in BUNDLED_BOUNDARIES {
+                let backend = boundary.backend;
+                for version in std::iter::once(boundary.min_version).chain(boundary.later) {
+                    let identity = launched(backend, version, &catalog);
+                    assert_eq!(identity.native_version.as_deref(), Some(version));
+                    assert_eq!(
+                        identity.profile_version.as_deref(),
+                        Some(boundary.profile_version),
+                        "{backend:?} {version}"
+                    );
+                    assert_eq!(identity.coverage, Coverage::Tested, "{backend:?} {version}");
+                    assert_eq!(
+                        identity.warning, None,
+                        "{backend:?} {version} launches without a version-mismatch warning"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn native_launch_identity_rejects_a_known_version_below_the_lowest_boundary() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for boundary in BUNDLED_BOUNDARIES {
+                let below = boundary.below;
+                let error =
+                    match native_launch_identity(boundary.backend, Ok(below.into()), &catalog) {
+                        Err(error) => error,
+                        Ok(_) => panic!("{:?} {below} must not launch", boundary.backend),
+                    };
+                assert_eq!(error.exit_code(), 1, "{below}");
+                assert_eq!(
+                    error.message(),
+                    format!(
+                        "unsupported native version for {}: {below}; minimum supported version is {}",
+                        boundary.backend.name(),
+                        boundary.min_version
+                    )
+                );
+            }
+            let several = ProfileCatalog::from_definitions(&thresholds(&[
+                ("high", "2.0.0"),
+                ("low", "1.0.0"),
+            ]))
+            .unwrap();
+            let error =
+                match native_launch_identity(CodingAgent::Codex, Ok("0.9.0".into()), &several) {
+                    Err(error) => error,
+                    Ok(_) => panic!("0.9.0 is below every boundary"),
+                };
             assert_eq!(
-                tested.profile_version,
-                catalog
-                    .capabilities(CodingAgent::Claude, Some("2.1.302"))
-                    .profile_version
+                error.message(),
+                "unsupported native version for codex: 0.9.0; minimum supported version is 1.0.0"
             );
-            assert!(tested.profile_version.is_some());
-            assert_eq!(tested.profile_match, Some(ProfileMatch::Exact));
-            assert_eq!(tested.coverage, Coverage::Tested);
-            assert_eq!(tested.warning, None);
+        }
+
+        #[test]
+        fn native_launch_identity_launches_a_failed_probe_with_unknown_coverage_and_its_warning() {
+            let catalog = ProfileCatalog::bundled().unwrap();
             let failed = native_launch_identity(
                 CodingAgent::Codex,
                 Err(CafleetError::App("probe exited with status 1".into())),
                 &catalog,
-            );
+            )
+            .unwrap_or_else(|error| panic!("a failed probe still launches: {}", error.message()));
             assert_eq!(failed.native_version, None);
             assert_eq!(failed.profile_version, None);
-            assert_eq!(failed.profile_match, None);
             assert_eq!(failed.coverage, Coverage::Unknown);
             assert_eq!(
                 failed.warning.as_deref(),
@@ -308,44 +404,13 @@ mod tests {
         }
 
         #[test]
-        fn native_launch_identity_runs_an_unprofiled_version_under_the_newest_bundled_profile() {
-            let catalog = ProfileCatalog::bundled().unwrap();
-            for (backend, pinned, probes) in
-                crate::coding_agent::profiles::catalog::test_support::BUNDLED_PROBES
-            {
-                let profile = catalog
-                    .capabilities(backend, Some(pinned))
-                    .profile_version
-                    .expect("each backend bundles a profile for its pinned version");
-                for probe in probes {
-                    let identity = native_launch_identity(backend, Ok(probe.into()), &catalog);
-                    assert_eq!(identity.native_version.as_deref(), Some(probe));
-                    assert_eq!(identity.coverage, Coverage::Tested, "{backend:?} {probe}");
-                    assert_eq!(
-                        identity.warning,
-                        Some(format!(
-                            "Warning: no bundled profile for {} {probe}; using {profile} (profile_match=fallback).",
-                            backend.name()
-                        ))
-                    );
-                }
-                let exact_identity = native_launch_identity(backend, Ok(pinned.into()), &catalog);
-                assert_eq!(exact_identity.profile_match, Some(ProfileMatch::Exact));
-                assert_eq!(exact_identity.warning, None);
-            }
-        }
-
-        #[test]
         fn native_launch_identity_without_any_profile_for_the_backend_records_unknown_silently() {
-            let catalog = ProfileCatalog::from_definitions(
-                &crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition(),
-            )
-            .unwrap();
+            let catalog =
+                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
             for backend in [CodingAgent::Claude, CodingAgent::Opencode] {
-                let identity = native_launch_identity(backend, Ok("2.1.302".into()), &catalog);
+                let identity = launched(backend, "2.1.302", &catalog);
                 assert_eq!(identity.native_version.as_deref(), Some("2.1.302"));
                 assert_eq!(identity.profile_version, None);
-                assert_eq!(identity.profile_match, None);
                 assert_eq!(identity.coverage, Coverage::Unknown);
                 assert_eq!(identity.warning, None);
             }

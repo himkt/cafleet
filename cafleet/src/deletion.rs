@@ -970,7 +970,6 @@ mod tests {
                         event_evidence: old_run.event_evidence,
                         native_version: old_run.native_version.clone(),
                         profile_version: old_run.profile_version.clone(),
-                        profile_match: old_run.profile_match,
                         coverage: old_run.coverage,
                         owner_pid: old_run.owner_pid,
                         owner_start_identity: old_run.owner_start_identity.clone(),

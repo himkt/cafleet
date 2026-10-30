@@ -13,7 +13,6 @@ stored_enum!(OwnerKind, "member_runs.owner_kind", { Creator => "creator", Runner
 stored_enum!(Reachability, "member_runs.reachability", { Reachable => "reachable", Suspect => "suspect" });
 stored_enum!(CleanupState, "member_runs.cleanup_state", { Complete => "complete", Incomplete => "incomplete" });
 stored_enum!(Coverage, "member_runs.coverage", { Tested => "tested", Unknown => "unknown" });
-stored_enum!(ProfileMatch, "member_runs.profile_match", { Exact => "exact", Fallback => "fallback" });
 stored_enum!(EventEvidence, "member_runs.event_evidence", { Metadata => "metadata", Redacted => "redacted" });
 stored_enum!(AutomaticReview, "effective_policy.automatic_review", { Available => "available", Unavailable => "unavailable" });
 stored_enum!(InteractionClass, "member_interactions.classification", {
@@ -29,7 +28,8 @@ stored_enum!(test_values RuntimeEventKind,"member_runtime_events.kind", {
     InteractionObscured => "interaction_obscured", InteractionClosed => "interaction_closed",
     PermissionDeniedObserved => "permission_denied_observed",
     AutomaticRefusalObserved => "automatic_refusal_observed",
-    AutomaticReviewUnavailable => "automatic_review_unavailable", RunnerDegraded => "runner_degraded",
+    AutomaticReviewUnavailable => "automatic_review_unavailable",
+    InputDeliveryResult => "input_delivery_result", RunnerDegraded => "runner_degraded",
     RunnerLost => "runner_lost", RunnerExited => "runner_exited"
 });
 stored_enum!(RuntimeCauseKind, "cause.kind", {
@@ -82,7 +82,6 @@ pub(crate) struct NewRun {
     pub(crate) event_evidence: EventEvidence,
     pub(crate) native_version: Option<String>,
     pub(crate) profile_version: Option<String>,
-    pub(crate) profile_match: Option<ProfileMatch>,
     pub(crate) coverage: Coverage,
     pub(crate) owner_pid: i64,
     pub(crate) owner_start_identity: String,
@@ -108,7 +107,6 @@ pub(crate) struct RunRecord {
     pub(crate) created_at: String,
     pub(crate) native_version: Option<String>,
     pub(crate) profile_version: Option<String>,
-    pub(crate) profile_match: Option<ProfileMatch>,
     pub(crate) effective_policy_json: Option<Value>,
     pub(crate) owner_epoch: i64,
     pub(crate) owner_kind: OwnerKind,
@@ -239,6 +237,33 @@ pub(crate) struct InputOperation {
     pub(crate) disposition: Option<InputDisposition>,
     pub(crate) evidence_ref: Option<String>,
     pub(crate) permission_response: Option<PermissionResponseRecord>,
+    pub(crate) delivery_method: Option<DeliveryMethod>,
+    pub(crate) delivery_reason: Option<String>,
+    pub(crate) deferred_at: Option<String>,
+    pub(crate) defer_reason: Option<String>,
+    pub(crate) payload_digest_version: i64,
+}
+
+stored_enum!(DeliveryStatus, "delivery.status", {
+    Submitted => "submitted", Queued => "queued", Held => "held", Uncertain => "uncertain",
+    NotSubmitted => "not_submitted", NotApplicable => "not_applicable"
+});
+stored_enum!(DeliveryMethod, "member_input_operations.delivery_method", {
+    Profile => "profile", Fallback => "fallback", Unwrapped => "unwrapped"
+});
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DeliveryProjection {
+    pub(crate) status: DeliveryStatus,
+    pub(crate) method: Option<DeliveryMethod>,
+    pub(crate) reason: Option<String>,
+}
+impl DeliveryProjection {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({"status":self.status.as_str(),
+            "method":self.method.map(DeliveryMethod::as_str),"reason":self.reason})
+    }
 }
 
 stored_enum!(values PermissionDecision, "member_permission_responses.decision", { Allow => "allow", Deny => "deny" });

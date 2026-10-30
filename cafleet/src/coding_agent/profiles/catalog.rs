@@ -1,7 +1,8 @@
 use super::composer::{ComposerOperation, ComposerSubmission};
 use super::detector::ObservationKind;
 use super::{AnswerCapability, CodingAgent, PermissionDecision};
-use crate::broker::runtime::{Coverage, ProfileMatch};
+use crate::broker::runtime::Coverage;
+use crate::coding_agent::NativeVersion;
 use crate::error::CafleetError;
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -67,6 +68,9 @@ fn expression(value: &Value) -> Result<Regex> {
 fn unique(ids: &mut BTreeSet<String>, id: &str) -> Result<()> {
     require(ids.insert(id.into()), "duplicate profile identity")
 }
+fn semver(value: &Value) -> Result<NativeVersion> {
+    NativeVersion::parse(&text(value)?).ok_or_else(|| invalid("canonical SemVer version required"))
+}
 fn lower_hex(value: &str) -> bool {
     value
         .bytes()
@@ -77,7 +81,7 @@ pub(super) struct Fixture {
     pub(crate) id: String,
     pub(crate) native: bool,
     pub(crate) backend: CodingAgent,
-    pub(crate) version: String,
+    pub(crate) version: NativeVersion,
 }
 #[derive(Clone)]
 pub(super) struct Capture {
@@ -235,7 +239,8 @@ impl AnswerPlan {
 #[derive(Clone)]
 pub(super) struct Profile {
     pub(crate) backend: CodingAgent,
-    pub(crate) versions: Vec<String>,
+    pub(crate) min_version: NativeVersion,
+    pub(crate) min_version_text: String,
     pub(crate) version: String,
     pub(crate) rules: Vec<Rule>,
     pub(crate) detection: Option<Capability>,
@@ -244,60 +249,19 @@ pub(super) struct Profile {
     pub(crate) submissions: [Option<ComposerSubmission>; 2],
     pub(crate) answers: Vec<Answer>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum VersionComponent {
-    Number(u64),
-    Text(String),
+struct Interval<'a> {
+    min: &'a NativeVersion,
+    next: Option<&'a NativeVersion>,
 }
-#[derive(Debug, Clone)]
-struct DottedVersion(Vec<VersionComponent>);
-impl PartialEq for DottedVersion {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other).is_eq()
-    }
-}
-impl Eq for DottedVersion {}
-impl DottedVersion {
-    fn parse(version: &str) -> Self {
-        Self(
-            version
-                .split('.')
-                .map(|part| {
-                    part.parse().map_or_else(
-                        |_| VersionComponent::Text(part.into()),
-                        VersionComponent::Number,
-                    )
-                })
-                .collect(),
-        )
-    }
-}
-impl Ord for DottedVersion {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let missing = VersionComponent::Number(0);
-        (0..self.0.len().max(other.0.len()))
-            .map(|index| {
-                let left = self.0.get(index).unwrap_or(&missing);
-                let right = other.0.get(index).unwrap_or(&missing);
-                left.cmp(right)
-            })
-            .find(|ordering| ordering.is_ne())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    }
-}
-impl PartialOrd for DottedVersion {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+impl Interval<'_> {
+    fn contains(&self, version: &NativeVersion) -> bool {
+        version.precedence(self.min).is_ge()
+            && self
+                .next
+                .is_none_or(|next| version.precedence(next).is_lt())
     }
 }
 impl Profile {
-    fn newest_version(&self) -> DottedVersion {
-        self.versions
-            .iter()
-            .map(|version| DottedVersion::parse(version))
-            .max()
-            .expect("catalog validation requires every profile to declare a native version")
-    }
     pub(super) fn answer_plan(
         &self,
         version: &str,
@@ -336,7 +300,6 @@ pub(crate) struct NativeCapabilities {
     #[cfg(test)]
     pub(crate) native_version: Option<String>,
     pub(crate) profile_version: Option<String>,
-    pub(crate) profile_match: Option<ProfileMatch>,
     pub(crate) detection: Coverage,
     #[cfg(test)]
     pub(crate) composer: Coverage,
@@ -698,7 +661,7 @@ fn validate_continuation(
     rule: &Rule,
     rules: &[Rule],
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<()> {
     let Some(continuation) = &rule.continuation else {
@@ -722,7 +685,7 @@ fn validate_continuation(
             .any(|choice| choice.id == continuation.choice_id),
         "continuation names an unknown continued choice",
     )?;
-    provenance(&continuation.fixtures, backend, versions, fixtures)?;
+    provenance(&continuation.fixtures, backend, interval, fixtures)?;
     require(
         continuation.fixtures.iter().all(|id| {
             fixtures
@@ -735,26 +698,21 @@ fn validate_continuation(
 fn provenance(
     ids: &[String],
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<()> {
     require(!ids.is_empty(), "capability provenance required")?;
-    let mut covered = BTreeSet::new();
     for id in ids {
         let f = fixtures
             .iter()
             .find(|f| &f.id == id)
             .ok_or_else(|| invalid("unknown fixture"))?;
         require(
-            f.backend == backend && versions.contains(&f.version),
-            "fixture backend/version mismatch",
+            f.backend == backend && interval.contains(&f.version),
+            "fixture backend or capture version outside the profile interval",
         )?;
-        covered.insert(f.version.as_str());
     }
-    require(
-        versions.iter().all(|v| covered.contains(v.as_str())),
-        "every exact version needs compatible provenance",
-    )
+    Ok(())
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
@@ -781,7 +739,7 @@ fn capability(
     group: Group,
     rules: &[Rule],
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<Option<Capability>> {
     if value.is_null() {
@@ -805,7 +763,7 @@ fn capability(
             "capability rule component mismatch",
         )?;
     }
-    provenance(&texts(&m["fixture_ids"])?, backend, versions, fixtures)?;
+    provenance(&texts(&m["fixture_ids"])?, backend, interval, fixtures)?;
     Ok(Some(Capability { rules: ids }))
 }
 
@@ -823,7 +781,7 @@ fn composer_submission(
     value: &Value,
     operation: ComposerOperation,
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<Option<ComposerSubmission>> {
     if value.is_null() {
@@ -845,7 +803,7 @@ fn composer_submission(
         "composer submit requires 1–32 lowercase hexadecimal bytes",
     )?;
     let fixture_ids = texts(&m["fixture_ids"])?;
-    provenance(&fixture_ids, backend, versions, fixtures)?;
+    provenance(&fixture_ids, backend, interval, fixtures)?;
     Ok(Some(ComposerSubmission {
         prefix: decoded_hex(prefix),
         submit: decoded_hex(submit),
@@ -856,7 +814,7 @@ fn composer_submission(
 fn composer_submissions(
     value: &Value,
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<[Option<ComposerSubmission>; 2]> {
     let Some(submission) = value.get("submission") else {
@@ -868,14 +826,14 @@ fn composer_submissions(
             &m["prompt"],
             ComposerOperation::Prompt,
             backend,
-            versions,
+            interval,
             fixtures,
         )?,
         composer_submission(
             &m["exec"],
             ComposerOperation::Exec,
             backend,
-            versions,
+            interval,
             fixtures,
         )?,
     ])
@@ -968,6 +926,25 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = bundled![
     "opencode-2.1.4-deny-pre-stage-3",
     "opencode-2.1.4-focus-always-1",
     "opencode-2.1.4-idle-composer-1",
+    "claude-2.1.308-prompt-empty-composer-1",
+    "claude-2.1.308-prompt-typed-literal-1",
+    "claude-2.1.308-prompt-post-submit-1",
+    "claude-2.1.308-exec-empty-composer-1",
+    "claude-2.1.308-exec-typed-literal-1",
+    "claude-2.1.308-exec-post-submit-1",
+    "codex-0.163.0-prompt-empty-composer-1",
+    "codex-0.163.0-prompt-typed-literal-1",
+    "codex-0.163.0-prompt-post-submit-1",
+    "codex-0.163.0-exec-empty-composer-1",
+    "codex-0.163.0-exec-typed-literal-1",
+    "codex-0.163.0-exec-post-submit-1",
+    "opencode-2.1.4-prompt-empty-composer-1",
+    "opencode-2.1.4-prompt-typed-literal-1",
+    "opencode-2.1.4-prompt-post-submit-1",
+    "opencode-2.1.4-exec-empty-composer-1",
+    "opencode-2.1.4-exec-typed-literal-1",
+    "opencode-2.1.4-exec-post-submit-1",
+    "claude-2.1.308-auto-tip-padded-question-1",
 ];
 
 fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {
@@ -1174,28 +1151,44 @@ impl ProfileCatalog {
                 id,
                 native,
                 backend: backend(&m["backend"])?,
-                version: text(&m["native_version"])?,
+                version: semver(&m["native_version"])?,
             });
         }
-        let mut profiles = Vec::new();
-        let mut selections = BTreeSet::new();
+        let mut headers = Vec::new();
         for v in array(&root["profiles"])? {
             let m = object(
                 v,
                 &[
                     "backend",
-                    "native_versions",
+                    "min_version",
                     "profile_version",
                     "rules",
                     "capabilities",
                 ],
             )?;
-            let backend = backend(&m["backend"])?;
-            let versions = texts(&m["native_versions"])?;
-            require(!versions.is_empty(), "exact native versions required")?;
-            for version in &versions {
-                unique(&mut selections, &format!("{}:{version}", backend.name()))?;
-            }
+            headers.push((m, backend(&m["backend"])?, semver(&m["min_version"])?));
+        }
+        for (index, (_, backend, min)) in headers.iter().enumerate() {
+            require(
+                headers[..index]
+                    .iter()
+                    .all(|(_, other, earlier)| other != backend || earlier.precedence(min).is_ne()),
+                "equal-precedence profile thresholds for one backend",
+            )?;
+        }
+        let mut profiles = Vec::new();
+        for (m, backend, min_version) in &headers {
+            let (m, backend) = (*m, *backend);
+            let interval = Interval {
+                min: min_version,
+                next: headers
+                    .iter()
+                    .filter(|(_, other, threshold)| {
+                        *other == backend && threshold.precedence(min_version).is_gt()
+                    })
+                    .map(|(_, _, threshold)| threshold)
+                    .min_by(|a, b| a.precedence(b)),
+            };
             let version = text(&m["profile_version"])?;
             let rules = array(&m["rules"])?
                 .iter()
@@ -1206,7 +1199,7 @@ impl ProfileCatalog {
                 unique(&mut rule_ids, &rule.id)?;
             }
             for rule in &rules {
-                validate_continuation(rule, &rules, backend, &versions, &fixtures)?;
+                validate_continuation(rule, &rules, backend, &interval, &fixtures)?;
             }
             let c = object(
                 &m["capabilities"],
@@ -1217,7 +1210,7 @@ impl ProfileCatalog {
                 Group::Detection,
                 &rules,
                 backend,
-                &versions,
+                &interval,
                 &fixtures,
             )?;
             let composer = capability(
@@ -1225,7 +1218,7 @@ impl ProfileCatalog {
                 Group::Composer,
                 &rules,
                 backend,
-                &versions,
+                &interval,
                 &fixtures,
             )?;
             let annotations = capability(
@@ -1233,7 +1226,7 @@ impl ProfileCatalog {
                 Group::Annotations,
                 &rules,
                 backend,
-                &versions,
+                &interval,
                 &fixtures,
             )?;
             require(
@@ -1247,7 +1240,7 @@ impl ProfileCatalog {
                     }),
                 "every annotation rule belongs to the annotations group",
             )?;
-            let submissions = composer_submissions(&c["composer"], backend, &versions, &fixtures)?;
+            let submissions = composer_submissions(&c["composer"], backend, &interval, &fixtures)?;
             let mut answers = Vec::new();
             let mut decisions = BTreeSet::new();
             for v in array(&c["answers"])? {
@@ -1327,7 +1320,7 @@ impl ProfileCatalog {
                 }
                 validate_gates(&compiled_stages, rule, &rules, &choice_id, &focus)?;
                 let fixture_ids = texts(&a["fixture_ids"])?;
-                provenance(&fixture_ids, backend, &versions, &fixtures)?;
+                provenance(&fixture_ids, backend, &interval, &fixtures)?;
                 answers.push(Answer {
                     decision,
                     request,
@@ -1340,7 +1333,8 @@ impl ProfileCatalog {
             }
             profiles.push(Profile {
                 backend,
-                versions,
+                min_version: min_version.clone(),
+                min_version_text: text(&m["min_version"])?,
                 version,
                 rules,
                 detection,
@@ -1357,21 +1351,23 @@ impl ProfileCatalog {
         })
     }
     pub(super) fn matching(&self, backend: CodingAgent, version: Option<&str>) -> Option<&Profile> {
-        self.selection(backend, version).map(|(profile, _)| profile)
+        let version = NativeVersion::parse(version?)?;
+        self.profiles
+            .iter()
+            .filter(|p| p.backend == backend && p.min_version.precedence(&version).is_le())
+            .max_by(|a, b| a.min_version.precedence(&b.min_version))
     }
-    fn selection(
-        &self,
-        backend: CodingAgent,
-        version: Option<&str>,
-    ) -> Option<(&Profile, ProfileMatch)> {
-        let version = version?;
-        let candidates = || self.profiles.iter().filter(|p| p.backend == backend);
-        if let Some(exact) = candidates().find(|p| p.versions.iter().any(|s| s == version)) {
-            return Some((exact, ProfileMatch::Exact));
-        }
-        candidates()
-            .max_by(|a, b| a.newest_version().cmp(&b.newest_version()))
-            .map(|newest| (newest, ProfileMatch::Fallback))
+    pub(crate) fn unsupported_minimum(&self, backend: CodingAgent, version: &str) -> Option<&str> {
+        let version = NativeVersion::parse(version)?;
+        let lowest = self
+            .profiles
+            .iter()
+            .filter(|p| p.backend == backend)
+            .min_by(|a, b| a.min_version.precedence(&b.min_version))?;
+        version
+            .precedence(&lowest.min_version)
+            .is_lt()
+            .then_some(lowest.min_version_text.as_str())
     }
     pub(crate) fn rule_ids(&self) -> Vec<String> {
         self.profiles
@@ -1386,15 +1382,13 @@ impl ProfileCatalog {
         backend: CodingAgent,
         version: Option<&str>,
     ) -> NativeCapabilities {
-        let selection = self.selection(backend, version);
-        let profile = selection.map(|(profile, _)| profile);
+        let profile = self.matching(backend, version);
         NativeCapabilities {
             #[cfg(test)]
             backend,
             #[cfg(test)]
             native_version: version.map(str::to_owned),
             profile_version: profile.map(|p| p.version.clone()),
-            profile_match: selection.map(|(_, profile_match)| profile_match),
             detection: if profile.is_some_and(|p| p.detection.is_some()) {
                 Coverage::Tested
             } else {
@@ -1459,12 +1453,93 @@ pub(crate) mod test_support {
     use super::*;
     use serde_json::json;
 
-    /// Each backend's bundled exact version and two unbundled versions around it.
-    pub(crate) const BUNDLED_PROBES: [(CodingAgent, &str, [&str; 2]); 3] = [
-        (CodingAgent::Claude, "2.1.302", ["2.1.306", "2.1.301"]),
-        (CodingAgent::Codex, "0.163.0", ["0.164.0", "0.162.0"]),
-        (CodingAgent::Opencode, "2.1.4", ["2.1.5", "2.1.3"]),
+    pub(crate) struct BundledBoundary {
+        pub(crate) backend: CodingAgent,
+        pub(crate) min_version: &'static str,
+        pub(crate) profile_version: &'static str,
+        pub(crate) later: [&'static str; 2],
+        pub(crate) below: &'static str,
+    }
+
+    /// Each backend's first bundled boundary, later supported native versions
+    /// and a version below that boundary.
+    pub(crate) const BUNDLED_BOUNDARIES: [BundledBoundary; 3] = [
+        BundledBoundary {
+            backend: CodingAgent::Claude,
+            min_version: "2.1.302",
+            profile_version: "claude-2.1.302-auto-1",
+            later: ["2.1.308", "3.0.0-beta.1"],
+            below: "2.1.301",
+        },
+        BundledBoundary {
+            backend: CodingAgent::Codex,
+            min_version: "0.163.0",
+            profile_version: "codex-0.163.0-approve-for-me-1",
+            later: ["0.164.0", "1.0.0+build.7"],
+            below: "0.163.0-alpha.2",
+        },
+        BundledBoundary {
+            backend: CodingAgent::Opencode,
+            min_version: "2.1.4",
+            profile_version: "opencode-2.1.4-cafleet-ask-1",
+            later: ["2.1.40", "2.10.0"],
+            below: "2.1.3",
+        },
     ];
+
+    pub(crate) fn fixture_at(id: &str, version: &str) -> Value {
+        let mut fixture = synthetic_definitions()["fixtures"][0].clone();
+        fixture["id"] = json!(id);
+        fixture["native_version"] = json!(version);
+        fixture
+    }
+
+    /// A Codex catalog whose profiles are `(profile_version, min_version)`
+    /// thresholds, each citing one fixture captured at its boundary for
+    /// detection, composer observation, both composer operations, annotations
+    /// and an allow answer.
+    pub(crate) fn thresholds(profiles: &[(&str, &str)]) -> Value {
+        thresholds_for(CodingAgent::Codex, profiles)
+    }
+
+    pub(crate) fn thresholds_for(backend: CodingAgent, profiles: &[(&str, &str)]) -> Value {
+        let base = annotation::annotated();
+        let composer = simple_definition("composer_empty", true)["profiles"][0]["rules"][0].clone();
+        let mut value = base.clone();
+        value["fixtures"] = json!([]);
+        value["profiles"] = json!([]);
+        for (name, min) in profiles {
+            let id = format!("{FIXTURE}-{}-{name}", backend.name());
+            let mut fixture = fixture_at(&id, min);
+            fixture["backend"] = json!(backend.name());
+            value["fixtures"].as_array_mut().unwrap().push(fixture);
+            let mut profile = base["profiles"][0].clone();
+            profile["backend"] = json!(backend.name());
+            profile["min_version"] = json!(min);
+            profile["profile_version"] = json!(name);
+            profile["rules"]
+                .as_array_mut()
+                .unwrap()
+                .push(composer.clone());
+            let capabilities = &mut profile["capabilities"];
+            capabilities["detection"]["fixture_ids"] = json!([id]);
+            capabilities["annotations"]["fixture_ids"] = json!([id]);
+            capabilities["composer"] = json!({
+                "rule_ids":["synthetic-composer_empty"],"fixture_ids":[id],
+                "submission":{
+                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":[id]},
+                    "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[id]}
+                }
+            });
+            capabilities["answers"] = json!([{
+                "decision":"allow","request_rule_id":RULE,"answer_rule_id":format!("{name}-allow-plan"),
+                "choice_id":"allow-once","focus_matcher_id":"allow","fixture_ids":[id],
+                "stages":[{"bytes_hex":"78","required_rule_id":RULE,"required_choice_id":"allow-once"}]
+            }]);
+            value["profiles"].as_array_mut().unwrap().push(profile);
+        }
+        value
+    }
 
     pub(crate) fn bundled_fixture(id: &str) -> (&'static str, &'static [u8]) {
         let source = format!("native/{id}.json");
@@ -1481,6 +1556,28 @@ pub(crate) mod test_support {
 
     pub(crate) fn bundled_definitions() -> Value {
         serde_json::from_str(BUNDLED_DEFINITIONS).unwrap()
+    }
+
+    /// The fixtures a bundled profile cites as composer prompt/exec submission provenance.
+    pub(crate) fn submission_fixture_ids(backend: CodingAgent) -> BTreeSet<String> {
+        let definitions = bundled_definitions();
+        let profile = definitions["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|profile| profile["backend"] == backend.name())
+            .expect("bundled backend profile");
+        ["prompt", "exec"]
+            .iter()
+            .flat_map(|operation| {
+                profile["capabilities"]["composer"]["submission"][operation]["fixture_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|id| id.as_str().unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
     }
 
     pub(crate) fn bundled_entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
@@ -1515,8 +1612,8 @@ pub(crate) mod test_support {
     pub(crate) fn synthetic_definitions() -> Value {
         json!({
             "schema_version":1,
-            "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"synthetic-0.0.1","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773"}],
-            "profiles":[{"backend":"codex","native_versions":["synthetic-0.0.1"],"profile_version":"synthetic-profile-1",
+            "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"0.0.1-synthetic","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773"}],
+            "profiles":[{"backend":"codex","min_version":"0.0.1-synthetic","profile_version":"synthetic-profile-1",
                 "rules":[{"id":"synthetic-permission","priority":100,"observation":"permission_request",
                     "region":{"screen":"either","start_pattern":"^Synthetic permission request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"at_end"},
                     "matchers":[
@@ -1706,7 +1803,7 @@ pub(crate) mod test_support {
         )
         .into_bytes()
     }
-    pub(crate) const VERSION: &str = "synthetic-0.0.1";
+    pub(crate) const VERSION: &str = "0.0.1-synthetic";
     pub(crate) const PROFILE: &str = "synthetic-profile-1";
     pub(crate) const RULE: &str = "synthetic-permission";
     pub(crate) const FIXTURE: &str = "synthetic-permission-1";
@@ -1796,7 +1893,7 @@ mod tests {
     use super::test_support::synthetic_definitions as definitions;
     use super::test_support::*;
     use crate::broker::runtime::{
-        Coverage, InteractionClass, InteractionCloseReason, ProfileMatch, RuntimeEventKind,
+        Coverage, InteractionClass, InteractionCloseReason, RuntimeEventKind,
         evidence::EvidencePolicy,
     };
     use crate::coding_agent::profiles::composer::test_support::*;
@@ -1987,14 +2084,14 @@ mod tests {
             let plan = catalog
                 .answer_plan(
                     CodingAgent::Codex,
-                    "synthetic-0.0.1",
+                    "0.0.1-synthetic",
                     "synthetic-permission",
                     decision,
                 )
                 .unwrap();
             let capability = plan.capability();
             assert_eq!(capability.backend(), CodingAgent::Codex);
-            assert_eq!(capability.native_version(), "synthetic-0.0.1");
+            assert_eq!(capability.native_version(), "0.0.1-synthetic");
             assert_eq!(capability.profile_version(), "synthetic-profile-1");
             assert_eq!(capability.request_rule_id(), "synthetic-permission");
             assert_eq!(capability.answer_rule_id(), rule);
@@ -2017,16 +2114,16 @@ mod tests {
             catalog
                 .answer_plan(
                     CodingAgent::Claude,
-                    "synthetic-0.0.1",
+                    "0.0.1-synthetic",
                     "synthetic-permission",
                     PermissionDecision::Allow
                 )
                 .is_none()
         );
         for (version, rule, decision) in [
-            ("synthetic-0.0.1", "unknown", PermissionDecision::Allow),
+            ("0.0.1-synthetic", "unknown", PermissionDecision::Allow),
             (
-                "synthetic-0.0.1",
+                "0.0.1-synthetic",
                 "inspection-alternate-request",
                 PermissionDecision::Deny,
             ),
@@ -2042,7 +2139,7 @@ mod tests {
                 .unwrap()
                 .answer_plan(
                     CodingAgent::Codex,
-                    "synthetic-0.0.1",
+                    "0.0.1-synthetic",
                     "synthetic-permission",
                     PermissionDecision::Allow
                 )
@@ -2061,7 +2158,7 @@ mod tests {
         let plan = catalog
             .answer_plan(
                 CodingAgent::Codex,
-                "synthetic-0.0.1",
+                "0.0.1-synthetic",
                 "synthetic-permission",
                 PermissionDecision::Allow,
             )
@@ -2117,13 +2214,11 @@ mod tests {
         assert_eq!(supported.backend, CodingAgent::Codex);
         assert_eq!(supported.native_version.as_deref(), Some(VERSION));
         assert_eq!(supported.profile_version.as_deref(), Some(PROFILE));
-        assert_eq!(supported.profile_match, Some(ProfileMatch::Exact));
         assert_eq!(supported.detection, Coverage::Tested);
         assert_eq!(supported.composer, Coverage::Unknown);
         assert!(supported.answer_decisions.is_empty());
         let unknown = catalog.capabilities(CodingAgent::Codex, None);
         assert_eq!(unknown.profile_version, None);
-        assert_eq!(unknown.profile_match, None);
         assert_eq!(unknown.detection, Coverage::Unknown);
         assert_eq!(unknown.composer, Coverage::Unknown);
         assert!(unknown.answer_decisions.is_empty());
@@ -2264,7 +2359,9 @@ mod tests {
             ("/fixtures/0/cols", json!(-1)),
             ("/fixtures/0/sha256", json!("A".repeat(64))),
             ("/fixtures/0/source_ref", json!(" ")),
-            ("/profiles/0/native_versions", json!([])),
+            ("/profiles/0/min_version", json!(" ")),
+            ("/profiles/0/min_version", json!([VERSION])),
+            ("/profiles/0/min_version", Value::Null),
             ("/profiles/0/rules/0/priority", json!(1.5)),
             ("/profiles/0/rules/0/observation", json!("approved")),
             (
@@ -2298,7 +2395,9 @@ mod tests {
             value["profiles"].as_array_mut().unwrap().push(copy);
         });
         invalid(|value| {
-            value["profiles"][0]["native_versions"] = json!([VERSION, VERSION]);
+            let mut copy = value["profiles"][0].clone();
+            copy["profile_version"] = json!("synthetic-profile-2");
+            value["profiles"].as_array_mut().unwrap().push(copy);
         });
         for array in [
             "/profiles/0/rules",
@@ -2364,7 +2463,7 @@ mod tests {
     fn runtime_profile_capability_provenance_references_are_checked() {
         for (path, replacement) in [
             ("/fixtures/0/backend", json!("claude")),
-            ("/fixtures/0/native_version", json!("different-version")),
+            ("/fixtures/0/native_version", json!("0.0.0")),
             (
                 "/profiles/0/capabilities/detection/rule_ids",
                 json!(["missing-rule"]),
@@ -2382,13 +2481,6 @@ mod tests {
         invalid(|value| {
             value["profiles"][0]["capabilities"]["composer"] =
                 value["profiles"][0]["capabilities"]["detection"].clone();
-        });
-    }
-
-    #[test]
-    fn runtime_profile_each_declared_exact_version_needs_compatible_provenance() {
-        invalid(|value| {
-            value["profiles"][0]["native_versions"] = json!([VERSION, "synthetic-0.0.2"]);
         });
     }
 
@@ -2487,7 +2579,7 @@ mod tests {
         let catalog = ProfileCatalog::bundled().unwrap();
         for &backend in CodingAgent::all() {
             let unprobed = catalog.capabilities(backend, None);
-            assert_eq!(unprobed.profile_match, None);
+            assert_eq!(unprobed.profile_version, None);
             assert_eq!(unprobed.detection, Coverage::Unknown);
             assert_eq!(unprobed.composer, Coverage::Unknown);
             assert!(unprobed.answer_decisions.is_empty());
@@ -3092,7 +3184,7 @@ mod tests {
                                 .name()
                         )
                     } else {
-                        json!(VERSION_TWO)
+                        json!("0.0.0")
                     };
                     bad["fixtures"].as_array_mut().unwrap().push(foreign);
                     bad["profiles"][0]["capabilities"]["composer"]["submission"]
@@ -3104,24 +3196,12 @@ mod tests {
         }
 
         #[test]
-        fn composer_operation_provenance_covers_every_declared_exact_native_version() {
+        fn composer_operation_provenance_captured_inside_the_interval_serves_every_later_run() {
             let mut good = definition(Some("7e"), Some("6b6c"));
-            good["profiles"][0]["native_versions"] = json!([VERSION, VERSION_TWO]);
-            let originals = good["fixtures"].as_array().unwrap().clone();
-            for mut fixture in originals {
-                fixture["id"] = json!(format!("{}-v2", fixture["id"].as_str().unwrap()));
-                fixture["native_version"] = json!(VERSION_TWO);
-                good["fixtures"].as_array_mut().unwrap().push(fixture);
-            }
-            good["profiles"][0]["capabilities"]["composer"]["fixture_ids"] =
-                json!([FIXTURE, format!("{FIXTURE}-v2")]);
-            for (operation, fixture) in [
-                (ComposerOperation::Prompt, PROMPT_FIXTURE),
-                (ComposerOperation::Exec, EXEC_FIXTURE),
-            ] {
-                good["profiles"][0]["capabilities"]["composer"]["submission"]
-                    [operation_name(operation)]["fixture_ids"] =
-                    json!([fixture, format!("{fixture}-v2")]);
+            for fixture in good["fixtures"].as_array_mut().unwrap() {
+                if fixture["id"] != FIXTURE {
+                    fixture["native_version"] = json!(VERSION_TWO);
+                }
             }
             let catalog = ProfileCatalog::from_definitions(&good).unwrap();
             for (operation, fixture) in [
@@ -3129,17 +3209,11 @@ mod tests {
                 (ComposerOperation::Exec, EXEC_FIXTURE),
             ] {
                 let selected = catalog
-                    .composer_plan(CodingAgent::Codex, VERSION_TWO, operation)
-                    .unwrap();
-                assert_eq!(selected.native_version(), VERSION_TWO);
-                assert_eq!(
-                    selected.fixture_ids(),
-                    &[fixture.to_owned(), format!("{fixture}-v2")]
-                );
-                let mut bad = good.clone();
-                bad["profiles"][0]["capabilities"]["composer"]["submission"]
-                    [operation_name(operation)]["fixture_ids"] = json!([fixture]);
-                reject(&good, &bad, operation, "uncovered operation version");
+                    .composer_plan(CodingAgent::Codex, "7.0.0-beta.1", operation)
+                    .expect("a later run reuses the profile's plan");
+                assert_eq!(selected.native_version(), "7.0.0-beta.1");
+                assert_eq!(selected.profile_version(), PROFILE);
+                assert_eq!(selected.fixture_ids(), &[fixture.to_owned()]);
             }
         }
 
@@ -3236,7 +3310,7 @@ mod tests {
                 .find(|profile| profile["backend"] == "claude")
                 .expect("bundled Claude profile");
             assert_eq!(profile["profile_version"], PROFILE_VERSION);
-            assert_eq!(profile["native_versions"], json!([CLAUDE_VERSION]));
+            assert_eq!(profile["min_version"], CLAUDE_VERSION);
             let cited_by = |group: &str| {
                 profile["capabilities"][group]["fixture_ids"]
                     .as_array()
@@ -3399,11 +3473,17 @@ mod tests {
         const UNKNOWN: ObservationKind = ObservationKind::Unknown;
         const INDICATOR: (&str, Option<&str>) = (INDICATOR_RULE, None);
 
-        const CLASSIFICATION: [Expected; 38] = [
+        const CLASSIFICATION: [Expected; 39] = [
             (
                 "claude-2.1.302-access-allow-continuation-1",
                 COMPOSER,
                 IDLE_RULE,
+                &[],
+            ),
+            (
+                "claude-2.1.308-auto-tip-padded-question-1",
+                FORM,
+                TIP_RULE,
                 &[],
             ),
             (TIP_ALLOW_PRE_STAGE, FORM, TIP_RULE, &[]),
@@ -3649,7 +3729,6 @@ mod tests {
                 capabilities.profile_version.as_deref(),
                 Some(PROFILE_VERSION)
             );
-            assert_eq!(capabilities.profile_match, Some(ProfileMatch::Exact));
             assert_eq!(capabilities.detection, Coverage::Tested);
             let definitions: Value = serde_json::from_str(include_str!("bundled.json")).unwrap();
             let claude = definitions["profiles"]
@@ -3665,7 +3744,7 @@ mod tests {
             );
             let profile = claude[0];
             assert_eq!(profile["profile_version"], PROFILE_VERSION);
-            assert_eq!(profile["native_versions"], json!([CLAUDE_VERSION]));
+            assert_eq!(profile["min_version"], CLAUDE_VERSION);
             let group = |name: &str| {
                 profile["capabilities"][name]["rule_ids"]
                     .as_array()
@@ -3716,6 +3795,7 @@ mod tests {
                 .filter(|entry| entry["backend"] == "claude")
                 .map(|entry| entry["id"].as_str().unwrap().to_owned())
                 .filter(|id| !super::bundled_claude::PREDECESSOR_FIXTURES.contains(&id.as_str()))
+                .filter(|id| !submission_fixture_ids(CodingAgent::Claude).contains(id))
                 .collect::<BTreeSet<_>>();
             assert_eq!(ids, automatic, "every automatic-mode fixture is classified");
             for (id, kind, rule, annotations) in CLASSIFICATION {
@@ -4544,7 +4624,6 @@ mod tests {
                 capabilities.profile_version.as_deref(),
                 Some(PROFILE_VERSION)
             );
-            assert_eq!(capabilities.profile_match, Some(ProfileMatch::Exact));
             let definitions: Value = serde_json::from_str(include_str!("bundled.json")).unwrap();
             let codex = definitions["profiles"]
                 .as_array()
@@ -4590,6 +4669,7 @@ mod tests {
                 .filter(|entry| entry["backend"] == "codex")
                 .map(|entry| entry["id"].as_str().unwrap().to_owned())
                 .filter(|id| !super::bundled_codex::PREDECESSOR_FIXTURES.contains(&id.as_str()))
+                .filter(|id| !submission_fixture_ids(CodingAgent::Codex).contains(id))
                 .collect::<BTreeSet<_>>();
             assert_eq!(
                 CLASSIFICATION
@@ -4889,7 +4969,8 @@ mod tests {
         ];
 
         #[test]
-        fn each_bundled_profile_declares_detection_idle_composer_and_both_answers_only() {
+        fn each_bundled_profile_declares_detection_idle_composer_both_operations_and_both_answers()
+        {
             let bundled = ProfileCatalog::bundled().unwrap();
             for profile in [CLAUDE, CODEX, OPENCODE] {
                 let backend = profile.backend;
@@ -4902,10 +4983,10 @@ mod tests {
                 );
                 assert_eq!(declared.detection, Coverage::Tested, "{backend:?}");
                 assert_eq!(declared.composer, Coverage::Tested, "{backend:?}");
-                assert_eq!(declared.prompt_submission, Coverage::Unknown, "{backend:?}");
+                assert_eq!(declared.prompt_submission, Coverage::Tested, "{backend:?}");
                 assert_eq!(
                     declared.native_exec_submission,
-                    Coverage::Unknown,
+                    Coverage::Tested,
                     "{backend:?}"
                 );
                 assert_eq!(declared.answer_decisions.len(), 2, "{backend:?}");
@@ -4916,32 +4997,75 @@ mod tests {
                     );
                 }
                 assert_eq!(declared.capability_reason, None, "{backend:?}");
-                assert_eq!(
-                    declared.profile_match,
-                    Some(ProfileMatch::Exact),
-                    "{backend:?}"
-                );
                 let unknown = bundled.capabilities(backend, None);
                 assert_eq!(unknown.detection, Coverage::Unknown, "{backend:?}");
                 assert_eq!(unknown.composer, Coverage::Unknown, "{backend:?}");
                 assert_eq!(unknown.profile_version, None, "{backend:?}");
-                assert_eq!(unknown.profile_match, None, "{backend:?}");
                 assert!(unknown.answer_decisions.is_empty(), "{backend:?}");
                 assert!(unknown.capability_reason.is_some(), "{backend:?}");
                 for &other in CodingAgent::all().iter().filter(|&&other| other != backend) {
-                    let fallback = bundled.capabilities(other, Some(profile.version));
+                    let foreign = bundled.capabilities(other, Some(profile.version));
                     assert_ne!(
-                        fallback.profile_version.as_deref(),
+                        foreign.profile_version.as_deref(),
                         Some(profile.profile_version),
                         "{other:?} at {backend:?} {}",
                         profile.version
                     );
-                    assert_eq!(
-                        fallback.profile_match,
-                        Some(ProfileMatch::Fallback),
-                        "{other:?} at {backend:?} {}",
-                        profile.version
-                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_submission_fixtures_replay_their_composer_stages_through_the_production_catalog()
+        {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            for (profile, run) in [
+                (CLAUDE, "2.1.308"),
+                (CODEX, CODEX.version),
+                (OPENCODE, OPENCODE.version),
+            ] {
+                let backend = profile.backend;
+                let detector = Detector::new(&bundled, backend, Some(run));
+                for (operation, name) in [
+                    (ComposerOperation::Prompt, "prompt"),
+                    (ComposerOperation::Exec, "exec"),
+                ] {
+                    let plan = bundled
+                        .composer_plan(backend, run, operation)
+                        .unwrap_or_else(|| panic!("{backend:?} {name} plan"));
+                    assert_eq!(plan.native_version(), run);
+                    assert_eq!(plan.profile_version(), profile.profile_version);
+                    for id in plan.fixture_ids() {
+                        assert!(
+                            submission_fixture_ids(backend).contains(id),
+                            "{id} is declared submission provenance"
+                        );
+                        let document: Value =
+                            serde_json::from_slice(bundled_fixture(id).1).unwrap();
+                        let screen = replay_native_fixture(
+                            bundled_screen(id),
+                            |_| {},
+                            document["alternate_screen"].as_bool().unwrap(),
+                            None,
+                        );
+                        let observed = detector.observe(&screen).unwrap();
+                        assert!(
+                            !matches!(observed.kind, ObservationKind::Interaction(_)),
+                            "{id}: a composer stage is never an interaction"
+                        );
+                        if id.ends_with("-empty-composer-1") {
+                            assert_eq!(observed.kind, ObservationKind::ComposerEmpty, "{id}");
+                            assert!(observed.verified_noninteraction, "{id}");
+                        } else if id.ends_with("-typed-literal-1") {
+                            assert_ne!(
+                                observed.kind,
+                                ObservationKind::ComposerEmpty,
+                                "{id}: a typed literal is not an empty composer"
+                            );
+                        } else {
+                            assert!(id.ends_with("-post-submit-1"), "{id}");
+                        }
+                    }
                 }
             }
         }
@@ -5230,10 +5354,7 @@ mod tests {
         fn bundled_opencode_definitions_declare_the_form_reason_dialog_and_idle_rules() {
             let definitions = definitions();
             let capabilities = &profile(&definitions)["capabilities"];
-            assert_eq!(
-                profile(&definitions)["native_versions"],
-                json!([OPENCODE_VERSION])
-            );
+            assert_eq!(profile(&definitions)["min_version"], OPENCODE_VERSION);
             assert_eq!(profile(&definitions)["profile_version"], PROFILE_VERSION);
             assert_eq!(
                 capabilities["detection"]["rule_ids"],
@@ -5248,7 +5369,21 @@ mod tests {
                 capabilities["composer"]["fixture_ids"],
                 json!([IDLE_FIXTURE])
             );
-            assert!(capabilities["composer"].get("submission").is_none());
+            assert_eq!(
+                capabilities["composer"]["submission"],
+                json!({
+                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":[
+                        "opencode-2.1.4-prompt-empty-composer-1",
+                        "opencode-2.1.4-prompt-typed-literal-1",
+                        "opencode-2.1.4-prompt-post-submit-1"
+                    ]},
+                    "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[
+                        "opencode-2.1.4-exec-empty-composer-1",
+                        "opencode-2.1.4-exec-typed-literal-1",
+                        "opencode-2.1.4-exec-post-submit-1"
+                    ]}
+                })
+            );
             let reason = rule(&definitions, REASON_RULE);
             assert_eq!(reason["observation"], "permission_continuation");
             assert_eq!(reason["continues_rule_id"], PERMISSION_RULE);
@@ -5884,7 +6019,7 @@ mod tests {
             rejected("annotation fixture of another version", |value| {
                 let mut other = value["fixtures"][0].clone();
                 other["id"] = json!("other-version-fixture");
-                other["native_version"] = json!("synthetic-0.0.9");
+                other["native_version"] = json!("0.0.0");
                 value["fixtures"].as_array_mut().unwrap().push(other);
                 value["profiles"][0]["capabilities"]["annotations"]["fixture_ids"] =
                     json!(["other-version-fixture"]);
@@ -5997,329 +6132,373 @@ mod tests {
             assert!(ProfileCatalog::bundled().is_ok());
         }
     }
-    mod profile_version_fallback {
+    mod profile_thresholds {
         use super::*;
+        use crate::coding_agent::profiles::detector::test_support::bundled_observe;
 
-        fn fixture_id(version: &str) -> String {
-            format!("{FIXTURE}-{version}")
+        fn catalog(profiles: &[(&str, &str)]) -> ProfileCatalog {
+            ProfileCatalog::from_definitions(&thresholds(profiles)).unwrap()
         }
 
-        fn versioned(profiles: &[(&str, &[&str])]) -> ProfileCatalog {
-            let base = definitions();
-            let mut value = base.clone();
-            value["fixtures"] = json!([]);
-            value["profiles"] = json!([]);
-            for (name, versions) in profiles {
-                let ids = versions.iter().map(|v| fixture_id(v)).collect::<Vec<_>>();
-                for (version, id) in versions.iter().zip(&ids) {
-                    let mut fixture = base["fixtures"][0].clone();
-                    fixture["id"] = json!(id);
-                    fixture["native_version"] = json!(version);
-                    value["fixtures"].as_array_mut().unwrap().push(fixture);
+        fn selected(catalog: &ProfileCatalog, probe: &str) -> Option<String> {
+            catalog
+                .capabilities(CodingAgent::Codex, Some(probe))
+                .profile_version
+        }
+
+        fn rejected(value: &Value, label: &str) {
+            match ProfileCatalog::from_definitions(value) {
+                Err(error) => {
+                    assert_eq!(error.exit_code(), 2, "{label}: {}", error.message());
+                    assert!(
+                        error.message().starts_with("invalid native profile: "),
+                        "{label}: {}",
+                        error.message()
+                    );
                 }
-                let mut profile = base["profiles"][0].clone();
-                profile["native_versions"] = json!(versions);
-                profile["profile_version"] = json!(name);
-                profile["capabilities"]["detection"]["fixture_ids"] = json!(ids);
-                profile["capabilities"]["answers"] = json!([{
-                    "decision":"allow","request_rule_id":RULE,"answer_rule_id":"synthetic-allow-plan",
-                    "choice_id":"allow-once","focus_matcher_id":"allow","fixture_ids":ids,
-                    "stages":[{"bytes_hex":"78","required_rule_id":RULE,"required_choice_id":"allow-once"}]
-                }]);
-                value["profiles"].as_array_mut().unwrap().push(profile);
-            }
-            ProfileCatalog::from_definitions(&value).unwrap()
-        }
-
-        fn selected(
-            catalog: &ProfileCatalog,
-            probe: &str,
-        ) -> (Option<String>, Option<ProfileMatch>) {
-            let capabilities = catalog.capabilities(CodingAgent::Codex, Some(probe));
-            assert_eq!(capabilities.native_version.as_deref(), Some(probe));
-            (capabilities.profile_version, capabilities.profile_match)
-        }
-
-        fn fallback(profile: &str) -> (Option<String>, Option<ProfileMatch>) {
-            (Some(profile.into()), Some(ProfileMatch::Fallback))
-        }
-
-        const NEWER_LAST: &[(&str, &[&str])] = &[
-            ("profile-0.9.0", &["0.9.0"]),
-            ("profile-0.10.0", &["0.10.0"]),
-        ];
-        const NEWER_FIRST: &[(&str, &[&str])] = &[
-            ("profile-0.10.0", &["0.10.0"]),
-            ("profile-0.9.0", &["0.9.0"]),
-        ];
-
-        #[test]
-        fn profile_fallback_a_declared_version_selects_its_own_profile_exactly() {
-            let catalog = versioned(NEWER_LAST);
-            for (probe, profile) in [("0.9.0", "profile-0.9.0"), ("0.10.0", "profile-0.10.0")] {
-                assert_eq!(
-                    selected(&catalog, probe),
-                    (Some(profile.into()), Some(ProfileMatch::Exact))
-                );
-                assert_eq!(
-                    catalog
-                        .capabilities(CodingAgent::Codex, Some(probe))
-                        .detection,
-                    Coverage::Tested
-                );
+                Ok(_) => panic!("{label} accepted"),
             }
         }
 
+        const MALFORMED: [&str; 8] = [
+            "2.1",
+            "2.1.302.1",
+            "v2.1.302",
+            "01.2.3",
+            "1.2.3-",
+            "1.2.3-01",
+            " 1.2.3",
+            "synthetic-0.0.1",
+        ];
+
         #[test]
-        fn profile_fallback_selects_the_highest_declared_version_for_newer_and_older_probes() {
-            for declarations in [NEWER_LAST, NEWER_FIRST] {
-                let catalog = versioned(declarations);
-                for probe in [
-                    "0.11.0", "0.10.1", "1.0.0", "0.9.5", "0.9.1", "0.1.0", "0.0.0",
+        fn threshold_selection_picks_the_greatest_boundary_at_or_below_the_version_in_any_order() {
+            for declarations in [
+                [("first", "2.1.302"), ("second", "2.1.310")],
+                [("second", "2.1.310"), ("first", "2.1.302")],
+            ] {
+                let catalog = catalog(&declarations);
+                for (probe, expected) in [
+                    ("2.1.302", Some("first")),
+                    ("2.1.308", Some("first")),
+                    ("2.1.310-beta.1", Some("first")),
+                    ("2.1.310", Some("second")),
+                    ("99.0.0", Some("second")),
+                    ("2.1.301", None),
                 ] {
                     assert_eq!(
-                        selected(&catalog, probe),
-                        fallback("profile-0.10.0"),
-                        "{probe}"
-                    );
-                    let capabilities = catalog.capabilities(CodingAgent::Codex, Some(probe));
-                    assert_eq!(capabilities.detection, Coverage::Tested, "{probe}");
-                    assert_eq!(
-                        capabilities.answer_decisions,
-                        vec![PermissionDecision::Allow]
-                    );
-                }
-            }
-        }
-
-        #[test]
-        fn profile_fallback_compares_dotted_numeric_components_with_missing_components_as_zero() {
-            for (declarations, highest) in [
-                (
-                    &[("short", &["1.2"][..]), ("long", &["1.2.0.1"][..])][..],
-                    "long",
-                ),
-                (
-                    &[("two-ten", &["2.10"][..]), ("two-nine", &["2.9.99"][..])][..],
-                    "two-ten",
-                ),
-                (
-                    &[("ten", &["10.0.0"][..]), ("nine", &["9.99.99"][..])][..],
-                    "ten",
-                ),
-                (
-                    &[
-                        ("one-three", &["1.3"][..]),
-                        ("one-two-nine", &["1.2.9"][..]),
-                    ][..],
-                    "one-three",
-                ),
-                (
-                    &[
-                        ("multi", &["0.5.0", "3.0.0"][..]),
-                        ("single", &["2.0.0"][..]),
-                    ][..],
-                    "multi",
-                ),
-            ] {
-                let catalog = versioned(declarations);
-                for probe in ["99.0.0", "0.0.1", "2.5"] {
-                    assert_eq!(
-                        selected(&catalog, probe),
-                        fallback(highest),
+                        selected(&catalog, probe).as_deref(),
+                        expected,
                         "{declarations:?} {probe}"
                     );
+                    let detection = catalog
+                        .capabilities(CodingAgent::Codex, Some(probe))
+                        .detection;
+                    assert_eq!(detection == Coverage::Tested, expected.is_some(), "{probe}");
                 }
+            }
+            let before = catalog(&[("first", "2.1.302")]);
+            let after = catalog(&[("first", "2.1.302"), ("second", "2.1.310")]);
+            for probe in ["2.1.302", "2.1.308", "2.1.310-beta.1"] {
+                assert_eq!(selected(&after, probe), selected(&before, probe), "{probe}");
             }
         }
 
         #[test]
-        fn profile_fallback_detection_and_answers_resolve_through_the_selected_profile() {
-            let catalog = versioned(NEWER_LAST);
-            let observed = Detector::new(&catalog, CodingAgent::Codex, Some("0.11.0"))
-                .observe(&terminal(&lines("write disposable.txt"), 80, false).snapshot())
-                .unwrap();
-            assert_eq!(
-                observed.kind,
-                ObservationKind::Interaction(InteractionClass::PermissionRequest)
-            );
-            assert_eq!(observed.rule_id, RULE);
-            assert_eq!(observed.profile_version.as_deref(), Some("profile-0.10.0"));
-            let plan = catalog
-                .answer_plan(
-                    CodingAgent::Codex,
-                    "0.11.0",
-                    RULE,
-                    PermissionDecision::Allow,
-                )
-                .expect("the fallback profile supplies its answer plan");
-            let capability = plan.capability();
-            assert_eq!(capability.native_version(), "0.11.0");
-            assert_eq!(capability.profile_version(), "profile-0.10.0");
-            assert_eq!(capability.answer_rule_id(), "synthetic-allow-plan");
-            assert_eq!(capability.fixture_ids(), &[fixture_id("0.10.0")]);
-            assert_eq!(plan.stages().len(), 1);
-            assert_eq!(plan.stages()[0].bytes(), b"x");
-            assert!(
-                catalog
-                    .answer_plan(CodingAgent::Codex, "0.11.0", RULE, PermissionDecision::Deny)
-                    .is_none()
-            );
-        }
-
-        #[test]
-        fn profile_fallback_never_crosses_backends_and_an_absent_version_selects_nothing() {
-            let catalog = versioned(NEWER_LAST);
-            for (backend, version) in [
-                (CodingAgent::Claude, Some("0.10.0")),
-                (CodingAgent::Opencode, Some("0.11.0")),
-                (CodingAgent::Codex, None),
+        fn threshold_selection_compares_numeric_components_numerically() {
+            let catalog = catalog(&[("nine", "0.9.0"), ("ten", "0.10.0")]);
+            for (probe, expected) in [
+                ("0.9.99", Some("nine")),
+                ("0.10.0", Some("ten")),
+                ("0.8.9", None),
             ] {
-                let capabilities = catalog.capabilities(backend, version);
-                assert_eq!(capabilities.profile_version, None, "{backend:?}");
-                assert_eq!(capabilities.profile_match, None, "{backend:?}");
-                assert_eq!(capabilities.detection, Coverage::Unknown, "{backend:?}");
-                assert!(capabilities.answer_decisions.is_empty());
-                assert!(capabilities.capability_reason.is_some());
+                assert_eq!(selected(&catalog, probe).as_deref(), expected, "{probe}");
             }
-            assert!(
-                catalog
-                    .answer_plan(
-                        CodingAgent::Claude,
-                        "0.10.0",
-                        RULE,
-                        PermissionDecision::Allow
-                    )
-                    .is_none()
-            );
-            let observed = Detector::new(&catalog, CodingAgent::Claude, Some("0.10.0"))
-                .observe(&terminal(&lines("write disposable.txt"), 80, false).snapshot())
-                .unwrap();
-            assert_eq!(observed.kind, ObservationKind::Unknown);
-            assert_eq!(observed.profile_version, None);
         }
 
-        use super::super::test_support::BUNDLED_PROBES;
+        #[test]
+        fn threshold_selection_orders_prereleases_by_semver_precedence() {
+            let catalog = catalog(&[
+                ("alpha-1", "1.0.0-alpha.1"),
+                ("beta-2", "1.0.0-beta.2"),
+                ("beta-11", "1.0.0-beta.11"),
+                ("release", "1.0.0"),
+            ]);
+            for (probe, expected) in [
+                ("1.0.0-alpha", None),
+                ("1.0.0-alpha.beta", Some("alpha-1")),
+                ("1.0.0-beta.10", Some("beta-2")),
+                ("1.0.0-beta.11", Some("beta-11")),
+                ("1.0.0-rc.1", Some("beta-11")),
+                ("1.0.0", Some("release")),
+            ] {
+                assert_eq!(selected(&catalog, probe).as_deref(), expected, "{probe}");
+            }
+        }
 
         #[test]
-        fn profile_fallback_bundled_capabilities_equal_the_exact_run_of_the_selected_profile() {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            for (backend, pinned, probes) in BUNDLED_PROBES {
-                let exact = bundled.capabilities(backend, Some(pinned));
+        fn threshold_selection_gives_build_metadata_no_precedence() {
+            let catalog = catalog(&[("built", "1.2.0+build.1"), ("older", "1.0.0")]);
+            for (probe, expected) in [
+                ("1.2.0", Some("built")),
+                ("1.2.0+other.9", Some("built")),
+                ("1.2.0-rc.1+build.1", Some("older")),
+            ] {
+                assert_eq!(selected(&catalog, probe).as_deref(), expected, "{probe}");
+            }
+        }
+
+        #[test]
+        fn threshold_selection_stays_within_each_backend() {
+            let mut value = thresholds(&[("codex-low", "0.5.0"), ("codex-high", "2.0.0")]);
+            let claude = thresholds_for(CodingAgent::Claude, &[("claude-only", "2.0.0")]);
+            for key in ["fixtures", "profiles"] {
+                value[key]
+                    .as_array_mut()
+                    .unwrap()
+                    .extend(claude[key].as_array().unwrap().iter().cloned());
+            }
+            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            for (backend, probe, expected) in [
+                (CodingAgent::Codex, "1.0.0", Some("codex-low")),
+                (CodingAgent::Claude, "1.0.0", None),
+                (CodingAgent::Claude, "2.0.0", Some("claude-only")),
+                (CodingAgent::Opencode, "2.0.0", None),
+            ] {
                 assert_eq!(
-                    exact.profile_match,
-                    Some(ProfileMatch::Exact),
-                    "{backend:?}"
+                    catalog
+                        .capabilities(backend, Some(probe))
+                        .profile_version
+                        .as_deref(),
+                    expected,
+                    "{backend:?} {probe}"
                 );
-                for probe in probes {
-                    let fallback = bundled.capabilities(backend, Some(probe));
-                    let context = format!("{backend:?} {probe}");
-                    assert_eq!(fallback.native_version.as_deref(), Some(probe), "{context}");
-                    assert_eq!(fallback.profile_version, exact.profile_version, "{context}");
-                    assert_eq!(
-                        fallback.profile_match,
-                        Some(ProfileMatch::Fallback),
-                        "{context}"
+            }
+        }
+
+        #[test]
+        fn threshold_validation_rejects_malformed_profile_and_fixture_versions() {
+            assert!(ProfileCatalog::from_definitions(&definitions()).is_ok());
+            for malformed in MALFORMED {
+                let mut value = definitions();
+                value["profiles"][0]["min_version"] = json!(malformed);
+                rejected(&value, &format!("min_version {malformed:?}"));
+                let mut value = definitions();
+                value["fixtures"][0]["native_version"] = json!(malformed);
+                rejected(&value, &format!("fixture native_version {malformed:?}"));
+            }
+        }
+
+        #[test]
+        fn threshold_validation_rejects_equal_precedence_thresholds_for_one_backend() {
+            for pair in [
+                [("first", "1.0.0"), ("second", "1.0.0")],
+                [("first", "1.0.0"), ("second", "1.0.0+build.2")],
+            ] {
+                rejected(&thresholds(&pair), &format!("{pair:?}"));
+            }
+        }
+
+        #[test]
+        fn fixture_interval_bounds_every_cited_capture_by_its_profile_thresholds() {
+            fn citing(profile: usize, citation: &str, captured: &str) -> Value {
+                let mut value = thresholds(&[("first", "1.0.0"), ("second", "2.0.0")]);
+                value["fixtures"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(fixture_at("interval-probe", captured));
+                *value
+                    .pointer_mut(&format!("/profiles/{profile}/capabilities/{citation}"))
+                    .unwrap() = json!(["interval-probe"]);
+                value
+            }
+            for citation in [
+                "detection/fixture_ids",
+                "composer/fixture_ids",
+                "composer/submission/prompt/fixture_ids",
+                "composer/submission/exec/fixture_ids",
+                "annotations/fixture_ids",
+                "answers/0/fixture_ids",
+            ] {
+                for (profile, captured) in [(0, "1.5.0"), (0, "2.0.0-rc.1"), (1, "9.0.0")] {
+                    assert!(
+                        ProfileCatalog::from_definitions(&citing(profile, citation, captured))
+                            .is_ok(),
+                        "{citation} profile {profile} {captured}"
                     );
-                    assert_eq!(fallback.detection, exact.detection, "{context}");
-                    assert_eq!(fallback.composer, exact.composer, "{context}");
-                    assert_eq!(
-                        fallback.prompt_submission, exact.prompt_submission,
-                        "{context}"
-                    );
-                    assert_eq!(
-                        fallback.native_exec_submission, exact.native_exec_submission,
-                        "{context}"
-                    );
-                    assert_eq!(
-                        fallback.answer_decisions, exact.answer_decisions,
-                        "{context}"
+                }
+                for (profile, captured) in [(0, "1.0.0-rc.1"), (0, "2.0.0+build.1"), (1, "1.9.9")] {
+                    rejected(
+                        &citing(profile, citation, captured),
+                        &format!("{citation} profile {profile} {captured}"),
                     );
                 }
             }
         }
 
         #[test]
-        fn profile_fallback_bundled_answer_plans_match_the_exact_plans_for_predecessor_forms() {
+        fn capability_reuse_resolves_every_capability_through_the_selected_profile() {
+            let catalog = catalog(&[("first", "1.0.0"), ("second", "2.0.0")]);
+            let mut rows = vec![
+                "Live footer".to_owned(),
+                "Refused: write outside.txt".to_owned(),
+                "Refusal end".to_owned(),
+            ];
+            rows.extend(lines("write disposable.txt"));
+            let screen = terminal(&rows, 80, false).snapshot();
+            for (run, name) in [("1.4.2", "first"), ("3.1.4", "second")] {
+                let fixture = format!("{FIXTURE}-codex-{name}");
+                let observed = Detector::new(&catalog, CodingAgent::Codex, Some(run))
+                    .observe(&screen)
+                    .unwrap();
+                assert_eq!(
+                    observed.kind,
+                    ObservationKind::Interaction(InteractionClass::PermissionRequest)
+                );
+                assert_eq!(observed.profile_version.as_deref(), Some(name), "{run}");
+                assert_eq!(observed.raw_evidence["native_version"], run);
+                assert_eq!(observed.annotations.len(), 1, "{run}");
+                assert_eq!(
+                    observed.annotations[0].raw_evidence["profile_version"],
+                    name
+                );
+                for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
+                    let plan = catalog
+                        .composer_plan(CodingAgent::Codex, run, operation)
+                        .unwrap_or_else(|| panic!("{run} {operation:?} plan"));
+                    assert_eq!(plan.native_version(), run);
+                    assert_eq!(plan.profile_version(), name);
+                    assert_eq!(plan.fixture_ids(), std::slice::from_ref(&fixture));
+                }
+                let capability = catalog
+                    .answer_plan(CodingAgent::Codex, run, RULE, PermissionDecision::Allow)
+                    .unwrap_or_else(|| panic!("{run} answer plan"))
+                    .capability()
+                    .clone();
+                assert_eq!(capability.native_version(), run);
+                assert_eq!(capability.profile_version(), name);
+                assert_eq!(capability.answer_rule_id(), format!("{name}-allow-plan"));
+                assert_eq!(capability.fixture_ids(), &[fixture]);
+            }
+        }
+
+        #[test]
+        fn bundled_profiles_declare_their_initial_boundary_and_keep_capture_versions() {
+            let definitions = bundled_definitions();
+            for boundary in BUNDLED_BOUNDARIES {
+                let profiles = definitions["profiles"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|profile| profile["backend"] == boundary.backend.name())
+                    .collect::<Vec<_>>();
+                assert_eq!(profiles.len(), 1, "{:?}", boundary.backend);
+                assert_eq!(profiles[0]["profile_version"], boundary.profile_version);
+                assert_eq!(profiles[0]["min_version"], boundary.min_version);
+                let minimum = semver::Version::parse(boundary.min_version).unwrap();
+                for fixture in definitions["fixtures"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|fixture| fixture["backend"] == boundary.backend.name())
+                {
+                    let id = fixture["id"].as_str().unwrap();
+                    let captured = fixture["native_version"].as_str().unwrap();
+                    assert!(
+                        id.starts_with(&format!("{}-{captured}-", boundary.backend.name())),
+                        "{id} keeps the native version it was captured at"
+                    );
+                    assert!(
+                        semver::Version::parse(captured).unwrap() >= minimum,
+                        "{id} is captured inside its profile interval"
+                    );
+                }
+            }
+            assert!(
+                definitions["fixtures"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|fixture| fixture["native_version"] == "2.1.308"),
+                "the Claude submission captures come from a later version inside the interval"
+            );
+        }
+
+        #[test]
+        fn bundled_later_versions_reuse_the_complete_boundary_profile_including_claude_2_1_308() {
             let bundled = ProfileCatalog::bundled().unwrap();
-            for ((backend, pinned, probes), request) in BUNDLED_PROBES.into_iter().zip([
+            for (boundary, request) in BUNDLED_BOUNDARIES.iter().zip([
                 "claude-bash-permission",
                 "codex-exec-approval",
                 "opencode-shell-permission",
             ]) {
-                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                    let exact = bundled
-                        .answer_plan(backend, pinned, request, decision)
-                        .expect("bundled exact answer plan");
-                    for probe in probes {
-                        let context = format!("{backend:?} {probe} {decision:?}");
+                let backend = boundary.backend;
+                let at = bundled.capabilities(backend, Some(boundary.min_version));
+                assert_eq!(
+                    at.profile_version.as_deref(),
+                    Some(boundary.profile_version)
+                );
+                for later in boundary.later {
+                    let context = format!("{backend:?} {later}");
+                    let reused = bundled.capabilities(backend, Some(later));
+                    assert_eq!(reused.profile_version, at.profile_version, "{context}");
+                    assert_eq!(reused.detection, at.detection, "{context}");
+                    assert_eq!(reused.composer, at.composer, "{context}");
+                    assert_eq!(reused.prompt_submission, at.prompt_submission, "{context}");
+                    assert_eq!(
+                        reused.native_exec_submission, at.native_exec_submission,
+                        "{context}"
+                    );
+                    assert_eq!(reused.answer_decisions, at.answer_decisions, "{context}");
+                    for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                        let exact = bundled
+                            .answer_plan(backend, boundary.min_version, request, decision)
+                            .expect("bundled boundary answer plan");
                         let plan = bundled
-                            .answer_plan(backend, probe, request, decision)
-                            .unwrap_or_else(|| panic!("fallback answer plan for {context}"));
-                        let capability = plan.capability();
-                        assert_eq!(capability.native_version(), probe, "{context}");
+                            .answer_plan(backend, later, request, decision)
+                            .unwrap_or_else(|| panic!("{context} {decision:?}"));
+                        assert_eq!(plan.capability().native_version(), later);
                         assert_eq!(
-                            capability.profile_version(),
-                            exact.capability().profile_version(),
-                            "{context}"
+                            plan.capability().answer_rule_id(),
+                            exact.capability().answer_rule_id()
                         );
-                        assert_eq!(
-                            capability.answer_rule_id(),
-                            exact.capability().answer_rule_id(),
-                            "{context}"
-                        );
-                        assert_eq!(
-                            capability.fixture_ids(),
-                            exact.capability().fixture_ids(),
-                            "{context}"
-                        );
-                        assert_eq!(plan.choice_id(), exact.choice_id(), "{context}");
                         assert_eq!(
                             plan.stages()
                                 .iter()
-                                .map(|stage| stage.bytes().to_vec())
+                                .map(|s| s.bytes().to_vec())
                                 .collect::<Vec<_>>(),
                             exact
                                 .stages()
                                 .iter()
-                                .map(|stage| stage.bytes().to_vec())
+                                .map(|s| s.bytes().to_vec())
                                 .collect::<Vec<_>>(),
-                            "{context}"
+                            "{context} {decision:?}"
                         );
                     }
                 }
             }
-        }
-
-        #[test]
-        fn profile_fallback_bundled_detector_reads_the_predecessor_permission_form() {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            let screen = replay_native_fixture(
-                include_str!("native/claude-2.1.302-default-permission-1.json"),
-                |_| {},
-                true,
-                None,
-            );
-            let exact = Detector::new(&bundled, CodingAgent::Claude, Some("2.1.302"))
-                .observe(&screen)
-                .unwrap();
-            assert_eq!(
-                exact.kind,
-                ObservationKind::Interaction(InteractionClass::PermissionRequest)
-            );
-            let fallback = Detector::new(&bundled, CodingAgent::Claude, Some("2.1.306"))
-                .observe(&screen)
-                .unwrap();
-            assert_eq!(fallback.kind, exact.kind);
-            assert_eq!(fallback.rule_id, exact.rule_id);
-            assert_eq!(fallback.profile_version, exact.profile_version);
-            for field in ["operation", "operation_rows", "choices"] {
+            for id in [
+                "claude-2.1.302-auto-ask-permission-1",
+                "claude-2.1.302-auto-refusal-notice-idle-1",
+            ] {
+                let exact = bundled_observe(CodingAgent::Claude, "2.1.302", id);
+                let reused = bundled_observe(CodingAgent::Claude, "2.1.308", id);
+                assert_eq!(reused.kind, exact.kind, "{id}");
+                assert_eq!(reused.rule_id, exact.rule_id, "{id}");
                 assert_eq!(
-                    fallback.raw_evidence[field], exact.raw_evidence[field],
-                    "{field}"
+                    reused.profile_version.as_deref(),
+                    Some("claude-2.1.302-auto-1"),
+                    "{id}"
                 );
+                let rules = |observed: &ScreenObservation| {
+                    observed
+                        .annotations
+                        .iter()
+                        .map(|block| block.rule_id.clone())
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(rules(&reused), rules(&exact), "{id}");
             }
-            assert_eq!(fallback.raw_evidence["native_version"], "2.1.306");
         }
     }
 }

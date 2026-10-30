@@ -30,7 +30,7 @@ pub(crate) fn runtime_snapshot(row: &crate::broker::runtime::RuntimeSnapshot) ->
     let run = &row.run;
     json!({"run_id":run.run_id,"resolved_mode":run.resolved_mode,"status":run.status.as_str(),
         "reachability":run.reachability.as_str(),"owner_epoch":run.owner_epoch,"last_health_at":run.last_health_at,
-        "coverage":run.coverage.as_str(),"profile_match":run.profile_match.map(|profile_match| profile_match.as_str()),
+        "coverage":run.coverage.as_str(),
         "current_interaction_id":row.current_interaction_id,
         "unresolved_input_ids":row.unresolved_input_ids,"owner_kind":run.owner_kind.as_str(),"owner_pid":run.owner_pid,
         "owner_start_identity":run.owner_start_identity,"runner_pid":run.runner_pid,"runner_start_identity":run.runner_start_identity,
@@ -55,7 +55,9 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
     json!({"input":{"input_id":row.input_id,"run_id":row.run_id,"operation_key":row.operation_key,
         "kind":row.kind.as_str(),"payload_digest":row.payload_digest,"state":row.state.as_str(),
         "created_at":row.created_at,"updated_at":row.updated_at,"message_id":row.message_id,
-        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response)}})
+        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response),
+        "delivery":row.delivery().as_ref().map(crate::broker::runtime::DeliveryProjection::to_json),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
+        "payload_digest_version":row.payload_digest_version}})
 }
 
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
@@ -86,8 +88,38 @@ pub(crate) fn message_envelope(row: &MessageRecord) -> Value {
     json!({"message":message(row)})
 }
 
-pub(crate) fn send_outcome(row: &MessageRecord, notification_sent: bool) -> Value {
-    json!({"message":message(row),"notification_sent":notification_sent})
+pub(crate) fn send_outcome(
+    row: &MessageRecord,
+    notification_sent: bool,
+    input_id: Option<i64>,
+    delivery: &crate::broker::runtime::DeliveryProjection,
+) -> Value {
+    json!({"message":message(row),"notification_sent":notification_sent,
+        "input_id":input_id,"delivery":delivery.to_json()})
+}
+
+pub(crate) fn member_prompt(
+    member_id: i64,
+    pane_id: &str,
+    text: &str,
+    input_id: Option<i64>,
+    delivery: &crate::broker::runtime::DeliveryProjection,
+) -> Value {
+    json!({"member_id":member_id,"pane_id":pane_id,"text":text,"input_id":input_id,
+        "delivery":delivery.to_json()})
+}
+
+pub(crate) fn member_exec(
+    member_id: i64,
+    pane_id: &str,
+    coding_agent: &str,
+    command: &str,
+    input_id: Option<i64>,
+    delivery: &crate::broker::runtime::DeliveryProjection,
+) -> Value {
+    json!({"member_id":member_id,"pane_id":pane_id,"coding_agent":coding_agent,"command":command,
+        "dispatched":delivery.status == crate::broker::runtime::DeliveryStatus::Submitted,
+        "input_id":input_id,"delivery":delivery.to_json()})
 }
 
 pub(crate) fn member_capture(capture: &crate::capture::MemberCapture) -> Value {
@@ -223,6 +255,128 @@ mod tests {
         }
     }
 
+    mod delivery_outcomes {
+        use crate::broker::records::MessageRecord;
+        use crate::broker::runtime::test_support::assert_key_order;
+        use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
+        use serde_json::{Value, json};
+
+        fn projection(
+            status: DeliveryStatus,
+            method: Option<DeliveryMethod>,
+            reason: Option<&str>,
+        ) -> DeliveryProjection {
+            DeliveryProjection {
+                status,
+                method,
+                reason: reason.map(str::to_owned),
+            }
+        }
+
+        fn cases() -> [(bool, Option<i64>, DeliveryProjection, Value); 6] {
+            [
+                (
+                    true,
+                    Some(5),
+                    projection(
+                        DeliveryStatus::Submitted,
+                        Some(DeliveryMethod::Profile),
+                        None,
+                    ),
+                    json!({"status":"submitted","method":"profile","reason":null}),
+                ),
+                (
+                    false,
+                    Some(6),
+                    projection(DeliveryStatus::Queued, None, Some("interaction_open")),
+                    json!({"status":"queued","method":null,"reason":"interaction_open"}),
+                ),
+                (
+                    false,
+                    None,
+                    projection(DeliveryStatus::Held, None, Some("observer_unavailable")),
+                    json!({"status":"held","method":null,"reason":"observer_unavailable"}),
+                ),
+                (
+                    false,
+                    Some(7),
+                    projection(
+                        DeliveryStatus::Uncertain,
+                        Some(DeliveryMethod::Fallback),
+                        Some("submission_plan_unavailable"),
+                    ),
+                    json!({"status":"uncertain","method":"fallback","reason":"submission_plan_unavailable"}),
+                ),
+                (
+                    false,
+                    None,
+                    projection(DeliveryStatus::NotApplicable, None, Some("director_stdout")),
+                    json!({"status":"not_applicable","method":null,"reason":"director_stdout"}),
+                ),
+                (
+                    false,
+                    None,
+                    projection(DeliveryStatus::NotApplicable, None, Some("self_send")),
+                    json!({"status":"not_applicable","method":null,"reason":"self_send"}),
+                ),
+            ]
+        }
+
+        #[test]
+        fn send_outcome_appends_input_id_and_ordered_delivery_after_its_existing_keys() {
+            let message = MessageRecord::fixture(9, 2, 3, "hello");
+            for (sent, input_id, delivery, expected) in cases() {
+                let output = crate::presentation::send_outcome(&message, sent, input_id, &delivery);
+                assert_key_order(
+                    &output,
+                    &["message", "notification_sent", "input_id", "delivery"],
+                );
+                assert_key_order(&output["delivery"], &["status", "method", "reason"]);
+                assert_eq!(output["notification_sent"], sent);
+                assert_eq!(output["input_id"], json!(input_id));
+                assert_eq!(output["delivery"], expected);
+                assert_eq!(output["message"], crate::presentation::message(&message));
+            }
+        }
+
+        #[test]
+        fn prompt_and_exec_outcomes_append_delivery_and_dispatch_only_on_submission() {
+            for (_, input_id, delivery, expected) in cases().into_iter().take(4) {
+                let prompt =
+                    crate::presentation::member_prompt(7, "%2", "do it", input_id, &delivery);
+                assert_key_order(
+                    &prompt,
+                    &["member_id", "pane_id", "text", "input_id", "delivery"],
+                );
+                assert_eq!(
+                    prompt,
+                    json!({"member_id":7,"pane_id":"%2","text":"do it","input_id":input_id,"delivery":expected})
+                );
+                let exec = crate::presentation::member_exec(
+                    7, "%2", "codex", "ls -l", input_id, &delivery,
+                );
+                assert_key_order(
+                    &exec,
+                    &[
+                        "member_id",
+                        "pane_id",
+                        "coding_agent",
+                        "command",
+                        "dispatched",
+                        "input_id",
+                        "delivery",
+                    ],
+                );
+                assert_eq!(
+                    exec["dispatched"],
+                    delivery.status == DeliveryStatus::Submitted,
+                    "{expected}"
+                );
+                assert_eq!(exec["delivery"], expected);
+            }
+        }
+    }
+
     mod runtime {
         use super::*;
         use crate::broker::runtime::test_support::*;
@@ -250,6 +404,10 @@ mod tests {
                     "disposition",
                     "evidence_ref",
                     "permission_response",
+                    "delivery",
+                    "deferred_at",
+                    "defer_reason",
+                    "payload_digest_version",
                 ],
             );
             let audit = &output["input"]["permission_response"];
@@ -272,6 +430,10 @@ mod tests {
                     "decided_at",
                 ],
             );
+            assert_eq!(output["input"]["delivery"], Value::Null);
+            assert_eq!(output["input"]["deferred_at"], Value::Null);
+            assert_eq!(output["input"]["defer_reason"], Value::Null);
+            assert_eq!(output["input"]["payload_digest_version"], 1);
             assert_eq!(audit["decision"], "allow");
             assert_eq!(audit["director_mode"], "auto");
             assert_eq!(audit["decided_at"], receipt.response.decided_at);
@@ -296,6 +458,22 @@ mod tests {
             let owner = fixture.activate();
             let event = fixture.open(&owner);
             let input = fixture.input(&owner, "exec:uncertain", InputKind::Exec, None);
+            let queued = fixture.input(&owner, "prompt:queued", InputKind::Prompt, None);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET state='ready',deferred_at='2026-10-30T10:00:00Z',defer_reason='interaction_open' WHERE input_id=?1",
+                    [queued.input_id],
+                )
+                .unwrap();
+            let zero_bytes = fixture.input(&owner, "prompt:zero-bytes", InputKind::Prompt, None);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET state='ready' WHERE input_id=?1",
+                    [zero_bytes.input_id],
+                )
+                .unwrap();
             let member = crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
                 .unwrap()
                 .unwrap();
@@ -324,7 +502,6 @@ mod tests {
                     "owner_epoch",
                     "last_health_at",
                     "coverage",
-                    "profile_match",
                     "current_interaction_id",
                     "unresolved_input_ids",
                     "owner_kind",
@@ -338,13 +515,16 @@ mod tests {
                 ],
             );
             assert_eq!(runtime["run_id"], owner.run_id);
-            assert_eq!(runtime["profile_match"], Value::Null);
             assert_eq!(runtime["effective_policy"], Value::Null);
             assert_eq!(
                 runtime["current_interaction_id"],
                 event.interaction_id.unwrap()
             );
-            assert_eq!(runtime["unresolved_input_ids"], json!([input.input_id]));
+            assert_eq!(
+                runtime["unresolved_input_ids"],
+                json!([input.input_id, queued.input_id]),
+                "a queued ready input is unresolved; a plain zero-byte ready input is not"
+            );
             assert_eq!(runtime["owner_start_identity"], "fixture-start-identity");
             assert_eq!(runtime["child_pid"], Value::Null);
             assert_eq!(runtime["child_start_identity"], Value::Null);
@@ -360,53 +540,69 @@ mod tests {
             assert_eq!(
                 text,
                 format!(
-                    "{} worker active\nRuntime: run={} mode=never status=running coverage=unknown profile=- review=-",
+                    "{} worker active\nRuntime: run={} mode=never status=running coverage=unknown review=-",
                     fixture.member, owner.run_id
                 )
             );
         }
 
         #[test]
-        fn runtime_presentation_renders_the_recorded_profile_match_on_member_and_event_surfaces() {
+        fn runtime_presentation_renders_a_profiled_run_on_member_and_event_surfaces() {
+            const RUNTIME_KEYS: [&str; 17] = [
+                "run_id",
+                "resolved_mode",
+                "status",
+                "reachability",
+                "owner_epoch",
+                "last_health_at",
+                "coverage",
+                "current_interaction_id",
+                "unresolved_input_ids",
+                "owner_kind",
+                "owner_pid",
+                "owner_start_identity",
+                "runner_pid",
+                "runner_start_identity",
+                "child_pid",
+                "child_start_identity",
+                "effective_policy",
+            ];
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             let event = fixture.open(&owner);
-            for (version, profile_match) in [("0.163.0", "exact"), ("0.164.0", "fallback")] {
-                fixture
+            fixture
                 .conn
                 .execute(
-                    "UPDATE member_runs SET native_version=?1,profile_version='codex-0.163.0-on-request-1',profile_match=?2,coverage='tested' WHERE run_id=?3",
-                    params![version, profile_match, owner.run_id],
+                    "UPDATE member_runs SET native_version='0.164.0',profile_version='codex-0.163.0-on-request-1',coverage='tested' WHERE run_id=?1",
+                    params![owner.run_id],
                 )
                 .unwrap();
-                let member =
-                    crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
-                        .unwrap()
-                        .unwrap();
-                let runtime = &crate::presentation::member(&member)["runtime"];
-                assert_eq!(runtime["coverage"], "tested");
-                assert_eq!(runtime["profile_match"], profile_match);
-                let line = format!(
-                    "Runtime: run={} mode=never status=running coverage=tested profile={profile_match} review=-",
-                    owner.run_id
-                );
-                assert_eq!(
-                    crate::output::format_member_detail(&member),
-                    format!("{} worker active\n{line}", fixture.member)
-                );
-                let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
-                assert_eq!(
-                    crate::presentation::runtime_event(&view)["run"]["profile_match"],
-                    profile_match
-                );
-                assert_eq!(
-                    crate::output::format_runtime_event(&view)
-                        .lines()
-                        .nth(1)
-                        .unwrap(),
-                    line
-                );
-            }
+            let member = crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
+                .unwrap()
+                .unwrap();
+            let runtime = &crate::presentation::member(&member)["runtime"];
+            assert_eq!(runtime["coverage"], "tested");
+            assert_key_order(runtime, &RUNTIME_KEYS);
+            let line = format!(
+                "Runtime: run={} mode=never status=running coverage=tested review=-",
+                owner.run_id
+            );
+            assert_eq!(
+                crate::output::format_member_detail(&member),
+                format!("{} worker active\n{line}", fixture.member)
+            );
+            let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
+            assert_key_order(
+                &crate::presentation::runtime_event(&view)["run"],
+                &RUNTIME_KEYS,
+            );
+            assert_eq!(
+                crate::output::format_runtime_event(&view)
+                    .lines()
+                    .nth(1)
+                    .unwrap(),
+                line
+            );
         }
         #[test]
         fn effective_policy_record_is_rendered_last_in_every_runtime_snapshot_surface() {
@@ -437,7 +633,7 @@ mod tests {
                 );
                 assert_eq!(runtime["effective_policy"], record);
                 let line = format!(
-                    "Runtime: run={} mode=never status=running coverage=unknown profile=- review={review}",
+                    "Runtime: run={} mode=never status=running coverage=unknown review={review}",
                     owner.run_id
                 );
                 assert_eq!(
@@ -505,7 +701,7 @@ mod tests {
             assert_eq!(
                 crate::output::format_runtime_event(&view),
                 format!(
-                    "Event: {} run={} seq=1 kind=interaction_opened notification=inbox message={}\nRuntime: run={} mode=never status=running coverage=unknown profile=- review=-\nInteraction: {} classification=permission_request closed_at=- close_reason=-",
+                    "Event: {} run={} seq=1 kind=interaction_opened notification=inbox message={}\nRuntime: run={} mode=never status=running coverage=unknown review=-\nInteraction: {} classification=permission_request closed_at=- close_reason=-",
                     event.event_id,
                     owner.run_id,
                     event.message_id.unwrap(),
@@ -530,6 +726,10 @@ mod tests {
                     "disposition",
                     "evidence_ref",
                     "permission_response",
+                    "delivery",
+                    "deferred_at",
+                    "defer_reason",
+                    "payload_digest_version",
                 ],
             );
             assert_eq!(output["input"]["permission_response"], Value::Null);
@@ -539,6 +739,99 @@ mod tests {
                     "Input: {} run={} kind=exec state=in_progress disposition=- message=-",
                     input.input_id, owner.run_id
                 )
+            );
+        }
+
+        #[test]
+        fn input_presentation_projects_delivery_from_the_stored_receipt_state() {
+            const NOW: &str = "2026-10-30T10:00:00.000000+00:00";
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            for (index, (assignment, delivery, deferred)) in [
+                (
+                    format!("state='ready',deferred_at='{NOW}',defer_reason='interaction_open'"),
+                    json!({"status":"queued","method":null,"reason":"interaction_open"}),
+                    true,
+                ),
+                (
+                    "state='ready'".to_owned(),
+                    json!({"status":"held","method":null,"reason":"zero_bytes_ready"}),
+                    false,
+                ),
+                (
+                    "delivery_method='fallback',delivery_reason='submission_plan_unavailable'".to_owned(),
+                    json!({"status":"uncertain","method":"fallback","reason":"submission_plan_unavailable"}),
+                    false,
+                ),
+                (
+                    "state='accepted',delivery_method='profile'".to_owned(),
+                    json!({"status":"submitted","method":"profile","reason":null}),
+                    false,
+                ),
+                (
+                    "state='settled',disposition='submitted',delivery_method='fallback',delivery_reason='submission_plan_unavailable'".to_owned(),
+                    json!({"status":"submitted","method":"fallback","reason":"submission_plan_unavailable"}),
+                    false,
+                ),
+                (
+                    "state='settled',disposition='not_submitted',delivery_reason='runner_stopped'".to_owned(),
+                    json!({"status":"not_submitted","method":null,"reason":"runner_stopped"}),
+                    false,
+                ),
+                (
+                    "state='settled',disposition='not_submitted',delivery_method='profile'".to_owned(),
+                    json!({"status":"not_submitted","method":"profile","reason":null}),
+                    false,
+                ),
+                (
+                    "state='settled',disposition='abandoned_uncertain',delivery_method='profile'".to_owned(),
+                    json!({"status":"uncertain","method":"profile","reason":null}),
+                    false,
+                ),
+                (
+                    "state='accepted'".to_owned(),
+                    json!({"status":"submitted","method":null,"reason":"method_unrecorded"}),
+                    false,
+                ),
+                (
+                    "state='uncertain'".to_owned(),
+                    json!({"status":"uncertain","method":null,"reason":"method_unrecorded"}),
+                    false,
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let input = fixture.input(&owner, &format!("prompt:{index}"), InputKind::Prompt, None);
+                fixture
+                    .conn
+                    .execute(
+                        &format!("UPDATE member_input_operations SET {assignment} WHERE input_id=?1"),
+                        [input.input_id],
+                    )
+                    .unwrap_or_else(|error| panic!("{assignment}: {error}"));
+                let stored = storage::get_input(&fixture.conn, input.input_id)
+                    .unwrap_or_else(|error| panic!("{assignment}: {}", error.message()));
+                let output = &crate::presentation::input_operation(&stored)["input"];
+                assert_eq!(output["delivery"], delivery, "{assignment}");
+                assert_key_order(&output["delivery"], &["status", "method", "reason"]);
+                assert_eq!(output["deferred_at"].is_null(), !deferred, "{assignment}");
+                assert_eq!(output["defer_reason"].is_null(), !deferred, "{assignment}");
+                assert_eq!(output["payload_digest_version"], 1);
+            }
+            let queued_with_method = fixture.input(&owner, "exec:invalid", InputKind::Exec, None);
+            fixture
+                .conn
+                .execute(
+                    &format!(
+                        "UPDATE member_input_operations SET state='ready',deferred_at='{NOW}',defer_reason='interaction_open',delivery_method='profile' WHERE input_id=?1"
+                    ),
+                    [queued_with_method.input_id],
+                )
+                .unwrap();
+            assert!(
+                storage::get_input(&fixture.conn, queued_with_method.input_id).is_err(),
+                "a queued receipt with a selected method fails validation"
             );
         }
     }

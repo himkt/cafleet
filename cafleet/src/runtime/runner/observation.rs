@@ -127,6 +127,7 @@ pub(crate) struct ObservationController {
     request_region: Option<RequestRegion>,
     current_classification: Option<storage::InteractionClass>,
     pending_error: Option<CafleetError>,
+    delivery_results: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     #[cfg(test)]
     capture: Option<NativeCapturePort>,
     #[cfg(test)]
@@ -247,7 +248,6 @@ impl ObservationController {
         let capabilities = catalog.capabilities(backend, run.native_version.as_deref());
         ensure(
             capabilities.profile_version == run.profile_version
-                && capabilities.profile_match == run.profile_match
                 && capabilities.detection == run.coverage,
             "observer profile/coverage mismatch",
         )?;
@@ -281,11 +281,25 @@ impl ObservationController {
             request_region: None,
             current_classification: None,
             pending_error: None,
+            delivery_results: std::sync::Mutex::default(),
             #[cfg(test)]
             capture: None,
             #[cfg(test)]
             observation_hooks: None,
         })
+    }
+    /// Queues a deferred input's first result for publication on the next poll, once per input.
+    pub(crate) fn publish_delivery_result(&self, record: serde_json::Value) {
+        let mut queue = self
+            .delivery_results
+            .lock()
+            .expect("delivery result queue is never poisoned");
+        if queue
+            .iter()
+            .all(|queued| queued["input_id"] != record["input_id"])
+        {
+            queue.push_back(record);
+        }
     }
     pub(crate) fn current_request(&self) -> Option<&ObservedRequest> {
         self.current_request.as_ref()
@@ -818,9 +832,34 @@ impl ObservationController {
                 self.next_deadline = Some(now.monotonic);
             }
         }
+        if self.started
+            && !self.terminal_fenced
+            && self.pending.is_none()
+            && self.gap.is_none()
+            && !writer.status().degraded
+            && let Some(record) = self
+                .delivery_results
+                .get_mut()
+                .expect("delivery result queue is never poisoned")
+                .pop_front()
+        {
+            let value = self.lifecycle(
+                RuntimeEventKind::InputDeliveryResult,
+                record,
+                &now.observed_at,
+                current.screen_seq,
+            )?;
+            self.retain(self.update(vec![value]))?;
+            self.route(writer, &now)?;
+        }
         if self.pending.is_none()
             && self.gap.is_none()
             && !writer.status().degraded
+            && self
+                .delivery_results
+                .get_mut()
+                .expect("delivery result queue is never poisoned")
+                .is_empty()
             && let Some(exit) = self.exit.take()
         {
             self.terminal_fenced = true;
@@ -2247,10 +2286,10 @@ pub(crate) mod native_capture {
                     ProcessIdentity::current().unwrap(),
                 )
                 .unwrap();
-                fixture.conn.execute("UPDATE member_runs SET runner_pid=owner_pid,runner_start_identity=owner_start_identity,native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested',event_evidence=?1 WHERE run_id=?2",rusqlite::params![policy["mode"].as_str().unwrap(),fixture.run.run_id]).unwrap();
+                fixture.conn.execute("UPDATE member_runs SET runner_pid=owner_pid,runner_start_identity=owner_start_identity,native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='tested',event_evidence=?1 WHERE run_id=?2",rusqlite::params![policy["mode"].as_str().unwrap(),fixture.run.run_id]).unwrap();
                 fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 let executable = fixture._dir.path().join("owned-synthetic-process");
-                private_write(&executable,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'synthetic-0.0.1\\n'; exit 0; fi\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; *) printf '%s\\n' \"$line\" ;; esac; done\n");
+                private_write(&executable,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; *) printf '%s\\n' \"$line\" ;; esac; done\n");
                 std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
                     .unwrap();
                 let mut spec = fixture.spec();
@@ -2266,10 +2305,10 @@ pub(crate) mod native_capture {
                 let source = fixture._dir.path().join("source-evidence.json");
                 private_write(
                     &source,
-                    b"{\"kind\":\"synthetic\",\"version\":\"synthetic-0.0.1\"}",
+                    b"{\"kind\":\"synthetic\",\"version\":\"0.0.1-synthetic\"}",
                 );
                 let current = std::env::current_exe().unwrap();
-                let producer_json = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":source,"source_manifest_sha256":digest(&source),"libtest_executable_path":current,"libtest_executable_sha256":digest(&current),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"synthetic","native_executable":{"path":executable,"sha256":digest(&executable),"version":"synthetic-0.0.1","version_evidence_ref":source},"launch_evidence_ref":source,"environment_evidence_ref":source});
+                let producer_json = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":source,"source_manifest_sha256":digest(&source),"libtest_executable_path":current,"libtest_executable_sha256":digest(&current),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"synthetic","native_executable":{"path":executable,"sha256":digest(&executable),"version":"0.0.1-synthetic","version_evidence_ref":source},"launch_evidence_ref":source,"environment_evidence_ref":source});
                 let producer_path = fixture._dir.path().join("producer.json");
                 private_write(&producer_path, &serde_json::to_vec(&producer_json).unwrap());
                 let placement = crate::broker::get_member(
@@ -3291,18 +3330,17 @@ pub(crate) mod native_capture {
                         fixture.fixture.run.native_version.as_deref(),
                     );
                     fixture
-            .fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET profile_version=?1,profile_match=?2,coverage=?3 WHERE run_id=?4",
-                rusqlite::params![
-                    selected.profile_version,
-                    selected.profile_match.map(|value| value.as_str()),
-                    selected.detection.as_str(),
-                    fixture.fixture.run.run_id
-                ],
-            )
-            .unwrap();
+                        .fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_runs SET profile_version=?1,coverage=?2 WHERE run_id=?3",
+                            rusqlite::params![
+                                selected.profile_version,
+                                selected.detection.as_str(),
+                                fixture.fixture.run.run_id
+                            ],
+                        )
+                        .unwrap();
                     fixture.fixture.run =
                         storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
                             .unwrap();
@@ -7112,7 +7150,6 @@ pub(crate) mod native_capture {
                     event_evidence: storage::EventEvidence::Redacted,
                     native_version: Some(case.native_version.clone()),
                     profile_version: capabilities.profile_version,
-                    profile_match: capabilities.profile_match,
                     coverage: capabilities.detection,
                 };
                 let member = PendingMemberSpec {
@@ -7578,10 +7615,10 @@ pub(crate) mod test_support {
                 .unwrap()
                 .into(),
         ));
-        fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+        fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         let script = fixture._dir.path().join("owned-observation-process");
-        private_write(&script,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'synthetic-0.0.1\\n'; exit 0; fi\n/usr/bin/touch \"$CAFLEET_REVIEW_NATIVE_START\"\nprintf 'review-native-ready\\n'\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; form*) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write %s.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: ' \"$line\" ;; transient) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write transient.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: \\033[2J\\033[Hworking' ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done\n");
+        private_write(&script,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\n/usr/bin/touch \"$CAFLEET_REVIEW_NATIVE_START\"\nprintf 'review-native-ready\\n'\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; form*) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write %s.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: ' \"$line\" ;; transient) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write transient.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: \\033[2J\\033[Hworking' ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done\n");
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         spec.argv = vec![script.to_str().unwrap().into(), "--approve-for-me".into()];
         let definitions =
@@ -7681,22 +7718,18 @@ mod tests {
             assert_eq!(reason, "process_exited");
         }
         #[test]
-        fn service_fallback_profile_emits_no_coverage_unknown_while_no_profile_still_does() {
-            let fallback = crate::coding_agent::ProfileCatalog::bundled()
+        fn service_later_version_profile_emits_no_coverage_unknown_while_no_profile_still_does() {
+            let reused = crate::coding_agent::ProfileCatalog::bundled()
                 .unwrap()
                 .capabilities(crate::coding_agent::CodingAgent::Codex, Some("0.164.0"));
-            assert_eq!(
-                fallback.profile_match.map(|value| value.as_str()),
-                Some("fallback")
-            );
-            let fallback_profile = fallback.profile_version.unwrap();
-            for (profile, expected) in [(Some("fallback"), 0), (None, 1)] {
-                let fallback_profile = fallback_profile.clone();
+            let reused_profile = reused.profile_version.unwrap();
+            for (profile, expected) in [(Some(reused_profile), 0), (None, 1)] {
+                let selected = profile.clone();
                 let mut fixture = ServiceFixture::configured(false, move |fixture, _| {
-                    if profile.is_some() {
-                        fixture.conn.execute("UPDATE member_runs SET native_version='0.164.0',profile_version=?1,profile_match=?2,coverage='tested' WHERE run_id=?3",rusqlite::params![fallback_profile,profile,fixture.run.run_id]).unwrap();
+                    if let Some(selected) = &selected {
+                        fixture.conn.execute("UPDATE member_runs SET native_version='0.164.0',profile_version=?1,coverage='tested' WHERE run_id=?2",rusqlite::params![selected,fixture.run.run_id]).unwrap();
                     } else {
-                        fixture.conn.execute("UPDATE member_runs SET native_version=NULL,profile_version=NULL,profile_match=NULL,coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+                        fixture.conn.execute("UPDATE member_runs SET native_version=NULL,profile_version=NULL,coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
                     }
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 });
@@ -7710,11 +7743,7 @@ mod tests {
                 assert_eq!(count, expected, "{profile:?}");
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                assert_eq!(
-                    run.profile_match.map(|value| value.as_str()),
-                    profile,
-                    "{profile:?}"
-                );
+                assert_eq!(run.profile_version, profile, "{profile:?}");
                 if profile.is_none() {
                     assert_eq!(run.resolved_mode, "approve-for-me");
                     assert!(run.effective_policy_json.is_none());
@@ -7821,7 +7850,7 @@ mod tests {
             .unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-            fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog =
                 ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
@@ -7897,7 +7926,7 @@ mod tests {
                 let observed = Detector::new(
                     &catalog,
                     crate::coding_agent::CodingAgent::Codex,
-                    Some("synthetic-0.0.1"),
+                    Some("0.0.1-synthetic"),
                 )
                 .observe(&terminal.snapshot())
                 .unwrap();

@@ -51,9 +51,9 @@ Send the one follow-up the [member role](../roles/member.md#on-spawn--send-the-r
 
 ## Runner observations
 
-Handle each runtime event under the [member runtime procedure](member-runtime.md), which owns verification, the mode-dependent decision, the bound response and the finite `message wait` that retries held previews. A live listener alone performs no preview retry.
+Handle each runtime event under the [member runtime procedure](member-runtime.md), which owns verification, the mode-dependent decision, the bound response and the runner's automatic delivery of input it queued during the interaction. A live listener performs no preview retry; finite `message wait` retries held previews.
 
-Programmatic input remains held for observed/candidate interactions and unknown composer coverage. Preserve durable input uncertainty and ownership during receipt settlement or run recovery; event persistence, inbox consumption and operation continuation have separate evidence.
+Programmatic input is queued with zero bytes for observed/candidate interactions, uses delivery fallback where composer coverage is unknown, and is held for unavailable observer, ownership or storage. Preserve durable input uncertainty and ownership during receipt settlement or run recovery; event persistence, inbox consumption and operation continuation have separate evidence.
 
 ## Reading captures
 
