@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 54/56 tasks complete
+**Progress**: 56/56 tasks complete
 **Last Updated**: 2026-10-30
 
 ## Overview
@@ -10,19 +10,19 @@ Remove waste from the CAFleet repository without changing the shipped specificat
 
 ## Success Criteria
 
-- [ ] `git ls-files cafleet/src` lists no test-only file or folder: no `runtime/runner_tests/`, no `runtime/runner/native_capture/`, `runtime/runner/native_capture.rs`, `runtime/runner/process/`, `coding_agent/profiles/contract_tests/`, no `*_tests.rs` and no fixture directory. Both checks print nothing: `git grep -n -A1 -F '#[cfg(test)]' -- cafleet/src | grep -E '^[^:]+-[0-9]+-\s*(pub(\([a-z ]+\))? )?mod [a-z_]+;'` (a `#[cfg(test)]` module loaded from a separate file) and `git grep -n -F '#[path' -- cafleet/src`.
-- [ ] Every row of § Test relocation map is applied: each test lives in the file that defines the entry point it asserts on, and cross-file helpers live in `#[cfg(test)] pub(crate) mod test_support` of the owning file (§ Shared test-support homes).
-- [ ] `CLAUDE.md`, `.claude/rules/code-quality.md` § Test placement and `docs/docs/contributing.md` state the test-placement rule with the wording in § Test placement rule.
-- [ ] The test ledger reconciles exactly: the leaf-name multiset of `tests-after.txt` equals `tests-before.txt` with the ledger's additions, deletions, merges and renames applied (§ Test-change ledger).
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` pass.
-- [ ] The help text of `cafleet` and of every subcommand is byte-identical before and after (`help-before.txt` = `help-after.txt`, § Test-change ledger).
-- [ ] `cafleet/src/lib.rs` declares only `cli` and `error` as `pub`; every other module is `pub(crate)` or private, and `mise //cafleet:lint` reports no dead code.
-- [ ] `docs/docs/spec/` and `skills/cafleet/reference/runtime/` no longer exist; `git grep -n -e 'docs/docs/spec' -e 'reference/runtime' -e 'runtime/spec' -- . ':!design-docs'` prints nothing.
-- [ ] SPEC.md contains every contract statement previously held only by a docs spec page, and no link into `docs/docs/`.
-- [ ] `docs/docs/contributing.md` links SPEC.md; README links SPEC.md as the specification.
-- [ ] `skills/cafleet/reference/cli.md` exists and covers every `cafleet` command, flag, output field and error string that a shipped skill tells an agent to run, parse or act on (§ Agent CLI reference).
-- [ ] The removed contracts have zero hits: `git grep -n -F -e 'fleet capture' -e 'stale assets detected' -e 'no assets install is recorded' -e 'issues found' -e 'member_permissions' -e 'Upgraded from' -e 'nothing to do' -e 'db half failed' -e 'assets half failed' -e "cannot resolve the member's coding agent" -- SPEC.md docs skills .claude` prints nothing.
-- [ ] Every adopted finding in § Production simplification catalog and § Test de-duplication catalog is applied, or recorded in the ledger as kept with the failed verification that kept it (§ Verify-then-act protocol).
+- [x] `git ls-files cafleet/src` lists no test-only file or folder: no `runtime/runner_tests/`, no `runtime/runner/native_capture/`, `runtime/runner/native_capture.rs`, `runtime/runner/process/`, `coding_agent/profiles/contract_tests/`, no `*_tests.rs` and no fixture directory. Both checks print nothing: `git grep -n -A1 -F '#[cfg(test)]' -- cafleet/src | grep -E '^[^:]+-[0-9]+-\s*(pub(\([a-z ]+\))? )?mod [a-z_]+;'` (a `#[cfg(test)]` module loaded from a separate file) and `git grep -n -F '#[path' -- cafleet/src`.
+- [x] Every row of § Test relocation map is applied: each test lives in the file that defines the entry point it asserts on, and cross-file helpers live in `#[cfg(test)] pub(crate) mod test_support` of the owning file (§ Shared test-support homes).
+- [x] `CLAUDE.md`, `.claude/rules/code-quality.md` § Test placement and `docs/docs/contributing.md` state the test-placement rule with the wording in § Test placement rule.
+- [x] The test ledger reconciles exactly: the leaf-name multiset of `tests-after.txt` equals `tests-before.txt` with the ledger's additions, deletions, merges and renames applied (§ Test-change ledger).
+- [x] `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` pass.
+- [x] The help text of `cafleet` and of every subcommand is byte-identical before and after (`help-before.txt` = `help-after.txt`, § Test-change ledger).
+- [x] `cafleet/src/lib.rs` declares only `cli` and `error` as `pub`; every other module is `pub(crate)` or private, and `mise //cafleet:lint` reports no dead code.
+- [x] `docs/docs/spec/` and `skills/cafleet/reference/runtime/` no longer exist; `git grep -n -e 'docs/docs/spec' -e 'reference/runtime' -e 'runtime/spec' -- . ':!design-docs'` prints nothing.
+- [x] SPEC.md contains every contract statement previously held only by a docs spec page, and no link into `docs/docs/`.
+- [x] `docs/docs/contributing.md` links SPEC.md; README links SPEC.md as the specification.
+- [x] `skills/cafleet/reference/cli.md` exists and covers every `cafleet` command, flag, output field and error string that a shipped skill tells an agent to run, parse or act on (§ Agent CLI reference).
+- [x] The removed contracts have zero hits: `git grep -n -F -e 'fleet capture' -e 'stale assets detected' -e 'no assets install is recorded' -e 'issues found' -e 'member_permissions' -e 'Upgraded from' -e 'nothing to do' -e 'db half failed' -e 'assets half failed' -e "cannot resolve the member's coding agent" -- SPEC.md docs skills .claude` prints nothing.
+- [x] Every adopted finding in § Production simplification catalog and § Test de-duplication catalog is applied, or recorded in the ledger as kept with the failed verification that kept it (§ Verify-then-act protocol).
 
 ---
 
@@ -639,8 +639,8 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 13: Verification
 
-- [ ] Record `tests-after.txt` and `help-after.txt`; reconcile the ledger and help text per § Test-change ledger <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` and confirm every grep check in § Success Criteria <!-- completed: -->
+- [x] Record `tests-after.txt` and `help-after.txt`; reconcile the ledger and help text per § Test-change ledger <!-- completed: 2026-10-30T03:15 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` and confirm every grep check in § Success Criteria <!-- completed: 2026-10-30T03:15 -->
 
 ---
 
