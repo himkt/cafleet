@@ -811,6 +811,30 @@ impl InputCoordinator {
         self.current_request = None;
         self.input_fenced = true;
         let mut settled = Vec::new();
+        if let Some((id, _, written)) = self.active_deferred() {
+            self.pending = None;
+            let mut conn = crate::db::connect(&self.database_url)?;
+            if written {
+                self.record_deferred_uncertain(&mut conn, id, deadline)?;
+            } else {
+                let operation = with_database_deadline(&mut conn, deadline, |conn| {
+                    storage::settle_zero_byte_deferred(
+                        conn,
+                        &self.run.owner(),
+                        id,
+                        storage::InputState::InProgress,
+                        "runner_stopped",
+                    )
+                })?;
+                let retained = self
+                    .operations
+                    .get_mut(&id)
+                    .expect("a deferred attempt retains its receipt");
+                retained.operation = operation;
+                retained.attempt_available = false;
+            }
+            settled.push(id);
+        }
         if !self.queue.is_empty() || self.finalization.is_some() {
             let mut conn = crate::db::connect(&self.database_url)?;
             let owner = self.run.owner();
@@ -3241,6 +3265,7 @@ impl InputCoordinator {
             if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer.as_mut()) {
                 composer.pane = None;
             }
+            self.retire_failed_deferred(conn, observation);
             let source = if terminal_bookkeeping {
                 source
             } else {
@@ -3248,6 +3273,99 @@ impl InputCoordinator {
             };
             self.failure(source)
         })
+    }
+
+    /// The started deferred attempt's input and whether it may have written a child byte.
+    fn active_deferred(&self) -> Option<(i64, SubmissionStage, bool)> {
+        let pending = self.pending.as_ref()?;
+        pending.composer.as_ref()?.deferred.as_ref()?;
+        let id = pending
+            .input_id
+            .expect("a deferred attempt has its receipt");
+        let stage = self
+            .operations
+            .get(&id)
+            .expect("a deferred attempt retains its receipt")
+            .stage;
+        let written = pending
+            .composer
+            .as_ref()
+            .is_some_and(|composer| composer.written_stages > 0);
+        Some((id, stage, stage != SubmissionStage::ZeroBytes || written))
+    }
+
+    /// Records a still-`in_progress` deferred receipt as uncertain after a possible write and
+    /// returns the receipt as stored.
+    fn record_deferred_uncertain(
+        &mut self,
+        conn: &mut Connection,
+        id: i64,
+        deadline: Instant,
+    ) -> Result<storage::InputOperation> {
+        let current = with_database_deadline(conn, deadline, |conn| storage::get_input(conn, id))?;
+        let operation = if current.state == storage::InputState::InProgress {
+            with_database_deadline(conn, deadline, |conn| {
+                storage::record_input_state(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    storage::InputState::InProgress,
+                    storage::InputState::Uncertain,
+                )
+            })?
+        } else {
+            current
+        };
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("a deferred attempt retains its receipt");
+        retained.operation = operation.clone();
+        retained.attempt_available = false;
+        Ok(operation)
+    }
+
+    /// Ends a deferred attempt that failed after a possible write: its receipt becomes uncertain,
+    /// its result is published once and the queue waits for reconciliation. Without a durable
+    /// uncertain receipt, recovery publishes the result instead.
+    fn retire_failed_deferred(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+    ) {
+        let Some((id, stage, written)) = self.active_deferred() else {
+            return;
+        };
+        if !written {
+            return;
+        }
+        self.pending = None;
+        match self.record_deferred_uncertain(conn, id, Instant::now() + DEFERRED_FINALIZATION) {
+            Ok(operation) if operation.state == storage::InputState::Uncertain => {
+                Self::publish_result(observation, id, stage);
+            }
+            Ok(operation) => {
+                if let Err(cause) = self.finish_deferred(conn, observation, &operation) {
+                    eprintln!(
+                        "member runtime: input {id} result is pending recovery: {}",
+                        cause.message()
+                    );
+                }
+            }
+            Err(cause) => eprintln!(
+                "member runtime: input {id} result is pending recovery: {}",
+                cause.message()
+            ),
+        }
+    }
+
+    /// The stage a fenced input's result reports: its attempt's stage, or zero bytes for work that
+    /// never started an attempt.
+    pub(super) fn fenced_stage(&self, input_id: i64) -> SubmissionStage {
+        match self.operations.get(&input_id) {
+            Some(retained) => retained.stage,
+            None => SubmissionStage::ZeroBytes,
+        }
     }
 
     fn stop_composer_stages(
@@ -3337,7 +3455,12 @@ impl InputCoordinator {
         }
     }
 
+    /// Retires the pending immediate attempt; a started deferred attempt stays for `fence`,
+    /// which settles it by its written bytes.
     pub(super) fn finish_pending_attempt(&mut self) {
+        if self.active_deferred().is_some() {
+            return;
+        }
         if let Some(id) = self
             .pending
             .as_ref()
@@ -4303,7 +4426,7 @@ mod tests {
             use super::*;
             use crate::coding_agent::CodingAgent;
 
-            const SETTLE: Duration = Duration::from_millis(500);
+            pub(super) const SETTLE: Duration = Duration::from_millis(500);
             const ESCAPE: &[u8] = b"\x1b";
 
             fn prompt_request(host: &Host, key: &str) -> InputControlRequest {
@@ -5094,6 +5217,140 @@ mod tests {
                         Some("target_inactive")
                     );
                 });
+            }
+
+            /// Drives turns until the queued head's literal stage is written.
+            fn until_head_literal(host: &mut Host) {
+                while host.pty.stages.is_empty() {
+                    assert!(
+                        Instant::now() < host.until,
+                        "the head's literal stage is written"
+                    );
+                    host.drain();
+                    host.advance();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            fn reconcile(host: &mut Host, input_id: i64) {
+                let reply = host
+                    .receipt(crate::runtime::runner::ReceiptAction::Reconcile {
+                        input_id,
+                        expected: storage::InputState::Uncertain,
+                        disposition: storage::InputDisposition::AbandonedUncertain,
+                        evidence_ref: "audit:inspected-pane".into(),
+                    })
+                    .unwrap();
+                assert!(
+                    matches!(
+                        reply,
+                        InputControlReply::Receipt(crate::runtime::runner::ReceiptReply::Settled {
+                            input_id: settled
+                        }) if settled == input_id
+                    ),
+                    "the coordinator reconciles the uncertain receipt"
+                );
+            }
+
+            #[test]
+            fn queue_head_failure_after_a_possible_write_is_uncertain_published_once_and_reconcilable()
+             {
+                for case in ["write_failure", "human_input_after_the_settle"] {
+                    with_permission_host(Duration::from_secs(60), |host| {
+                        form(host);
+                        let first =
+                            queued(host, host.request("prompt:failing"), "interaction_open");
+                        let next = queued(host, host.request("prompt:after"), "interaction_open");
+                        close(host);
+                        until_head_literal(host);
+                        if case == "write_failure" {
+                            host.pty.failure = Some(io::ErrorKind::BrokenPipe);
+                        } else {
+                            std::thread::sleep(
+                                super::staged_delivery::SETTLE + Duration::from_millis(100),
+                            );
+                            host.human.bytes.extend(b"h");
+                        }
+                        while row(host, first).state != storage::InputState::Uncertain {
+                            assert!(
+                                Instant::now() < host.until,
+                                "{case}: the head becomes uncertain"
+                            );
+                            host.drain();
+                            if let Err(failure) = host.try_advance() {
+                                assert_eq!(case, "write_failure", "{failure:?}");
+                                assert!(
+                                    failure
+                                        .source
+                                        .message()
+                                        .contains("injected PTY write failure"),
+                                    "{failure:?}"
+                                );
+                            }
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        host.pty.failure = None;
+                        turns_until(host, |host| result_events(host, first) > 0);
+                        super::composer_busy::hold_turns(host);
+                        assert_eq!(result_events(host, first), 1, "{case}");
+                        assert_eq!(row(host, next).state, storage::InputState::Ready, "{case}");
+                        reconcile(host, first);
+                        turns_until(host, |host| settled(host, next));
+                        assert_eq!(
+                            host.pty.offers[host.pty.offers.len() - 2..],
+                            [LITERAL.as_bytes().to_vec(), b"~".to_vec()],
+                            "{case}: the next queued input drains"
+                        );
+                        assert_eq!(result_events(host, first), 1, "{case}");
+                    });
+                }
+            }
+
+            /// Applies the runner's orderly shutdown order: settle and publish the fenced results.
+            fn shut_down(host: &mut Host) -> Vec<i64> {
+                host.coordinator.finish_pending_attempt();
+                let settled = host.coordinator.fence(host.until).unwrap();
+                for input_id in &settled {
+                    host.controller
+                        .publish_delivery_result(storage::input_delivery_result_cause(
+                            *input_id,
+                            SubmissionStage::ZeroBytes.as_str(),
+                            None,
+                        ));
+                }
+                host.drain();
+                settled
+            }
+
+            #[test]
+            fn queue_orderly_shutdown_settles_an_active_deferred_attempt_by_its_written_bytes() {
+                for written in [false, true] {
+                    with_permission_host(Duration::from_secs(60), |host| {
+                        form(host);
+                        let id = queued(host, host.request("prompt:active"), "interaction_open");
+                        close(host);
+                        if written {
+                            until_head_literal(host);
+                        } else {
+                            while row(host, id).state == storage::InputState::Ready {
+                                assert!(Instant::now() < host.until, "the attempt starts");
+                                host.drain();
+                                host.advance();
+                                std::thread::sleep(Duration::from_millis(5));
+                            }
+                            assert!(host.pty.offers.is_empty());
+                        }
+                        assert_eq!(row(host, id).state, storage::InputState::InProgress);
+                        assert_eq!(shut_down(host), vec![id], "written={written}");
+                        let input = row(host, id);
+                        if written {
+                            assert_eq!(input.state, storage::InputState::Uncertain);
+                        } else {
+                            assert_not_submitted(host, id, "runner_stopped");
+                        }
+                        assert_eq!(result_events(host, id), 1, "written={written}");
+                    });
+                }
             }
 
             #[test]
@@ -6224,6 +6481,7 @@ mod tests {
                 pub(crate) stages: Vec<(Instant, Vec<u8>)>,
                 pub(crate) manual: Vec<u8>,
                 pub(crate) short: Option<usize>,
+                pub(crate) failure: Option<io::ErrorKind>,
                 expected_program: Vec<u8>,
                 program_offset: usize,
                 database_url: String,
@@ -6253,6 +6511,9 @@ mod tests {
                 fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
                     assert!(!bytes.is_empty());
                     self.offers.push(bytes.to_vec());
+                    if let Some(kind) = self.failure {
+                        return Err(io::Error::new(kind, "injected PTY write failure"));
+                    }
                     if self.expected_program[self.program_offset..].starts_with(bytes) {
                         let conn = crate::db::connect(&self.database_url).unwrap();
                         assert!(
@@ -6560,6 +6821,7 @@ mod tests {
                         stages: Vec::new(),
                         manual: Vec::new(),
                         short: None,
+                        failure: None,
                         expected_program,
                         program_offset: 0,
                         database_url: url,

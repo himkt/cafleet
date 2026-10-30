@@ -1165,13 +1165,14 @@ pub(crate) fn run_service(
         }
     };
     if let Some(coordinator) = coordinator.as_mut() {
+        let fenced = coordinator.fence(clock.storage_deadline());
         coordinator.finish_pending_attempt();
-        match coordinator.fence(clock.storage_deadline()) {
+        match fenced {
             Ok(settled) => {
                 for input_id in settled {
                     controller.publish_delivery_result(storage::input_delivery_result_cause(
                         input_id,
-                        super::input_protocol::SubmissionStage::ZeroBytes.as_str(),
+                        coordinator.fenced_stage(input_id).as_str(),
                         None,
                     ));
                 }
