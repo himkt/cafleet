@@ -231,6 +231,7 @@ pub(super) fn advance_recovery_owner(
     storage::get_run(conn, expected.run_id)
 }
 
+#[cfg(test)]
 pub(crate) fn recover_member_with_host(
     conn: &mut Connection,
     settings: &Settings,
@@ -307,14 +308,16 @@ pub(crate) fn recover_member(
     attestation: Option<&OwnerTerminationAttestation>,
     deadline: Instant,
 ) -> Result<RecoveryReport> {
-    recover_member_with_host(
+    recover(
         conn,
         settings,
         member_id,
         attestation,
         deadline,
+        None,
         &mut NativeRecoveryHost,
     )
+    .map(|value| value.report)
 }
 fn recover(
     conn: &mut Connection,
@@ -493,7 +496,7 @@ impl RecoveryHost for NativeRecoveryHost {
         ))
     }
     fn health(&mut self, run: &RunRecord, until: Instant) -> Result<RecoveryHealth> {
-        match super::service::request(run, "health", until) {
+        match super::control::request(run, "health", until) {
             Ok(value) => match HealthSnapshot::decode(value, run) {
                 Ok(health) => Ok(RecoveryHealth::Matching(health)),
                 Err(cause) => Ok(RecoveryHealth::Mismatched(cause.message().into_owned())),
@@ -855,12 +858,8 @@ pub(crate) mod test_support {
             assert!(clock.storage_deadline() <= self.deadline);
             self.calls.push("cleanup".into());
             Ok(ShutdownOutcome {
-                native_exit: None,
                 cleanup_state: self.cleanup,
-                diagnostics: Vec::new(),
-                dropped_display_bytes: 0,
-                pending_event_frames: 0,
-                unsaved_observation_gap: 0,
+                ..ShutdownOutcome::complete(None)
             })
         }
         fn checkpoint(
@@ -922,7 +921,8 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn evidence(run: &RunRecord, sequence: i64) -> Value {
-        storage::evidence::EvidencePolicy::metadata().apply(&json!({"backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,"rule_id":"recovery-fixture","screen_seq":sequence,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap()
+        storage::evidence::run_metadata(run, "recovery-fixture", u64::try_from(sequence).unwrap())
+            .unwrap()
     }
     pub(crate) fn opening(run: &RunRecord, sequence: i64, episode: i64) -> ObservedTransition {
         ObservedTransition {
@@ -1003,7 +1003,7 @@ pub(crate) mod test_support {
         use super::*;
         pub(crate) fn persist_opening(case: &mut Case) -> RuntimeEventRecord {
             let transition = opening(&case.fixture.run, 1, 1);
-            storage::persist_transition(
+            storage::persist_event(
                 &mut case.fixture.conn,
                 &case.fixture.run.owner(),
                 &transition,
@@ -1199,7 +1199,7 @@ pub(crate) mod test_support {
         pub(crate) fn established_terminal() -> Case {
             let mut case = Case::new();
             let transition = exited(&case.fixture.run, 1, Some(7), None);
-            storage::persist_transition(
+            storage::persist_event(
                 &mut case.fixture.conn,
                 &case.fixture.run.owner(),
                 &transition,
@@ -1786,7 +1786,7 @@ mod tests {
         {
             let mut case = exceptional_case_with_concurrent_reads();
             let value = opening(&case.fixture.run, 1, 1);
-            storage::persist_transition(
+            storage::persist_event(
                 &mut case.fixture.conn,
                 &case.fixture.run.owner(),
                 &value,
@@ -1859,7 +1859,7 @@ mod tests {
          {
             let mut case = exceptional_case_with_concurrent_reads();
             let value = opening(&case.fixture.run, 1, 1);
-            storage::persist_transition(
+            storage::persist_event(
                 &mut case.fixture.conn,
                 &case.fixture.run.owner(),
                 &value,

@@ -282,6 +282,14 @@ pub(crate) struct PermissionReceiptIdentity {
     pub(crate) database_identity_json: Value,
     pub(crate) run_id: i64,
 }
+impl PermissionReceiptIdentity {
+    pub(crate) fn for_run(run: &RunRecord) -> Self {
+        Self {
+            database_identity_json: run.database_identity_json.clone(),
+            run_id: run.run_id,
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NewPermissionResponse {
     pub(crate) operation_key: String,

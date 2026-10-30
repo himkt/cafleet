@@ -32,8 +32,8 @@ fn refresh(conn: &mut Connection, result: &mut RecoveryCompletion, until: Instan
     result.report.status = result.run.status;
     Ok(())
 }
-fn count(
-    result: &mut RecoveryCompletion,
+pub(super) fn count_commit(
+    report: &mut RecoveryReport,
     event: &RuntimeEventRecord,
     original: bool,
 ) -> Result<()> {
@@ -44,11 +44,11 @@ fn count(
         Ok(())
     }
     if original {
-        increment(&mut result.report.replayed_count)?;
+        increment(&mut report.replayed_count)?;
     }
     match event.notification_state {
-        NotificationState::Inbox => increment(&mut result.report.inbox_count),
-        NotificationState::Archived => increment(&mut result.report.archived_count),
+        NotificationState::Inbox => increment(&mut report.inbox_count),
+        NotificationState::Archived => increment(&mut report.archived_count),
     }
 }
 fn persist(
@@ -61,14 +61,14 @@ fn persist(
     until: Instant,
 ) -> Result<()> {
     let (event, inserted) = with_database_deadline(conn, until, |conn| match effective_policy {
-        Some(observation) => storage::persist_transition_with_effective_policy_counted(
+        Some(observation) => storage::persist_transition_with_effective_policy(
             conn,
             &result.run.owner(),
             transition,
             observation,
             PersistenceMode::Recovery,
         ),
-        None => storage::persist_transition_counted(
+        None => storage::persist_transition(
             conn,
             &result.run.owner(),
             transition,
@@ -76,7 +76,7 @@ fn persist(
         ),
     })?;
     if inserted {
-        count(result, &event, original)?;
+        count_commit(&mut result.report, &event, original)?;
     }
     refresh(conn, result, until)?;
     host.checkpoint(RecoveryBoundary::AfterCommit, &result.run, until)
@@ -111,11 +111,7 @@ pub(super) fn loss_transitions(
             .checked_add(1)
             .ok_or_else(|| error("recovery sequence overflow"))?;
     }
-    let evidence = storage::evidence::EvidencePolicy::metadata().apply(&json!({
-        "backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,
-        "rule_id":"runtime-recovery","screen_seq":0,"operation":null,"choices":null,"native_request_id":null,
-        "excerpt":null,"truncated":false,"sensitive":false
-    }))?;
+    let evidence = storage::evidence::run_metadata(run, "runtime-recovery", 0)?;
     transitions.push(ObservedTransition {
         run_id: run.run_id,
         event_seq: next,
@@ -233,20 +229,6 @@ fn perform(
     Ok(())
 }
 
-pub(super) fn count_exceptional(
-    report: &mut RecoveryReport,
-    event: &RuntimeEventRecord,
-) -> Result<()> {
-    let counter = match event.notification_state {
-        NotificationState::Inbox => &mut report.inbox_count,
-        NotificationState::Archived => &mut report.archived_count,
-    };
-    *counter = counter
-        .checked_add(1)
-        .ok_or_else(|| error("recovery commit count overflow"))?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
@@ -359,7 +341,7 @@ mod tests {
             for archived in [false, true] {
                 let mut case = Case::new();
                 let original = opening(&case.fixture.run, 1, 1);
-                let event = storage::persist_transition(
+                let event = storage::persist_event(
                     &mut case.fixture.conn,
                     &case.fixture.run.owner(),
                     &original,
@@ -440,7 +422,7 @@ mod tests {
             case.refresh();
             let owner = case.fixture.run.owner();
             let original = opening(&case.fixture.run, 1, 1);
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut case.fixture.conn,
                 &owner,
                 &original,
@@ -564,16 +546,21 @@ mod tests {
 
         fn unavailable(run: &RunRecord, sequence: i64) -> ObservedTransition {
             ObservedTransition {
-        run_id: run.run_id,
-        event_seq: sequence,
-        episode_seq: None,
-        kind: RuntimeEventKind::AutomaticReviewUnavailable,
-        classification: None,
-        observed_at: NOW.into(),
-        evidence_json: storage::evidence::EvidencePolicy::metadata().apply(&json!({"backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,"rule_id":"codex-auto-review-unavailable","screen_seq":sequence,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap(),
-        close_reason: None,
-        cause_json: None,
-    }
+                run_id: run.run_id,
+                event_seq: sequence,
+                episode_seq: None,
+                kind: RuntimeEventKind::AutomaticReviewUnavailable,
+                classification: None,
+                observed_at: NOW.into(),
+                evidence_json: storage::evidence::run_metadata(
+                    run,
+                    "codex-auto-review-unavailable",
+                    u64::try_from(sequence).unwrap(),
+                )
+                .unwrap(),
+                close_reason: None,
+                cause_json: None,
+            }
         }
 
         #[test]
@@ -645,7 +632,7 @@ mod tests {
                     .append_synced_with_policy(&value, Some(&lost), deadline)
                     .unwrap();
             }
-            let committed = storage::persist_transition_with_effective_policy(
+            let committed = storage::persist_event_with_effective_policy(
                 &mut case.fixture.conn,
                 &case.fixture.run.owner(),
                 &value,
@@ -716,7 +703,7 @@ mod tests {
         fn runner_recovery_counts_only_new_commits_across_prefix_and_identical_duplicate_frames() {
             let mut case = Case::new();
             let prefix = opening(&case.fixture.run, 1, 1);
-            storage::persist_transition(
+            storage::persist_event(
                 &mut case.fixture.conn,
                 &case.fixture.run.owner(),
                 &prefix,
@@ -1142,7 +1129,7 @@ mod tests {
             for (code, signal) in [(Some(7), None), (None, Some(15))] {
                 let mut case = Case::new();
                 let original = exited(&case.fixture.run, 1, code, signal);
-                let event = storage::persist_transition(
+                let event = storage::persist_event(
                     &mut case.fixture.conn,
                     &case.fixture.run.owner(),
                     &original,
@@ -1196,7 +1183,7 @@ mod tests {
          {
             let mut case = Case::new();
             let original = exited(&case.fixture.run, 1, Some(7), None);
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut case.fixture.conn,
                 &case.fixture.run.owner(),
                 &original,

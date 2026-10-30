@@ -2,7 +2,7 @@ use super::*;
 use crate::broker::records::Placement;
 use crate::broker::runtime::{self as storage, *};
 use crate::config::Settings;
-use crate::input::{Deadline, PaneLock, inherited_database_deadline, with_database_budget};
+use crate::input::{Deadline, PaneLock, bounded_by_inherited, with_database_budget};
 use rusqlite::{Connection, OptionalExtension};
 use std::time::Instant;
 
@@ -31,7 +31,6 @@ impl<'a> PreparedSubmission<'a> {
     ) -> Result<InputControlRequest> {
         ensure(input_id > 0, "positive retirement input ID required")?;
         Ok(InputControlRequest {
-            protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: ControlIdentity::from_run(run),
             expires_at_mono_ns: self.expiration.monotonic_ns(),
             operation: InputControlOperation::Receipt(ReceiptAction::Retire { input_id }),
@@ -189,11 +188,9 @@ fn submission_digest(run_id: i64, request: &SubmitInput) -> Result<String> {
             return Err(CafleetError::Usage("ordinary input kind required".into()));
         }
     }
-    let bytes = crate::digest::canonical_json(&serde_json::json!({
-        "run_id":run_id,"kind":request.input_kind.as_str(),
-        "message_id":request.message_id,"literal":request.literal,
-    }));
-    Ok(crate::digest::sha256_hex(bytes.as_bytes()))
+    Ok(crate::broker::runtime::input_payload_digest(
+        run_id, request,
+    ))
 }
 
 pub(crate) fn find_submission(
@@ -230,21 +227,28 @@ pub(crate) fn find_submission(
     result.map_err(|source| context.failure(source))
 }
 
-fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
-    let (status, stage, reason) = match (input.state, input.disposition) {
-        (InputState::Ready, _) => return None,
+/// The outcome a durable input already determines; a `Ready` input needs live revalidation.
+pub(super) fn durable_outcome(
+    input: &InputOperation,
+) -> Option<(SubmissionStatus, SubmissionStage, Option<String>)> {
+    match (input.state, input.disposition) {
+        (InputState::Ready, _) => None,
         (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
-            (SubmissionStatus::Accepted, SubmissionStage::Submitted, None)
+            Some((SubmissionStatus::Accepted, SubmissionStage::Submitted, None))
         }
         (InputState::InProgress | InputState::Uncertain, _) => {
-            (SubmissionStatus::Uncertain, SubmissionStage::Unknown, None)
+            Some((SubmissionStatus::Uncertain, SubmissionStage::Unknown, None))
         }
-        (InputState::Settled, _) => (
+        (InputState::Settled, _) => Some((
             SubmissionStatus::Rejected,
             SubmissionStage::ZeroBytes,
             Some("input operation key is consumed".into()),
-        ),
-    };
+        )),
+    }
+}
+
+fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
+    let (status, stage, reason) = durable_outcome(input)?;
     Some(SubmissionResult {
         status,
         input_id: Some(input.input_id),
@@ -255,12 +259,69 @@ fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
 }
 
 fn submission_deadline(conn: &Connection, deadline: Deadline) -> Result<Deadline> {
-    let effective = inherited_database_deadline(conn).map_or(deadline.instant(), |bound| {
-        bound.instant().min(deadline.instant())
-    });
-    let deadline = Deadline::until(effective);
+    let deadline = Deadline::until(bounded_by_inherited(conn, deadline.instant()));
     deadline.remaining()?;
     Ok(deadline)
+}
+
+fn same_association(
+    view: &storage::RuntimeEventView,
+    original: &storage::RuntimeEventView,
+) -> bool {
+    let interaction = |view: &storage::RuntimeEventView| {
+        view.interaction
+            .as_ref()
+            .map(|i| (i.interaction_id, i.run_id, i.episode_seq, i.classification))
+    };
+    view.event == original.event && interaction(view) == interaction(original)
+}
+
+fn permission_placement(conn: &Connection, run: &RunRecord) -> Result<Placement> {
+    crate::broker::get_member(conn, run.member_id, run.fleet_id)?
+        .and_then(|member| member.placement)
+        .ok_or_else(|| error("permission member placement unavailable"))
+}
+
+/// `messages` are the identity, contradiction, missing-durable and unmatched errors, in that order.
+fn validate_reply_against_durable(
+    reply: &SubmissionResult,
+    durable: Option<&InputOperation>,
+    messages: [&str; 4],
+) -> Result<()> {
+    let [identity, contradiction, missing, unmatched] = messages;
+    match (reply.input_id, durable) {
+        (Some(id), Some(input)) => {
+            ensure(id == input.input_id, identity)?;
+            let consistent = match reply.status {
+                SubmissionStatus::Accepted => {
+                    reply.stage == SubmissionStage::Submitted
+                        && matches!(
+                            (input.state, input.disposition),
+                            (InputState::Accepted, _)
+                                | (InputState::Settled, Some(InputDisposition::Submitted))
+                        )
+                }
+                SubmissionStatus::Uncertain => {
+                    matches!(input.state, InputState::InProgress | InputState::Uncertain)
+                }
+                SubmissionStatus::Held | SubmissionStatus::Rejected => {
+                    reply.stage == SubmissionStage::ZeroBytes
+                        && (input.state == InputState::Ready
+                            || input.state == InputState::Settled
+                                && input.disposition != Some(InputDisposition::Submitted))
+                }
+            };
+            ensure(consistent, contradiction)
+        }
+        (None, None) => ensure(
+            matches!(
+                reply.status,
+                SubmissionStatus::Held | SubmissionStatus::Rejected
+            ) && reply.stage == SubmissionStage::ZeroBytes,
+            missing,
+        ),
+        _ => Err(error(unmatched)),
+    }
 }
 
 pub(crate) fn validate_submission_target(
@@ -269,13 +330,10 @@ pub(crate) fn validate_submission_target(
     expected: &RunRecord,
     placement: &Placement,
 ) -> Result<()> {
-    let selected_path = conn
-        .path()
-        .ok_or_else(|| error("file-backed input database required"))?;
-    ensure(
-        std::fs::canonicalize(selected_path).map_err(io_error)?
-            == std::fs::canonicalize(crate::db::database_path(&settings.database_url)?)
-                .map_err(io_error)?,
+    validate_configured_database(
+        conn,
+        settings,
+        "file-backed input database required",
         "submission connection and configured database differ",
     )?;
     let current = storage::validate_owner(conn, &expected.owner())?;
@@ -319,7 +377,7 @@ pub(crate) fn submit_wrapped_input(
     request: &SubmitInput,
     deadline: Deadline,
 ) -> std::result::Result<SubmissionResult, InputFailure> {
-    match prepare_submission_with_host(
+    submit_wrapped_input_with_host(
         conn,
         settings,
         expected_run,
@@ -327,25 +385,9 @@ pub(crate) fn submit_wrapped_input(
         request,
         deadline,
         &mut NativeInputHost,
-    )? {
-        SubmissionPreparation::History(result) => Ok(result),
-        SubmissionPreparation::Locked {
-            attempt,
-            held,
-            deadline,
-        } => submit_wrapped_input_under_pane_lock(
-            conn,
-            settings,
-            expected_run,
-            expected_placement,
-            &held,
-            &attempt,
-            deadline,
-        ),
-    }
+    )
 }
 
-#[cfg(test)]
 fn submit_wrapped_input_with_host(
     conn: &mut Connection,
     settings: &Settings,
@@ -391,10 +433,7 @@ fn prepare_submission_with_host<'a>(
     deadline: Deadline,
     host: &mut impl InputCommandHost,
 ) -> std::result::Result<SubmissionPreparation<'a>, InputFailure> {
-    let identity = PermissionReceiptIdentity {
-        database_identity_json: expected_run.database_identity_json.clone(),
-        run_id: expected_run.run_id,
-    };
+    let identity = PermissionReceiptIdentity::for_run(expected_run);
     let retained = find_submission(conn, &identity, request, deadline)?;
     if let Some(result) = retained.as_ref().and_then(historical_submission) {
         return Ok(SubmissionPreparation::History(result));
@@ -422,27 +461,6 @@ fn prepare_submission_with_host<'a>(
     .map_err(|source| context.failure(source))
 }
 
-pub(crate) fn submit_wrapped_input_under_pane_lock(
-    conn: &mut Connection,
-    settings: &Settings,
-    expected_run: &RunRecord,
-    expected_placement: &Placement,
-    held: &PaneLock,
-    attempt: &PreparedSubmission<'_>,
-    deadline: Deadline,
-) -> std::result::Result<SubmissionResult, InputFailure> {
-    submit_wrapped_input_under_pane_lock_with_host(
-        conn,
-        settings,
-        expected_run,
-        expected_placement,
-        held,
-        attempt,
-        deadline,
-        &mut NativeInputHost,
-    )
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "the approved borrowed submission entry adds its host to the same fixed arguments"
@@ -462,10 +480,7 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         Deadline::until(deadline.instant().min(attempt.deadline)),
     )
     .map_err(|source| submission_context(expected_run.run_id, attempt.request).failure(source))?;
-    let identity = PermissionReceiptIdentity {
-        database_identity_json: expected_run.database_identity_json.clone(),
-        run_id: expected_run.run_id,
-    };
+    let identity = PermissionReceiptIdentity::for_run(expected_run);
     let retained = find_submission(conn, &identity, attempt.request, deadline)?;
     if let Some(result) = retained.as_ref().and_then(historical_submission) {
         return Ok(result);
@@ -495,19 +510,13 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
             deadline.remaining()?;
             tx.commit().map_err(crate::error::CafleetError::from)
         })?;
-        let input = SubmitInput {
-            operation_key: attempt.request.operation_key.clone(),
-            input_kind: attempt.request.input_kind,
-            message_id: attempt.request.message_id,
-            literal: attempt.request.literal.clone(),
-        };
+        let input = attempt.request.clone();
         let operation = match input.input_kind {
             InputKind::Preview | InputKind::Prompt => InputControlOperation::SubmitPrompt(input),
             InputKind::Exec => InputControlOperation::SubmitExec(input),
             InputKind::PermissionResponse => unreachable!("validated ordinary input kind"),
         };
         let request = InputControlRequest {
-            protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: ControlIdentity::from_run(expected_run),
             expires_at_mono_ns: attempt.expiration.monotonic_ns(),
             operation,
@@ -527,42 +536,16 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
             held.validate_binding(&settings.database_url, expected_placement)?;
             validate_submission_target(conn, settings, expected_run, expected_placement)
         })?;
-        match (reply.input_id, recorded.as_ref()) {
-            (Some(id), Some(input)) => {
-                ensure(
-                    id == input.input_id,
-                    "submission reply input identity mismatch",
-                )?;
-                let matches = match reply.status {
-                    SubmissionStatus::Accepted => {
-                        reply.stage == SubmissionStage::Submitted
-                            && matches!(
-                                (input.state, input.disposition),
-                                (InputState::Accepted, _)
-                                    | (InputState::Settled, Some(InputDisposition::Submitted))
-                            )
-                    }
-                    SubmissionStatus::Uncertain => {
-                        matches!(input.state, InputState::InProgress | InputState::Uncertain)
-                    }
-                    SubmissionStatus::Held | SubmissionStatus::Rejected => {
-                        reply.stage == SubmissionStage::ZeroBytes
-                            && (input.state == InputState::Ready
-                                || input.state == InputState::Settled
-                                    && input.disposition != Some(InputDisposition::Submitted))
-                    }
-                };
-                ensure(matches, "submission reply contradicts durable state")?;
-            }
-            (None, None) => ensure(
-                matches!(
-                    reply.status,
-                    SubmissionStatus::Held | SubmissionStatus::Rejected
-                ) && reply.stage == SubmissionStage::ZeroBytes,
+        validate_reply_against_durable(
+            &reply,
+            recorded.as_ref(),
+            [
+                "submission reply input identity mismatch",
+                "submission reply contradicts durable state",
                 "submission outcome requires a durable input identity",
-            )?,
-            _ => return Err(error("submission reply has no matching durable input")),
-        }
+                "submission reply has no matching durable input",
+            ],
+        )?;
         deadline.remaining()?;
         Ok(reply)
     })();
@@ -588,14 +571,26 @@ fn validate_receipt_target(
 }
 
 pub(super) fn validate_receipt_database(conn: &Connection, settings: &Settings) -> Result<()> {
-    let selected_path = conn
-        .path()
-        .ok_or_else(|| error("file-backed receipt database required"))?;
+    validate_configured_database(
+        conn,
+        settings,
+        "file-backed receipt database required",
+        "receipt connection and configured database differ",
+    )
+}
+
+fn validate_configured_database(
+    conn: &Connection,
+    settings: &Settings,
+    memory_message: &str,
+    mismatch_message: &str,
+) -> Result<()> {
+    let selected_path = conn.path().ok_or_else(|| error(memory_message))?;
     ensure(
         std::fs::canonicalize(selected_path).map_err(io_error)?
             == std::fs::canonicalize(crate::db::database_path(&settings.database_url)?)
                 .map_err(io_error)?,
-        "receipt connection and configured database differ",
+        mismatch_message,
     )
 }
 
@@ -739,7 +734,6 @@ fn reconcile_receipt_with_hosts(
             deadline.remaining()?;
             read_target(conn)?;
             let request = |action| InputControlRequest {
-                protocol_version: CONTROL_PROTOCOL_VERSION,
                 identity: ControlIdentity::from_run(&run),
                 expires_at_mono_ns: expiration.monotonic_ns(),
                 operation: InputControlOperation::Receipt(action),
@@ -751,8 +745,8 @@ fn reconcile_receipt_with_hosts(
                 .exchange(&run, &query, deadline.instant())
                 .map_err(CafleetError::from)?;
             ensure(
-                matches!(reply, InputControlReply::Receipt(ReceiptReply::Present { input_id: actual, submission })
-                if actual == input_id && submission.input_id == Some(input_id)),
+                matches!(reply, InputControlReply::Receipt(ReceiptReply::Present { input_id: actual, .. })
+                if actual == input_id),
                 "receipt query has no matching durable input identity",
             )?;
             deadline.remaining()?;
@@ -763,13 +757,8 @@ fn reconcile_receipt_with_hosts(
                 disposition,
                 evidence_ref: evidence_ref.into(),
             });
-            let reply = host
-                .exchange(&run, &reconcile, deadline.instant())
+            host.exchange(&run, &reconcile, deadline.instant())
                 .map_err(CafleetError::from)?;
-            ensure(
-                matches!(reply, InputControlReply::Receipt(ReceiptReply::Settled { input_id: actual }) if actual == input_id),
-                "receipt settlement acknowledgment identity mismatch",
-            )?;
             let settled = read_target(conn)?;
             ensure(
                 settled.state == InputState::Settled
@@ -779,13 +768,8 @@ fn reconcile_receipt_with_hosts(
             )?;
             deadline.remaining()?;
             let retirement = request(ReceiptAction::Retire { input_id });
-            let reply = host
-                .exchange(&run, &retirement, deadline.instant())
+            host.exchange(&run, &retirement, deadline.instant())
                 .map_err(CafleetError::from)?;
-            ensure(
-                matches!(reply, InputControlReply::Receipt(ReceiptReply::Retired { input_id: actual }) if actual == input_id),
-                "receipt retirement acknowledgment identity mismatch",
-            )?;
             deadline.remaining()?;
             let recorded = read_target(conn)?;
             ensure(recorded == settled, "receipt changed after retirement")?;
@@ -996,10 +980,7 @@ pub(super) fn response_lookup(
         operation_key: input.operation_key.clone(),
         metadata: metadata(input, &retained.response),
     };
-    let identity = PermissionReceiptIdentity {
-        database_identity_json: run.database_identity_json.clone(),
-        run_id: run.run_id,
-    };
+    let identity = PermissionReceiptIdentity::for_run(run);
     let receipt = storage::lookup_permission_response(conn, &identity, &request)?
         .ok_or_else(|| error("retained permission response disappeared from its snapshot"))?;
     Ok(Some(receipt))
@@ -1040,15 +1021,7 @@ fn prepare_response(
                 input.expected_owner_epoch == run.owner_epoch,
                 "permission owner epoch changed",
             )?;
-            let original = super::input::inspection_association(
-                &tx,
-                &run,
-                &PermissionInspectInput {
-                    interaction_id: input.interaction_id,
-                    event_id: input.event_id,
-                    director_member_id: input.director_member_id,
-                },
-            )?;
+            let original = super::input::inspection_association(&tx, &run, &input.inspection())?;
             ResponsePreparation::Live(Box::new((run, original, retained)))
         };
         deadline.remaining()?;
@@ -1056,23 +1029,6 @@ fn prepare_response(
         Ok(prepared)
     });
     result.map_err(|source| context.failure(source))
-}
-
-fn copy_response_input(input: &PermissionRespondInput) -> PermissionRespondInput {
-    PermissionRespondInput {
-        interaction_id: input.interaction_id,
-        event_id: input.event_id,
-        director_member_id: input.director_member_id,
-        expected_run_id: input.expected_run_id,
-        expected_owner_epoch: input.expected_owner_epoch,
-        request_token: input.request_token.clone(),
-        decision: input.decision,
-        decision_source: input.decision_source,
-        director_mode: input.director_mode,
-        mode_evidence_ref: input.mode_evidence_ref.clone(),
-        decision_evidence_ref: input.decision_evidence_ref.clone(),
-        operation_key: input.operation_key.clone(),
-    }
 }
 
 pub(crate) fn respond_permission_with_host(
@@ -1100,61 +1056,43 @@ pub(crate) fn respond_permission_with_host(
     };
     context.input_id = ready.as_ref().map(|r| r.input.input_id);
     let result = (|| {
-        let placement = with_database_budget(conn, deadline, |conn| {
-            crate::broker::get_member(conn, run.member_id, run.fleet_id)?
-                .and_then(|member| member.placement)
-                .ok_or_else(|| error("permission member placement unavailable"))
-        })?;
+        let placement =
+            with_database_budget(conn, deadline, |conn| permission_placement(conn, &run))?;
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
             .lock(settings, &run, &placement, deadline)
             .map_err(CafleetError::from)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
-        let validate =
-            |conn: &mut Connection| -> Result<()> {
-                deadline.remaining()?;
-                held.validate_binding(&settings.database_url, &placement)?;
-                with_database_budget(conn, deadline, |conn| {
-                    let tx = conn.transaction()?;
-                    validate_submission_target(&tx, settings, &run, &placement)?;
-                    let view = super::input::inspection_association(
-                        &tx,
-                        &run,
-                        &PermissionInspectInput {
-                            interaction_id: input.interaction_id,
-                            event_id: input.event_id,
-                            director_member_id: input.director_member_id,
-                        },
-                    )?;
+        let validate = |conn: &mut Connection| -> Result<()> {
+            deadline.remaining()?;
+            held.validate_binding(&settings.database_url, &placement)?;
+            with_database_budget(conn, deadline, |conn| {
+                let tx = conn.transaction()?;
+                validate_submission_target(&tx, settings, &run, &placement)?;
+                let view = super::input::inspection_association(&tx, &run, &input.inspection())?;
+                ensure(
+                    same_association(&view, &original),
+                    "permission response association changed",
+                )?;
+                if let Some(ready) = &ready {
                     ensure(
-                        view.event == original.event
-                            && view.interaction.as_ref().map(|i| {
-                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
-                            }) == original.interaction.as_ref().map(|i| {
-                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
-                            }),
-                        "permission response association changed",
+                        storage::get_permission_response(&tx, ready.input.input_id)? == *ready,
+                        "ready response snapshot changed",
                     )?;
-                    if let Some(ready) = &ready {
-                        ensure(
-                            storage::get_permission_response(&tx, ready.input.input_id)? == *ready,
-                            "ready response snapshot changed",
-                        )?;
-                    }
-                    deadline.remaining()?;
-                    tx.commit().map_err(crate::error::CafleetError::from)
-                })
-            };
+                }
+                deadline.remaining()?;
+                tx.commit().map_err(crate::error::CafleetError::from)
+            })
+        };
         validate(conn)?;
         host.health(&run, deadline.instant())
             .map_err(CafleetError::from)?
             .validate(&run)?;
         validate(conn)?;
         let request = InputControlRequest {
-            protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: ControlIdentity::from_run(&run),
             expires_at_mono_ns: expiration.monotonic_ns(),
-            operation: InputControlOperation::PermissionRespond(copy_response_input(input)),
+            operation: InputControlOperation::PermissionRespond(input.clone()),
         };
         let reply = host
             .exchange(&run, &request, deadline.instant())
@@ -1162,16 +1100,6 @@ pub(crate) fn respond_permission_with_host(
         let InputControlReply::PermissionResponse(reply) = reply else {
             return Err(error("permission response requires its typed reply"));
         };
-        ensure(
-            reply.member_id == run.member_id
-                && reply.run_id == run.run_id
-                && reply.owner_epoch == input.expected_owner_epoch
-                && reply.interaction_id == input.interaction_id
-                && reply.event_id == input.event_id
-                && reply.decision == input.decision
-                && reply.decision_source == input.decision_source,
-            "permission response reply identity mismatch",
-        )?;
         let receipt = with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction()?;
             held.validate_binding(&settings.database_url, &placement)?;
@@ -1189,47 +1117,16 @@ pub(crate) fn respond_permission_with_host(
             tx.commit()?;
             Ok(receipt)
         })?;
-        match (reply.submission.input_id, receipt.as_ref()) {
-            (Some(id), Some(receipt)) => {
-                ensure(
-                    id == receipt.input.input_id,
-                    "permission response reply input identity mismatch",
-                )?;
-                let valid = match reply.submission.status {
-                    SubmissionStatus::Accepted => {
-                        reply.submission.stage == SubmissionStage::Submitted
-                            && (receipt.input.state == InputState::Accepted
-                                || receipt.input.state == InputState::Settled
-                                    && receipt.input.disposition
-                                        == Some(InputDisposition::Submitted))
-                    }
-                    SubmissionStatus::Uncertain => matches!(
-                        receipt.input.state,
-                        InputState::InProgress | InputState::Uncertain
-                    ),
-                    SubmissionStatus::Held | SubmissionStatus::Rejected => {
-                        reply.submission.stage == SubmissionStage::ZeroBytes
-                            && (receipt.input.state == InputState::Ready
-                                || receipt.input.state == InputState::Settled
-                                    && receipt.input.disposition
-                                        != Some(InputDisposition::Submitted))
-                    }
-                };
-                ensure(valid, "permission response reply contradicts durable state")?;
-            }
-            (None, None) => ensure(
-                matches!(
-                    reply.submission.status,
-                    SubmissionStatus::Held | SubmissionStatus::Rejected
-                ) && reply.submission.stage == SubmissionStage::ZeroBytes,
+        validate_reply_against_durable(
+            &reply.submission,
+            receipt.as_ref().map(|receipt| &receipt.input),
+            [
+                "permission response reply input identity mismatch",
+                "permission response reply contradicts durable state",
                 "permission response outcome requires its durable input",
-            )?,
-            _ => {
-                return Err(error(
-                    "permission response reply has no matching durable input",
-                ));
-            }
-        }
+                "permission response reply has no matching durable input",
+            ],
+        )?;
         deadline.remaining()?;
         Ok(reply)
     })();
@@ -1300,9 +1197,7 @@ fn inspect_permission_with_host(
                 "member_runs.database_identity_json",
             )?;
             context.run_id = Some(run.run_id);
-            let placement = crate::broker::get_member(&tx, run.member_id, run.fleet_id)?
-                .and_then(|member| member.placement)
-                .ok_or_else(|| error("permission member placement unavailable"))?;
+            let placement = permission_placement(&tx, &run)?;
             validate_submission_target(&tx, settings, &run, &placement)?;
             let view = super::input::inspection_association(&tx, &run, input)?;
             deadline.remaining()?;
@@ -1314,41 +1209,30 @@ fn inspect_permission_with_host(
             .lock(settings, &run, &placement, deadline)
             .map_err(CafleetError::from)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
-        let validate =
-            |conn: &mut Connection| -> Result<()> {
+        let validate = |conn: &mut Connection| -> Result<()> {
+            deadline.remaining()?;
+            held.validate_binding(&settings.database_url, &placement)?;
+            with_database_budget(conn, deadline, |conn| {
+                let tx = conn.transaction()?;
+                validate_submission_target(&tx, settings, &run, &placement)?;
+                let view = super::input::inspection_association(&tx, &run, input)?;
+                ensure(
+                    same_association(&view, &original),
+                    "permission inspection association changed",
+                )?;
                 deadline.remaining()?;
-                held.validate_binding(&settings.database_url, &placement)?;
-                with_database_budget(conn, deadline, |conn| {
-                    let tx = conn.transaction()?;
-                    validate_submission_target(&tx, settings, &run, &placement)?;
-                    let view = super::input::inspection_association(&tx, &run, input)?;
-                    ensure(
-                        view.event == original.event
-                            && view.interaction.as_ref().map(|i| {
-                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
-                            }) == original.interaction.as_ref().map(|i| {
-                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
-                            }),
-                        "permission inspection association changed",
-                    )?;
-                    deadline.remaining()?;
-                    tx.commit().map_err(crate::error::CafleetError::from)
-                })
-            };
+                tx.commit().map_err(crate::error::CafleetError::from)
+            })
+        };
         validate(conn)?;
         host.health(&run, deadline.instant())
             .map_err(CafleetError::from)?
             .validate(&run)?;
         validate(conn)?;
         let request = InputControlRequest {
-            protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: ControlIdentity::from_run(&run),
             expires_at_mono_ns: expiration.monotonic_ns(),
-            operation: InputControlOperation::PermissionInspect(PermissionInspectInput {
-                event_id: input.event_id,
-                interaction_id: input.interaction_id,
-                director_member_id: input.director_member_id,
-            }),
+            operation: InputControlOperation::PermissionInspect(input.clone()),
         };
         let reply = host
             .exchange(&run, &request, deadline.instant())
@@ -1362,21 +1246,13 @@ fn inspect_permission_with_host(
             .as_ref()
             .expect("validated permission interaction");
         ensure(
-            reply.event_id == input.event_id
-                && reply.interaction_id == input.interaction_id
-                && reply.message_id == original.event.message_id.expect("validated inbox message")
-                && reply.run_id == run.run_id
-                && reply.owner_epoch == run.owner_epoch
-                && reply.member_id == run.member_id
-                && reply.fleet_id == run.fleet_id
-                && reply.director_member_id == run.director_member_id
+            reply.message_id == original.event.message_id.expect("validated inbox message")
                 && reply.episode_seq == interaction.episode_seq
                 && reply.backend == run.backend
                 && reply.native_version == run.native_version
                 && reply.profile_version == run.profile_version,
             "permission inspection reply identity mismatch",
         )?;
-        storage::evidence::validate(&reply.evidence)?;
         ensure(
             reply.evidence["backend"].as_str() == Some(run.backend.as_str())
                 && reply.evidence["native_version"].as_str() == run.native_version.as_deref()
@@ -1392,17 +1268,6 @@ fn inspect_permission_with_host(
                 .map(MissingEvidence::as_str)
                 .eq(missing.iter().map(MissingEvidence::as_str)),
             "permission inspection evidence completeness mismatch",
-        )?;
-        if let Some(token) = &reply.request_token {
-            validate_request_token(token)?;
-        }
-        let expected_order = [PermissionDecision::Allow, PermissionDecision::Deny]
-            .into_iter()
-            .filter(|decision| reply.supported_decisions.contains(decision))
-            .collect::<Vec<_>>();
-        ensure(
-            reply.supported_decisions == expected_order,
-            "permission inspection decisions are not an ordered subset",
         )?;
         match reply.answer_capability {
             Coverage::Tested => ensure(
@@ -1530,7 +1395,7 @@ pub(crate) mod test_support {
                 close_reason: None,
                 cause_json: None,
             };
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -1832,48 +1697,6 @@ mod tests {
         fixture.finish();
     }
 
-    struct InspectionHost {
-        socket: SocketHost,
-        wrong_event: bool,
-    }
-    impl InputCommandHost for InspectionHost {
-        fn lock(
-            &mut self,
-            settings: &Settings,
-            run: &RunRecord,
-            placement: &Placement,
-            deadline: Deadline,
-        ) -> std::result::Result<Option<PaneLock>, InputFailure> {
-            self.socket.lock(settings, run, placement, deadline)
-        }
-        fn health(
-            &mut self,
-            run: &RunRecord,
-            deadline: Instant,
-        ) -> std::result::Result<HealthSnapshot, InputFailure> {
-            self.socket.health(run, deadline)
-        }
-        fn exchange(
-            &mut self,
-            run: &RunRecord,
-            request: &InputControlRequest,
-            deadline: Instant,
-        ) -> std::result::Result<InputControlReply, InputFailure> {
-            assert!(matches!(
-                request.operation,
-                InputControlOperation::PermissionInspect(_)
-            ));
-            let mut reply = self.socket.exchange(run, request, deadline)?;
-            if self.wrong_event {
-                let InputControlReply::Inspection(value) = &mut reply else {
-                    panic!("actual typed permission inspection")
-                };
-                value.event_id += 1;
-            }
-            Ok(reply)
-        }
-    }
-
     #[test]
     fn permission_inspection_client_uses_real_guard_original_sql_bound_and_validates_live_reply() {
         use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
@@ -1939,10 +1762,7 @@ mod tests {
         assert_eq!(health_records(&fixture.fixture.conn), records);
 
         let inherited = outer - Duration::from_millis(100);
-        let mut host = InspectionHost {
-            socket: SocketHost::new(&settings, &placement, inherited),
-            wrong_event: false,
-        };
+        let mut host = SocketHost::new(&settings, &placement, inherited);
         let value = with_database_budget(
             &mut fixture.fixture.conn,
             Deadline::until(inherited),
@@ -1958,8 +1778,8 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(host.socket.calls, [1, 1, 1]);
-        assert!(host.socket.expiration.is_some());
+        assert_eq!(host.calls, [1, 1, 1]);
+        assert!(host.expiration.is_some());
         assert_eq!(
             (value.event_id, value.interaction_id, value.message_id),
             (event_id, interaction_id, message_id)
@@ -1977,36 +1797,6 @@ mod tests {
                 .missing_evidence
                 .iter()
                 .any(|v| matches!(v, MissingEvidence::ChoiceScope))
-        );
-
-        let mut wrong = InspectionHost {
-            socket: SocketHost::new(&settings, &placement, outer),
-            wrong_event: true,
-        };
-        let failure = match inspect_permission_with_host(
-            &mut fixture.fixture.conn,
-            &settings,
-            &request,
-            Deadline::until(outer),
-            &mut wrong,
-        ) {
-            Err(failure) => failure,
-            Ok(_) => panic!("a real typed reply still requires its pinned event identity"),
-        };
-        assert_eq!(wrong.socket.calls, [1, 1, 1]);
-        assert_eq!(failure.run_id, Some(run.run_id));
-        assert_eq!(failure.interaction_id, Some(interaction_id));
-        assert!(
-            !failure
-                .source
-                .message()
-                .contains("form-executable-inspection")
-        );
-        assert!(
-            !failure
-                .source
-                .message()
-                .contains(value.request_token.as_ref().unwrap())
         );
 
         let original_sender: i64 = fixture
@@ -2188,14 +1978,6 @@ mod tests {
             });
         let expired = expired.expect("expired-frame invocation completed");
         let expired_calls = expired_calls.expect("SQL count sampled after expired invocation");
-        eprintln!(
-            "permission inherited expiry: result={:?}; SQL={expired_calls}; scope_cleanup={scoped:?}",
-            expired.as_ref().map(|reply| (
-                reply.submission.status,
-                reply.submission.input_id,
-                reply.submission.stage
-            ))
-        );
         scoped.unwrap();
         let active = active
             .expect("same history has a live-budget control")
@@ -3241,14 +3023,6 @@ mod tests {
         _run_lock: RunLock,
     }
 
-    fn digest(run_id: i64, request: &SubmitInput) -> String {
-        let value = serde_json::json!({
-            "kind":request.input_kind.as_str(), "literal":request.literal,
-            "message_id":request.message_id, "run_id":run_id,
-        });
-        crate::digest::sha256_hex(&serde_json::to_vec(&value).unwrap())
-    }
-
     struct NoLiveHost;
     impl InputCommandHost for NoLiveHost {
         fn lock(
@@ -3332,16 +3106,6 @@ mod tests {
                 skip_reconcile: false,
             }
         }
-
-        fn failure(source: CafleetError) -> InputFailure {
-            InputFailure {
-                source,
-                run_id: None,
-                interaction_id: None,
-                input_id: None,
-                operation_key: None,
-            }
-        }
     }
 
     impl InputCommandHost for SocketHost {
@@ -3355,7 +3119,7 @@ mod tests {
             self.calls[0] += 1;
             assert_eq!(deadline.instant(), self.until);
             PaneLock::acquire_within(&settings.database_url, placement, deadline)
-                .map_err(Self::failure)
+                .map_err(host_failure)
         }
 
         fn health(
@@ -3372,7 +3136,7 @@ mod tests {
             );
             let health = match self.health_reply.take() {
                 Some(health) => health,
-                None => super::super::probe_health(run, deadline).map_err(Self::failure)?,
+                None => super::super::probe_health(run, deadline).map_err(host_failure)?,
             };
             if let Some(callback) = &mut self.after_health {
                 callback();
@@ -3448,21 +3212,21 @@ mod tests {
                 }));
             }
             let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)
-                .map_err(Self::failure)?;
+                .map_err(host_failure)?;
             let mut client =
                 super::super::control::ControlClient::connect(&paths.control_socket, deadline)
-                    .map_err(Self::failure)?;
+                    .map_err(host_failure)?;
             if matches!(self.reply, ReplyMode::Disconnected) {
                 client
                     .stream
                     .shutdown(Shutdown::Read)
                     .map_err(io_error)
-                    .map_err(Self::failure)?;
+                    .map_err(host_failure)?;
                 let bytes = super::super::input_protocol::encode_input_request(request)
-                    .map_err(Self::failure)?;
+                    .map_err(host_failure)?;
                 let mut offset = 0;
                 while offset < bytes.len() {
-                    check_deadline(Instant::now(), deadline).map_err(Self::failure)?;
+                    check_deadline(Instant::now(), deadline).map_err(host_failure)?;
                     match client.stream.write(&bytes[offset..]) {
                         Ok(0) => panic!("owned external request disconnected during send"),
                         Ok(count) => offset += count,
@@ -3472,9 +3236,9 @@ mod tests {
                                 std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
                             ) =>
                         {
-                            super::super::control::pause(deadline).map_err(Self::failure)?;
+                            super::super::control::pause(deadline).map_err(host_failure)?;
                         }
-                        Err(cause) => return Err(Self::failure(io_error(cause))),
+                        Err(cause) => return Err(host_failure(io_error(cause))),
                     }
                 }
                 let key = match &request.operation {
@@ -3489,20 +3253,20 @@ mod tests {
                         with_database_budget(&mut observed, Deadline::until(deadline), |conn| {
                             storage::find_input(conn, run.run_id, key)
                         })
-                        .map_err(Self::failure)?;
+                        .map_err(host_failure)?;
                     if retained.is_some_and(|input| input.state == InputState::Accepted) {
                         break;
                     }
-                    super::super::control::pause(deadline).map_err(Self::failure)?;
+                    super::super::control::pause(deadline).map_err(host_failure)?;
                 }
                 drop(client);
-                return Err(Self::failure(CafleetError::App(
+                return Err(host_failure(CafleetError::App(
                     "owned reply consumer closed".into(),
                 )));
             }
             let mut reply = client
                 .exchange_input(request, deadline)
-                .map_err(Self::failure)?;
+                .map_err(host_failure)?;
             if let Some(wrong) = self.wrong_query_id {
                 let InputControlReply::Receipt(ReceiptReply::Present {
                     input_id,
@@ -3988,7 +3752,10 @@ mod tests {
                 &NewInput {
                     operation_key: request.operation_key.clone(),
                     kind: request.input_kind,
-                    payload_digest: digest(owner.run_id, &request),
+                    payload_digest: crate::broker::runtime::input_payload_digest(
+                        owner.run_id,
+                        &request,
+                    ),
                     message_id: request.message_id,
                 },
             )
@@ -4246,18 +4013,6 @@ mod tests {
             .fixture
             .conn
             .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
-        eprintln!(
-            "prepared history: expired={:?}; expired_reads={expired_reads}; active_sql_budgets_past_original={:?}; authorizer_cleanup={removed:?}",
-            expired
-                .as_ref()
-                .map(|result| (result.status, result.input_id, result.stage)),
-            budgets
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|budget| budget.saturating_duration_since(original_active))
-                .collect::<Vec<_>>()
-        );
         removed.unwrap();
         case.assert_unchanged(changes);
         assert_eq!(
@@ -4479,7 +4234,10 @@ mod tests {
             assert_eq!(host.requests[0]["kind"], "submit_prompt");
             assert_eq!(result.status, SubmissionStatus::Accepted);
             let row = storage::get_input(&fixture.fixture.conn, result.input_id.unwrap()).unwrap();
-            assert_eq!(row.payload_digest, digest(run.run_id, &request));
+            assert_eq!(
+                row.payload_digest,
+                crate::broker::runtime::input_payload_digest(run.run_id, &request)
+            );
             assert_eq!(row.state, InputState::Accepted);
             assert!(
                 PaneLock::try_acquire(&settings.database_url, &placement)
@@ -4682,7 +4440,7 @@ mod tests {
             let run = case.fixture.run.clone();
             storage::reserve_event_sequences(&mut case.fixture.conn, &run.owner()).unwrap();
             let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","profile_version":null,"rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
-            storage::persist_transition(
+            storage::persist_event(
                 &mut case.fixture.conn,
                 &run.owner(),
                 &ObservedTransition {
@@ -4772,7 +4530,9 @@ mod tests {
                 &NewInput {
                     operation_key: request.operation_key.clone(),
                     kind: request.input_kind,
-                    payload_digest: digest(run.run_id, &request),
+                    payload_digest: crate::broker::runtime::input_payload_digest(
+                        run.run_id, &request,
+                    ),
                     message_id: None,
                 },
             )
@@ -4852,7 +4612,10 @@ mod tests {
             .unwrap()
             .expect("actual committed receipt survives reply loss");
             assert_eq!(row.state, InputState::Accepted);
-            assert_eq!(row.payload_digest, digest(run.run_id, &request));
+            assert_eq!(
+                row.payload_digest,
+                crate::broker::runtime::input_payload_digest(run.run_id, &request)
+            );
             let result = submit_wrapped_input_with_host(
                 &mut fixture.fixture.conn,
                 &settings,
@@ -5032,7 +4795,7 @@ mod tests {
                         "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
                     }))
                     .unwrap();
-                    let annotation = storage::persist_transition(
+                    let annotation = storage::persist_event(
                         &mut case.fixture.conn,
                         &case.owner,
                         &ObservedTransition {
@@ -6123,13 +5886,6 @@ mod tests {
                         )),
                         "every supplied-connection read is enclosed by the single transaction: {observed:?}"
                     );
-                    eprintln!(
-                        "H2 supplied-connection transaction actions={transactions:?}, read authorizations={}",
-                        observed
-                            .iter()
-                            .filter(|operation| matches!(operation, ObservedSql::Read { .. }))
-                            .count()
-                    );
                     let committed = mutation
                     .lock()
                     .unwrap()
@@ -6164,10 +5920,6 @@ mod tests {
                         "the new snapshot exposes the committed corruption"
                     );
                     assert_projection(&case, &success(result), Retained::Accepted);
-                    eprintln!(
-                        "H2 WAL mutation committed before audit preparation; original history accepted, new snapshot rejects association; caller total_changes={}",
-                        after.changes
-                    );
                 }
             }
 

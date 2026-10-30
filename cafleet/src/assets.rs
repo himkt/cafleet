@@ -19,7 +19,7 @@ pub(crate) fn agent_paths(
     home: &Path,
     agent: CodingAgent,
 ) -> Result<AgentPaths, CafleetError> {
-    let base = agent.config_dir(env, home)?.path;
+    let base = agent.config_dir(env, home)?;
     let skills_dir = match agent {
         CodingAgent::Opencode => opencode_skills_base(home).join("skills"),
         _ => base.join("skills"),
@@ -305,43 +305,6 @@ mod tests {
     }
 
     #[test]
-    fn opencode_installation_prints_both_preset_targets_after_the_skills_line() {
-        let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&home);
-        let base = home.path().join("preset-base");
-        let paths = agent_paths(
-            &|name| (name == "OPENCODE_CONFIG_DIR").then(|| base.display().to_string()),
-            home.path(),
-            CodingAgent::Opencode,
-        )
-        .unwrap();
-        let mut output = Vec::new();
-        install_agent(
-            &mut conn,
-            CodingAgent::Opencode,
-            &paths,
-            "1.0.0",
-            &mut output,
-        )
-        .unwrap();
-        let lines = output_lines(output);
-        assert_eq!(
-            lines[1..],
-            [
-                format!(
-                    "opencode: installed preset (v1.0.0) -> {}",
-                    base.join("agents/cafleet.md").display()
-                ),
-                format!(
-                    "opencode: installed preset (v1.0.0) -> {}",
-                    base.join("agents/cafleet-ask.md").display()
-                ),
-            ]
-        );
-        assert_eq!(asset_install_count(&conn), 1);
-    }
-
-    #[test]
     fn opencode_preset_failure_fails_installation_and_records_nothing() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
@@ -389,9 +352,6 @@ mod tests {
     fn opencode_default_installation_uses_the_native_config_directory_for_skills_and_presets() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
-        let former = home.path().join(".opencode/agents/cafleet.md");
-        std::fs::create_dir_all(former.parent().unwrap()).unwrap();
-        std::fs::write(&former, "former base").unwrap();
         let paths = agent_paths(&|_| None, home.path(), CodingAgent::Opencode).unwrap();
         let base = home.path().join(".config/opencode");
         assert_eq!(paths.identity, base.display().to_string());
@@ -440,18 +400,6 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(recorded, [base.display().to_string()]);
-        assert_eq!(
-            std::fs::read(&former).unwrap(),
-            b"former base",
-            "setup leaves files at the former base in place"
-        );
-        assert!(!home.path().join(".opencode/agents/cafleet-ask.md").exists());
-    }
-
-    #[test]
-    fn embedded_presets_include_both_opencode_agents() {
-        assert!(lookup(PRESETS, "opencode/cafleet.md").is_some());
-        assert!(lookup(PRESETS, "opencode/cafleet-ask.md").is_some());
     }
 
     #[test]

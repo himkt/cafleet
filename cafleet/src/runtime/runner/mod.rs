@@ -40,7 +40,7 @@ pub(crate) use health::*;
 pub(crate) use lifecycle::*;
 pub(crate) use process::*;
 #[cfg(test)]
-pub(crate) use service::{RunnerTestServices, run_with_test_services};
+pub(crate) use service::{RunnerDependencies, run_service};
 pub(crate) use service::{run, terminal_size};
 pub(crate) use terminal::*;
 pub(crate) use transport::*;
@@ -66,6 +66,22 @@ pub(crate) fn ensure(condition: bool, message: &str) -> Result<()> {
     } else {
         Err(error(message))
     }
+}
+
+pub(crate) fn check_deadline(now: std::time::Instant, deadline: std::time::Instant) -> Result<()> {
+    if now >= deadline {
+        Err(CafleetError::DeadlineExceeded)
+    } else {
+        Ok(())
+    }
+}
+
+/// Sleep one polling tick, never past `deadline`.
+pub(crate) fn nap_until(deadline: std::time::Instant) {
+    std::thread::sleep(
+        std::time::Duration::from_millis(2)
+            .min(deadline.saturating_duration_since(std::time::Instant::now())),
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

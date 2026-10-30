@@ -262,7 +262,7 @@ impl RunArtifacts {
             Some(identity(&file.metadata().map_err(io_error)?));
         let data = serde_json::to_vec(descriptor).map_err(io_error)?;
         ensure(
-            data.len() <= 1024 * 1024,
+            data.len() as u64 <= DESCRIPTOR_LIMIT,
             "launch descriptor exceeds private size limit",
         )?;
         file.write_all(&data).map_err(io_error)?;
@@ -323,7 +323,17 @@ impl LaunchDescriptor {
             spawn,
         })
     }
+    pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
+        let descriptor: Self =
+            serde_json::from_slice(bytes).map_err(|_| error("malformed launch descriptor"))?;
+        ensure(
+            descriptor.schema_version == 1,
+            "unsupported launch descriptor schema",
+        )?;
+        Ok(descriptor)
+    }
 }
+pub(crate) const DESCRIPTOR_LIMIT: u64 = 1024 * 1024;
 pub(crate) fn load_descriptor(conn: &Connection, path: &Path) -> Result<LaunchDescriptor> {
     ensure(
         path.is_absolute(),
@@ -331,17 +341,12 @@ pub(crate) fn load_descriptor(conn: &Connection, path: &Path) -> Result<LaunchDe
     )?;
     let mut file = open_private(path, false)?;
     ensure(
-        file.metadata().map_err(io_error)?.len() <= 1024 * 1024,
+        file.metadata().map_err(io_error)?.len() <= DESCRIPTOR_LIMIT,
         "launch descriptor exceeds private size limit",
     )?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(io_error)?;
-    let descriptor: LaunchDescriptor =
-        serde_json::from_slice(&bytes).map_err(|_| error("malformed launch descriptor"))?;
-    ensure(
-        descriptor.schema_version == 1,
-        "unsupported launch descriptor schema",
-    )?;
+    let descriptor = LaunchDescriptor::parse(&bytes)?;
     descriptor.spawn.validate()?;
     let run = storage::get_run(conn, descriptor.run_id)?;
     let paths = validate_run_paths(conn, &run)?;

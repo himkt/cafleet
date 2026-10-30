@@ -241,20 +241,30 @@ pub(super) fn validate_input_response(
     )?;
     let event = get_event(conn, metadata.event_id)?;
     require(
-        event.event.run_id == input.run_id
-            && event.event.interaction_id == Some(metadata.interaction_id)
-            && event.event.kind == RuntimeEventKind::InteractionOpened
-            && event.event.notification_state == NotificationState::Inbox
+        permission_event_matches(&event, input.run_id, metadata, false)
             && event.run.run.director_member_id == metadata.director_member_id
-            && metadata.director_member_id == run.director_member_id
-            && event.interaction.as_ref().is_some_and(|interaction| {
-                interaction.classification == InteractionClass::PermissionRequest
-            }),
+            && metadata.director_member_id == run.director_member_id,
         "permission_response",
         "recorded run/event/interaction/Director association mismatch",
     )?;
     read_claim(conn, input, metadata)?;
     Ok(Some(response))
+}
+
+fn permission_event_matches(
+    event: &RuntimeEventView,
+    run_id: i64,
+    metadata: &PermissionResponseMetadata,
+    require_open: bool,
+) -> bool {
+    event.event.run_id == run_id
+        && event.event.interaction_id == Some(metadata.interaction_id)
+        && event.event.kind == RuntimeEventKind::InteractionOpened
+        && event.event.notification_state == NotificationState::Inbox
+        && event.interaction.as_ref().is_some_and(|interaction| {
+            interaction.classification == InteractionClass::PermissionRequest
+                && (!require_open || interaction.closed_at.is_none())
+        })
 }
 
 pub(crate) fn get_permission_response(
@@ -342,18 +352,11 @@ pub(crate) fn reserve_permission_response(
         )?;
         let event = get_event(&tx, metadata.event_id)?;
         require(
-            event.event.run_id == run.run_id
-                && event.event.interaction_id == Some(metadata.interaction_id)
-                && event.event.kind == RuntimeEventKind::InteractionOpened
-                && event.event.notification_state == NotificationState::Inbox
-                && event.interaction.as_ref().is_some_and(|interaction| {
-                    interaction.classification == InteractionClass::PermissionRequest
-                        && interaction.closed_at.is_none()
-                }),
+            permission_event_matches(&event, run.run_id, metadata, true),
             "permission_response",
             "current open inbox permission event required",
         )?;
-        validate_current_capability(&tx, &run, metadata, capability)?;
+        validate_current_capability(&tx, &run, metadata, &event, capability)?;
         inputs::require_capacity(&tx, run.run_id)?;
         let digest = permission_response_digest(run.run_id, metadata)?;
         let now = now_stamp();
@@ -428,22 +431,16 @@ fn validate_current_capability(
     conn: &Connection,
     run: &RunRecord,
     metadata: &PermissionResponseMetadata,
+    event: &RuntimeEventView,
     capability: Option<&AnswerCapability>,
 ) -> Result<(), CafleetError> {
-    let event = get_event(conn, metadata.event_id)?;
     require(
         run.owner_kind == OwnerKind::Runner
             && run.status == RunStatus::Running
             && historical_ownership(conn, run)?.is_none()
             && metadata.expected_owner_epoch == run.owner_epoch
             && metadata.director_member_id == run.director_member_id
-            && event.event.run_id == run.run_id
-            && event.event.interaction_id == Some(metadata.interaction_id)
-            && event.event.kind == RuntimeEventKind::InteractionOpened
-            && event.event.notification_state == NotificationState::Inbox
-            && event.interaction.as_ref().is_some_and(|i| {
-                i.classification == InteractionClass::PermissionRequest && i.closed_at.is_none()
-            }),
+            && permission_event_matches(event, run.run_id, metadata, true),
         "permission_response",
         "current open runner permission association required",
     )?;
@@ -500,7 +497,8 @@ pub(crate) fn rearm_permission_response(
             "permission_response",
             "exact ready response required",
         )?;
-        validate_current_capability(&tx, &run, &request.metadata, Some(capability))?;
+        let event = get_event(&tx, request.metadata.event_id)?;
+        validate_current_capability(&tx, &run, &request.metadata, &event, Some(capability))?;
         if receipt.claim.is_none() {
             tx.execute("INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)", params![request.metadata.interaction_id, receipt.input.input_id])?;
         }
@@ -604,6 +602,40 @@ pub(crate) fn settle_permission_response_in_transaction(
     get_permission_response(conn, expected_input.input_id)
 }
 
+/// Settles `expected_input` at its current state. A `PermissionResponse` goes through the
+/// permission settlement, which consumes `proof`; every other kind ignores `proof` and `deadline`.
+pub(crate) fn settle_any_input_in_transaction(
+    conn: &Connection,
+    owner: &RunOwner,
+    expected_input: &InputOperation,
+    disposition: InputDisposition,
+    evidence_ref: &str,
+    proof: Option<&ZeroByteRetirement<'_>>,
+    deadline: Instant,
+) -> Result<InputOperation, CafleetError> {
+    if expected_input.kind == InputKind::PermissionResponse {
+        settle_permission_response_in_transaction(
+            conn,
+            owner,
+            expected_input,
+            disposition,
+            evidence_ref,
+            proof,
+            deadline,
+        )
+        .map(|receipt| receipt.input)
+    } else {
+        inputs::settle_input_in_transaction(
+            conn,
+            owner,
+            expected_input.input_id,
+            expected_input.state,
+            disposition,
+            evidence_ref,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -667,7 +699,7 @@ mod tests {
             RuntimeEventKind::AutomaticReviewUnavailable,
         ] {
             let mut fixture = ResponseFixture::new();
-            let refusal = storage::persist_transition(
+            let refusal = storage::persist_event(
                 &mut fixture.base.conn,
                 &fixture.owner,
                 &ObservedTransition {
@@ -707,7 +739,7 @@ mod tests {
             .unwrap()
             .owner();
         storage::reserve_event_sequences(&mut fixture.base.conn, &owner).unwrap();
-        let event = storage::persist_transition(
+        let event = storage::persist_event(
             &mut fixture.base.conn,
             &owner,
             &opening(owner.run_id, 1, 1, metadata()),
@@ -819,14 +851,14 @@ mod tests {
             );
             let (other_owner, _) = another_run(&mut fixture);
             let alternate_episode = if matches!(changed, "event" | "interaction") {
-                storage::persist_transition(
+                storage::persist_event(
                     &mut fixture.base.conn,
                     &fixture.owner,
                     &closure(fixture.owner.run_id, 2, 1),
                     PersistenceMode::Live,
                 )
                 .unwrap();
-                let event = storage::persist_transition(
+                let event = storage::persist_event(
                     &mut fixture.base.conn,
                     &fixture.owner,
                     &opening(fixture.owner.run_id, 3, 2, metadata()),
@@ -1331,7 +1363,7 @@ mod tests {
                     fixture.base.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",params![NOW,fixture.request.metadata.interaction_id]).unwrap();
                 }
                 "wrong-event-kind" => {
-                    let next = storage::persist_transition(
+                    let next = storage::persist_event(
                         &mut fixture.base.conn,
                         &fixture.owner,
                         &ObservedTransition {

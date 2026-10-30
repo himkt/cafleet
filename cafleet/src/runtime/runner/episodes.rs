@@ -78,6 +78,18 @@ pub(crate) struct EpisodeUpdate {
     pub(crate) next_deadline: Option<Instant>,
     pub(crate) effective_policy: Option<EffectivePolicyObservation>,
 }
+impl EpisodeUpdate {
+    pub(crate) fn new(visibility: Visibility, eligibility: InputEligibility) -> Self {
+        Self {
+            visibility,
+            eligibility,
+            transitions: Vec::new(),
+            latest_evidence: None,
+            next_deadline: None,
+            effective_policy: None,
+        }
+    }
+}
 fn earliest(deadline: &mut Option<Instant>, until: Instant) {
     *deadline = Some(deadline.map_or(until, |old| old.min(until)));
 }
@@ -445,20 +457,12 @@ impl EpisodeTracker {
         }
         self.last_output = Some(value.output_seq);
         self.last_time = Some(now);
-        let mut update = EpisodeUpdate {
-            visibility: Visibility::Unknown,
-            eligibility: InputEligibility::Hold(GateReason::Unknown),
-            transitions: Vec::new(),
-            latest_evidence: None,
-            next_deadline: None,
-            effective_policy: None,
-        };
+        let mut update = EpisodeUpdate::new(
+            Visibility::Unknown,
+            InputEligibility::Hold(GateReason::Unknown),
+        );
         if let ObservationKind::Interaction(class) = value.kind {
-            self.boundary = None;
-            self.refusal_boundary = None;
-            self.obscurity = None;
-            self.obscured = false;
-            self.refusal_candidate = None;
+            self.clear_boundaries();
             update.visibility = Visibility::Visible;
             let fingerprint = value
                 .fingerprint
@@ -510,11 +514,7 @@ impl EpisodeTracker {
         }
         if self.continues_active(value) {
             self.candidate = None;
-            self.boundary = None;
-            self.refusal_boundary = None;
-            self.obscurity = None;
-            self.obscured = false;
-            self.refusal_candidate = None;
+            self.clear_boundaries();
             update.visibility = Visibility::Visible;
             update.eligibility = InputEligibility::Hold(GateReason::Interaction);
             return Ok(update);
@@ -598,9 +598,10 @@ impl EpisodeTracker {
                     self.last_refusal = Some(fingerprint.clone());
                     self.refusal_candidate = None;
                 } else {
-                    let until = since + Duration::from_millis(100);
-                    update.next_deadline =
-                        Some(update.next_deadline.map_or(until, |old| old.min(until)));
+                    earliest(
+                        &mut update.next_deadline,
+                        since + Duration::from_millis(100),
+                    );
                 }
             }
         } else {
@@ -611,9 +612,10 @@ impl EpisodeTracker {
                     self.last_refusal = None;
                     self.refusal_boundary = None;
                 } else {
-                    let until = since + Duration::from_millis(250);
-                    update.next_deadline =
-                        Some(update.next_deadline.map_or(until, |old| old.min(until)));
+                    earliest(
+                        &mut update.next_deadline,
+                        since + Duration::from_millis(250),
+                    );
                 }
             } else {
                 self.refusal_boundary = None;
@@ -641,27 +643,23 @@ impl EpisodeTracker {
         };
         Ok(update)
     }
-    pub(crate) fn reset_observation(&mut self, reason: GateReason) -> Result<EpisodeUpdate> {
+    pub(crate) fn reset_observation(&mut self, reason: GateReason) -> Result<()> {
         self.current_evidence = None;
         ensure(
             matches!(reason, GateReason::Gap | GateReason::ObserverUnavailable),
             "reset requires observation-gap cause",
         )?;
         self.candidate = None;
+        self.clear_boundaries();
+        self.annotations.forget_candidates();
+        Ok(())
+    }
+    fn clear_boundaries(&mut self) {
         self.boundary = None;
         self.refusal_boundary = None;
         self.obscurity = None;
         self.obscured = false;
         self.refusal_candidate = None;
-        self.annotations.forget_candidates();
-        Ok(EpisodeUpdate {
-            visibility: Visibility::Unknown,
-            eligibility: InputEligibility::Hold(reason),
-            transitions: Vec::new(),
-            latest_evidence: None,
-            next_deadline: None,
-            effective_policy: None,
-        })
     }
     pub(crate) fn finish(
         &mut self,
@@ -677,15 +675,15 @@ impl EpisodeTracker {
         self.finished = true;
         self.candidate = None;
         Ok(EpisodeUpdate {
-            visibility: Visibility::NotVisible,
-            eligibility: InputEligibility::Hold(GateReason::ObserverUnavailable),
             transitions,
-            latest_evidence: None,
-            next_deadline: None,
-            effective_policy: None,
+            ..EpisodeUpdate::new(
+                Visibility::NotVisible,
+                InputEligibility::Hold(GateReason::ObserverUnavailable),
+            )
         })
     }
 }
+#[derive(Default)]
 pub(crate) struct EventSequencePool {
     range: Option<RangeInclusive<i64>>,
     high_water: i64,
@@ -694,17 +692,8 @@ impl EventSequencePool {
     pub(crate) fn exhausted(&self) -> bool {
         self.range.as_ref().is_none_or(|range| range.is_empty())
     }
-    pub(crate) fn new() -> Self {
-        Self {
-            range: None,
-            high_water: 0,
-        }
-    }
     pub(crate) fn supply(&mut self, reserved: RangeInclusive<i64>) -> Result<()> {
-        ensure(
-            self.range.as_ref().is_none_or(|range| range.is_empty()),
-            "consume the current sequence grant first",
-        )?;
+        ensure(self.exhausted(), "consume the current sequence grant first")?;
         let first = *reserved.start();
         let last = *reserved.end();
         ensure(
@@ -793,7 +782,6 @@ mod tests {
             let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
             state.feed(bytes).unwrap();
             let mut value = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
-                .unwrap()
                 .observe(&state.snapshot())
                 .unwrap();
             value.output_seq = sequence;
@@ -934,7 +922,7 @@ mod tests {
         }
         let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
         let mut bridge = ParserAlgorithmBridge {
-            detector: Detector::new(&catalog, CodingAgent::Codex, Some(VERSION)).unwrap(),
+            detector: Detector::new(&catalog, CodingAgent::Codex, Some(VERSION)),
             tracker: tracker(),
             now: Instant::now(),
             visits: Vec::new(),
@@ -1698,11 +1686,7 @@ mod tests {
                     NOW,
                 )
                 .unwrap();
-            let reset = tracker.reset_observation(reason).unwrap();
-            assert!(reset.transitions.is_empty());
-            assert!(reset.next_deadline.is_none());
-            assert!(matches!(reset.visibility, Visibility::Unknown));
-            assert!(matches!(reset.eligibility, InputEligibility::Hold(_)));
+            tracker.reset_observation(reason).unwrap();
             let returned = tracker
                 .observe(
                     &sequenced(permission("write first.txt"), 3),
@@ -1963,7 +1947,7 @@ mod tests {
                 .to_string()
                 .contains(secret)
         );
-        let mut pool = EventSequencePool::new();
+        let mut pool = EventSequencePool::default();
         pool.supply(1..=256).unwrap();
         let event = pool.materialize(&opened.transitions[0]).unwrap();
         assert!(!serde_json::to_string(&event).unwrap().contains(secret));
@@ -2006,7 +1990,7 @@ mod tests {
         let mut tracker = tracker();
         let update = open(&mut tracker, &permission("write disposable.txt"), origin);
         let draft = &update.transitions[0];
-        let mut pool = EventSequencePool::new();
+        let mut pool = EventSequencePool::default();
         assert!(pool.materialize(draft).is_err());
         assert_eq!(draft.observed_at, NOW);
         pool.supply(1..=256).unwrap();
@@ -2031,12 +2015,12 @@ mod tests {
             (-255)..=0,
             (i64::MAX - 1)..=i64::MAX,
         ] {
-            assert!(EventSequencePool::new().supply(range).is_err());
+            assert!(EventSequencePool::default().supply(range).is_err());
         }
         let origin = Instant::now();
         let mut tracker = tracker();
         let update = open(&mut tracker, &permission("write disposable.txt"), origin);
-        let mut pool = EventSequencePool::new();
+        let mut pool = EventSequencePool::default();
         pool.supply(257..=512).unwrap();
         for _ in 0..256 {
             pool.materialize(&update.transitions[0]).unwrap();

@@ -8,16 +8,21 @@ mod inputs;
 mod permissions;
 mod records;
 
-pub(crate) use effective_policy::persist_transition_with_effective_policy_counted;
+#[cfg(test)]
+pub(crate) use effective_policy::persist_event_with_effective_policy;
 pub(crate) use effective_policy::{
     persist_transition_with_effective_policy, record_effective_policy,
 };
-pub(crate) use events::{get_event, persist_transition, update_interaction_evidence};
-pub(crate) use events::{persist_transition_counted, persist_transition_in_transaction};
-pub(crate) use inputs::{
-    InputReservation, reserve_input_with_provenance, settle_input_in_transaction,
+#[cfg(test)]
+pub(crate) use events::persist_event;
+pub(crate) use events::persist_transition_in_transaction;
+pub(crate) use events::{
+    get_event, latest_event_seq, persist_transition, update_interaction_evidence,
 };
-pub(crate) use inputs::{find_input, get_input, record_input_state, settle_preview};
+pub(crate) use inputs::{InputReservation, UNRESOLVED_INPUT_STATES, reserve_input_with_provenance};
+pub(crate) use inputs::{
+    find_input, get_input, input_payload_digest, record_input_state, settle_preview,
+};
 #[cfg(test)]
 pub(crate) use inputs::{reserve_input, settle_input};
 #[cfg(test)]
@@ -26,9 +31,7 @@ pub(crate) use permissions::{
     ZeroByteRetirement, get_permission_response, lookup_permission_response,
     permission_response_digest, reserve_permission_response,
 };
-pub(crate) use permissions::{
-    rearm_permission_response, settle_permission_response_in_transaction,
-};
+pub(crate) use permissions::{rearm_permission_response, settle_any_input_in_transaction};
 pub(crate) use records::*;
 
 use std::ops::RangeInclusive;
@@ -247,17 +250,13 @@ pub(super) fn historical_ownership(
     conn: &Connection,
     run: &RunRecord,
 ) -> Result<Option<ArchiveReason>, CafleetError> {
-    let member: (i64, MemberStatus) = conn.query_row(
-        "SELECT fleet_id,status FROM members WHERE member_id=?1",
-        [run.member_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    let director: (i64, MemberStatus) = conn.query_row(
-        "SELECT fleet_id,status FROM members WHERE member_id=?1",
-        [run.director_member_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    let fleet = super::fleets::fetch_fleet(conn, run.fleet_id)?
+    let present = |member_id| {
+        super::members::member_fleet_status(conn, member_id)?
+            .ok_or(CafleetError::from(rusqlite::Error::QueryReturnedNoRows))
+    };
+    let member = present(run.member_id)?;
+    let director = present(run.director_member_id)?;
+    let fleet = super::fleets::get_fleet(conn, run.fleet_id)?
         .ok_or_else(|| invalid("member_runs.fleet_id", "fleet missing"))?;
     require(
         member.0 == run.fleet_id
@@ -409,9 +408,9 @@ pub(crate) fn runtime_snapshot(
             |row| row.get(0),
         )
         .optional()?;
-    let mut statement = conn.prepare(
-        "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain') ORDER BY input_id",
-    )?;
+    let mut statement = conn.prepare(&format!(
+        "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND state IN {UNRESOLVED_INPUT_STATES} ORDER BY input_id"
+    ))?;
     let unresolved_input_ids = statement
         .query_map([run_id], |row| row.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -544,7 +543,7 @@ pub(crate) mod test_support {
         pub(crate) fn open(&mut self, owner: &RunOwner) -> RuntimeEventRecord {
             self.reserve(owner);
             let transition = opening(self.run.run_id, 1, 1, metadata());
-            storage::persist_transition(&mut self.conn, owner, &transition, PersistenceMode::Live)
+            storage::persist_event(&mut self.conn, owner, &transition, PersistenceMode::Live)
                 .unwrap()
         }
 
@@ -862,7 +861,7 @@ pub(crate) mod test_support {
         ) -> RuntimeEventRecord {
             let owner = fixture.activate();
             fixture.reserve(&owner);
-            storage::persist_transition(
+            storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &annotation_event(owner.run_id, 1, kind, evidence),
@@ -1049,8 +1048,7 @@ mod tests {
         );
         let transition = opening(owner.run_id, 257, 1, metadata());
         assert!(
-            storage::persist_transition(&mut other, &owner, &transition, PersistenceMode::Live)
-                .is_ok()
+            storage::persist_event(&mut other, &owner, &transition, PersistenceMode::Live).is_ok()
         );
     }
 
@@ -1073,7 +1071,7 @@ mod tests {
                 "{mismatch}"
             );
             assert!(
-                storage::persist_transition(
+                storage::persist_event(
                     &mut fixture.conn,
                     &stale,
                     &opening(owner.run_id, 1, 1, metadata()),

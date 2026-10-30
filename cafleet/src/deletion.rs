@@ -34,14 +34,10 @@ pub(crate) fn deletion_placements(
     let mut placements = Vec::new();
     for row in rows {
         let (member_id, placement) = row?;
-        let path = lock_path(&settings.database_url, &placement).map_err(|error| {
-            CafleetError::App(format!(
-                "member {member_id} pane input: {}",
-                error.message()
-            ))
-        })?;
+        let path = lock_path(&settings.database_url, &placement)
+            .map_err(crate::input::member_pane_input_error(member_id))?;
         let run_identity = crate::broker::runtime::member_runtime(conn, member_id)?
-            .map(|runtime| deletion_run_identity(&runtime.run));
+            .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run));
         placements.push(DeletionPlacement {
             member_id,
             placement,
@@ -87,7 +83,9 @@ pub(crate) trait DeletionHost {
         conn: &mut Connection,
         run: &crate::broker::runtime::RunRecord,
         deadline: Deadline,
-    ) -> Result<crate::runtime::runner::ShutdownOutcome, CafleetError>;
+    ) -> Result<crate::runtime::runner::ShutdownOutcome, CafleetError> {
+        crate::runtime::runner::request_shutdown(conn, run, deadline.instant())
+    }
     fn close_pane(
         &mut self,
         placement: &Placement,
@@ -99,15 +97,6 @@ pub(crate) trait DeletionHost {
 pub(crate) struct MultiplexerDeletionHost<'a>(pub(crate) &'a AnyMultiplexer);
 
 impl DeletionHost for MultiplexerDeletionHost<'_> {
-    fn shutdown(
-        &mut self,
-        conn: &mut Connection,
-        run: &crate::broker::runtime::RunRecord,
-        deadline: Deadline,
-    ) -> Result<crate::runtime::runner::ShutdownOutcome, CafleetError> {
-        crate::runtime::runner::request_shutdown(conn, run, deadline.instant())
-    }
-
     fn close_pane(
         &mut self,
         placement: &Placement,
@@ -156,15 +145,6 @@ impl NativeFleetDeletionHost<'_> {
 }
 
 impl DeletionHost for NativeFleetDeletionHost<'_> {
-    fn shutdown(
-        &mut self,
-        conn: &mut Connection,
-        run: &crate::broker::runtime::RunRecord,
-        deadline: Deadline,
-    ) -> Result<crate::runtime::runner::ShutdownOutcome, CafleetError> {
-        crate::runtime::runner::request_shutdown(conn, run, deadline.instant())
-    }
-
     fn close_pane(
         &mut self,
         placement: &Placement,
@@ -180,10 +160,6 @@ impl DeletionHost for NativeFleetDeletionHost<'_> {
             .expect("layout restoration follows a pane close");
         MultiplexerDeletionHost(mux).restore_layout(layout)
     }
-}
-
-fn deletion_run_identity(run: &crate::broker::runtime::RunRecord) -> serde_json::Value {
-    crate::runtime::runner::stable_run_identity(run)
 }
 
 pub(crate) fn active_member(
@@ -203,11 +179,11 @@ pub(crate) fn member_deletion_matches(expected: &MemberRecord, current: &MemberR
         && expected
             .runtime
             .as_ref()
-            .map(|runtime| deletion_run_identity(&runtime.run))
+            .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run))
             == current
                 .runtime
                 .as_ref()
-                .map(|runtime| deletion_run_identity(&runtime.run))
+                .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run))
 }
 
 fn revalidate_member(
@@ -262,7 +238,9 @@ pub(crate) fn end_member(
         if let Some(expected) = snapshot.runtime.as_ref().map(|runtime| runtime.run.clone()) {
             scope(conn)?;
             let current = crate::broker::runtime::get_run(conn, expected.run_id)?;
-            if deletion_run_identity(&current) != deletion_run_identity(&expected) {
+            if crate::runtime::runner::stable_run_identity(&current)
+                != crate::runtime::runner::stable_run_identity(&expected)
+            {
                 return Err(CafleetError::App(
                     "member runtime ownership changed during cleanup".into(),
                 ));
@@ -343,8 +321,7 @@ pub(crate) fn delete_fleet_with_host(
     host: &mut impl DeletionHost,
 ) -> Result<DeletedFleet, CafleetError> {
     with_database_budget(conn, deadline, |conn| {
-        crate::broker::fleets::fetch_fleet(conn, fleet_id)?
-            .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+        crate::broker::require_fleet(conn, fleet_id)?;
         Ok(())
     })?;
     let changed_error = || {
@@ -496,7 +473,7 @@ pub(crate) mod test_support {
     use rusqlite::Connection;
 
     use crate::broker::records::{DeletedFleet, Placement};
-    use crate::broker::runtime::{self as storage, CleanupState, RunRecord};
+    use crate::broker::runtime::{self as storage, RunRecord};
     use crate::config::Settings;
     use crate::error::CafleetError;
     use crate::input::PaneLock;
@@ -653,14 +630,7 @@ pub(crate) mod test_support {
             if matches!(self.mutation, Mutation::AfterShutdown) {
                 Self::bump_epoch(conn, run.run_id);
             }
-            Ok(ShutdownOutcome {
-                native_exit,
-                cleanup_state: CleanupState::Complete,
-                diagnostics: Vec::new(),
-                dropped_display_bytes: 0,
-                pending_event_frames: 0,
-                unsaved_observation_gap: 0,
-            })
+            Ok(ShutdownOutcome::complete(native_exit))
         }
 
         fn recover(

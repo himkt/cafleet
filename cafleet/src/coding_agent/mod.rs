@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use clap::ValueEnum;
 
-use crate::config_dir::{self, EnvLookup, ResolvedDir};
+use crate::config_dir::{self, EnvLookup};
 use crate::error::CafleetError;
 
 pub(crate) trait SpawnProbe {
@@ -50,10 +50,6 @@ impl CodingAgent {
         }
     }
 
-    pub(crate) fn binary_name(self) -> &'static str {
-        self.name()
-    }
-
     pub(crate) fn config_variable(self) -> &'static str {
         match self {
             Self::Claude => "CLAUDE_CONFIG_DIR",
@@ -66,12 +62,13 @@ impl CodingAgent {
         self,
         env: EnvLookup<'_>,
         home: &Path,
-    ) -> Result<ResolvedDir, CafleetError> {
-        match self {
-            Self::Claude => config_dir::claude_config_dir(env, home),
-            Self::Codex => config_dir::codex_home(env, home),
-            Self::Opencode => config_dir::opencode_preset_base(env, home),
-        }
+    ) -> Result<PathBuf, CafleetError> {
+        let default = match self {
+            Self::Claude => home.join(".claude"),
+            Self::Codex => home.join(".codex"),
+            Self::Opencode => config_dir::opencode_skills_base(home),
+        };
+        config_dir::resolve(self.config_variable(), env, default)
     }
 
     pub(crate) fn spawn_environment(
@@ -133,10 +130,10 @@ impl CodingAgent {
         mode: &str,
     ) -> Result<PathBuf, CafleetError> {
         let config = self.config_dir(&|name| probe.env_var(name), &probe.home_dir())?;
-        let executable = probe.resolve_binary(self.binary_name()).ok_or_else(|| {
-            CafleetError::App(format!("binary {} not found on PATH", self.binary_name()))
+        let executable = probe.resolve_binary(self.name()).ok_or_else(|| {
+            CafleetError::App(format!("binary {} not found on PATH", self.name()))
         })?;
-        if let Some(preset) = self.required_preset(&config.path, mode) {
+        if let Some(preset) = self.required_preset(&config, mode) {
             std::fs::read(&preset).map_err(|error| CafleetError::App(format!(
                 "cannot read opencode agent preset at {}: {error}; run 'cafleet setup --coding-agent opencode' first", preset.display()
             )))?;
@@ -167,21 +164,6 @@ impl CodingAgent {
         argv[0] = program.into();
         Ok(argv)
     }
-
-    #[cfg(test)]
-    pub(crate) fn build_spawn_argv(
-        self,
-        prompt: &str,
-        display_name: &str,
-        model: Option<&str>,
-        effort: Option<&str>,
-    ) -> Vec<String> {
-        let policy = self
-            .resolve_policy(None, None)
-            .expect("registered backend has a valid default policy");
-        self.build_spawn_argv_with_policy(prompt, display_name, model, effort, &policy)
-            .expect("spawn inputs satisfy backend validation")
-    }
 }
 
 pub(crate) fn coding_agent(name: &str) -> Option<CodingAgent> {
@@ -204,7 +186,7 @@ mod tests {
 
     impl SpawnProbe for Probe {
         fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
-            assert_eq!(name, self.agent.binary_name());
+            assert_eq!(name, self.agent.name());
             self.available
                 .then(|| PathBuf::from("/fixture/bin").join(name))
         }
@@ -268,12 +250,15 @@ mod tests {
                 }
                 expected.push(prompt.into());
                 assert_eq!(
-                    agent.build_spawn_argv(
-                        prompt,
-                        "display name",
-                        configured.then_some("provider/model with spaces"),
-                        effort
-                    ),
+                    agent
+                        .build_spawn_argv_with_policy(
+                            prompt,
+                            "display name",
+                            configured.then_some("provider/model with spaces"),
+                            effort,
+                            &agent.resolve_policy(None, None).unwrap()
+                        )
+                        .unwrap(),
                     expected
                 );
             }
@@ -355,7 +340,7 @@ mod tests {
             } else {
                 assert_eq!(
                     agent.ensure_available(&probe, &mode).unwrap(),
-                    PathBuf::from("/fixture/bin").join(agent.binary_name())
+                    PathBuf::from("/fixture/bin").join(agent.name())
                 );
             }
         }
@@ -567,6 +552,93 @@ mod tests {
         std::fs::remove_file(&ask_preset).unwrap();
         std::fs::create_dir(&ask_preset).unwrap();
         assert_missing("cafleet-ask", &ask_preset);
+    }
+
+    fn home() -> PathBuf {
+        PathBuf::from("/home/tester")
+    }
+
+    fn default_config_dir(agent: CodingAgent) -> PathBuf {
+        home().join(match agent {
+            CodingAgent::Claude => ".claude",
+            CodingAgent::Codex => ".codex",
+            CodingAgent::Opencode => ".config/opencode",
+        })
+    }
+
+    #[test]
+    fn unset_variable_resolves_the_default() {
+        for &agent in CodingAgent::all() {
+            assert_eq!(
+                agent.config_dir(&|_| None, &home()).unwrap(),
+                default_config_dir(agent),
+                "default for {agent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn absolute_value_is_used_verbatim() {
+        for &agent in CodingAgent::all() {
+            let var = agent.config_variable();
+            let lookup = move |name: &str| (name == var).then(|| "/custom/cfg".to_string());
+            assert_eq!(
+                agent.config_dir(&lookup, &home()).unwrap(),
+                PathBuf::from("/custom/cfg")
+            );
+        }
+    }
+
+    #[test]
+    fn each_resolver_reads_only_its_own_variable() {
+        for &agent in CodingAgent::all() {
+            let var = agent.config_variable();
+            let lookup = move |name: &str| (name != var).then(|| "/other/cfg".to_string());
+            assert_eq!(
+                agent.config_dir(&lookup, &home()).unwrap(),
+                default_config_dir(agent),
+                "{var}'s resolver must ignore every other variable"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_value_fails_with_the_pinned_error() {
+        for &agent in CodingAgent::all() {
+            let var = agent.config_variable();
+            let lookup = move |name: &str| (name == var).then(String::new);
+            let err = agent.config_dir(&lookup, &home()).unwrap_err();
+            assert!(matches!(err, CafleetError::App(_)), "App error for {var}");
+            assert_eq!(
+                err.message(),
+                format!("{var} must be an absolute path (got '')")
+            );
+        }
+    }
+
+    #[test]
+    fn relative_or_tilde_value_fails_with_the_pinned_error() {
+        for &agent in CodingAgent::all() {
+            let var = agent.config_variable();
+            for value in ["cfg/dir", "~/cfg"] {
+                let lookup = move |name: &str| (name == var).then(|| value.to_string());
+                let err = agent.config_dir(&lookup, &home()).unwrap_err();
+                assert!(matches!(err, CafleetError::App(_)), "App error for {var}");
+                assert_eq!(
+                    err.message(),
+                    format!("{var} must be an absolute path (got '{value}')")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn opencode_config_dir_defaults_to_the_skills_base_the_native_cli_reads() {
+        let home = home();
+        assert_eq!(
+            CodingAgent::Opencode.config_dir(&|_| None, &home).unwrap(),
+            config_dir::opencode_skills_base(&home)
+        );
     }
 
     #[test]

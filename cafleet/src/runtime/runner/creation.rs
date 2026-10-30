@@ -32,7 +32,7 @@ pub(crate) struct PendingRegistration {
     pub(crate) paths: RuntimePaths,
 }
 
-pub(crate) fn register_pending_run(
+pub(super) fn register_pending_run(
     conn: &mut Connection,
     member: &PendingMemberSpec,
     settings: &RunSettings,
@@ -115,6 +115,17 @@ impl ControlIdentity {
             run_id: run.run_id,
             owner_epoch: run.owner_epoch,
             launch_nonce: run.launch_nonce.clone(),
+        }
+    }
+    pub(crate) fn from_descriptor(descriptor: &LaunchDescriptor) -> Self {
+        Self {
+            database_identity_json: descriptor.database_identity_json.clone(),
+            fleet_id: descriptor.fleet_id,
+            member_id: descriptor.member_id,
+            director_member_id: descriptor.director_member_id,
+            run_id: descriptor.run_id,
+            owner_epoch: descriptor.owner_epoch,
+            launch_nonce: descriptor.launch_nonce.clone(),
         }
     }
     pub(crate) fn validate(&self, run: &RunRecord) -> Result<()> {
@@ -248,23 +259,17 @@ pub(crate) fn create_registered(
             return Err(guard.rollback(cause, ShutdownClock::new(host.now()), Vec::new()));
         }
     };
-    guard.armed = false;
-    launch_registered(guard.conn, pending, &mut artifacts, &spawn, host, deadline)
+    launch_registered(&mut guard, pending, &mut artifacts, &spawn, host, deadline)
 }
 
-pub(crate) fn launch_registered(
-    conn: &mut Connection,
+fn launch_registered(
+    guard: &mut PendingGuard<'_>,
     pending: PendingRegistration,
     artifacts: &mut RunArtifacts,
     spawn: &SpawnSpec,
     host: &mut impl LaunchHost,
     deadline: Instant,
 ) -> Result<LaunchOutcome> {
-    let mut guard = PendingGuard {
-        conn,
-        run: pending.run.clone(),
-        armed: true,
-    };
     let mut pane = None;
     let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         check_deadline(host.now(), deadline)?;
@@ -432,14 +437,6 @@ pub(crate) fn launch_registered(
     Err(failure)
 }
 
-pub(crate) fn check_deadline(now: Instant, deadline: Instant) -> Result<()> {
-    if now >= deadline {
-        Err(crate::error::CafleetError::DeadlineExceeded)
-    } else {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::result::Result;
@@ -524,15 +521,7 @@ mod tests {
             }
         }
         fn identity(run: &RunRecord) -> ControlIdentity {
-            ControlIdentity {
-                database_identity_json: run.database_identity_json.clone(),
-                fleet_id: run.fleet_id,
-                member_id: run.member_id,
-                director_member_id: run.director_member_id,
-                run_id: run.run_id,
-                owner_epoch: run.owner_epoch,
-                launch_nonce: run.launch_nonce.clone(),
-            }
+            ControlIdentity::from_run(run)
         }
     }
 
@@ -648,7 +637,7 @@ mod tests {
                 let run = storage::get_run(&conn, run.run_id).unwrap();
                 storage::reserve_event_sequences(&mut conn, &run.owner()).unwrap();
                 let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({"backend":"codex","native_version":"0.163.0","profile_version":null,"rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
-                storage::persist_transition(
+                storage::persist_event(
                     &mut conn,
                     &run.owner(),
                     &ObservedTransition {
@@ -703,14 +692,7 @@ mod tests {
                 ));
             }
             self.lock.take();
-            Ok(ShutdownOutcome {
-                native_exit: None,
-                cleanup_state: CleanupState::Complete,
-                diagnostics: Vec::new(),
-                dropped_display_bytes: 0,
-                pending_event_frames: 0,
-                unsaved_observation_gap: 0,
-            })
+            Ok(ShutdownOutcome::complete(None))
         }
         fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<(), CafleetError> {
             self.calls.push("close");

@@ -47,7 +47,7 @@ impl HealthSnapshot {
     }
 }
 pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
-    let reply = super::service::request(run, "health", deadline)?;
+    let reply = super::control::request(run, "health", deadline)?;
     HealthSnapshot::decode(reply, run)
 }
 pub(crate) struct RuntimeDiagnosis {
@@ -124,16 +124,9 @@ impl ObservationHealth {
         )?;
         if let Some(code) = &self.diagnostic {
             ensure(
-                code.len() <= 128
-                    && code.is_ascii()
-                    && [
-                        "parser_unavailable",
-                        "detector_unavailable",
-                        "sequence_unavailable",
-                        "sink_unavailable",
-                        "observation_gap",
-                    ]
-                    .contains(&code.as_str()),
+                ObservationFailure::ALL
+                    .iter()
+                    .any(|failure| failure.code() == code),
                 "invalid health diagnostic",
             )?;
         }
@@ -238,57 +231,6 @@ mod tests {
         assert_eq!(std::fs::read(fixture.conn.path().unwrap()).unwrap(), before);
     }
 
-    #[test]
-    fn runner_doctor_runtime_diagnosis_reports_leftovers_and_preserves_registry_and_artifact_bytes()
-    {
-        let mut fixture = Fixture::new();
-        let artifacts = fixture.artifacts();
-        artifacts
-            .write_descriptor(&LaunchDescriptor::new(&fixture.run, fixture.spec()).unwrap())
-            .unwrap();
-        fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET status='failed' WHERE run_id=?1",
-                [fixture.run.run_id],
-            )
-            .unwrap();
-        fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-        let files = [
-            std::path::PathBuf::from(fixture.conn.path().unwrap()),
-            artifacts.paths.namespace_manifest.clone(),
-            artifacts.paths.descriptor.clone(),
-            artifacts.paths.owner_lock.clone(),
-        ];
-        let before = files
-            .iter()
-            .map(|path| std::fs::read(path).unwrap())
-            .collect::<Vec<_>>();
-        let start = Instant::now();
-        let diagnosis = diagnose_runtime(
-            &fixture.conn,
-            fixture.run.run_id,
-            start + Duration::from_millis(80),
-        )
-        .unwrap();
-        assert!(start.elapsed() < Duration::from_millis(750));
-        assert!(
-            diagnosis
-                .diagnostics
-                .iter()
-                .any(|line| line.contains("descriptor"))
-        );
-        assert!(
-            diagnosis
-                .diagnostics
-                .iter()
-                .any(|line| line.contains("recover"))
-        );
-        for (path, bytes) in files.iter().zip(before) {
-            assert_eq!(std::fs::read(path).unwrap(), bytes);
-        }
-    }
-
     mod observation_contract {
         use super::*;
 
@@ -316,7 +258,7 @@ mod tests {
                 value["observation"]["pending_count"] = json!(130);
                 value["observation"]["pending_evidence"] = json!(true);
                 value["observation"]["degraded"] = json!(true);
-                value["observation"]["diagnostic"] = json!("observation_gap");
+                value["observation"]["diagnostic"] = json!("sink_unavailable");
                 let decoded = HealthSnapshot::decode(value, &fixture.run).unwrap();
                 decoded.observation.unwrap().validate().unwrap();
             }

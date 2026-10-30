@@ -3,16 +3,20 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-use super::helpers::{emit, resolve_body, resolve_command_body, resolve_mux};
+use super::helpers::{available_mux, emit, nonblank, resolve_body, resolve_command_body};
 use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::{CodingAgent, ProfileCatalog, SpawnProbe, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
+use crate::runtime::resolve_mux;
 
 use crate::multiplexer::{AnyMultiplexer, Lead};
-use crate::output::{format_member, format_member_detail, format_member_list};
+use crate::output::{
+    format_member, format_member_delete, format_member_detail, format_member_exec,
+    format_member_list, format_member_prompt,
+};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
 
@@ -56,7 +60,7 @@ pub(crate) enum MemberCommand {
         #[arg(long, requires = "owner_terminated", value_parser = clap::value_parser!(i64).range(1..))]
         expected_owner_epoch: Option<i64>,
         /// Reference to the operator's recorded termination evidence.
-        #[arg(long, requires = "owner_terminated", value_parser = recovery_reference)]
+        #[arg(long, requires = "owner_terminated", value_parser = nonblank("nonblank termination evidence reference required"))]
         evidence_ref: Option<String>,
         /// Output in JSON format.
         #[arg(long)]
@@ -191,14 +195,6 @@ fn require_pane(
                 "member {member_id} has no pane yet (pending placement) — nothing to {action}."
             ))
         })
-}
-
-fn recovery_reference(value: &str) -> Result<String, String> {
-    if value.trim().is_empty() {
-        Err("nonblank termination evidence reference required".into())
-    } else {
-        Ok(value.to_owned())
-    }
 }
 
 fn load_member(
@@ -377,7 +373,7 @@ fn create(
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
+    let fleet = broker::get_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
     if fleet.deleted_at.is_some() {
         return Err(CafleetError::App(format!("fleet {fleet_id} is deleted")));
@@ -400,9 +396,7 @@ fn create(
 
     let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
 
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
-    mux.ensure_available()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
+    let mux = available_mux(settings)?;
     let executable = backend.ensure_available(&SystemProbe, &policy.resolved_mode)?;
     let context = mux
         .context_discovery()
@@ -509,24 +503,20 @@ fn create(
     let registered = created.member;
     let member_id = created.run.member_id;
     let placement_view = created.placement;
-    let runtime = Some(broker::runtime::runtime_snapshot(
-        conn,
-        created.started.identity.run_id,
-    )?);
+    let runtime = broker::runtime::runtime_snapshot(conn, created.started.identity.run_id)?;
     let result = json!({
         "member_id": member_id,
         "name": name,
         "registered_at": registered.registered_at,
         "placement": presentation::placement(&placement_view),
-        "runtime": runtime.as_ref().map(presentation::runtime_snapshot),
+        "runtime": presentation::runtime_snapshot(&runtime),
     });
     emit(json, &result, || {
-        let mut text = format_member(&registered, &placement_view);
-        if let Some(runtime) = &runtime {
-            text.push('\n');
-            text.push_str(&crate::output::format_runtime_snapshot(runtime));
-        }
-        text
+        format!(
+            "{}\n{}",
+            format_member(&registered, &placement_view),
+            crate::output::format_runtime_snapshot(&runtime)
+        )
     });
     Ok(())
 }
@@ -617,7 +607,7 @@ fn delete(
     emit(
         json,
         &json!({"member_id":member_id, "pane_status":pane_status}),
-        || format!("Member deleted.\n  member_id: {member_id}\n  pane_id:   {pane_status}"),
+        || format_member_delete(member_id, &pane_status),
     );
     Ok(())
 }
@@ -770,6 +760,40 @@ fn dispatch_input(
     }).map(|()| None)
 }
 
+struct Dispatch {
+    kind: crate::broker::runtime::InputKind,
+    command: &'static str,
+    label: &'static str,
+    director_refusal: &'static str,
+}
+
+fn dispatch_to_member(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    text: &str,
+    dispatch: Dispatch,
+    deadline: crate::input::Deadline,
+) -> Result<(MemberRecord, String, Option<i64>), CafleetError> {
+    let member = crate::input::with_database_budget(conn, deadline, |conn| {
+        load_member(conn, member_id, false)
+    })?;
+    if member.kind == crate::broker::records::MemberKind::Director {
+        return Err(CafleetError::App(dispatch.director_refusal.into()));
+    }
+    let pane = require_pane(&member, member_id, dispatch.command)?;
+    let input_id = dispatch_input(
+        conn,
+        settings,
+        &member,
+        text,
+        dispatch.kind,
+        dispatch.label,
+        deadline,
+    )?;
+    Ok((member, pane, input_id))
+}
+
 fn prompt(
     conn: &mut Connection,
     settings: &Settings,
@@ -783,34 +807,23 @@ fn prompt(
             "text must be one non-empty line without control characters.".into(),
         ));
     }
-    let member = crate::input::with_database_budget(conn, deadline, |conn| {
-        load_member(conn, member_id, false)
-    })?;
-    if member.kind == crate::broker::records::MemberKind::Director {
-        return Err(CafleetError::App(
-            "cannot prompt the Director's own pane".into(),
-        ));
-    }
-    let pane = require_pane(&member, member_id, "prompt")?;
-    let input_id = dispatch_input(
+    let (member, pane, input_id) = dispatch_to_member(
         conn,
         settings,
-        &member,
+        member_id,
         text,
-        crate::broker::runtime::InputKind::Prompt,
-        "prompt",
+        Dispatch {
+            kind: crate::broker::runtime::InputKind::Prompt,
+            command: "prompt",
+            label: "prompt",
+            director_refusal: "cannot prompt the Director's own pane",
+        },
         deadline,
     )?;
     emit(
         json,
         &json!({"member_id":member_id,"pane_id":pane,"text":text,"input_id":input_id}),
-        || {
-            let mut output = format!("Sent prompt {text:?} to member {} ({pane}).", member.name);
-            if let Some(id) = input_id {
-                output.push_str(&format!("\nInput: {id}"));
-            }
-            output
-        },
+        || format_member_prompt(text, &member.name, &pane, input_id),
     );
     Ok(())
 }
@@ -827,22 +840,17 @@ fn exec(
         .command
         .as_deref()
         .expect("exec input was resolved before its deadline");
-    let member = crate::input::with_database_budget(conn, deadline, |conn| {
-        load_member(conn, member_id, false)
-    })?;
-    if member.kind == crate::broker::records::MemberKind::Director {
-        return Err(CafleetError::App(
-            "cannot exec in the Director's own pane".into(),
-        ));
-    }
-    let pane = require_pane(&member, member_id, "exec")?;
-    let input_id = dispatch_input(
+    let (member, pane, input_id) = dispatch_to_member(
         conn,
         settings,
-        &member,
+        member_id,
         command,
-        crate::broker::runtime::InputKind::Exec,
-        "native command",
+        Dispatch {
+            kind: crate::broker::runtime::InputKind::Exec,
+            command: "exec",
+            label: "native command",
+            director_refusal: "cannot exec in the Director's own pane",
+        },
         deadline,
     )?;
     let agent = &member
@@ -854,15 +862,7 @@ fn exec(
         json,
         &json!({"member_id":member_id,"pane_id":pane,"coding_agent":agent,
         "command":command,"dispatched":true,"input_id":input_id}),
-        || {
-            let mut output = format!(
-                "Dispatched native command to member {member_id} ({pane}). Inspect the pane for its result."
-            );
-            if let Some(id) = input_id {
-                output.push_str(&format!("\nInput: {id}"));
-            }
-            output
-        },
+        || format_member_exec(member_id, &pane, input_id),
     );
     Ok(())
 }
@@ -875,9 +875,7 @@ fn capture(
     ansi: bool,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
-    mux.ensure_available()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
+    let mux = available_mux(settings)?;
 
     let member = load_member(conn, member_id, false)?;
     let pane_id = require_pane(&member, member_id, "capture")?;
@@ -1814,64 +1812,6 @@ mod tests {
         assert!(resolve_coding_agent(&conn, fleet, director, None).is_err());
     }
 
-    fn parse(args: &[&str]) -> Result<MemberCommand, clap::Error> {
-        let member = std::iter::once("member")
-            .chain(args[1..].iter().copied())
-            .collect::<Vec<_>>();
-        match crate::cli::test_support::parse_cli(&member)? {
-            crate::cli::Command::Member(command) => Ok(command),
-            _ => unreachable!("the member prefix selects the member command"),
-        }
-    }
-
-    #[test]
-    fn create_parses_the_supplied_assignment_and_inline_prompt() {
-        let parsed = parse(&[
-            "cafleet",
-            "create",
-            "--fleet-id",
-            "1",
-            "--name",
-            "reviewer",
-            "--description",
-            "assignment",
-            "PROMPT",
-        ])
-        .unwrap();
-        let MemberCommand::Create {
-            name, description, ..
-        } = parsed
-        else {
-            panic!("expected member creation");
-        };
-        assert_eq!(name, "reviewer");
-        assert_eq!(description, "assignment");
-    }
-
-    #[test]
-    fn create_parses_file_input_and_backend_model_selection() {
-        parse(&[
-            "cafleet",
-            "create",
-            "--fleet-id",
-            "1",
-            "--name",
-            "worker",
-            "--description",
-            "assignment",
-            "--coding-agent",
-            "codex",
-            "--model",
-            "gpt-6.1-sol",
-            "--effort",
-            "high",
-            "--file",
-            "prompt.md",
-            "--json",
-        ])
-        .unwrap();
-    }
-
     mod launch_policy {
         use super::*;
         use crate::cli::{CliArgs, Command, member};
@@ -2157,7 +2097,7 @@ mod tests {
         use crate::cli::test_support::usage_error;
         use crate::cli::{CliArgs, dispatch};
         use crate::config::Settings;
-        use crate::db::test_support::{migrated_conn, wal_snapshot};
+        use crate::db::test_support::migrated_conn;
 
         fn recognized_usage_error(args: &[&str]) {
             let error = usage_error(args);
@@ -2397,29 +2337,6 @@ mod tests {
                 .collect::<Vec<_>>();
             after_names.sort();
             assert_eq!(after_names, names);
-        }
-
-        #[test]
-        fn runner_recovery_entry_refused_registry_preserves_wal_database_and_sidecar_bytes() {
-            for mutation in [
-                "PRAGMA application_id=42",
-                "ALTER TABLE member_runtime_events RENAME COLUMN notification_state TO broken",
-                "ALTER TABLE runtime_database_identity RENAME COLUMN instance_id TO broken",
-            ] {
-                let (_dir, settings, conn, member_id) = unwrapped_registry();
-                conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
-                conn.execute_batch(mutation).unwrap();
-                conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
-                    .unwrap();
-                let before = wal_snapshot(std::path::Path::new(conn.path().unwrap()));
-                let id = member_id.to_string();
-                let args = CliArgs::try_parse_from(["cafleet", "member", "recover", &id, "--json"])
-                    .unwrap();
-                assert!(dispatch(&settings, args.command).is_err());
-                for (path, bytes) in before {
-                    assert_eq!(std::fs::read(&path).unwrap(), bytes, "{mutation}: {path:?}");
-                }
-            }
         }
     }
 }

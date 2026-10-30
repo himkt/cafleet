@@ -36,11 +36,7 @@ pub(super) fn reconcile(
         let target = match established {
             Some(status) => status,
             None => {
-                let maximum: Option<i64> = tx.query_row(
-                    "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
-                    [run.run_id],
-                    |row| row.get(0),
-                )?;
+                let maximum = storage::latest_event_seq(&tx, run.run_id)?;
                 let ceiling = maximum.map_or(run.event_seq_reserved_through, |value| {
                     value.max(run.event_seq_reserved_through)
                 });
@@ -66,7 +62,7 @@ pub(super) fn reconcile(
                         inserted,
                         "exceptional recovery requires fresh reserved transitions",
                     )?;
-                    super::replay::count_exceptional(&mut report, &event)?;
+                    super::replay::count_commit(&mut report, &event, false)?;
                 }
                 RunStatus::Lost
             }
@@ -153,7 +149,7 @@ mod tests {
                 close_reason: None,
                 cause_json: Some(json!({"kind":"coverage_unknown"})),
             };
-            storage::persist_transition(
+            storage::persist_event(
                 &mut case.fixture.conn,
                 &case.fixture.run.owner(),
                 &event,
@@ -293,7 +289,7 @@ mod tests {
                 for directory in [false, true] {
                     let mut case = Case::new();
                     let transition = exited(&case.fixture.run, 1, code, signal);
-                    storage::persist_transition(
+                    storage::persist_event(
                         &mut case.fixture.conn,
                         &case.fixture.run.owner(),
                         &transition,

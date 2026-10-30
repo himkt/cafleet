@@ -128,18 +128,19 @@ fn write_if_changed(
     Ok(true)
 }
 
-pub(crate) fn persist_transition_with_effective_policy(
+#[cfg(test)]
+pub(crate) fn persist_event_with_effective_policy(
     conn: &mut Connection,
     owner: &RunOwner,
     transition: &ObservedTransition,
     observation: &EffectivePolicyObservation,
     mode: PersistenceMode,
 ) -> Result<RuntimeEventRecord, CafleetError> {
-    persist_transition_with_effective_policy_counted(conn, owner, transition, observation, mode)
+    persist_transition_with_effective_policy(conn, owner, transition, observation, mode)
         .map(|(event, _)| event)
 }
 
-pub(crate) fn persist_transition_with_effective_policy_counted(
+pub(crate) fn persist_transition_with_effective_policy(
     conn: &mut Connection,
     owner: &RunOwner,
     transition: &ObservedTransition,
@@ -301,7 +302,7 @@ mod tests {
             fixture.reserve(&owner);
             let observation = unavailable(None);
             let transition = unavailable_transition(&fixture, 1);
-            let event = storage::persist_transition_with_effective_policy(
+            let event = storage::persist_event_with_effective_policy(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -339,7 +340,7 @@ mod tests {
             fixture.reserve(&owner);
             let transition = unavailable_transition(&fixture, 1);
             let observation = unavailable(None);
-            let first = storage::persist_transition_with_effective_policy(
+            let first = storage::persist_event_with_effective_policy(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -348,7 +349,7 @@ mod tests {
             )
             .unwrap();
             let committed = durable_state(&fixture.conn);
-            let again = storage::persist_transition_with_effective_policy(
+            let again = storage::persist_event_with_effective_policy(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -362,7 +363,7 @@ mod tests {
             );
             assert_eq!(durable_state(&fixture.conn), committed);
             let recovery = fixture.recoverer();
-            let replayed = storage::persist_transition_with_effective_policy(
+            let replayed = storage::persist_event_with_effective_policy(
                 &mut fixture.conn,
                 &recovery,
                 &transition,
@@ -388,7 +389,7 @@ mod tests {
             let transition = unavailable_transition(&fixture, 1);
             let recovery = fixture.recoverer();
             let observation = unavailable(None);
-            let event = storage::persist_transition_with_effective_policy(
+            let event = storage::persist_event_with_effective_policy(
                 &mut fixture.conn,
                 &recovery,
                 &transition,
@@ -414,7 +415,7 @@ mod tests {
                 ..unavailable_transition(&fixture, 1)
             };
             assert!(
-                storage::persist_transition_with_effective_policy(
+                storage::persist_event_with_effective_policy(
                     &mut fixture.conn,
                     &owner,
                     &rejected,
@@ -455,7 +456,7 @@ mod tests {
                 ),
             ] {
                 assert!(
-                    storage::persist_transition_with_effective_policy(
+                    storage::persist_event_with_effective_policy(
                         &mut fixture.conn,
                         &owner,
                         &transition,
@@ -477,7 +478,7 @@ mod tests {
             let before = durable_state(&fixture.conn);
             let transition = unavailable_transition(&fixture, 1);
             assert!(
-                storage::persist_transition_with_effective_policy(
+                storage::persist_event_with_effective_policy(
                     &mut fixture.conn,
                     &owner,
                     &transition,
@@ -499,7 +500,7 @@ mod tests {
                 fixture.reserve(&owner);
                 let observation = unavailable(observed_mode);
                 let transition = unavailable_transition(&fixture, 1);
-                let event = storage::persist_transition_with_effective_policy(
+                let event = storage::persist_event_with_effective_policy(
                     &mut fixture.conn,
                     &owner,
                     &transition,
@@ -554,7 +555,7 @@ mod tests {
             assert!(record_available(&mut fixture, &owner, &first).unwrap());
             let lost = unavailable(Some("auto"));
             let transition = unavailable_transition(&fixture, 1);
-            let event = storage::persist_transition_with_effective_policy(
+            let event = storage::persist_event_with_effective_policy(
                 &mut fixture.conn,
                 &owner,
                 &transition,

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clap::Args;
 use rusqlite::Connection;
@@ -19,9 +19,7 @@ pub(crate) struct SetupArgs {
 
 pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
     let mut conn = prepare_database(settings)?;
-    let home = PathBuf::from(
-        std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".into()))?,
-    );
+    let home = crate::config_dir::home_dir()?;
     install_selected(
         &mut conn,
         &args.coding_agent,
@@ -175,26 +173,6 @@ mod tests {
                     .unwrap(),
                 1
             );
-        }
-    }
-
-    #[test]
-    fn foreign_ahead_and_malformed_databases_are_unchanged_on_refusal() {
-        for mutation in [
-            "PRAGMA application_id=42",
-            "UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
-            "ALTER TABLE messages RENAME COLUMN text TO wrong",
-        ] {
-            let home = tempfile::tempdir().unwrap();
-            let settings = settings(home.path());
-            let conn = prepare_database(&settings).unwrap();
-            conn.execute_batch(mutation).unwrap();
-            drop(conn);
-            let path = crate::db::database_path(&settings.database_url).unwrap();
-            let before = std::fs::read(path).unwrap();
-            assert!(prepare_database(&settings).is_err(), "{mutation}");
-            assert_eq!(std::fs::read(path).unwrap(), before);
-            assert!(!home.path().join(".claude").exists());
         }
     }
 

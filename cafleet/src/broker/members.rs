@@ -2,7 +2,9 @@
 use rusqlite::TransactionBehavior;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::records::{MemberActivity, MemberKind, MemberRecord, Placement, RegisteredMember};
+use super::records::{
+    MemberActivity, MemberKind, MemberRecord, MemberStatus, Placement, RegisteredMember,
+};
 use crate::error::CafleetError;
 use crate::time::{now_stamp, parse_lenient};
 
@@ -38,36 +40,81 @@ pub(crate) fn register_member_rows(
 ) -> Result<RegisteredMember, CafleetError> {
     let now = now_stamp();
     super::fleets::require_live_fleet(conn, fleet_id)?;
-    let member = conn.query_row(
-        "INSERT INTO members (fleet_id, name, description, status, registered_at)
-         VALUES (?1, ?2, ?3, 'active', ?4) RETURNING member_id, name, registered_at",
-        params![fleet_id, name, description, now],
-        |row| {
-            Ok(RegisteredMember {
-                member_id: row.get(0)?,
-                name: row.get(1)?,
-                registered_at: row.get(2)?,
-            })
-        },
-    )?;
-    let member_id = member.member_id;
-    if let Some(p) = placement {
-        conn.execute(
-            "INSERT INTO member_placements
-             (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                member_id,
-                p.mux_session,
-                p.mux_window_id,
-                p.mux_pane_id,
-                p.backend,
-                p.coding_agent,
-                now
-            ],
-        )?;
+    let member_id = insert_member_row(conn, fleet_id, name, description, &now)?;
+    if let Some(placement) = placement {
+        insert_placement_row(conn, member_id, placement, &now)?;
     }
-    Ok(member)
+    Ok(RegisteredMember {
+        member_id,
+        name: name.into(),
+        registered_at: now,
+    })
+}
+
+pub(super) fn insert_member_row(
+    conn: &Connection,
+    fleet_id: i64,
+    name: &str,
+    description: &str,
+    now: &str,
+) -> Result<i64, CafleetError> {
+    conn.query_row(
+        "INSERT INTO members (fleet_id, name, description, status, registered_at)
+         VALUES (?1, ?2, ?3, 'active', ?4) RETURNING member_id",
+        params![fleet_id, name, description, now],
+        |row| row.get(0),
+    )
+    .map_err(CafleetError::from)
+}
+
+pub(super) fn insert_placement_row(
+    conn: &Connection,
+    member_id: i64,
+    placement: &NewPlacement,
+    now: &str,
+) -> Result<(), CafleetError> {
+    conn.execute(
+        "INSERT INTO member_placements
+         (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            member_id,
+            placement.mux_session,
+            placement.mux_window_id,
+            placement.mux_pane_id,
+            placement.backend,
+            placement.coding_agent,
+            now
+        ],
+    )?;
+    Ok(())
+}
+
+const MEMBER_COLUMNS: &str = "m.name, m.description, m.status, m.registered_at,
+    f.director_member_id=m.member_id,
+    p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at";
+
+fn member_row(
+    row: &rusqlite::Row<'_>,
+    member_id: i64,
+    fleet_id: i64,
+) -> rusqlite::Result<MemberRecord> {
+    let backend: Option<String> = row.get(5)?;
+    Ok(MemberRecord {
+        member_id,
+        fleet_id,
+        name: row.get(0)?,
+        description: row.get(1)?,
+        status: row.get(2)?,
+        registered_at: row.get(3)?,
+        kind: if row.get(4)? {
+            MemberKind::Director
+        } else {
+            MemberKind::Member
+        },
+        placement: backend.map(|_| Placement::from_row(row, 5)).transpose()?,
+        runtime: None,
+    })
 }
 
 pub(crate) fn get_member(
@@ -76,29 +123,35 @@ pub(crate) fn get_member(
     fleet_id: i64,
 ) -> Result<Option<MemberRecord>, CafleetError> {
     super::fleets::require_live_fleet(conn, fleet_id)?;
-    let mut member = conn.query_row(
-        "SELECT m.name, m.description, m.status, m.registered_at,
-                f.director_member_id=m.member_id,
-                p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at
-         FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
-         LEFT JOIN member_placements p ON p.member_id=m.member_id
-         WHERE m.member_id=?1 AND m.fleet_id=?2 AND m.status='active'",
-        params![member_id, fleet_id],
-        |row| {
-            let backend: Option<String> = row.get(5)?;
-            Ok(MemberRecord {
-                member_id, fleet_id, name: row.get(0)?, description: row.get(1)?,
-                status: row.get(2)?, registered_at: row.get(3)?,
-                kind: if row.get(4)? { MemberKind::Director } else { MemberKind::Member },
-                placement: backend.map(|_| Placement::from_row(row, 5)).transpose()?,
-                runtime: None,
-            })
-        },
-    ).optional()?;
+    let mut member = conn
+        .query_row(
+            &format!(
+                "SELECT {MEMBER_COLUMNS}
+                 FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
+                 LEFT JOIN member_placements p ON p.member_id=m.member_id
+                 WHERE m.member_id=?1 AND m.fleet_id=?2 AND m.status='active'"
+            ),
+            params![member_id, fleet_id],
+            |row| member_row(row, member_id, fleet_id),
+        )
+        .optional()?;
     if let Some(member) = &mut member {
         member.runtime = super::runtime::member_runtime(conn, member_id)?;
     }
     Ok(member)
+}
+
+pub(crate) fn member_fleet_status(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<Option<(i64, MemberStatus)>, CafleetError> {
+    conn.query_row(
+        "SELECT fleet_id, status FROM members WHERE member_id=?1",
+        [member_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(CafleetError::from)
 }
 
 pub(crate) fn active_member_fleet(
@@ -173,10 +226,8 @@ pub(crate) fn update_placement_pane_id(
 }
 
 fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, CafleetError> {
-    let mut stmt = conn.prepare(
-        "SELECT m.member_id, m.name, m.status, f.director_member_id=m.member_id,
-                p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at,
-                m.description, m.registered_at,
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {MEMBER_COLUMNS}, m.member_id,
                 (SELECT MAX(created_at) FROM messages WHERE from_member_id=m.member_id),
                 (SELECT MAX(created_at) FROM messages WHERE to_member_id=m.member_id),
                 (SELECT MAX(status_timestamp) FROM messages WHERE to_member_id=m.member_id AND status_state='completed')
@@ -184,25 +235,10 @@ fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, 
          LEFT JOIN member_placements p ON p.member_id=m.member_id
          WHERE m.fleet_id=?1 AND m.status='active'
          ORDER BY m.member_id"
-    )?;
+    ))?;
     stmt.query_map([fleet_id], |row| {
-        let backend: Option<String> = row.get(4)?;
         Ok(MemberActivity {
-            member: MemberRecord {
-                member_id: row.get(0)?,
-                fleet_id,
-                name: row.get(1)?,
-                status: row.get(2)?,
-                kind: if row.get(3)? {
-                    MemberKind::Director
-                } else {
-                    MemberKind::Member
-                },
-                placement: backend.map(|_| Placement::from_row(row, 4)).transpose()?,
-                runtime: None,
-                description: row.get(10)?,
-                registered_at: row.get(11)?,
-            },
+            member: member_row(row, row.get(11)?, fleet_id)?,
             last_sent: row.get(12)?,
             last_recv: row.get(13)?,
             last_ack: row.get(14)?,

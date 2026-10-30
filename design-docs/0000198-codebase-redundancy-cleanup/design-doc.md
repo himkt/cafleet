@@ -1,8 +1,8 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 42/56 tasks complete
-**Last Updated**: 2026-10-29
+**Progress**: 51/56 tasks complete
+**Last Updated**: 2026-10-30
 
 ## Overview
 
@@ -618,18 +618,18 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 10: Runtime runner simplification
 
-- [ ] Apply OBS-02, 03, 05, 06, 12, 14–20 and 24 <!-- completed: -->
-- [ ] Apply SVC-06, 07, 08, 09, 12, 13, 16, 17, 18 and 19 <!-- completed: -->
-- [ ] Apply INP-02, 03, 04, 05, 10, 11, 12 <!-- completed: -->
-- [ ] Apply INP-18–22, 25, 26, 30, 32–35, 37 <!-- completed: -->
-- [ ] Apply INP-39–42, 44 and 49, plus MUX-06 <!-- completed: -->
+- [x] Apply OBS-02, 03, 05, 06, 12, 14–20 and 24 <!-- completed: 2026-10-30T00:01 -->
+- [x] Apply SVC-06, 07, 08, 09, 12, 13, 16, 17, 18 and 19 <!-- completed: 2026-10-30T00:31 -->
+- [x] Apply INP-02, 03, 04, 05, 10, 11, 12 <!-- completed: 2026-10-30T01:40 -->
+- [x] Apply INP-18–22, 25, 26, 30, 32–35, 37 <!-- completed: 2026-10-30T01:40 -->
+- [x] Apply INP-39–42, 44 and 49, plus MUX-06 <!-- completed: 2026-10-30T01:40 -->
 
 ### Step 11: Coding agent, broker, CLI and multiplexer simplification
 
-- [ ] Apply AGT-04, 09–14, 16, 17 and CLI-06 <!-- completed: -->
-- [ ] Apply BRK-05, 06, 08, 09, 10, 11, 13, 14, 16, 17 <!-- completed: -->
-- [ ] Apply CLI-08, 09, 11, 12, 14, 22, 23 <!-- completed: -->
-- [ ] Apply MUX-01, 07, 08, 10, 11, 15, 16, 17 <!-- completed: -->
+- [x] Apply AGT-04, 09–14, 16, 17 and CLI-06 <!-- completed: 2026-10-30T00:01 -->
+- [x] Apply BRK-05, 06, 08, 09, 10, 11, 13, 14, 16, 17 <!-- completed: 2026-10-30T00:22 -->
+- [x] Apply CLI-08, 09, 11, 12, 14, 22, 23 <!-- completed: 2026-10-30T00:46 -->
+- [x] Apply MUX-01, 07, 08, 10, 11, 15, 16, 17 <!-- completed: 2026-10-30T00:46 -->
 
 ### Step 12: Test de-duplication and hygiene
 

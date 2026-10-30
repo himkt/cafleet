@@ -53,10 +53,13 @@ fn positive(value: &Value) -> Result<u16> {
         .filter(|n| *n > 0)
         .ok_or_else(|| invalid("positive viewport bound required"))
 }
-fn one_of(value: &Value, choices: &[&str]) -> Result<String> {
+fn one_of<T: Copy>(value: &Value, choices: &[(&str, T)]) -> Result<T> {
     let value = text(value)?;
-    require(choices.contains(&value.as_str()), "invalid profile enum")?;
-    Ok(value)
+    choices
+        .iter()
+        .find(|(name, _)| *name == value)
+        .map(|(_, choice)| *choice)
+        .ok_or_else(|| invalid("invalid profile enum"))
 }
 fn expression(value: &Value) -> Result<Regex> {
     Regex::new(&text(value)?).map_err(|cause| invalid(format!("regex: {cause}")))
@@ -72,7 +75,7 @@ fn lower_hex(value: &str) -> bool {
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct Fixture {
     pub(crate) id: String,
-    pub(crate) kind: String,
+    pub(crate) native: bool,
     pub(crate) backend: CodingAgent,
     pub(crate) version: String,
 }
@@ -82,16 +85,27 @@ pub(super) struct Capture {
     pub(crate) name: String,
     pub(crate) row_margin: Option<String>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ChoiceScope {
+    SingleRequest,
+    Session,
+    Persistent,
+}
 #[derive(Clone)]
 pub(super) struct Choice {
     pub(crate) id: String,
     pub(crate) label: Capture,
-    pub(crate) scope: String,
+    pub(crate) scope: ChoiceScope,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum MatcherScope {
+    Line,
+    Region,
 }
 #[derive(Clone)]
 pub(super) struct Matcher {
     pub(crate) id: String,
-    pub(crate) scope: String,
+    pub(crate) scope: MatcherScope,
     pub(crate) regex: Regex,
     pub(crate) background_focus: bool,
 }
@@ -101,13 +115,26 @@ pub(super) struct Continuation {
     pub(crate) choice_id: String,
     pub(crate) fixtures: Vec<String>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ScreenSelector {
+    Primary,
+    Alternate,
+    Either,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum CursorRule {
+    AtEnd,
+    Inside,
+    Outside,
+    Any,
+}
 #[derive(Clone)]
 pub(super) struct Region {
-    pub(crate) screen: String,
+    pub(crate) screen: ScreenSelector,
     pub(crate) start: Regex,
     pub(crate) end: Regex,
     pub(crate) max_rows: u16,
-    pub(crate) cursor: String,
+    pub(crate) cursor: CursorRule,
 }
 #[derive(Clone)]
 pub(super) struct Frame {
@@ -132,7 +159,6 @@ pub(super) struct Rule {
 #[derive(Clone)]
 pub(super) struct Capability {
     pub(crate) rules: Vec<String>,
-    pub(crate) fixtures: Vec<String>,
 }
 #[derive(Clone)]
 pub(super) struct Answer {
@@ -143,7 +169,6 @@ pub(super) struct Answer {
     pub(crate) choice_id: String,
     pub(crate) focus_matcher_id: String,
     pub(crate) stages: Vec<AnswerStage>,
-    pub(crate) provenance: Vec<Fixture>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -192,7 +217,6 @@ pub(crate) struct AnswerPlan {
     choice_id: String,
     focus_matcher_id: String,
     stages: Vec<AnswerStage>,
-    provenance: Vec<Fixture>,
 }
 impl AnswerPlan {
     pub(crate) fn capability(&self) -> &AnswerCapability {
@@ -297,7 +321,6 @@ impl Profile {
             choice_id: answer.choice_id.clone(),
             focus_matcher_id: answer.focus_matcher_id.clone(),
             stages: answer.stages.clone(),
-            provenance: answer.provenance.clone(),
         })
     }
 }
@@ -436,11 +459,26 @@ fn compile_rule(value: &Value) -> Result<Rule> {
         ],
     )?;
     let region = Region {
-        screen: one_of(&r["screen"], &["primary", "alternate", "either"])?,
+        screen: one_of(
+            &r["screen"],
+            &[
+                ("primary", ScreenSelector::Primary),
+                ("alternate", ScreenSelector::Alternate),
+                ("either", ScreenSelector::Either),
+            ],
+        )?,
         start: expression(&r["start_pattern"])?,
         end: expression(&r["end_pattern"])?,
         max_rows: positive(&r["max_rows"])?,
-        cursor: one_of(&r["cursor"], &["at_end", "inside", "outside", "any"])?,
+        cursor: one_of(
+            &r["cursor"],
+            &[
+                ("at_end", CursorRule::AtEnd),
+                ("inside", CursorRule::Inside),
+                ("outside", CursorRule::Outside),
+                ("any", CursorRule::Any),
+            ],
+        )?,
     };
     let mut ids = BTreeSet::new();
     let mut matchers = Vec::new();
@@ -452,13 +490,19 @@ fn compile_rule(value: &Value) -> Result<Rule> {
             object(v, &["id", "scope", "pattern"])?
         };
         if background_focus {
-            one_of(&m["focus_style"], &["background"])?;
+            one_of(&m["focus_style"], &[("background", ())])?;
         }
         let id = text(&m["id"])?;
         unique(&mut ids, &id)?;
         matchers.push(Matcher {
             id,
-            scope: one_of(&m["scope"], &["line", "region"])?,
+            scope: one_of(
+                &m["scope"],
+                &[
+                    ("line", MatcherScope::Line),
+                    ("region", MatcherScope::Region),
+                ],
+            )?,
             regex: expression(&m["pattern"])?,
             background_focus,
         });
@@ -477,7 +521,14 @@ fn compile_rule(value: &Value) -> Result<Rule> {
         choices.push(Choice {
             id,
             label: capture(&c["label"], &matchers)?,
-            scope: one_of(&c["scope"], &["single_request", "session", "persistent"])?,
+            scope: one_of(
+                &c["scope"],
+                &[
+                    ("single_request", ChoiceScope::SingleRequest),
+                    ("session", ChoiceScope::Session),
+                    ("persistent", ChoiceScope::Persistent),
+                ],
+            )?,
         });
     }
     require(
@@ -636,7 +687,7 @@ fn validate_gates(
                 .find(|matcher| matcher.id == choice.label.matcher)
                 .expect("validated choice label matcher");
             require(
-                label.scope == "line",
+                label.scope == MatcherScope::Line,
                 "focus-gated choice labels are line-scoped",
             )?;
         }
@@ -676,7 +727,7 @@ fn validate_continuation(
         continuation.fixtures.iter().all(|id| {
             fixtures
                 .iter()
-                .any(|fixture| &fixture.id == id && fixture.kind == "native")
+                .any(|fixture| &fixture.id == id && fixture.native)
         }),
         "continuation cites native fixtures",
     )
@@ -754,12 +805,8 @@ fn capability(
             "capability rule component mismatch",
         )?;
     }
-    let fixture_ids = texts(&m["fixture_ids"])?;
-    provenance(&fixture_ids, backend, versions, fixtures)?;
-    Ok(Some(Capability {
-        rules: ids,
-        fixtures: fixture_ids,
-    }))
+    provenance(&texts(&m["fixture_ids"])?, backend, versions, fixtures)?;
+    Ok(Some(Capability { rules: ids }))
 }
 
 fn decoded_hex(value: &str) -> Vec<u8> {
@@ -797,22 +844,12 @@ fn composer_submission(
         (2..=64).contains(&submit.len()) && submit.len().is_multiple_of(2) && lower_hex(submit),
         "composer submit requires 1–32 lowercase hexadecimal bytes",
     )?;
-    let ids = texts(&m["fixture_ids"])?;
-    provenance(&ids, backend, versions, fixtures)?;
-    let fixtures = ids
-        .iter()
-        .map(|id| {
-            fixtures
-                .iter()
-                .find(|fixture| &fixture.id == id)
-                .expect("validated composer fixture reference")
-                .clone()
-        })
-        .collect();
+    let fixture_ids = texts(&m["fixture_ids"])?;
+    provenance(&fixture_ids, backend, versions, fixtures)?;
     Ok(Some(ComposerSubmission {
         prefix: decoded_hex(prefix),
         submit: decoded_hex(submit),
-        fixtures,
+        fixture_ids,
     }))
 }
 
@@ -845,315 +882,92 @@ fn composer_submissions(
 }
 
 const BUNDLED_DEFINITIONS: &str = include_str!("bundled.json");
-const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
-    (
-        "native/claude-2.1.302-default-permission-1.json",
-        include_bytes!("native/claude-2.1.302-default-permission-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-allow-pre-stage-1.json",
-        include_bytes!("native/claude-2.1.302-allow-pre-stage-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-deny-pre-stage-1.json",
-        include_bytes!("native/claude-2.1.302-deny-pre-stage-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-idle-composer-1.json",
-        include_bytes!("native/claude-2.1.302-idle-composer-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-wrapped-permission-1.json",
-        include_bytes!("native/claude-2.1.302-wrapped-permission-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-wrapped-allow-pre-stage-1.json",
-        include_bytes!("native/claude-2.1.302-wrapped-allow-pre-stage-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-wrapped-deny-pre-stage-1.json",
-        include_bytes!("native/claude-2.1.302-wrapped-deny-pre-stage-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-boxed-permission-1.json",
-        include_bytes!("native/claude-2.1.302-boxed-permission-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-boxed-single-row-permission-1.json",
-        include_bytes!("native/claude-2.1.302-boxed-single-row-permission-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-approved-done-1.json",
-        include_bytes!("native/claude-2.1.302-auto-approved-done-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-approved-running-1.json",
-        include_bytes!("native/claude-2.1.302-auto-approved-running-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-ask-allow-continuation-1.json",
-        include_bytes!("native/claude-2.1.302-auto-ask-allow-continuation-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-ask-deny-continuation-1.json",
-        include_bytes!("native/claude-2.1.302-auto-ask-deny-continuation-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-ask-hiding-refusal-notice-1.json",
-        include_bytes!("native/claude-2.1.302-auto-ask-hiding-refusal-notice-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1.json",
-        include_bytes!("native/claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-ask-permission-1.json",
-        include_bytes!("native/claude-2.1.302-auto-ask-permission-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-fresh-first-launch-notice-1.json",
-        include_bytes!("native/claude-2.1.302-auto-fresh-first-launch-notice-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-fresh-onboarding-theme-1.json",
-        include_bytes!("native/claude-2.1.302-auto-fresh-onboarding-theme-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-idle-composer-1.json",
-        include_bytes!("native/claude-2.1.302-auto-idle-composer-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-model-switch-question-1.json",
-        include_bytes!("native/claude-2.1.302-auto-model-switch-question-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-quote-false-positive-1.json",
-        include_bytes!("native/claude-2.1.302-auto-quote-false-positive-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-refusal-notice-expired-1.json",
-        include_bytes!("native/claude-2.1.302-auto-refusal-notice-expired-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-refusal-notice-idle-1.json",
-        include_bytes!("native/claude-2.1.302-auto-refusal-notice-idle-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-refusal-notice-working-1.json",
-        include_bytes!("native/claude-2.1.302-auto-refusal-notice-working-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-transcript-viewer-1.json",
-        include_bytes!("native/claude-2.1.302-auto-transcript-viewer-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-two-refusals-notice-1.json",
-        include_bytes!("native/claude-2.1.302-auto-two-refusals-notice-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-unavailable-manual-footer-1.json",
-        include_bytes!("native/claude-2.1.302-auto-unavailable-manual-footer-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-unavailable-notice-1.json",
-        include_bytes!("native/claude-2.1.302-auto-unavailable-notice-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-verbose-quote-false-positive-1.json",
-        include_bytes!("native/claude-2.1.302-auto-verbose-quote-false-positive-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-verbose-refusal-above-form-1.json",
-        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-above-form-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-verbose-refusal-hidden-by-form-1.json",
-        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-hidden-by-form-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-verbose-refusal-restored-idle-1.json",
-        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-restored-idle-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-verbose-refusal-rewrapped-form-1.json",
-        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-rewrapped-form-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1.json",
-        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-verbose-transcript-viewer-1.json",
-        include_bytes!("native/claude-2.1.302-auto-verbose-transcript-viewer-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-verbose-two-refusals-1.json",
-        include_bytes!("native/claude-2.1.302-auto-verbose-two-refusals-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-trust-dialog-1.json",
-        include_bytes!("native/claude-2.1.302-trust-dialog-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-access-allow-continuation-1.json",
-        include_bytes!("native/claude-2.1.302-access-allow-continuation-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-access-allow-pre-stage-1.json",
-        include_bytes!("native/claude-2.1.302-access-allow-pre-stage-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-access-allow-running-1.json",
-        include_bytes!("native/claude-2.1.302-access-allow-running-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-access-deny-continuation-1.json",
-        include_bytes!("native/claude-2.1.302-access-deny-continuation-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-access-deny-pre-stage-1.json",
-        include_bytes!("native/claude-2.1.302-access-deny-pre-stage-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-access-permission-1.json",
-        include_bytes!("native/claude-2.1.302-access-permission-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-env-setup-cancelled-idle-1.json",
-        include_bytes!("native/claude-2.1.302-auto-env-setup-cancelled-idle-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-env-setup-offer-1.json",
-        include_bytes!("native/claude-2.1.302-auto-env-setup-offer-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-auto-env-setup-wizard-1.json",
-        include_bytes!("native/claude-2.1.302-auto-env-setup-wizard-1.json"),
-    ),
-    (
-        "native/claude-2.1.302-default-manual-idle-1.json",
-        include_bytes!("native/claude-2.1.302-default-manual-idle-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-on-request-permission-1.json",
-        include_bytes!("native/codex-0.163.0-on-request-permission-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-allow-pre-stage-1.json",
-        include_bytes!("native/codex-0.163.0-allow-pre-stage-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-deny-pre-stage-1.json",
-        include_bytes!("native/codex-0.163.0-deny-pre-stage-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-idle-composer-1.json",
-        include_bytes!("native/codex-0.163.0-idle-composer-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-approved-escalated-1.json",
-        include_bytes!("native/codex-0.163.0-auto-approved-escalated-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-denial-limit-interrupted-1.json",
-        include_bytes!("native/codex-0.163.0-auto-denial-limit-interrupted-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-denial-limit-warning-1.json",
-        include_bytes!("native/codex-0.163.0-auto-denial-limit-warning-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-expanded-detail-1.json",
-        include_bytes!("native/codex-0.163.0-auto-expanded-detail-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-fresh-idle-1.json",
-        include_bytes!("native/codex-0.163.0-auto-fresh-idle-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-idle-composer-1.json",
-        include_bytes!("native/codex-0.163.0-auto-idle-composer-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-quote-false-positive-1.json",
-        include_bytes!("native/codex-0.163.0-auto-quote-false-positive-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-refusal-after-overlay-1.json",
-        include_bytes!("native/codex-0.163.0-auto-refusal-after-overlay-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-refusal-idle-1.json",
-        include_bytes!("native/codex-0.163.0-auto-refusal-idle-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-refusal-warning-overlay-1.json",
-        include_bytes!("native/codex-0.163.0-auto-refusal-warning-overlay-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-refusal-working-1.json",
-        include_bytes!("native/codex-0.163.0-auto-refusal-working-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-reviewing-1.json",
-        include_bytes!("native/codex-0.163.0-auto-reviewing-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-sandbox-failure-1.json",
-        include_bytes!("native/codex-0.163.0-auto-sandbox-failure-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-second-launch-idle-1.json",
-        include_bytes!("native/codex-0.163.0-auto-second-launch-idle-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-status-indicator-1.json",
-        include_bytes!("native/codex-0.163.0-auto-status-indicator-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-two-refusals-1.json",
-        include_bytes!("native/codex-0.163.0-auto-two-refusals-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-two-refusals-resized-1.json",
-        include_bytes!("native/codex-0.163.0-auto-two-refusals-resized-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-two-refusals-restored-1.json",
-        include_bytes!("native/codex-0.163.0-auto-two-refusals-restored-1.json"),
-    ),
-    (
-        "native/codex-0.163.0-auto-warning-overlay-1.json",
-        include_bytes!("native/codex-0.163.0-auto-warning-overlay-1.json"),
-    ),
-    (
-        "native/opencode-2.1.4-ask-permission-1.json",
-        include_bytes!("native/opencode-2.1.4-ask-permission-1.json"),
-    ),
-    (
-        "native/opencode-2.1.4-allow-pre-stage-1.json",
-        include_bytes!("native/opencode-2.1.4-allow-pre-stage-1.json"),
-    ),
-    (
-        "native/opencode-2.1.4-deny-pre-stage-1.json",
-        include_bytes!("native/opencode-2.1.4-deny-pre-stage-1.json"),
-    ),
-    (
-        "native/opencode-2.1.4-deny-pre-stage-2.json",
-        include_bytes!("native/opencode-2.1.4-deny-pre-stage-2.json"),
-    ),
-    (
-        "native/opencode-2.1.4-deny-pre-stage-3.json",
-        include_bytes!("native/opencode-2.1.4-deny-pre-stage-3.json"),
-    ),
-    (
-        "native/opencode-2.1.4-focus-always-1.json",
-        include_bytes!("native/opencode-2.1.4-focus-always-1.json"),
-    ),
-    (
-        "native/opencode-2.1.4-idle-composer-1.json",
-        include_bytes!("native/opencode-2.1.4-idle-composer-1.json"),
-    ),
+macro_rules! bundled {
+    ($($id:literal),* $(,)?) => {
+        &[$((
+            concat!("native/", $id, ".json"),
+            include_bytes!(concat!("native/", $id, ".json")),
+        )),*]
+    };
+}
+const BUNDLED_FIXTURES: &[(&str, &[u8])] = bundled![
+    "claude-2.1.302-default-permission-1",
+    "claude-2.1.302-allow-pre-stage-1",
+    "claude-2.1.302-deny-pre-stage-1",
+    "claude-2.1.302-idle-composer-1",
+    "claude-2.1.302-wrapped-permission-1",
+    "claude-2.1.302-wrapped-allow-pre-stage-1",
+    "claude-2.1.302-wrapped-deny-pre-stage-1",
+    "claude-2.1.302-boxed-permission-1",
+    "claude-2.1.302-boxed-single-row-permission-1",
+    "claude-2.1.302-auto-approved-done-1",
+    "claude-2.1.302-auto-approved-running-1",
+    "claude-2.1.302-auto-ask-allow-continuation-1",
+    "claude-2.1.302-auto-ask-deny-continuation-1",
+    "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
+    "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1",
+    "claude-2.1.302-auto-ask-permission-1",
+    "claude-2.1.302-auto-fresh-first-launch-notice-1",
+    "claude-2.1.302-auto-fresh-onboarding-theme-1",
+    "claude-2.1.302-auto-idle-composer-1",
+    "claude-2.1.302-auto-model-switch-question-1",
+    "claude-2.1.302-auto-quote-false-positive-1",
+    "claude-2.1.302-auto-refusal-notice-expired-1",
+    "claude-2.1.302-auto-refusal-notice-idle-1",
+    "claude-2.1.302-auto-refusal-notice-working-1",
+    "claude-2.1.302-auto-transcript-viewer-1",
+    "claude-2.1.302-auto-two-refusals-notice-1",
+    "claude-2.1.302-auto-unavailable-manual-footer-1",
+    "claude-2.1.302-auto-unavailable-notice-1",
+    "claude-2.1.302-auto-verbose-quote-false-positive-1",
+    "claude-2.1.302-auto-verbose-refusal-above-form-1",
+    "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1",
+    "claude-2.1.302-auto-verbose-refusal-restored-idle-1",
+    "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1",
+    "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1",
+    "claude-2.1.302-auto-verbose-transcript-viewer-1",
+    "claude-2.1.302-auto-verbose-two-refusals-1",
+    "claude-2.1.302-trust-dialog-1",
+    "claude-2.1.302-access-allow-continuation-1",
+    "claude-2.1.302-access-allow-pre-stage-1",
+    "claude-2.1.302-access-allow-running-1",
+    "claude-2.1.302-access-deny-continuation-1",
+    "claude-2.1.302-access-deny-pre-stage-1",
+    "claude-2.1.302-access-permission-1",
+    "claude-2.1.302-auto-env-setup-cancelled-idle-1",
+    "claude-2.1.302-auto-env-setup-offer-1",
+    "claude-2.1.302-auto-env-setup-wizard-1",
+    "claude-2.1.302-default-manual-idle-1",
+    "codex-0.163.0-on-request-permission-1",
+    "codex-0.163.0-allow-pre-stage-1",
+    "codex-0.163.0-deny-pre-stage-1",
+    "codex-0.163.0-idle-composer-1",
+    "codex-0.163.0-auto-approved-escalated-1",
+    "codex-0.163.0-auto-denial-limit-interrupted-1",
+    "codex-0.163.0-auto-denial-limit-warning-1",
+    "codex-0.163.0-auto-expanded-detail-1",
+    "codex-0.163.0-auto-fresh-idle-1",
+    "codex-0.163.0-auto-idle-composer-1",
+    "codex-0.163.0-auto-quote-false-positive-1",
+    "codex-0.163.0-auto-refusal-after-overlay-1",
+    "codex-0.163.0-auto-refusal-idle-1",
+    "codex-0.163.0-auto-refusal-warning-overlay-1",
+    "codex-0.163.0-auto-refusal-working-1",
+    "codex-0.163.0-auto-reviewing-1",
+    "codex-0.163.0-auto-sandbox-failure-1",
+    "codex-0.163.0-auto-second-launch-idle-1",
+    "codex-0.163.0-auto-status-indicator-1",
+    "codex-0.163.0-auto-two-refusals-1",
+    "codex-0.163.0-auto-two-refusals-resized-1",
+    "codex-0.163.0-auto-two-refusals-restored-1",
+    "codex-0.163.0-auto-warning-overlay-1",
+    "opencode-2.1.4-ask-permission-1",
+    "opencode-2.1.4-allow-pre-stage-1",
+    "opencode-2.1.4-deny-pre-stage-1",
+    "opencode-2.1.4-deny-pre-stage-2",
+    "opencode-2.1.4-deny-pre-stage-3",
+    "opencode-2.1.4-focus-always-1",
+    "opencode-2.1.4-idle-composer-1",
 ];
 
 fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {
@@ -1312,20 +1126,6 @@ impl ProfileCatalog {
         for entry in array(&definitions["fixtures"])? {
             verify_native_screen(entry, embedded)?;
         }
-        require(
-            catalog.profiles.iter().all(|profile| {
-                profile
-                    .submissions
-                    .iter()
-                    .flatten()
-                    .all(ComposerSubmission::native_provenance)
-                    && profile
-                        .answers
-                        .iter()
-                        .all(|a| a.provenance.iter().all(|f| f.kind == "native"))
-            }),
-            "bundled executable composer plans require native provenance",
-        )?;
         #[cfg(test)]
         let catalog = Self {
             capture_origin: "bundled_unknown",
@@ -1361,7 +1161,7 @@ impl ProfileCatalog {
             )?;
             let id = text(&m["id"])?;
             unique(&mut ids, &id)?;
-            let kind = one_of(&m["kind"], &["synthetic", "native"])?;
+            let native = one_of(&m["kind"], &[("synthetic", false), ("native", true)])?;
             positive(&m["rows"])?;
             positive(&m["cols"])?;
             text(&m["source_ref"])?;
@@ -1372,7 +1172,7 @@ impl ProfileCatalog {
             )?;
             fixtures.push(Fixture {
                 id,
-                kind,
+                native,
                 backend: backend(&m["backend"])?,
                 version: text(&m["native_version"])?,
             });
@@ -1488,7 +1288,7 @@ impl ProfileCatalog {
                     .find(|c| c.id == choice_id)
                     .ok_or_else(|| invalid("unknown answer choice"))?;
                 require(
-                    choice.scope == "single_request",
+                    choice.scope == ChoiceScope::SingleRequest,
                     "answer requires single-request scope",
                 )?;
                 let focus = text(&a["focus_matcher_id"])?;
@@ -1532,16 +1332,6 @@ impl ProfileCatalog {
                     decision,
                     request,
                     id,
-                    provenance: fixture_ids
-                        .iter()
-                        .map(|id| {
-                            fixtures
-                                .iter()
-                                .find(|f| &f.id == id)
-                                .expect("validated answer fixture reference")
-                                .clone()
-                        })
-                        .collect(),
                     fixtures: fixture_ids,
                     choice_id,
                     focus_matcher_id: focus,
@@ -1652,42 +1442,15 @@ impl ProfileCatalog {
             },
         }
     }
-    #[cfg(test)]
-    pub(crate) fn answer_capability(
-        &self,
-        backend: CodingAgent,
-        version: &str,
-        request_rule: &str,
-        decision: PermissionDecision,
-    ) -> Result<Option<AnswerCapability>> {
-        let Some(profile) = self.matching(backend, Some(version)) else {
-            return Ok(None);
-        };
-        Ok(profile
-            .answers
-            .iter()
-            .find(|a| a.request == request_rule && a.decision == decision)
-            .map(|answer| AnswerCapability {
-                backend,
-                native_version: version.into(),
-                profile_version: profile.version.clone(),
-                request_rule_id: request_rule.into(),
-                answer_rule_id: answer.id.clone(),
-                decision,
-                fixture_ids: answer.fixtures.clone(),
-            }))
-    }
-
     pub(crate) fn answer_plan(
         &self,
         backend: CodingAgent,
         version: &str,
         request: &str,
         decision: PermissionDecision,
-    ) -> Result<Option<AnswerPlan>> {
-        Ok(self
-            .matching(backend, Some(version))
-            .and_then(|p| p.answer_plan(version, request, decision)))
+    ) -> Option<AnswerPlan> {
+        self.matching(backend, Some(version))?
+            .answer_plan(version, request, decision)
     }
 }
 
@@ -1695,6 +1458,64 @@ impl ProfileCatalog {
 pub(crate) mod test_support {
     use super::*;
     use serde_json::json;
+
+    /// Each backend's bundled exact version and two unbundled versions around it.
+    pub(crate) const BUNDLED_PROBES: [(CodingAgent, &str, [&str; 2]); 3] = [
+        (CodingAgent::Claude, "2.1.302", ["2.1.306", "2.1.301"]),
+        (CodingAgent::Codex, "0.163.0", ["0.164.0", "0.162.0"]),
+        (CodingAgent::Opencode, "2.1.4", ["2.1.5", "2.1.3"]),
+    ];
+
+    pub(crate) fn bundled_fixture(id: &str) -> (&'static str, &'static [u8]) {
+        let source = format!("native/{id}.json");
+        BUNDLED_FIXTURES
+            .iter()
+            .copied()
+            .find(|(cited, _)| *cited == source)
+            .unwrap_or_else(|| panic!("{id} is a bundled fixture"))
+    }
+
+    pub(crate) fn bundled_screen(id: &str) -> &'static str {
+        std::str::from_utf8(bundled_fixture(id).1).expect("bundled fixtures are UTF-8 JSON")
+    }
+
+    pub(crate) fn bundled_embedded() -> Vec<(&'static str, &'static [u8])> {
+        BUNDLED_FIXTURES.to_vec()
+    }
+
+    pub(crate) fn bundled_definitions() -> Value {
+        serde_json::from_str(BUNDLED_DEFINITIONS).unwrap()
+    }
+
+    pub(crate) fn bundled_entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
+        definitions["fixtures"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|entry| entry["id"] == id)
+            .unwrap_or_else(|| panic!("the bundled catalog cites {id}"))
+    }
+
+    /// The bundled catalog with `id`'s screen and catalog entry changed; the
+    /// entry's digest follows the changed screen.
+    pub(crate) fn guarded_fixture(
+        id: &str,
+        change_definitions: impl FnOnce(&mut Value),
+        change_screen: impl FnOnce(&mut Value),
+    ) -> Result<ProfileCatalog> {
+        let (source, original) = bundled_fixture(id);
+        let mut screen: Value = serde_json::from_slice(original).unwrap();
+        change_screen(&mut screen);
+        let bytes = serde_json::to_vec_pretty(&screen).unwrap();
+        let mut definitions = bundled_definitions();
+        bundled_entry(&mut definitions, id)["sha256"] = json!(crate::digest::sha256_hex(&bytes));
+        change_definitions(&mut definitions);
+        let mut embedded = bundled_embedded();
+        embedded.retain(|&(cited, _)| cited != source);
+        embedded.push((source, &bytes));
+        ProfileCatalog::from_bundled_definitions(&definitions, &embedded)
+    }
+
     pub(crate) fn synthetic_definitions() -> Value {
         json!({
             "schema_version":1,
@@ -1989,6 +1810,167 @@ mod tests {
     use crate::runtime::runner::*;
     use serde_json::{Value, json};
     use std::time::{Duration, Instant};
+
+    type ScreenChange = (&'static str, fn(&mut Value));
+
+    fn first_masked_or_empty_row(screen: &Value) -> u64 {
+        screen["masked_rows"]
+            .as_array()
+            .unwrap()
+            .first()
+            .map(|mask| mask["row"].as_u64().unwrap())
+            .or_else(|| {
+                screen["lines"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .position(|line| line == "")
+                    .map(|row| row as u64)
+            })
+            .unwrap_or(0)
+    }
+
+    fn push_mask(screen: &mut Value, row: u64, reason: &str) {
+        screen["masked_rows"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"row":row,"reason":reason}));
+    }
+
+    const SCREEN_CHANGES: [ScreenChange; 15] = [
+        ("synthetic provenance", |s| {
+            s["provenance"] = json!("synthetic")
+        }),
+        ("extra field", |s| s["note"] = json!("unreviewed")),
+        ("missing masked rows", |s| {
+            s.as_object_mut().unwrap().remove("masked_rows");
+        }),
+        ("nonempty masked row", |s| {
+            let masked = s["masked_rows"]
+                .as_array()
+                .unwrap()
+                .first()
+                .map(|mask| mask["row"].as_u64().unwrap() as usize);
+            match masked {
+                Some(row) => s["lines"][row] = json!("restored header"),
+                None => {
+                    let row = s["lines"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .position(|line| line != "")
+                        .unwrap() as u64;
+                    push_mask(s, row, "reviewed_privacy");
+                }
+            }
+        }),
+        ("masked row out of range", |s| {
+            let rows = s["rows"].as_u64().unwrap();
+            push_mask(s, rows, "reviewed_privacy");
+        }),
+        ("duplicate masked row", |s| {
+            let row = first_masked_or_empty_row(s);
+            if s["masked_rows"].as_array().unwrap().is_empty() {
+                push_mask(s, row, "reviewed_privacy");
+            }
+            push_mask(s, row, "reviewed_privacy");
+        }),
+        ("unreviewed mask reason", |s| {
+            if s["masked_rows"].as_array().unwrap().is_empty() {
+                let row = first_masked_or_empty_row(s);
+                push_mask(s, row, "convenience");
+            } else {
+                s["masked_rows"][0]["reason"] = json!("convenience");
+            }
+        }),
+        ("fixture id", |s| s["fixture_id"] = json!("other-fixture")),
+        ("backend", |s| {
+            s["backend"] = json!(if s["backend"] == "codex" {
+                "claude"
+            } else {
+                "codex"
+            })
+        }),
+        ("native version", |s| {
+            s["native_version"] = json!("0.0.0-other")
+        }),
+        ("rows", |s| {
+            s["rows"] = json!(s["rows"].as_u64().unwrap() - 1)
+        }),
+        ("line count", |s| {
+            s["lines"].as_array_mut().unwrap().pop();
+        }),
+        ("cols differ from the entry", |s| {
+            s["cols"] = json!(s["cols"].as_u64().unwrap() + 1)
+        }),
+        ("cursor row outside the geometry", |s| {
+            s["cursor_row"] = s["rows"].clone()
+        }),
+        ("cursor column past the geometry", |s| {
+            s["cursor_col"] = json!(s["cols"].as_u64().unwrap() + 1)
+        }),
+    ];
+
+    #[test]
+    fn bundled_guard_rejects_every_unreviewed_change_to_each_bundled_fixture() {
+        let definitions = bundled_definitions();
+        let embedded = bundled_embedded();
+        let entries = definitions["fixtures"].as_array().unwrap();
+        assert_eq!(entries.len(), super::BUNDLED_FIXTURES.len());
+        for entry in entries {
+            let id = entry["id"].as_str().unwrap();
+            super::verify_native_screen(entry, &embedded)
+                .unwrap_or_else(|error| panic!("{id}: {}", error.message()));
+            let (source, bytes) = bundled_fixture(id);
+            let rejected = |entry: &Value, bytes: &[u8], case: &str| {
+                let mut changed: Vec<(&str, &[u8])> = embedded.clone();
+                changed.retain(|&(cited, _)| cited != source);
+                changed.push((source, bytes));
+                assert!(
+                    super::verify_native_screen(entry, &changed).is_err(),
+                    "{id}: {case} must be rejected"
+                );
+            };
+            let screen: Value = serde_json::from_slice(bytes).unwrap();
+            for (case, change) in SCREEN_CHANGES {
+                let mut changed = screen.clone();
+                change(&mut changed);
+                let changed = serde_json::to_vec_pretty(&changed).unwrap();
+                let mut digested = entry.clone();
+                digested["sha256"] = json!(crate::digest::sha256_hex(&changed));
+                rejected(&digested, &changed, case);
+            }
+            let mut synthetic = entry.clone();
+            synthetic["kind"] = json!("synthetic");
+            rejected(&synthetic, bytes, "synthetic catalog kind");
+            let mut tampered = bytes.to_vec();
+            tampered.push(b'\n');
+            rejected(entry, &tampered, "digest mismatch");
+            let mut missing = embedded.clone();
+            missing.retain(|&(cited, _)| cited != source);
+            assert!(
+                super::verify_native_screen(entry, &missing).is_err(),
+                "{id}: a cited fixture is embedded"
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_fixtures_carry_no_personal_paths_or_account_names() {
+        for (source, bytes) in bundled_embedded() {
+            let screen: Value = serde_json::from_slice(bytes).unwrap();
+            for (row, line) in screen["lines"].as_array().unwrap().iter().enumerate() {
+                let line = line.as_str().unwrap();
+                for private in ["/Users/", "/root", "/development-pvc", "/home/", "himkt"] {
+                    assert!(
+                        !line.contains(private),
+                        "{source} row {row} carries {private:?}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn permission_inspection_catalog_retains_exact_executable_plans_and_provenance() {
         let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
@@ -2013,7 +1995,6 @@ mod tests {
                     "synthetic-permission",
                     decision,
                 )
-                .unwrap()
                 .unwrap();
             let capability = plan.capability();
             assert_eq!(capability.backend(), CodingAgent::Codex);
@@ -2044,7 +2025,6 @@ mod tests {
                     "synthetic-permission",
                     PermissionDecision::Allow
                 )
-                .unwrap()
                 .is_none()
         );
         for (version, rule, decision) in [
@@ -2058,7 +2038,6 @@ mod tests {
             assert!(
                 catalog
                     .answer_plan(CodingAgent::Codex, version, rule, decision)
-                    .unwrap()
                     .is_none()
             );
         }
@@ -2071,7 +2050,6 @@ mod tests {
                     "synthetic-permission",
                     PermissionDecision::Allow
                 )
-                .unwrap()
                 .is_none()
         );
     }
@@ -2091,7 +2069,6 @@ mod tests {
                 "synthetic-permission",
                 PermissionDecision::Allow,
             )
-            .unwrap()
             .unwrap();
         assert_eq!(
             plan.stages().iter().map(|s| s.bytes().len()).sum::<usize>(),
@@ -2190,36 +2167,27 @@ mod tests {
                     .answer_decisions,
                 vec![decision]
             );
-            let capability = catalog
-                .answer_capability(CodingAgent::Codex, VERSION, RULE, decision)
-                .unwrap()
-                .unwrap();
-            assert_eq!(capability.backend(), CodingAgent::Codex);
-            assert_eq!(capability.native_version(), VERSION);
-            assert_eq!(capability.profile_version(), PROFILE);
-            assert_eq!(capability.request_rule_id(), RULE);
             assert_eq!(
-                capability.answer_rule_id(),
+                catalog
+                    .answer_plan(CodingAgent::Codex, VERSION, RULE, decision)
+                    .unwrap()
+                    .capability()
+                    .answer_rule_id(),
                 format!("synthetic-{name}-plan")
             );
-            assert_eq!(capability.decision(), decision);
-            assert_eq!(capability.fixture_ids(), &[FIXTURE.to_string()]);
             assert!(
                 catalog
-                    .answer_capability(CodingAgent::Codex, VERSION, RULE, other)
-                    .unwrap()
+                    .answer_plan(CodingAgent::Codex, VERSION, RULE, other)
                     .is_none()
             );
             assert!(
                 catalog
-                    .answer_capability(CodingAgent::Claude, VERSION, RULE, decision)
-                    .unwrap()
+                    .answer_plan(CodingAgent::Claude, VERSION, RULE, decision)
                     .is_none()
             );
             assert!(
                 catalog
-                    .answer_capability(CodingAgent::Codex, VERSION, "another-form", decision)
-                    .unwrap()
+                    .answer_plan(CodingAgent::Codex, VERSION, "another-form", decision)
                     .is_none()
             );
         }
@@ -2563,7 +2531,6 @@ mod tests {
             ProfileCatalog::from_definitions(&gated_fixture_definition())
                 .unwrap()
                 .answer_plan(CodingAgent::Codex, VERSION, GATED_RULE, decision)
-                .unwrap()
                 .expect("gated synthetic plan")
         }
 
@@ -2625,7 +2592,6 @@ mod tests {
                     "synthetic-permission",
                     PermissionDecision::Allow,
                 )
-                .unwrap()
                 .unwrap();
             let bundled = ProfileCatalog::bundled().unwrap();
             let mut plans = vec![synthetic];
@@ -2637,7 +2603,6 @@ mod tests {
                     plans.push(
                         bundled
                             .answer_plan(backend, version, rule, decision)
-                            .unwrap()
                             .expect("bundled ungated plan"),
                     );
                 }
@@ -3170,7 +3135,6 @@ mod tests {
             ] {
                 let selected = catalog
                     .composer_plan(CodingAgent::Codex, VERSION_TWO, operation)
-                    .unwrap()
                     .unwrap();
                 assert_eq!(selected.native_version(), VERSION_TWO);
                 assert_eq!(
@@ -3226,10 +3190,6 @@ mod tests {
 
         const CLAUDE_VERSION: &str = "2.1.302";
         const NATIVE_FIXTURE: &str = "claude-2.1.302-default-permission-1";
-        const NATIVE_SOURCE: &str = "native/claude-2.1.302-default-permission-1.json";
-        const NATIVE_BYTES: &[u8] =
-            include_bytes!("native/claude-2.1.302-default-permission-1.json");
-        const DEFINITIONS: &str = include_str!("bundled.json");
         const PERMISSION_RULE: &str = "claude-bash-permission";
         const IDLE_RULE: &str = "claude-idle-composer";
         const PROFILE_VERSION: &str = "claude-2.1.302-auto-1";
@@ -3239,93 +3199,24 @@ mod tests {
         const WRAPPED_FIXTURE: &str = "claude-2.1.302-wrapped-permission-1";
         const WRAPPED_ALLOW_FIXTURE: &str = "claude-2.1.302-wrapped-allow-pre-stage-1";
         const WRAPPED_DENY_FIXTURE: &str = "claude-2.1.302-wrapped-deny-pre-stage-1";
-        const ALLOW_BYTES: &[u8] = include_bytes!("native/claude-2.1.302-allow-pre-stage-1.json");
-        const DENY_BYTES: &[u8] = include_bytes!("native/claude-2.1.302-deny-pre-stage-1.json");
-        const IDLE_BYTES: &[u8] = include_bytes!("native/claude-2.1.302-idle-composer-1.json");
-        const WRAPPED_BYTES: &[u8] =
-            include_bytes!("native/claude-2.1.302-wrapped-permission-1.json");
-        const WRAPPED_ALLOW_BYTES: &[u8] =
-            include_bytes!("native/claude-2.1.302-wrapped-allow-pre-stage-1.json");
-        const WRAPPED_DENY_BYTES: &[u8] =
-            include_bytes!("native/claude-2.1.302-wrapped-deny-pre-stage-1.json");
-        const WRAPPED_FIXTURES: [&str; 3] =
-            [WRAPPED_FIXTURE, WRAPPED_ALLOW_FIXTURE, WRAPPED_DENY_FIXTURE];
         const BOXED_FIXTURE: &str = "claude-2.1.302-boxed-permission-1";
         const BOXED_SINGLE_ROW_FIXTURE: &str = "claude-2.1.302-boxed-single-row-permission-1";
-        const BOXED_BYTES: &[u8] = include_bytes!("native/claude-2.1.302-boxed-permission-1.json");
-        const BOXED_SINGLE_ROW_BYTES: &[u8] =
-            include_bytes!("native/claude-2.1.302-boxed-single-row-permission-1.json");
-        const BOXED_FIXTURES: [&str; 2] = [BOXED_FIXTURE, BOXED_SINGLE_ROW_FIXTURE];
-        pub(super) const FIXTURES: [(&str, &str, &[u8]); 9] = [
-            (NATIVE_FIXTURE, NATIVE_SOURCE, NATIVE_BYTES),
-            (
-                ALLOW_FIXTURE,
-                "native/claude-2.1.302-allow-pre-stage-1.json",
-                ALLOW_BYTES,
-            ),
-            (
-                DENY_FIXTURE,
-                "native/claude-2.1.302-deny-pre-stage-1.json",
-                DENY_BYTES,
-            ),
-            (
-                IDLE_FIXTURE,
-                "native/claude-2.1.302-idle-composer-1.json",
-                IDLE_BYTES,
-            ),
-            (
-                WRAPPED_FIXTURE,
-                "native/claude-2.1.302-wrapped-permission-1.json",
-                WRAPPED_BYTES,
-            ),
-            (
-                WRAPPED_ALLOW_FIXTURE,
-                "native/claude-2.1.302-wrapped-allow-pre-stage-1.json",
-                WRAPPED_ALLOW_BYTES,
-            ),
-            (
-                WRAPPED_DENY_FIXTURE,
-                "native/claude-2.1.302-wrapped-deny-pre-stage-1.json",
-                WRAPPED_DENY_BYTES,
-            ),
-            (
-                BOXED_FIXTURE,
-                "native/claude-2.1.302-boxed-permission-1.json",
-                BOXED_BYTES,
-            ),
-            (
-                BOXED_SINGLE_ROW_FIXTURE,
-                "native/claude-2.1.302-boxed-single-row-permission-1.json",
-                BOXED_SINGLE_ROW_BYTES,
-            ),
+        /// The captures of the predecessor form; every other Claude fixture is an
+        /// automatic-mode capture classified in `bundled_claude_auto`.
+        pub(super) const PREDECESSOR_FIXTURES: [&str; 9] = [
+            NATIVE_FIXTURE,
+            ALLOW_FIXTURE,
+            DENY_FIXTURE,
+            IDLE_FIXTURE,
+            WRAPPED_FIXTURE,
+            WRAPPED_ALLOW_FIXTURE,
+            WRAPPED_DENY_FIXTURE,
+            BOXED_FIXTURE,
+            BOXED_SINGLE_ROW_FIXTURE,
         ];
 
-        pub(super) fn embedded() -> Vec<(&'static str, &'static [u8])> {
-            FIXTURES
-                .iter()
-                .chain(super::bundled_claude_auto::FIXTURES.iter())
-                .chain(super::bundled_codex::FIXTURES.iter())
-                .chain(super::bundled_codex_auto::FIXTURES.iter())
-                .chain(super::bundled_opencode::FIXTURES.iter())
-                .map(|&(_, source, bytes)| (source, bytes))
-                .collect()
-        }
-
-        fn fixture(id: &str) -> (&'static str, &'static [u8]) {
-            FIXTURES
-                .iter()
-                .find(|(fixture, _, _)| *fixture == id)
-                .map(|&(_, source, bytes)| (source, bytes))
-                .expect("known bundled fixture")
-        }
-
-        fn lines(bytes: &[u8]) -> Vec<String> {
-            serde_json::from_slice::<Value>(bytes).unwrap()["lines"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|line| line.as_str().unwrap().to_owned())
-                .collect()
+        fn bytes(id: &str) -> &'static [u8] {
+            bundled_fixture(id).1
         }
 
         fn bundled_observation(bytes: &[u8]) -> ScreenObservation {
@@ -3333,142 +3224,8 @@ mod tests {
             let screen =
                 replay_native_fixture(std::str::from_utf8(bytes).unwrap(), |_| {}, true, None);
             Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
-                .unwrap()
                 .observe(&screen)
                 .unwrap()
-        }
-
-        fn digest(bytes: &[u8]) -> String {
-            crate::digest::sha256_hex(bytes)
-        }
-
-        fn definitions() -> Value {
-            serde_json::from_str(DEFINITIONS).unwrap()
-        }
-
-        fn native_screen() -> Value {
-            serde_json::from_slice(NATIVE_BYTES).unwrap()
-        }
-
-        fn entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
-            definitions["fixtures"]
-                .as_array_mut()
-                .unwrap()
-                .iter_mut()
-                .find(|entry| entry["id"] == id)
-                .expect("bundled catalog cites the native fixture")
-        }
-
-        fn native_entry(definitions: &mut Value) -> &mut Value {
-            entry(definitions, NATIVE_FIXTURE)
-        }
-
-        type ScreenChange = (&'static str, fn(&mut Value));
-
-        fn guarded_fixture(
-            id: &str,
-            change_definitions: impl FnOnce(&mut Value),
-            change_screen: impl FnOnce(&mut Value),
-        ) -> Result<ProfileCatalog, CafleetError> {
-            let (source, original) = fixture(id);
-            let mut screen: Value = serde_json::from_slice(original).unwrap();
-            change_screen(&mut screen);
-            let bytes = serde_json::to_vec_pretty(&screen).unwrap();
-            let mut value = definitions();
-            entry(&mut value, id)["sha256"] = json!(digest(&bytes));
-            change_definitions(&mut value);
-            let mut embedded = embedded();
-            embedded.retain(|&(cited, _)| cited != source);
-            embedded.push((source, &bytes));
-            ProfileCatalog::from_bundled_definitions(&value, &embedded)
-        }
-
-        fn guarded(
-            change_definitions: impl FnOnce(&mut Value),
-            change_screen: impl FnOnce(&mut Value),
-        ) -> Result<ProfileCatalog, CafleetError> {
-            guarded_fixture(NATIVE_FIXTURE, change_definitions, change_screen)
-        }
-
-        #[test]
-        fn bundled_claude_native_fixture_matches_its_catalog_entry_and_declares_masked_header_rows()
-        {
-            let mut value = definitions();
-            assert_eq!(
-                native_entry(&mut value),
-                &json!({"id":NATIVE_FIXTURE,"kind":"native","backend":"claude","native_version":CLAUDE_VERSION,
-                    "rows":36,"cols":120,"source_ref":NATIVE_SOURCE,"sha256":digest(NATIVE_BYTES)})
-            );
-            let screen = native_screen();
-            assert_eq!(
-                screen
-                    .as_object()
-                    .unwrap()
-                    .keys()
-                    .map(String::as_str)
-                    .collect::<BTreeSet<_>>(),
-                BTreeSet::from([
-                    "schema_version",
-                    "fixture_id",
-                    "provenance",
-                    "backend",
-                    "native_version",
-                    "rows",
-                    "cols",
-                    "alternate_screen",
-                    "screen_seq",
-                    "cursor_row",
-                    "cursor_col",
-                    "lines",
-                    "masked_rows",
-                ])
-            );
-            assert_eq!(screen["schema_version"], 1);
-            assert_eq!(screen["fixture_id"], NATIVE_FIXTURE);
-            assert_eq!(screen["provenance"], "native");
-            assert_eq!(screen["backend"], "claude");
-            assert_eq!(screen["native_version"], CLAUDE_VERSION);
-            assert_eq!(
-                (screen["rows"].clone(), screen["cols"].clone()),
-                (json!(36), json!(120))
-            );
-            assert_eq!(screen["alternate_screen"], true);
-            assert_eq!(screen["screen_seq"], 11424);
-            assert_eq!(
-                (screen["cursor_row"].clone(), screen["cursor_col"].clone()),
-                (json!(23), json!(1))
-            );
-            let lines = screen["lines"].as_array().unwrap();
-            assert_eq!(lines.len(), 36);
-            assert_eq!(
-                screen["masked_rows"],
-                json!(
-                    (0..12)
-                        .map(|row| json!({"row":row,"reason":"reviewed_privacy"}))
-                        .collect::<Vec<_>>()
-                )
-            );
-            for (row, line) in lines.iter().enumerate() {
-                let line = line.as_str().unwrap();
-                if row < 12 {
-                    assert_eq!(line, "", "masked row {row} is empty");
-                }
-                assert!(
-                    !line.contains("/Users/") && !line.contains("himkt"),
-                    "row {row} carries no personal path"
-                );
-            }
-            assert_eq!(lines[14], " Bash command");
-            assert_eq!(
-                lines[18],
-                " /private/tmp/cafleet-194/cells-002/permission-probe allow"
-            );
-            assert_eq!(lines[20], " This command requires approval");
-            assert_eq!(lines[22], " Do you want to proceed?");
-            assert_eq!(lines[23], " ❯ 1. Yes");
-            assert_eq!(lines[26], "   4. No");
-            assert_eq!(lines[28], " Esc to cancel · Tab to amend");
-            assert_eq!(lines[29], " ".repeat(17));
         }
 
         #[test]
@@ -3517,151 +3274,6 @@ mod tests {
         }
 
         #[test]
-        fn bundled_guard_accepts_declared_masks_and_rejects_synthetic_altered_or_mismatched_fixtures()
-         {
-            assert!(ProfileCatalog::from_bundled_definitions(&definitions(), &embedded()).is_ok());
-            assert!(guarded(|_| {}, |_| {}).is_ok());
-            let mut tampered = NATIVE_BYTES.to_vec();
-            tampered.push(b'\n');
-            let mut with_tampered = embedded();
-            with_tampered.retain(|&(source, _)| source != NATIVE_SOURCE);
-            with_tampered.push((NATIVE_SOURCE, &tampered));
-            assert!(
-                ProfileCatalog::from_bundled_definitions(&definitions(), &with_tampered).is_err(),
-                "digest mismatch"
-            );
-            let mut missing = embedded();
-            missing.retain(|&(source, _)| source != NATIVE_SOURCE);
-            assert!(
-                ProfileCatalog::from_bundled_definitions(&definitions(), &missing).is_err(),
-                "cited fixture is embedded"
-            );
-            let screen_changes: [ScreenChange; 13] = [
-                ("synthetic provenance", |s| {
-                    s["provenance"] = json!("synthetic")
-                }),
-                ("extra field", |s| s["note"] = json!("unreviewed")),
-                ("missing masked rows", |s| {
-                    s.as_object_mut().unwrap().remove("masked_rows");
-                }),
-                ("nonempty masked row", |s| {
-                    s["lines"][3] = json!("restored header")
-                }),
-                ("masked row out of range", |s| {
-                    s["masked_rows"]
-                        .as_array_mut()
-                        .unwrap()
-                        .push(json!({"row":36,"reason":"reviewed_privacy"}))
-                }),
-                ("duplicate masked row", |s| {
-                    s["masked_rows"]
-                        .as_array_mut()
-                        .unwrap()
-                        .push(json!({"row":0,"reason":"reviewed_privacy"}))
-                }),
-                ("unreviewed mask reason", |s| {
-                    s["masked_rows"][0]["reason"] = json!("convenience")
-                }),
-                ("fixture id", |s| s["fixture_id"] = json!("other-fixture")),
-                ("backend", |s| s["backend"] = json!("codex")),
-                ("native version", |s| s["native_version"] = json!("2.1.301")),
-                ("rows", |s| s["rows"] = json!(35)),
-                ("line count", |s| {
-                    s["lines"].as_array_mut().unwrap().pop();
-                }),
-                ("cursor outside geometry", |s| s["cursor_row"] = json!(36)),
-            ];
-            for (case, change) in screen_changes {
-                assert!(guarded(|_| {}, change).is_err(), "{case} must be rejected");
-            }
-            assert!(
-                guarded(|d| native_entry(d)["kind"] = json!("synthetic"), |_| {}).is_err(),
-                "synthetic catalog fixture kind must be rejected"
-            );
-        }
-
-        #[test]
-        fn bundled_claude_answer_and_idle_fixtures_match_their_entries_and_declare_privacy_masks() {
-            let mut value = definitions();
-            let header: Vec<usize> = (0..12).collect();
-            let idle_masks: Vec<usize> = (0..12).chain([33, 34]).collect();
-            for (id, sequence, cursor, masked) in [
-                (ALLOW_FIXTURE, 10819, (23, 1), &header),
-                (DENY_FIXTURE, 11866, (23, 1), &header),
-                (IDLE_FIXTURE, 7035, (31, 2), &idle_masks),
-            ] {
-                let (source, bytes) = fixture(id);
-                assert_eq!(
-                    entry(&mut value, id),
-                    &json!({"id":id,"kind":"native","backend":"claude","native_version":CLAUDE_VERSION,
-                        "rows":36,"cols":120,"source_ref":source,"sha256":digest(bytes)})
-                );
-                let screen: Value = serde_json::from_slice(bytes).unwrap();
-                assert_eq!(
-                    screen.as_object().unwrap().len(),
-                    native_screen().as_object().unwrap().len(),
-                    "{id} has exactly the documented fields"
-                );
-                assert_eq!(screen["fixture_id"], id);
-                assert_eq!(screen["provenance"], "native");
-                assert_eq!(screen["backend"], "claude");
-                assert_eq!(screen["native_version"], CLAUDE_VERSION);
-                assert_eq!(
-                    (screen["rows"].clone(), screen["cols"].clone()),
-                    (json!(36), json!(120))
-                );
-                assert_eq!(screen["alternate_screen"], true);
-                assert_eq!(screen["screen_seq"], sequence);
-                assert_eq!(
-                    (screen["cursor_row"].clone(), screen["cursor_col"].clone()),
-                    (json!(cursor.0), json!(cursor.1))
-                );
-                assert_eq!(
-                    screen["masked_rows"],
-                    json!(
-                        masked
-                            .iter()
-                            .map(|row| json!({"row":row,"reason":"reviewed_privacy"}))
-                            .collect::<Vec<_>>()
-                    )
-                );
-                let rows = lines(bytes);
-                assert_eq!(rows.len(), 36);
-                for (row, line) in rows.iter().enumerate() {
-                    if masked.contains(&row) {
-                        assert_eq!(line, "", "{id} masked row {row} is empty");
-                    }
-                    for private in ["/Users/", "himkt", "Opus", "$ ", "--resume"] {
-                        assert!(
-                            !line.contains(private),
-                            "{id} row {row} carries {private:?}"
-                        );
-                    }
-                }
-            }
-            for (bytes, operation) in [
-                (
-                    ALLOW_BYTES,
-                    " /private/tmp/cafleet-194/ans-allow-001/permission-probe allow",
-                ),
-                (
-                    DENY_BYTES,
-                    " /private/tmp/cafleet-194/ans-deny-001/permission-probe deny",
-                ),
-            ] {
-                let rows = lines(bytes);
-                assert_eq!(rows[14], " Bash command");
-                assert_eq!(rows[18], operation);
-                assert_eq!(rows[23], " ❯ 1. Yes");
-                assert_eq!(rows[26], "   4. No");
-            }
-            let idle = lines(IDLE_BYTES);
-            assert_eq!(idle[31], "❯\u{a0}");
-            assert!(idle[30].starts_with('─') && idle[32].starts_with('─'));
-            assert_eq!(idle[35], "  ⏸ manual mode on");
-        }
-
-        #[test]
         fn bundled_claude_answer_plans_are_the_measured_single_digit_stages() {
             let bundled = ProfileCatalog::bundled().unwrap();
             for (decision, byte, choice, answer_rule, provenance) in [
@@ -3687,7 +3299,6 @@ mod tests {
                         PERMISSION_RULE,
                         decision,
                     )
-                    .unwrap()
                     .expect("measured bundled answer plan");
                 assert_eq!(plan.choice_id(), choice);
                 assert_eq!(plan.focus_matcher_id(), "focus");
@@ -3715,7 +3326,6 @@ mod tests {
                     assert!(
                         bundled
                             .answer_plan(backend, version, PERMISSION_RULE, decision)
-                            .unwrap()
                             .is_none(),
                         "{backend:?} {version}"
                     );
@@ -3724,35 +3334,8 @@ mod tests {
         }
 
         #[test]
-        fn bundled_guard_rejects_synthetic_or_altered_answer_and_idle_fixtures() {
-            for id in [ALLOW_FIXTURE, DENY_FIXTURE, IDLE_FIXTURE] {
-                assert!(guarded_fixture(id, |_| {}, |_| {}).is_ok(), "{id}");
-                assert!(
-                    guarded_fixture(id, |d| entry(d, id)["kind"] = json!("synthetic"), |_| {})
-                        .is_err(),
-                    "{id} synthetic catalog kind"
-                );
-                assert!(
-                    guarded_fixture(id, |_| {}, |s| s["provenance"] = json!("synthetic")).is_err(),
-                    "{id} synthetic provenance"
-                );
-                assert!(
-                    guarded_fixture(id, |_| {}, |s| s["lines"][0] = json!("restored header"))
-                        .is_err(),
-                    "{id} nonempty masked row"
-                );
-                let (source, bytes) = fixture(id);
-                let mut tampered = bytes.to_vec();
-                tampered.push(b'\n');
-                let mut with_tampered = embedded();
-                with_tampered.retain(|&(cited, _)| cited != source);
-                with_tampered.push((source, &tampered));
-                assert!(
-                    ProfileCatalog::from_bundled_definitions(&definitions(), &with_tampered)
-                        .is_err(),
-                    "{id} digest mismatch"
-                );
-            }
+        fn bundled_guard_rejects_a_restored_masked_status_row_of_the_idle_composer() {
+            assert!(guarded_fixture(IDLE_FIXTURE, |_| {}, |_| {}).is_ok());
             assert!(
                 guarded_fixture(
                     IDLE_FIXTURE,
@@ -3766,8 +3349,8 @@ mod tests {
 
         #[test]
         fn bundled_claude_episode_closes_not_visible_once_the_idle_composer_holds_250_ms() {
-            let permission = bundled_observation(NATIVE_BYTES);
-            let idle = bundled_observation(IDLE_BYTES);
+            let permission = bundled_observation(bytes(NATIVE_FIXTURE));
+            let idle = bundled_observation(bytes(IDLE_FIXTURE));
             assert_eq!(idle.rule_id, IDLE_RULE);
             assert!(idle.verified_noninteraction);
             let at = |observation: &ScreenObservation, output_seq: u64| {
@@ -3818,247 +3401,9 @@ mod tests {
         }
 
         #[test]
-        fn bundled_claude_wrapped_fixtures_match_their_catalog_entries_and_declare_masked_header_rows()
-         {
-            let mut value = definitions();
-            for (id, sequence, cursor, heading, operation) in [
-                (
-                    WRAPPED_FIXTURE,
-                    6916,
-                    (28, 1),
-                    17,
-                    [
-                        " /tmp/cafleet-194/claude-wrap-cells-001/permission-",
-                        " probe allow",
-                    ],
-                ),
-                (
-                    WRAPPED_ALLOW_FIXTURE,
-                    7053,
-                    (27, 1),
-                    16,
-                    [
-                        " /tmp/cafleet-194/claude-wrap-ans-allow-001/permiss",
-                        " ion-probe allow",
-                    ],
-                ),
-                (
-                    WRAPPED_DENY_FIXTURE,
-                    7146,
-                    (27, 1),
-                    16,
-                    [
-                        " /tmp/cafleet-194/claude-wrap-ans-deny-001/permissi",
-                        " on-probe deny",
-                    ],
-                ),
-            ] {
-                let (source, bytes) = fixture(id);
-                assert_eq!(source, format!("native/{id}.json"));
-                assert_eq!(
-                    entry(&mut value, id),
-                    &json!({"id":id,"kind":"native","backend":"claude","native_version":CLAUDE_VERSION,
-                        "rows":36,"cols":52,"source_ref":source,"sha256":digest(bytes)})
-                );
-                let screen: Value = serde_json::from_slice(bytes).unwrap();
-                assert_eq!(
-                    screen.as_object().unwrap().keys().collect::<BTreeSet<_>>(),
-                    native_screen()
-                        .as_object()
-                        .unwrap()
-                        .keys()
-                        .collect::<BTreeSet<_>>(),
-                    "{id} has exactly the documented fields"
-                );
-                assert_eq!(screen["schema_version"], 1);
-                assert_eq!(screen["fixture_id"], id);
-                assert_eq!(screen["provenance"], "native");
-                assert_eq!(screen["backend"], "claude");
-                assert_eq!(screen["native_version"], CLAUDE_VERSION);
-                assert_eq!(
-                    (screen["rows"].clone(), screen["cols"].clone()),
-                    (json!(36), json!(52))
-                );
-                assert_eq!(screen["alternate_screen"], true, "{id}");
-                assert_eq!(screen["screen_seq"], sequence, "{id}");
-                assert_eq!(
-                    (screen["cursor_row"].clone(), screen["cursor_col"].clone()),
-                    (json!(cursor.0), json!(cursor.1)),
-                    "{id} cursor sits on the focused Yes row"
-                );
-                assert_eq!(
-                    screen["masked_rows"],
-                    json!(
-                        (0..12)
-                            .map(|row| json!({"row":row,"reason":"reviewed_privacy"}))
-                            .collect::<Vec<_>>()
-                    )
-                );
-                let rows = lines(bytes);
-                assert_eq!(rows.len(), 36);
-                for (row, line) in rows.iter().enumerate() {
-                    if row < 12 {
-                        assert_eq!(line, "", "{id} masked row {row} is empty");
-                    }
-                    assert!(line.chars().count() <= 52, "{id} row {row} fits 52 columns");
-                    for private in ["/Users/", "/root", "/development-pvc", "himkt", "Opus"] {
-                        assert!(
-                            !line.contains(private),
-                            "{id} row {row} carries {private:?}"
-                        );
-                    }
-                }
-                assert_eq!(rows[heading], " Bash command", "{id}");
-                for rule in [heading + 4, heading + 7] {
-                    assert!(rows[rule].starts_with('╌'), "{id} row {rule}");
-                    assert_eq!(rows[rule].chars().count(), 52, "{id} row {rule}");
-                }
-                assert_eq!(
-                    [rows[heading + 5].as_str(), rows[heading + 6].as_str()],
-                    operation,
-                    "{id} operation spans two rows"
-                );
-                assert_eq!(
-                    rows[heading + 5].chars().count(),
-                    51,
-                    "{id} first operation row reaches the last usable column"
-                );
-                assert_eq!(rows[heading + 8], " This command requires approval");
-                assert_eq!(rows[heading + 10], " Do you want to proceed?");
-                assert_eq!(rows[heading + 11], " ❯ 1. Yes");
-                assert_eq!(heading + 11, cursor.0);
-                assert_eq!(rows[33], "   4. No", "{id}");
-                assert_eq!(rows[35], " Esc to cancel · Tab to amend", "{id}");
-                assert!(
-                    35 - heading + 1 > 16 && 35 - heading < 24,
-                    "{id} form exceeds the unwrapped bound and fits 24 rows"
-                );
-            }
-        }
-
-        #[test]
-        fn bundled_claude_boxed_fixtures_match_their_catalog_entries_and_declare_masked_header_rows()
-         {
-            let mut value = definitions();
-            let path_089 =
-                "/tmp/cafleet-194/claude-boxed-cells-089-wide-operation-probe-01/permission-probe";
-            let path_120 =
-                "/tmp/cafleet-194/claude-boxed-cells-120-wide-operation-probe-01/permission-probe";
-            for (id, cols, sequence, cursor, heading, operation, closing) in [
-                (
-                    BOXED_FIXTURE,
-                    89,
-                    8800,
-                    (27, 1),
-                    17,
-                    vec![format!(" │ {path_089}"), " │ allow".to_owned()],
-                    34,
-                ),
-                (
-                    BOXED_SINGLE_ROW_FIXTURE,
-                    120,
-                    9055,
-                    (23, 1),
-                    14,
-                    vec![format!(" │ {path_120} allow")],
-                    29,
-                ),
-            ] {
-                let (source, bytes) = fixture(id);
-                assert_eq!(source, format!("native/{id}.json"));
-                assert_eq!(
-                    entry(&mut value, id),
-                    &json!({"id":id,"kind":"native","backend":"claude","native_version":CLAUDE_VERSION,
-                        "rows":36,"cols":cols,"source_ref":source,"sha256":digest(bytes)})
-                );
-                let screen: Value = serde_json::from_slice(bytes).unwrap();
-                assert_eq!(
-                    screen.as_object().unwrap().keys().collect::<BTreeSet<_>>(),
-                    native_screen()
-                        .as_object()
-                        .unwrap()
-                        .keys()
-                        .collect::<BTreeSet<_>>(),
-                    "{id} has exactly the documented fields"
-                );
-                assert_eq!(screen["schema_version"], 1);
-                assert_eq!(screen["fixture_id"], id);
-                assert_eq!(screen["provenance"], "native");
-                assert_eq!(screen["backend"], "claude");
-                assert_eq!(screen["native_version"], CLAUDE_VERSION);
-                assert_eq!(
-                    (screen["rows"].clone(), screen["cols"].clone()),
-                    (json!(36), json!(cols))
-                );
-                assert_eq!(screen["alternate_screen"], true, "{id}");
-                assert_eq!(screen["screen_seq"], sequence, "{id}");
-                assert_eq!(
-                    (screen["cursor_row"].clone(), screen["cursor_col"].clone()),
-                    (json!(cursor.0), json!(cursor.1)),
-                    "{id} cursor sits on the focused Yes row"
-                );
-                assert_eq!(
-                    screen["masked_rows"],
-                    json!(
-                        (0..12)
-                            .map(|row| json!({"row":row,"reason":"reviewed_privacy"}))
-                            .collect::<Vec<_>>()
-                    )
-                );
-                let rows = lines(bytes);
-                assert_eq!(rows.len(), 36);
-                for (row, line) in rows.iter().enumerate() {
-                    if row < 12 {
-                        assert_eq!(line, "", "{id} masked row {row} is empty");
-                    }
-                    assert!(
-                        line.chars().count() <= cols,
-                        "{id} row {row} fits {cols} columns"
-                    );
-                    for private in ["/Users/", "/root", "/development-pvc", "himkt", "Opus"] {
-                        assert!(
-                            !line.contains(private),
-                            "{id} row {row} carries {private:?}"
-                        );
-                    }
-                }
-                assert_eq!(rows[heading], " Bash command", "{id}");
-                let first_rule = heading + 3;
-                let last_rule = first_rule + operation.len() + 1;
-                for rule in [first_rule, last_rule] {
-                    assert!(rows[rule].starts_with('╌'), "{id} row {rule}");
-                    assert_eq!(rows[rule].chars().count(), cols, "{id} row {rule}");
-                }
-                assert_eq!(
-                    rows[first_rule + 1..last_rule],
-                    operation[..],
-                    "{id} boxed operation rows"
-                );
-                assert_eq!(rows[last_rule + 1], " This command requires approval");
-                assert_eq!(rows[last_rule + 3], " Do you want to proceed?");
-                assert_eq!(rows[cursor.0], " ❯ 1. Yes", "{id}");
-                assert_eq!(cursor.0, last_rule + 4);
-                assert_eq!(rows[closing], " Esc to cancel · Tab to amend", "{id}");
-                assert!(closing - heading < 24, "{id} form fits the 24-row bound");
-            }
-            let boxed = lines(BOXED_BYTES);
-            assert_eq!(boxed[21].chars().count(), 83, "short of the 88-cell edge");
-            assert_eq!(boxed[32], "   4. No");
-            assert_eq!(
-                boxed[33], "  ",
-                "two written spaces before the closing line"
-            );
-            assert_eq!(
-                lines(BOXED_SINGLE_ROW_BYTES)[18].chars().count(),
-                89,
-                "the single-row box follows the operation length"
-            );
-        }
-
-        #[test]
         fn bundled_claude_detection_and_catalog_cite_the_unwrapped_wrapped_and_boxed_native_captures()
          {
-            let value = definitions();
+            let value = bundled_definitions();
             let profile = value["profiles"]
                 .as_array()
                 .unwrap()
@@ -4084,72 +3429,6 @@ mod tests {
                 assert!(cited_by("detection").contains(id), "{id}");
             }
             assert!(cited_by("composer").contains(IDLE_FIXTURE));
-            let cited = value["fixtures"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|entry| entry["id"].as_str().unwrap())
-                .collect::<BTreeSet<_>>();
-            for (id, _, _) in FIXTURES {
-                assert!(cited.contains(id), "{id} is a bundled catalog fixture");
-            }
-        }
-
-        #[test]
-        fn bundled_guard_accepts_the_wrapped_and_boxed_fixtures_and_rejects_altered_ones() {
-            assert!(ProfileCatalog::from_bundled_definitions(&definitions(), &embedded()).is_ok());
-            for id in WRAPPED_FIXTURES.into_iter().chain(BOXED_FIXTURES) {
-                assert!(guarded_fixture(id, |_| {}, |_| {}).is_ok(), "{id}");
-                assert!(
-                    guarded_fixture(id, |d| entry(d, id)["kind"] = json!("synthetic"), |_| {})
-                        .is_err(),
-                    "{id} synthetic catalog kind"
-                );
-                let screen_changes: [ScreenChange; 9] = [
-                    ("synthetic provenance", |s| {
-                        s["provenance"] = json!("synthetic")
-                    }),
-                    ("nonempty masked row", |s| {
-                        s["lines"][0] = json!("restored header")
-                    }),
-                    ("backend", |s| s["backend"] = json!("codex")),
-                    ("native version", |s| s["native_version"] = json!("2.1.301")),
-                    ("cols differ from the entry", |s| {
-                        s["cols"] = json!(s["cols"].as_u64().unwrap() + 1)
-                    }),
-                    ("rows", |s| s["rows"] = json!(35)),
-                    ("line count", |s| {
-                        s["lines"].as_array_mut().unwrap().pop();
-                    }),
-                    ("extra field", |s| s["note"] = json!("unreviewed")),
-                    ("cursor past the geometry", |s| {
-                        s["cursor_col"] = json!(s["cols"].as_u64().unwrap() + 1)
-                    }),
-                ];
-                for (case, change) in screen_changes {
-                    assert!(
-                        guarded_fixture(id, |_| {}, change).is_err(),
-                        "{id} {case} must be rejected"
-                    );
-                }
-                let (source, bytes) = fixture(id);
-                let mut tampered = bytes.to_vec();
-                tampered.push(b'\n');
-                let mut with_tampered = embedded();
-                with_tampered.retain(|&(cited, _)| cited != source);
-                with_tampered.push((source, &tampered));
-                assert!(
-                    ProfileCatalog::from_bundled_definitions(&definitions(), &with_tampered)
-                        .is_err(),
-                    "{id} digest mismatch"
-                );
-                let mut missing = embedded();
-                missing.retain(|&(cited, _)| cited != source);
-                assert!(
-                    ProfileCatalog::from_bundled_definitions(&definitions(), &missing).is_err(),
-                    "{id} cited fixture is embedded"
-                );
-            }
         }
 
         fn sequenced_replay(
@@ -4162,7 +3441,6 @@ mod tests {
                 replay_native_fixture(std::str::from_utf8(bytes).unwrap(), change, true, None);
             let mut observation =
                 Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
-                    .unwrap()
                     .observe(&screen)
                     .unwrap();
             observation.output_seq = output_seq;
@@ -4172,10 +3450,10 @@ mod tests {
 
         #[test]
         fn bundled_claude_resize_between_wrapped_and_unwrapped_renderings_replaces_the_episode() {
-            let wrapped = |output_seq| sequenced_replay(WRAPPED_BYTES, |_| {}, output_seq);
+            let wrapped = |output_seq| sequenced_replay(bytes(WRAPPED_FIXTURE), |_| {}, output_seq);
             let unwrapped = |output_seq| {
                 sequenced_replay(
-                    NATIVE_BYTES,
+                    bytes(NATIVE_FIXTURE),
                     |lines| {
                         lines[18] =
                             " /tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow".into()
@@ -4281,57 +3559,6 @@ mod tests {
         const STARTUP_OFFER: &str = "claude-2.1.302-auto-env-setup-offer-1";
         const STARTUP_WIZARD: &str = "claude-2.1.302-auto-env-setup-wizard-1";
         const STARTUP_CANCELLED: &str = "claude-2.1.302-auto-env-setup-cancelled-idle-1";
-
-        macro_rules! native {
-            ($id:literal) => {
-                (
-                    $id,
-                    concat!("native/", $id, ".json"),
-                    include_bytes!(concat!("native/", $id, ".json")) as &[u8],
-                )
-            };
-        }
-
-        pub(super) const FIXTURES: [(&str, &str, &[u8]); 38] = [
-            native!("claude-2.1.302-access-allow-continuation-1"),
-            native!("claude-2.1.302-access-allow-pre-stage-1"),
-            native!("claude-2.1.302-access-allow-running-1"),
-            native!("claude-2.1.302-access-deny-continuation-1"),
-            native!("claude-2.1.302-access-deny-pre-stage-1"),
-            native!("claude-2.1.302-access-permission-1"),
-            native!("claude-2.1.302-auto-approved-done-1"),
-            native!("claude-2.1.302-auto-approved-running-1"),
-            native!("claude-2.1.302-auto-ask-allow-continuation-1"),
-            native!("claude-2.1.302-auto-ask-deny-continuation-1"),
-            native!("claude-2.1.302-auto-ask-hiding-refusal-notice-1"),
-            native!("claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1"),
-            native!("claude-2.1.302-auto-ask-permission-1"),
-            native!("claude-2.1.302-auto-env-setup-cancelled-idle-1"),
-            native!("claude-2.1.302-auto-env-setup-offer-1"),
-            native!("claude-2.1.302-auto-env-setup-wizard-1"),
-            native!("claude-2.1.302-auto-fresh-first-launch-notice-1"),
-            native!("claude-2.1.302-auto-fresh-onboarding-theme-1"),
-            native!("claude-2.1.302-auto-idle-composer-1"),
-            native!("claude-2.1.302-auto-model-switch-question-1"),
-            native!("claude-2.1.302-auto-quote-false-positive-1"),
-            native!("claude-2.1.302-auto-refusal-notice-expired-1"),
-            native!("claude-2.1.302-auto-refusal-notice-idle-1"),
-            native!("claude-2.1.302-auto-refusal-notice-working-1"),
-            native!("claude-2.1.302-auto-transcript-viewer-1"),
-            native!("claude-2.1.302-auto-two-refusals-notice-1"),
-            native!("claude-2.1.302-auto-unavailable-manual-footer-1"),
-            native!("claude-2.1.302-auto-unavailable-notice-1"),
-            native!("claude-2.1.302-auto-verbose-quote-false-positive-1"),
-            native!("claude-2.1.302-auto-verbose-refusal-above-form-1"),
-            native!("claude-2.1.302-auto-verbose-refusal-hidden-by-form-1"),
-            native!("claude-2.1.302-auto-verbose-refusal-restored-idle-1"),
-            native!("claude-2.1.302-auto-verbose-refusal-rewrapped-form-1"),
-            native!("claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1"),
-            native!("claude-2.1.302-auto-verbose-transcript-viewer-1"),
-            native!("claude-2.1.302-auto-verbose-two-refusals-1"),
-            native!("claude-2.1.302-default-manual-idle-1"),
-            native!("claude-2.1.302-trust-dialog-1"),
-        ];
 
         type Expected = (
             &'static str,
@@ -4492,12 +3719,7 @@ mod tests {
         ];
 
         fn bytes(id: &str) -> &'static [u8] {
-            FIXTURES
-                .iter()
-                .chain(super::bundled_claude::FIXTURES.iter())
-                .find(|(fixture, _, _)| *fixture == id)
-                .map(|&(_, _, bytes)| bytes)
-                .expect("known Claude native fixture")
+            bundled_fixture(id).1
         }
 
         fn document(id: &str) -> Value {
@@ -4518,7 +3740,7 @@ mod tests {
         }
 
         fn detector(catalog: &ProfileCatalog) -> Detector {
-            Detector::new(catalog, CodingAgent::Claude, Some(CLAUDE_VERSION)).unwrap()
+            Detector::new(catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
         }
 
         fn observe(id: &str) -> ScreenObservation {
@@ -4566,10 +3788,6 @@ mod tests {
                     )
                 })
                 .collect()
-        }
-
-        fn digest(bytes: &[u8]) -> String {
-            crate::digest::sha256_hex(bytes)
         }
 
         fn redacted() -> EvidencePolicy {
@@ -4745,7 +3963,6 @@ mod tests {
                         PERMISSION_RULE,
                         decision,
                     )
-                    .unwrap()
                     .expect("predecessor answer plan is kept");
                 let expected: &[u8] = if decision == PermissionDecision::Allow {
                     b"1"
@@ -4757,57 +3974,20 @@ mod tests {
         }
 
         #[test]
-        fn bundled_claude_auto_fixtures_are_registered_with_their_digests_and_dimensions() {
-            let mut definitions: Value =
-                serde_json::from_str(include_str!("bundled.json")).unwrap();
-            let entries = definitions["fixtures"].as_array_mut().unwrap();
-            for (id, source, bytes) in FIXTURES {
-                let screen: Value = serde_json::from_slice(bytes).unwrap();
-                assert_eq!(screen["fixture_id"], id);
-                assert_eq!(screen["provenance"], "native");
-                assert_eq!(screen["backend"], "claude");
-                assert_eq!(screen["native_version"], CLAUDE_VERSION);
-                let entry = entries
-                    .iter()
-                    .find(|entry| entry["id"] == id)
-                    .unwrap_or_else(|| panic!("{id} is a bundled catalog fixture"));
-                assert_eq!(
-                    entry,
-                    &json!({"id":id,"kind":"native","backend":"claude","native_version":CLAUDE_VERSION,
-                        "rows":screen["rows"],"cols":screen["cols"],"source_ref":source,"sha256":digest(bytes)}),
-                    "{id}"
-                );
-            }
-            let embedded = super::bundled_claude::embedded();
-            let mut tampered = bytes(NOTICE_IDLE).to_vec();
-            *tampered.last_mut().unwrap() = b' ';
-            let mut with_tampered = embedded.clone();
-            with_tampered.retain(|&(cited, _)| {
-                cited != "native/claude-2.1.302-auto-refusal-notice-idle-1.json"
-            });
-            with_tampered.push((
-                "native/claude-2.1.302-auto-refusal-notice-idle-1.json",
-                &tampered,
-            ));
-            let value: Value = serde_json::from_str(include_str!("bundled.json")).unwrap();
-            assert!(ProfileCatalog::from_bundled_definitions(&value, &embedded).is_ok());
-            assert!(ProfileCatalog::from_bundled_definitions(&value, &with_tampered).is_err());
-        }
-
-        #[test]
         fn bundled_claude_auto_fixtures_produce_exactly_their_primary_and_annotation_sets() {
             let ids = CLASSIFICATION
                 .iter()
-                .map(|case| case.0)
+                .map(|case| case.0.to_owned())
                 .collect::<BTreeSet<_>>();
-            assert_eq!(
-                ids,
-                FIXTURES
-                    .iter()
-                    .map(|fixture| fixture.0)
-                    .collect::<BTreeSet<_>>(),
-                "every automatic-mode fixture is classified"
-            );
+            let automatic = bundled_definitions()["fixtures"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|entry| entry["backend"] == "claude")
+                .map(|entry| entry["id"].as_str().unwrap().to_owned())
+                .filter(|id| !super::bundled_claude::PREDECESSOR_FIXTURES.contains(&id.as_str()))
+                .collect::<BTreeSet<_>>();
+            assert_eq!(ids, automatic, "every automatic-mode fixture is classified");
             for (id, kind, rule, annotations) in CLASSIFICATION {
                 let observed = observe(id);
                 assert_eq!(observed.kind, kind, "{id}");
@@ -4852,7 +4032,7 @@ mod tests {
         #[test]
         fn bundled_claude_auto_annotations_leave_every_primary_observation_unchanged() {
             let plain = without_annotation_rules();
-            for (id, _, _) in FIXTURES {
+            for (id, _, _, _) in CLASSIFICATION {
                 let annotated = observe(id);
                 let primary = detector(&plain).observe(&screen(id)).unwrap();
                 assert!(primary.annotations.is_empty(), "{id}");
@@ -4884,7 +4064,6 @@ mod tests {
             ] {
                 let plan = catalog
                     .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, ASK_RULE, decision)
-                    .unwrap()
                     .expect("ask-rule answer plan");
                 assert_eq!(plan.choice_id(), choice);
                 assert_eq!(plan.stages().len(), 1, "{decision:?}");
@@ -4914,7 +4093,6 @@ mod tests {
                         PERMISSION_RULE,
                         decision,
                     )
-                    .unwrap()
                     .unwrap();
                 assert!(
                     detector(&catalog)
@@ -4979,7 +4157,6 @@ mod tests {
             ] {
                 let plan = catalog
                     .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, TIP_RULE, decision)
-                    .unwrap()
                     .expect("tip-rule answer plan");
                 assert_eq!(plan.choice_id(), choice);
                 assert_eq!(plan.stages().len(), 1, "{decision:?}");
@@ -5013,7 +4190,6 @@ mod tests {
                     );
                     let foreign = catalog
                         .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, rule, decision)
-                        .unwrap()
                         .unwrap();
                     assert!(
                         detector(&catalog)
@@ -5050,7 +4226,6 @@ mod tests {
                 assert!(
                     catalog
                         .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, STARTUP_RULE, decision)
-                        .unwrap()
                         .is_none(),
                     "{decision:?}"
                 );
@@ -5465,38 +4640,6 @@ mod tests {
         const QUOTE: &str = "codex-0.163.0-auto-quote-false-positive-1";
         const STATUS: &str = "codex-0.163.0-auto-status-indicator-1";
 
-        macro_rules! native {
-            ($id:literal) => {
-                (
-                    $id,
-                    concat!("native/", $id, ".json"),
-                    include_bytes!(concat!("native/", $id, ".json")) as &[u8],
-                )
-            };
-        }
-
-        pub(super) const FIXTURES: [(&str, &str, &[u8]); 19] = [
-            native!("codex-0.163.0-auto-approved-escalated-1"),
-            native!("codex-0.163.0-auto-denial-limit-interrupted-1"),
-            native!("codex-0.163.0-auto-denial-limit-warning-1"),
-            native!("codex-0.163.0-auto-expanded-detail-1"),
-            native!("codex-0.163.0-auto-fresh-idle-1"),
-            native!("codex-0.163.0-auto-idle-composer-1"),
-            native!("codex-0.163.0-auto-quote-false-positive-1"),
-            native!("codex-0.163.0-auto-refusal-after-overlay-1"),
-            native!("codex-0.163.0-auto-refusal-idle-1"),
-            native!("codex-0.163.0-auto-refusal-warning-overlay-1"),
-            native!("codex-0.163.0-auto-refusal-working-1"),
-            native!("codex-0.163.0-auto-reviewing-1"),
-            native!("codex-0.163.0-auto-sandbox-failure-1"),
-            native!("codex-0.163.0-auto-second-launch-idle-1"),
-            native!("codex-0.163.0-auto-status-indicator-1"),
-            native!("codex-0.163.0-auto-two-refusals-1"),
-            native!("codex-0.163.0-auto-two-refusals-resized-1"),
-            native!("codex-0.163.0-auto-two-refusals-restored-1"),
-            native!("codex-0.163.0-auto-warning-overlay-1"),
-        ];
-
         type Expected = (
             &'static str,
             ObservationKind,
@@ -5578,11 +4721,7 @@ mod tests {
         ];
 
         fn bytes(id: &str) -> &'static [u8] {
-            FIXTURES
-                .iter()
-                .find(|(fixture, _, _)| *fixture == id)
-                .map(|&(_, _, bytes)| bytes)
-                .expect("known Codex automatic-mode fixture")
+            bundled_fixture(id).1
         }
 
         fn screen(id: &str) -> ScreenSnapshot {
@@ -5594,7 +4733,7 @@ mod tests {
         }
 
         fn detector(catalog: &ProfileCatalog) -> Detector {
-            Detector::new(catalog, CodingAgent::Codex, Some(CODEX_VERSION)).unwrap()
+            Detector::new(catalog, CodingAgent::Codex, Some(CODEX_VERSION))
         }
 
         fn observe(id: &str) -> ScreenObservation {
@@ -5732,10 +4871,6 @@ mod tests {
             values
         }
 
-        fn digest(bytes: &[u8]) -> String {
-            crate::digest::sha256_hex(bytes)
-        }
-
         #[test]
         fn bundled_codex_auto_profile_is_the_exact_0_163_0_profile_with_its_rule_groups() {
             let capabilities = ProfileCatalog::bundled()
@@ -5780,34 +4915,25 @@ mod tests {
                 .collect::<BTreeSet<_>>();
             assert!(!rules.contains("codex-auto-review-unavailable"));
             assert!(!rules.contains("codex-auto-startup"));
-            let entries = definitions["fixtures"].as_array().unwrap();
-            for (id, source, bytes) in FIXTURES {
-                let screen: Value = serde_json::from_slice(bytes).unwrap();
-                assert_eq!(screen["fixture_id"], id);
-                let entry = entries
-                    .iter()
-                    .find(|entry| entry["id"] == id)
-                    .unwrap_or_else(|| panic!("{id} is a bundled catalog fixture"));
-                assert_eq!(
-                    entry,
-                    &json!({"id":id,"kind":"native","backend":"codex","native_version":CODEX_VERSION,
-                        "rows":screen["rows"],"cols":screen["cols"],"source_ref":source,"sha256":digest(bytes)}),
-                    "{id}"
-                );
-            }
         }
 
         #[test]
         fn bundled_codex_auto_fixtures_produce_exactly_their_primary_and_annotation_sets() {
+            let automatic = bundled_definitions()["fixtures"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|entry| entry["backend"] == "codex")
+                .map(|entry| entry["id"].as_str().unwrap().to_owned())
+                .filter(|id| !super::bundled_codex::PREDECESSOR_FIXTURES.contains(&id.as_str()))
+                .collect::<BTreeSet<_>>();
             assert_eq!(
                 CLASSIFICATION
                     .iter()
-                    .map(|case| case.0)
+                    .map(|case| case.0.to_owned())
                     .collect::<BTreeSet<_>>(),
-                FIXTURES
-                    .iter()
-                    .map(|fixture| fixture.0)
-                    .collect::<BTreeSet<_>>()
+                automatic,
+                "every automatic-mode fixture is classified"
             );
             for (id, kind, rule, annotations) in CLASSIFICATION {
                 let observed = observe(id);
@@ -5837,21 +4963,9 @@ mod tests {
                     assert_eq!(block.raw_evidence["observed_mode"], mode, "{id}");
                 }
             }
-            for id in [
-                "codex-0.163.0-on-request-permission-1",
-                "codex-0.163.0-allow-pre-stage-1",
-                "codex-0.163.0-deny-pre-stage-1",
-                "codex-0.163.0-idle-composer-1",
-            ] {
+            for id in super::bundled_codex::PREDECESSOR_FIXTURES {
                 let screen = replay_native_fixture(
-                    std::str::from_utf8(
-                        super::bundled_codex::FIXTURES
-                            .iter()
-                            .find(|fixture| fixture.0 == id)
-                            .unwrap()
-                            .2,
-                    )
-                    .unwrap(),
+                    std::str::from_utf8(bytes(id)).unwrap(),
                     |_| {},
                     true,
                     None,
@@ -5972,7 +5086,6 @@ mod tests {
 
     mod bundled_codex {
         use super::*;
-        use std::collections::BTreeSet;
 
         const CODEX_VERSION: &str = "0.163.0";
         const PROFILE_VERSION: &str = "codex-0.163.0-approve-for-me-1";
@@ -5982,90 +5095,17 @@ mod tests {
         const ALLOW_FIXTURE: &str = "codex-0.163.0-allow-pre-stage-1";
         const DENY_FIXTURE: &str = "codex-0.163.0-deny-pre-stage-1";
         const IDLE_FIXTURE: &str = "codex-0.163.0-idle-composer-1";
-        const PERMISSION_BYTES: &[u8] =
-            include_bytes!("native/codex-0.163.0-on-request-permission-1.json");
-        const ALLOW_BYTES: &[u8] = include_bytes!("native/codex-0.163.0-allow-pre-stage-1.json");
-        const DENY_BYTES: &[u8] = include_bytes!("native/codex-0.163.0-deny-pre-stage-1.json");
-        const IDLE_BYTES: &[u8] = include_bytes!("native/codex-0.163.0-idle-composer-1.json");
-        pub(super) const FIXTURES: [(&str, &str, &[u8]); 4] = [
-            (
-                PERMISSION_FIXTURE,
-                "native/codex-0.163.0-on-request-permission-1.json",
-                PERMISSION_BYTES,
-            ),
-            (
-                ALLOW_FIXTURE,
-                "native/codex-0.163.0-allow-pre-stage-1.json",
-                ALLOW_BYTES,
-            ),
-            (
-                DENY_FIXTURE,
-                "native/codex-0.163.0-deny-pre-stage-1.json",
-                DENY_BYTES,
-            ),
-            (
-                IDLE_FIXTURE,
-                "native/codex-0.163.0-idle-composer-1.json",
-                IDLE_BYTES,
-            ),
+        /// The captures of the predecessor form; every other Codex fixture is an
+        /// automatic-mode capture classified in `bundled_codex_auto`.
+        pub(super) const PREDECESSOR_FIXTURES: [&str; 4] = [
+            PERMISSION_FIXTURE,
+            ALLOW_FIXTURE,
+            DENY_FIXTURE,
+            IDLE_FIXTURE,
         ];
-        const APPROVAL_HEADING: &str = "  Would you like to run the following command?";
-        const ALLOW_CHOICE: &str = "› 1. Yes, proceed (y)";
-        const DENY_CHOICE: &str = "  3. No, and tell Codex what to do differently (esc)";
-        const CLOSING_LINE: &str = "  Press enter to confirm or esc to cancel";
 
-        type ScreenChange = (&'static str, fn(&mut Value));
-
-        fn fixture(id: &str) -> (&'static str, &'static [u8]) {
-            FIXTURES
-                .iter()
-                .find(|(fixture, _, _)| *fixture == id)
-                .map(|&(_, source, bytes)| (source, bytes))
-                .expect("known bundled Codex fixture")
-        }
-
-        fn lines(bytes: &[u8]) -> Vec<String> {
-            serde_json::from_slice::<Value>(bytes).unwrap()["lines"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|line| line.as_str().unwrap().to_owned())
-                .collect()
-        }
-
-        fn digest(bytes: &[u8]) -> String {
-            crate::digest::sha256_hex(bytes)
-        }
-
-        fn definitions() -> Value {
-            serde_json::from_str(include_str!("bundled.json")).unwrap()
-        }
-
-        fn entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
-            definitions["fixtures"]
-                .as_array_mut()
-                .unwrap()
-                .iter_mut()
-                .find(|entry| entry["id"] == id)
-                .expect("bundled catalog cites the Codex fixture")
-        }
-
-        fn guarded_fixture(
-            id: &str,
-            change_definitions: impl FnOnce(&mut Value),
-            change_screen: impl FnOnce(&mut Value),
-        ) -> Result<ProfileCatalog, CafleetError> {
-            let (source, original) = fixture(id);
-            let mut screen: Value = serde_json::from_slice(original).unwrap();
-            change_screen(&mut screen);
-            let bytes = serde_json::to_vec_pretty(&screen).unwrap();
-            let mut value = definitions();
-            entry(&mut value, id)["sha256"] = json!(digest(&bytes));
-            change_definitions(&mut value);
-            let mut embedded = super::bundled_claude::embedded();
-            embedded.retain(|&(cited, _)| cited != source);
-            embedded.push((source, &bytes));
-            ProfileCatalog::from_bundled_definitions(&value, &embedded)
+        fn bytes(id: &str) -> &'static [u8] {
+            bundled_fixture(id).1
         }
 
         fn bundled_observation(bytes: &[u8]) -> ScreenObservation {
@@ -6073,134 +5113,8 @@ mod tests {
             let screen =
                 replay_native_fixture(std::str::from_utf8(bytes).unwrap(), |_| {}, true, None);
             Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
-                .unwrap()
                 .observe(&screen)
                 .unwrap()
-        }
-
-        #[test]
-        fn bundled_codex_fixtures_match_their_catalog_entries_and_declare_masked_header_rows() {
-            let mut value = definitions();
-            let header: Vec<usize> = (0..12).collect();
-            for (id, sequence, cursor) in [
-                (PERMISSION_FIXTURE, 25293, (35, 120)),
-                (ALLOW_FIXTURE, 24241, (35, 120)),
-                (DENY_FIXTURE, 25695, (35, 120)),
-                (IDLE_FIXTURE, 18164, (32, 2)),
-            ] {
-                let (source, bytes) = fixture(id);
-                assert_eq!(
-                    entry(&mut value, id),
-                    &json!({"id":id,"kind":"native","backend":"codex","native_version":CODEX_VERSION,
-                        "rows":36,"cols":120,"source_ref":source,"sha256":digest(bytes)})
-                );
-                let screen: Value = serde_json::from_slice(bytes).unwrap();
-                assert_eq!(
-                    screen
-                        .as_object()
-                        .unwrap()
-                        .keys()
-                        .map(String::as_str)
-                        .collect::<BTreeSet<_>>(),
-                    BTreeSet::from([
-                        "schema_version",
-                        "fixture_id",
-                        "provenance",
-                        "backend",
-                        "native_version",
-                        "rows",
-                        "cols",
-                        "alternate_screen",
-                        "screen_seq",
-                        "cursor_row",
-                        "cursor_col",
-                        "lines",
-                        "masked_rows",
-                    ]),
-                    "{id} has exactly the documented fields"
-                );
-                assert_eq!(screen["schema_version"], 1);
-                assert_eq!(screen["fixture_id"], id);
-                assert_eq!(screen["provenance"], "native");
-                assert_eq!(screen["backend"], "codex");
-                assert_eq!(screen["native_version"], CODEX_VERSION);
-                assert_eq!(
-                    (screen["rows"].clone(), screen["cols"].clone()),
-                    (json!(36), json!(120))
-                );
-                assert_eq!(screen["alternate_screen"], true, "{id}");
-                assert_eq!(screen["screen_seq"], sequence);
-                assert_eq!(
-                    (screen["cursor_row"].clone(), screen["cursor_col"].clone()),
-                    (json!(cursor.0), json!(cursor.1)),
-                    "{id}"
-                );
-                assert_eq!(
-                    screen["masked_rows"],
-                    json!(
-                        header
-                            .iter()
-                            .map(|row| json!({"row":row,"reason":"reviewed_privacy"}))
-                            .collect::<Vec<_>>()
-                    )
-                );
-                let rows = lines(bytes);
-                assert_eq!(rows.len(), 36);
-                for (row, line) in rows.iter().enumerate() {
-                    if header.contains(&row) {
-                        assert_eq!(line, "", "{id} masked row {row} is empty");
-                    }
-                    for private in ["/Users/", "/root", "himkt"] {
-                        assert!(
-                            !line.contains(private),
-                            "{id} row {row} carries {private:?}"
-                        );
-                    }
-                }
-            }
-            let permission = lines(PERMISSION_BYTES);
-            assert_eq!(permission[22], APPROVAL_HEADING);
-            assert_eq!(
-                permission[28],
-                "  $ /tmp/cafleet-194/codex-cells-001/permission-probe allow"
-            );
-            assert_eq!(permission[31].trim_end(), ALLOW_CHOICE);
-            assert!(
-                permission[32].starts_with("  2. Yes, and don't ask again")
-                    && permission[32].ends_with("` (p)"),
-                "choice 2 fits one row"
-            );
-            assert_eq!(permission[33], DENY_CHOICE);
-            assert_eq!(permission[35].trim_end(), CLOSING_LINE);
-            assert_eq!(
-                permission[35].chars().count(),
-                120,
-                "the closing row fills the width"
-            );
-            for (bytes, operation) in [
-                (
-                    ALLOW_BYTES,
-                    "  $ /tmp/cafleet-194/codex-ans-allow-001/permission-probe allow",
-                ),
-                (
-                    DENY_BYTES,
-                    "  $ /tmp/cafleet-194/codex-ans-deny-001/permission-probe deny",
-                ),
-            ] {
-                let rows = lines(bytes);
-                assert_eq!(rows[21], APPROVAL_HEADING);
-                assert_eq!(rows[27], operation);
-                assert_eq!(rows[30].trim_end(), ALLOW_CHOICE);
-                assert!(
-                    rows[31].ends_with('`'),
-                    "choice 2 continues on the next row"
-                );
-                assert_eq!(rows[32], "     (p)");
-                assert_eq!(rows[33], DENY_CHOICE);
-                assert_eq!(rows[35].trim_end(), CLOSING_LINE);
-                assert_eq!(rows[35].chars().count(), 120);
-            }
-            assert_eq!(lines(IDLE_BYTES)[32], "› Ask Codex to do anything");
         }
 
         #[test]
@@ -6263,7 +5177,6 @@ mod tests {
             ] {
                 let plan = bundled
                     .answer_plan(CodingAgent::Codex, CODEX_VERSION, PERMISSION_RULE, decision)
-                    .unwrap()
                     .expect("measured bundled answer plan");
                 assert_eq!(plan.choice_id(), choice);
                 assert_eq!(plan.focus_matcher_id(), "focus");
@@ -6287,54 +5200,10 @@ mod tests {
                     assert!(
                         bundled
                             .answer_plan(backend, version, PERMISSION_RULE, decision)
-                            .unwrap()
                             .is_none(),
                         "{backend:?} {version}"
                     );
                 }
-            }
-        }
-
-        #[test]
-        fn bundled_guard_rejects_synthetic_or_altered_codex_fixtures() {
-            for (id, _, _) in FIXTURES {
-                assert!(guarded_fixture(id, |_| {}, |_| {}).is_ok(), "{id}");
-                assert!(
-                    guarded_fixture(id, |d| entry(d, id)["kind"] = json!("synthetic"), |_| {})
-                        .is_err(),
-                    "{id} synthetic catalog kind"
-                );
-                let screen_changes: [ScreenChange; 6] = [
-                    ("synthetic provenance", |s| {
-                        s["provenance"] = json!("synthetic")
-                    }),
-                    ("nonempty masked row", |s| {
-                        s["lines"][0] = json!("restored header")
-                    }),
-                    ("backend", |s| s["backend"] = json!("claude")),
-                    ("native version", |s| s["native_version"] = json!("0.162.0")),
-                    ("extra field", |s| s["note"] = json!("unreviewed")),
-                    ("line count", |s| {
-                        s["lines"].as_array_mut().unwrap().pop();
-                    }),
-                ];
-                for (case, change) in screen_changes {
-                    assert!(
-                        guarded_fixture(id, |_| {}, change).is_err(),
-                        "{id} {case} must be rejected"
-                    );
-                }
-                let (source, bytes) = fixture(id);
-                let mut tampered = bytes.to_vec();
-                tampered.push(b'\n');
-                let mut with_tampered = super::bundled_claude::embedded();
-                with_tampered.retain(|&(cited, _)| cited != source);
-                with_tampered.push((source, &tampered));
-                assert!(
-                    ProfileCatalog::from_bundled_definitions(&definitions(), &with_tampered)
-                        .is_err(),
-                    "{id} digest mismatch"
-                );
             }
         }
 
@@ -6370,8 +5239,8 @@ mod tests {
 
         #[test]
         fn bundled_codex_episode_closes_not_visible_once_the_idle_composer_holds_250_ms() {
-            let permission = bundled_observation(PERMISSION_BYTES);
-            let idle = bundled_observation(IDLE_BYTES);
+            let permission = bundled_observation(bytes(PERMISSION_FIXTURE));
+            let idle = bundled_observation(bytes(IDLE_FIXTURE));
             assert_eq!(idle.rule_id, IDLE_RULE);
             assert!(idle.verified_noninteraction);
             let at = |observation: &ScreenObservation, output_seq: u64| {
@@ -6438,80 +5307,20 @@ mod tests {
         const DENY_3_FIXTURE: &str = "opencode-2.1.4-deny-pre-stage-3";
         const ALWAYS_FIXTURE: &str = "opencode-2.1.4-focus-always-1";
         const IDLE_FIXTURE: &str = "opencode-2.1.4-idle-composer-1";
-        const PERMISSION_BYTES: &[u8] =
-            include_bytes!("native/opencode-2.1.4-ask-permission-1.json");
-        const ALLOW_BYTES: &[u8] = include_bytes!("native/opencode-2.1.4-allow-pre-stage-1.json");
-        const DENY_1_BYTES: &[u8] = include_bytes!("native/opencode-2.1.4-deny-pre-stage-1.json");
-        const DENY_2_BYTES: &[u8] = include_bytes!("native/opencode-2.1.4-deny-pre-stage-2.json");
-        const DENY_3_BYTES: &[u8] = include_bytes!("native/opencode-2.1.4-deny-pre-stage-3.json");
-        const ALWAYS_BYTES: &[u8] = include_bytes!("native/opencode-2.1.4-focus-always-1.json");
-        const IDLE_BYTES: &[u8] = include_bytes!("native/opencode-2.1.4-idle-composer-1.json");
-        pub(super) const FIXTURES: [(&str, &str, &[u8]); 7] = [
-            (
-                PERMISSION_FIXTURE,
-                "native/opencode-2.1.4-ask-permission-1.json",
-                PERMISSION_BYTES,
-            ),
-            (
-                ALLOW_FIXTURE,
-                "native/opencode-2.1.4-allow-pre-stage-1.json",
-                ALLOW_BYTES,
-            ),
-            (
-                DENY_1_FIXTURE,
-                "native/opencode-2.1.4-deny-pre-stage-1.json",
-                DENY_1_BYTES,
-            ),
-            (
-                DENY_2_FIXTURE,
-                "native/opencode-2.1.4-deny-pre-stage-2.json",
-                DENY_2_BYTES,
-            ),
-            (
-                DENY_3_FIXTURE,
-                "native/opencode-2.1.4-deny-pre-stage-3.json",
-                DENY_3_BYTES,
-            ),
-            (
-                ALWAYS_FIXTURE,
-                "native/opencode-2.1.4-focus-always-1.json",
-                ALWAYS_BYTES,
-            ),
-            (
-                IDLE_FIXTURE,
-                "native/opencode-2.1.4-idle-composer-1.json",
-                IDLE_BYTES,
-            ),
-        ];
-        const FORM_FIXTURES: [(&[u8], &str, &str); 5] = [
-            (PERMISSION_BYTES, "opencode-cells-001", "allow"),
-            (ALLOW_BYTES, "opencode-ans-allow-001", "allow"),
-            (DENY_1_BYTES, "opencode-ans-deny-001", "deny"),
-            (DENY_2_BYTES, "opencode-ans-deny-002", "deny"),
-            (ALWAYS_BYTES, "opencode-focus-always-002", "deny"),
+        const FORM_FIXTURES: [(&str, &str, &str); 5] = [
+            (PERMISSION_FIXTURE, "opencode-cells-001", "allow"),
+            (ALLOW_FIXTURE, "opencode-ans-allow-001", "allow"),
+            (DENY_1_FIXTURE, "opencode-ans-deny-001", "deny"),
+            (DENY_2_FIXTURE, "opencode-ans-deny-002", "deny"),
+            (ALWAYS_FIXTURE, "opencode-focus-always-002", "deny"),
         ];
         const HEADING: &str = "  △ Permission required";
         const CHOICE_ROW: &str = "   Allow once   Always allow   Reject                                             ⇆ select  enter confirm  esc reject";
-        const REASON_HEADING: &str = "  △ Reject permission";
-        const REASON_CONTROL: &str = "  Tell OpenCode what to do differently                                                      enter confirm  esc cancel";
 
-        type ScreenChange = (&'static str, fn(&mut Value));
         type LineChange = Box<dyn Fn(&mut Vec<String>)>;
 
-        fn source(id: &str) -> &'static str {
-            FIXTURES
-                .iter()
-                .find(|(fixture, _, _)| *fixture == id)
-                .map(|&(_, source, _)| source)
-                .expect("known bundled OpenCode fixture")
-        }
-
         fn fixture(id: &str) -> &'static [u8] {
-            FIXTURES
-                .iter()
-                .find(|(fixture, _, _)| *fixture == id)
-                .map(|&(_, _, bytes)| bytes)
-                .expect("known bundled OpenCode fixture")
+            bundled_fixture(id).1
         }
 
         fn parsed(bytes: &[u8]) -> Value {
@@ -6527,21 +5336,8 @@ mod tests {
                 .collect()
         }
 
-        fn digest(bytes: &[u8]) -> String {
-            crate::digest::sha256_hex(bytes)
-        }
-
         fn definitions() -> Value {
-            serde_json::from_str(include_str!("bundled.json")).unwrap()
-        }
-
-        fn entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
-            definitions["fixtures"]
-                .as_array_mut()
-                .unwrap()
-                .iter_mut()
-                .find(|entry| entry["id"] == id)
-                .expect("bundled catalog cites the OpenCode fixture")
+            bundled_definitions()
         }
 
         fn profile(definitions: &Value) -> &Value {
@@ -6566,16 +5362,11 @@ mod tests {
             id: &str,
             change_screen: impl FnOnce(&mut Value),
         ) -> Result<ProfileCatalog, CafleetError> {
-            let mut screen = parsed(fixture(id));
-            change_screen(&mut screen);
-            let bytes = serde_json::to_vec_pretty(&screen).unwrap();
-            let mut value = definitions();
-            entry(&mut value, id)["sha256"] = json!(digest(&bytes));
-            let cited = source(id);
-            let mut embedded = super::bundled_claude::embedded();
-            embedded.retain(|&(reference, _)| reference != cited);
-            embedded.push((cited, &bytes));
-            ProfileCatalog::from_bundled_definitions(&value, &embedded)
+            crate::coding_agent::profiles::catalog::test_support::guarded_fixture(
+                id,
+                |_| {},
+                change_screen,
+            )
         }
 
         fn replay(bytes: &[u8]) -> ScreenSnapshot {
@@ -6596,7 +5387,6 @@ mod tests {
                 CodingAgent::Opencode,
                 Some(OPENCODE_VERSION),
             )
-            .unwrap()
         }
 
         fn observe(screen: &ScreenSnapshot) -> ScreenObservation {
@@ -6612,7 +5402,6 @@ mod tests {
                     PERMISSION_RULE,
                     decision,
                 )
-                .unwrap()
                 .expect("measured bundled OpenCode answer plan")
         }
 
@@ -6661,103 +5450,6 @@ mod tests {
             assert_eq!(observation.native_correlation, None);
             let region = observation.matched_region.expect("live form region");
             assert_eq!((region.top, region.bottom), (10, 22), "{case}");
-        }
-
-        #[test]
-        fn bundled_opencode_fixtures_match_their_catalog_entries_and_declare_the_masked_row() {
-            let mut value = definitions();
-            for (id, _, bytes) in FIXTURES {
-                assert_eq!(
-                    entry(&mut value, id),
-                    &json!({"id":id,"kind":"native","backend":"opencode","native_version":OPENCODE_VERSION,
-                        "rows":36,"cols":120,"source_ref":source(id),"sha256":digest(bytes)})
-                );
-                let screen = parsed(bytes);
-                let mut expected = BTreeSet::from([
-                    "schema_version",
-                    "fixture_id",
-                    "provenance",
-                    "backend",
-                    "native_version",
-                    "rows",
-                    "cols",
-                    "alternate_screen",
-                    "screen_seq",
-                    "cursor_row",
-                    "cursor_col",
-                    "lines",
-                    "masked_rows",
-                ]);
-                if id != IDLE_FIXTURE {
-                    expected.insert("cell_backgrounds");
-                }
-                assert_eq!(
-                    screen
-                        .as_object()
-                        .unwrap()
-                        .keys()
-                        .map(String::as_str)
-                        .collect::<BTreeSet<_>>(),
-                    expected,
-                    "{id} has exactly the documented fields"
-                );
-                assert_eq!(screen["schema_version"], 1);
-                assert_eq!(screen["fixture_id"], id);
-                assert_eq!(screen["provenance"], "native");
-                assert_eq!(screen["backend"], "opencode");
-                assert_eq!(screen["native_version"], OPENCODE_VERSION);
-                assert_eq!(
-                    (screen["rows"].clone(), screen["cols"].clone()),
-                    (json!(36), json!(120))
-                );
-                assert_eq!(
-                    screen["alternate_screen"], false,
-                    "{id} uses the primary screen"
-                );
-                assert_eq!(
-                    screen["masked_rows"],
-                    json!([{"row":35,"reason":"reviewed_privacy"}])
-                );
-                let rows = lines(bytes);
-                assert_eq!(rows.len(), 36);
-                assert_eq!(rows[35], "");
-                for (row, line) in rows.iter().enumerate() {
-                    for private in ["/Users/", "/root", "/home/", "himkt"] {
-                        assert!(
-                            !line.contains(private),
-                            "{id} row {row} carries {private:?}"
-                        );
-                    }
-                }
-            }
-            for (bytes, case, probe) in FORM_FIXTURES {
-                let rows = lines(bytes);
-                assert_eq!(rows[10].trim_end(), HEADING, "{case}");
-                assert!(
-                    rows[14].starts_with(&format!(
-                        "  $ /tmp/cafleet-194/{case}/permission-probe {probe} "
-                    )),
-                    "{case}"
-                );
-                assert_eq!(rows[21].trim_end(), CHOICE_ROW, "{case}");
-                assert_eq!(rows[21].chars().count(), 120);
-            }
-            let dialog = lines(DENY_3_BYTES);
-            assert_eq!(dialog[10].trim_end(), REASON_HEADING);
-            assert_eq!(
-                dialog[12].trim_end(),
-                "  Tell OpenCode what to do differently"
-            );
-            assert_eq!(dialog[21].trim_end(), REASON_CONTROL);
-            let idle = lines(IDLE_BYTES);
-            assert_eq!(idle[11].trim_end(), "┃");
-            assert_eq!(
-                (
-                    parsed(IDLE_BYTES)["cursor_row"].clone(),
-                    parsed(IDLE_BYTES)["cursor_col"].clone()
-                ),
-                (json!(11), json!(2))
-            );
         }
 
         #[test]
@@ -6938,7 +5630,6 @@ mod tests {
                     assert!(
                         bundled
                             .answer_plan(backend, version, request, decision)
-                            .unwrap()
                             .is_none(),
                         "{backend:?} {version} {request}"
                     );
@@ -6948,30 +5639,35 @@ mod tests {
 
         #[test]
         fn bundled_opencode_detects_each_native_form_from_its_live_region() {
-            for (bytes, case, probe) in FORM_FIXTURES {
+            for (form, case, probe) in FORM_FIXTURES {
+                let bytes = fixture(form);
                 let observation = observe(&replay(bytes));
                 assert_form(&observation, case, probe);
                 assert!(observation.fingerprint.is_some());
             }
             let detector = detector();
-            let a = detector.observe(&replay(DENY_1_BYTES)).unwrap();
-            let b = detector.observe(&replay(DENY_2_BYTES)).unwrap();
+            let a = detector.observe(&replay(fixture(DENY_1_FIXTURE))).unwrap();
+            let b = detector.observe(&replay(fixture(DENY_2_FIXTURE))).unwrap();
             assert!(
                 a.fingerprint != b.fingerprint,
                 "different cases carry different operations"
             );
-            let cursor_elsewhere = observe(&replay_changed(DENY_1_BYTES, |_| {}, Some((5, 0))));
+            let cursor_elsewhere = observe(&replay_changed(
+                fixture(DENY_1_FIXTURE),
+                |_| {},
+                Some((5, 0)),
+            ));
             assert_form(&cursor_elsewhere, "opencode-ans-deny-001", "deny");
         }
 
         #[test]
         fn bundled_opencode_focus_resolves_from_the_captured_cell_backgrounds() {
             for (bytes, expected) in [
-                (PERMISSION_BYTES, Some("allow-once")),
-                (ALLOW_BYTES, Some("allow-once")),
-                (DENY_1_BYTES, Some("allow-once")),
-                (DENY_2_BYTES, Some("deny-once")),
-                (ALWAYS_BYTES, None),
+                (fixture(PERMISSION_FIXTURE), Some("allow-once")),
+                (fixture(ALLOW_FIXTURE), Some("allow-once")),
+                (fixture(DENY_1_FIXTURE), Some("allow-once")),
+                (fixture(DENY_2_FIXTURE), Some("deny-once")),
+                (fixture(ALWAYS_FIXTURE), None),
             ] {
                 assert_eq!(
                     focused(&replay(bytes)).as_deref(),
@@ -6980,7 +5676,7 @@ mod tests {
                     parsed(bytes)["fixture_id"]
                 );
             }
-            let mut text_only = parsed(PERMISSION_BYTES);
+            let mut text_only = parsed(fixture(PERMISSION_FIXTURE));
             text_only
                 .as_object_mut()
                 .unwrap()
@@ -6998,9 +5694,9 @@ mod tests {
         #[test]
         fn bundled_opencode_focus_resolution_is_independent_of_the_theme_colours() {
             for (bytes, expected) in [
-                (PERMISSION_BYTES, Some("allow-once")),
-                (DENY_2_BYTES, Some("deny-once")),
-                (ALWAYS_BYTES, None),
+                (fixture(PERMISSION_FIXTURE), Some("allow-once")),
+                (fixture(DENY_2_FIXTURE), Some("deny-once")),
+                (fixture(ALWAYS_FIXTURE), None),
             ] {
                 let mut screen = parsed(bytes);
                 for run in screen["cell_backgrounds"].as_array_mut().unwrap() {
@@ -7026,19 +5722,19 @@ mod tests {
         fn bundled_opencode_stage_gates_hold_on_their_pre_stage_fixtures() {
             let allow = plan(PermissionDecision::Allow);
             assert_eq!(
-                focused(&replay(ALLOW_BYTES)).as_deref(),
+                focused(&replay(fixture(ALLOW_FIXTURE))).as_deref(),
                 allow.stages()[0].required_focus_choice_id()
             );
             let deny = plan(PermissionDecision::Deny);
             assert_eq!(
-                focused(&replay(DENY_1_BYTES)).as_deref(),
+                focused(&replay(fixture(DENY_1_FIXTURE))).as_deref(),
                 deny.stages()[0].required_focus_choice_id()
             );
             assert_eq!(
-                focused(&replay(DENY_2_BYTES)).as_deref(),
+                focused(&replay(fixture(DENY_2_FIXTURE))).as_deref(),
                 deny.stages()[1].required_focus_choice_id()
             );
-            let dialog = observe(&replay(DENY_3_BYTES));
+            let dialog = observe(&replay(fixture(DENY_3_FIXTURE)));
             assert_eq!(dialog.kind, ObservationKind::PermissionContinuation);
             assert_eq!(dialog.match_evidence, MatchEvidence::Complete);
             assert_eq!(
@@ -7049,13 +5745,13 @@ mod tests {
             for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                 assert!(
                     detector()
-                        .match_answer(&replay(DENY_3_BYTES), &plan(decision))
+                        .match_answer(&replay(fixture(DENY_3_FIXTURE)), &plan(decision))
                         .unwrap()
                         .is_none(),
                     "the rejection-reason dialog is not an answerable form"
                 );
             }
-            let always = focused(&replay(ALWAYS_BYTES));
+            let always = focused(&replay(fixture(ALWAYS_FIXTURE)));
             for stage in allow.stages().iter().chain(deny.stages()) {
                 if let Some(gate) = stage.required_focus_choice_id() {
                     assert_ne!(
@@ -7070,7 +5766,7 @@ mod tests {
         #[test]
         fn bundled_opencode_reject_reason_requires_the_empty_placeholder_textarea() {
             let typed = observe(&replay_changed(
-                DENY_3_BYTES,
+                fixture(DENY_3_FIXTURE),
                 |lines| {
                     lines[21] = lines[21].replacen(
                         "Tell OpenCode what to do differently",
@@ -7083,7 +5779,7 @@ mod tests {
             assert_ne!(typed.kind, ObservationKind::PermissionContinuation);
             assert_ne!(typed.rule_id, REASON_RULE);
             let appended = observe(&replay_changed(
-                DENY_3_BYTES,
+                fixture(DENY_3_FIXTURE),
                 |lines| {
                     lines[21] = lines[21].replacen(
                         "Tell OpenCode what to do differently ",
@@ -7098,7 +5794,7 @@ mod tests {
                 "the span equals the placeholder exactly"
             );
             let without_prompt = observe(&replay_changed(
-                DENY_3_BYTES,
+                fixture(DENY_3_FIXTURE),
                 |lines| lines[12] = String::new(),
                 None,
             ));
@@ -7107,7 +5803,7 @@ mod tests {
 
         #[test]
         fn bundled_opencode_idle_composer_is_a_verified_non_interaction_boundary() {
-            let idle = observe(&replay(IDLE_BYTES));
+            let idle = observe(&replay(fixture(IDLE_FIXTURE)));
             assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
             assert_eq!(idle.match_evidence, MatchEvidence::Complete);
             assert!(idle.verified_noninteraction);
@@ -7115,28 +5811,32 @@ mod tests {
             assert_eq!(idle.raw_evidence["operation"], Value::Null);
             assert!(idle.fingerprint.is_none());
             let draft = observe(&replay_changed(
-                IDLE_BYTES,
+                fixture(IDLE_FIXTURE),
                 |lines| lines[11] = "┃ hello".into(),
                 Some((11, 7)),
             ));
             assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "typed draft");
             assert!(!draft.verified_noninteraction);
-            let away = observe(&replay_changed(IDLE_BYTES, |_| {}, Some((11, 0))));
+            let away = observe(&replay_changed(
+                fixture(IDLE_FIXTURE),
+                |_| {},
+                Some((11, 0)),
+            ));
             assert_ne!(
                 away.kind,
                 ObservationKind::ComposerEmpty,
                 "cursor before the prefix end"
             );
             assert!(!away.verified_noninteraction);
-            let working = observe(&replay(PERMISSION_BYTES));
+            let working = observe(&replay(fixture(PERMISSION_FIXTURE)));
             assert!(!working.verified_noninteraction);
             assert_ne!(working.kind, ObservationKind::ComposerEmpty);
         }
 
         #[test]
         fn bundled_opencode_detects_nothing_from_form_or_dialog_text_outside_a_live_region() {
-            let form = lines(PERMISSION_BYTES);
-            let dialog = lines(DENY_3_BYTES);
+            let form = lines(fixture(PERMISSION_FIXTURE));
+            let dialog = lines(fixture(DENY_3_FIXTURE));
             let cases: [(&str, LineChange); 6] = [
                 ("idle screen", Box::new(|_| {})),
                 (
@@ -7173,7 +5873,11 @@ mod tests {
                 ),
             ];
             for (case, change) in cases {
-                let observation = observe(&replay_changed(IDLE_BYTES, |lines| change(lines), None));
+                let observation = observe(&replay_changed(
+                    fixture(IDLE_FIXTURE),
+                    |lines| change(lines),
+                    None,
+                ));
                 assert!(
                     !matches!(
                         observation.kind,
@@ -7188,7 +5892,7 @@ mod tests {
 
         #[test]
         fn bundled_opencode_replay_paints_each_captured_background_run() {
-            let screen = replay(PERMISSION_BYTES);
+            let screen = replay(fixture(PERMISSION_FIXTURE));
             let bg = |row: u16, col: u16| screen.screen.cell(row, col).unwrap().bgcolor();
             assert_eq!(bg(21, 0), vt100::Color::Rgb(30, 30, 30));
             for col in 2..14 {
@@ -7203,7 +5907,7 @@ mod tests {
                 "A",
                 "the repaint keeps the captured text"
             );
-            let idle = replay(IDLE_BYTES);
+            let idle = replay(fixture(IDLE_FIXTURE));
             for row in 0..36 {
                 for col in 0..120 {
                     assert_eq!(
@@ -7217,22 +5921,6 @@ mod tests {
 
         #[test]
         fn bundled_guard_accepts_the_opencode_fixtures_and_rejects_altered_backgrounds() {
-            for (id, _, _) in FIXTURES {
-                assert!(guarded_fixture(id, |_| {}).is_ok(), "{id}");
-                let screen_changes: [ScreenChange; 4] = [
-                    ("synthetic provenance", |s| {
-                        s["provenance"] = json!("synthetic")
-                    }),
-                    ("nonempty masked row", |s| {
-                        s["lines"][35] = json!("restored")
-                    }),
-                    ("native version", |s| s["native_version"] = json!("2.1.3")),
-                    ("extra field", |s| s["note"] = json!("unreviewed")),
-                ];
-                for (case, change) in screen_changes {
-                    assert!(guarded_fixture(id, change).is_err(), "{id} {case}");
-                }
-            }
             let run = |row: u64, start: u64, end: u64, bg: Value| json!({"row":row,"start_col":start,"end_col":end,"bg":bg});
             let rgb = json!({"kind":"rgb","r":1,"g":2,"b":3});
             for (case, runs) in [
@@ -7323,15 +6011,6 @@ mod tests {
                 .is_err(),
                 "a run overlapping a captured run is rejected"
             );
-            let mut tampered = PERMISSION_BYTES.to_vec();
-            tampered.push(b'\n');
-            let cited = source(PERMISSION_FIXTURE);
-            let mut with_tampered = super::bundled_claude::embedded();
-            with_tampered.retain(|&(reference, _)| reference != cited);
-            with_tampered.push((cited, &tampered));
-            assert!(
-                ProfileCatalog::from_bundled_definitions(&definitions(), &with_tampered).is_err()
-            );
         }
 
         #[test]
@@ -7345,12 +6024,12 @@ mod tests {
             };
             let origin = Instant::now();
             let mut tracker = tracker();
-            open(&mut tracker, &at(PERMISSION_BYTES, 1), origin);
+            open(&mut tracker, &at(fixture(PERMISSION_FIXTURE), 1), origin);
             let episode = tracker.active_episode();
             for (index, millis) in [200u64, 400, 3000].into_iter().enumerate() {
                 let update = tracker
                     .observe(
-                        &at(DENY_3_BYTES, 2 + index as u64),
+                        &at(fixture(DENY_3_FIXTURE), 2 + index as u64),
                         origin + Duration::from_millis(millis),
                         NOW,
                     )
@@ -7365,7 +6044,7 @@ mod tests {
             }
             let first = tracker
                 .observe(
-                    &at(IDLE_BYTES, 10),
+                    &at(fixture(IDLE_FIXTURE), 10),
                     origin + Duration::from_millis(3100),
                     NOW,
                 )
@@ -7373,7 +6052,7 @@ mod tests {
             assert!(first.transitions.is_empty());
             let held = tracker
                 .observe(
-                    &at(IDLE_BYTES, 11),
+                    &at(fixture(IDLE_FIXTURE), 11),
                     origin + Duration::from_millis(3350),
                     NOW,
                 )
@@ -7722,7 +6401,6 @@ mod tests {
         fn profile_fallback_detection_and_answers_resolve_through_the_selected_profile() {
             let catalog = versioned(NEWER_LAST);
             let observed = Detector::new(&catalog, CodingAgent::Codex, Some("0.11.0"))
-                .unwrap()
                 .observe(&terminal(&lines("write disposable.txt"), 80, false).snapshot())
                 .unwrap();
             assert_eq!(
@@ -7731,19 +6409,6 @@ mod tests {
             );
             assert_eq!(observed.rule_id, RULE);
             assert_eq!(observed.profile_version.as_deref(), Some("profile-0.10.0"));
-            let capability = catalog
-                .answer_capability(
-                    CodingAgent::Codex,
-                    "0.11.0",
-                    RULE,
-                    PermissionDecision::Allow,
-                )
-                .unwrap()
-                .expect("the fallback profile supplies its answer capability");
-            assert_eq!(capability.native_version(), "0.11.0");
-            assert_eq!(capability.profile_version(), "profile-0.10.0");
-            assert_eq!(capability.answer_rule_id(), "synthetic-allow-plan");
-            assert_eq!(capability.fixture_ids(), &[fixture_id("0.10.0")]);
             let plan = catalog
                 .answer_plan(
                     CodingAgent::Codex,
@@ -7751,15 +6416,17 @@ mod tests {
                     RULE,
                     PermissionDecision::Allow,
                 )
-                .unwrap()
                 .expect("the fallback profile supplies its answer plan");
-            assert_eq!(plan.capability(), &capability);
+            let capability = plan.capability();
+            assert_eq!(capability.native_version(), "0.11.0");
+            assert_eq!(capability.profile_version(), "profile-0.10.0");
+            assert_eq!(capability.answer_rule_id(), "synthetic-allow-plan");
+            assert_eq!(capability.fixture_ids(), &[fixture_id("0.10.0")]);
             assert_eq!(plan.stages().len(), 1);
             assert_eq!(plan.stages()[0].bytes(), b"x");
             assert!(
                 catalog
                     .answer_plan(CodingAgent::Codex, "0.11.0", RULE, PermissionDecision::Deny)
-                    .unwrap()
                     .is_none()
             );
         }
@@ -7787,22 +6454,16 @@ mod tests {
                         RULE,
                         PermissionDecision::Allow
                     )
-                    .unwrap()
                     .is_none()
             );
             let observed = Detector::new(&catalog, CodingAgent::Claude, Some("0.10.0"))
-                .unwrap()
                 .observe(&terminal(&lines("write disposable.txt"), 80, false).snapshot())
                 .unwrap();
             assert_eq!(observed.kind, ObservationKind::Unknown);
             assert_eq!(observed.profile_version, None);
         }
 
-        const BUNDLED_PROBES: [(CodingAgent, &str, [&str; 2]); 3] = [
-            (CodingAgent::Claude, "2.1.302", ["2.1.306", "2.1.301"]),
-            (CodingAgent::Codex, "0.163.0", ["0.164.0", "0.162.0"]),
-            (CodingAgent::Opencode, "2.1.4", ["2.1.5", "2.1.3"]),
-        ];
+        use super::super::test_support::BUNDLED_PROBES;
 
         #[test]
         fn profile_fallback_bundled_capabilities_equal_the_exact_run_of_the_selected_profile() {
@@ -7853,13 +6514,11 @@ mod tests {
                 for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                     let exact = bundled
                         .answer_plan(backend, pinned, request, decision)
-                        .unwrap()
                         .expect("bundled exact answer plan");
                     for probe in probes {
                         let context = format!("{backend:?} {probe} {decision:?}");
                         let plan = bundled
                             .answer_plan(backend, probe, request, decision)
-                            .unwrap()
                             .unwrap_or_else(|| panic!("fallback answer plan for {context}"));
                         let capability = plan.capability();
                         assert_eq!(capability.native_version(), probe, "{context}");
@@ -7906,7 +6565,6 @@ mod tests {
                 None,
             );
             let exact = Detector::new(&bundled, CodingAgent::Claude, Some("2.1.302"))
-                .unwrap()
                 .observe(&screen)
                 .unwrap();
             assert_eq!(
@@ -7914,7 +6572,6 @@ mod tests {
                 ObservationKind::Interaction(InteractionClass::PermissionRequest)
             );
             let fallback = Detector::new(&bundled, CodingAgent::Claude, Some("2.1.306"))
-                .unwrap()
                 .observe(&screen)
                 .unwrap();
             assert_eq!(fallback.kind, exact.kind);

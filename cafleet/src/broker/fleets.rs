@@ -1,5 +1,6 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
+use super::members::{NewPlacement, insert_member_row, insert_placement_row};
 use super::records::{
     CreatedFleet, FleetRecord, FleetSummary, MemberKind, MemberRecord, MemberStatus, Placement,
 };
@@ -9,7 +10,7 @@ use crate::time::now_stamp;
 const DIRECTOR_NAME: &str = "Director";
 const DIRECTOR_DESCRIPTION: &str = "Root Director for this fleet";
 
-pub(crate) fn fetch_fleet(
+pub(crate) fn get_fleet(
     conn: &Connection,
     fleet_id: i64,
 ) -> Result<Option<FleetRecord>, CafleetError> {
@@ -23,7 +24,11 @@ pub(crate) fn fetch_fleet(
     ).optional().map_err(crate::error::CafleetError::from)
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<FleetRecord, CafleetError> {
+    get_fleet(conn, fleet_id)?
+        .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))
+}
+
 pub(crate) fn create_fleet(
     conn: &mut Connection,
     name: Option<&str>,
@@ -40,25 +45,18 @@ pub(crate) fn create_fleet(
         params![name, now],
         |row| row.get(0),
     )?;
-    let director_id = tx.query_row(
-        "INSERT INTO members (fleet_id, name, description, status, registered_at)
-         VALUES (?1, ?2, ?3, 'active', ?4) RETURNING member_id",
-        params![fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, now],
-        |row| row.get(0),
-    )?;
-    tx.execute(
-        "INSERT INTO member_placements
-         (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            director_id,
-            mux_session,
-            mux_window_id,
-            mux_pane_id,
-            backend,
-            coding_agent,
-            now
-        ],
+    let director_id = insert_member_row(&tx, fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &now)?;
+    insert_placement_row(
+        &tx,
+        director_id,
+        &NewPlacement {
+            backend: backend.into(),
+            mux_session: mux_session.into(),
+            mux_window_id: mux_window_id.into(),
+            mux_pane_id: Some(mux_pane_id.into()),
+            coding_agent: coding_agent.into(),
+        },
+        &now,
     )?;
     tx.execute(
         "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
@@ -94,8 +92,7 @@ pub(crate) fn require_live_fleet(
     conn: &Connection,
     fleet_id: i64,
 ) -> Result<FleetRecord, CafleetError> {
-    let fleet = fetch_fleet(conn, fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+    let fleet = require_fleet(conn, fleet_id)?;
     if fleet.deleted_at.is_some() {
         return Err(CafleetError::App(format!("fleet {fleet_id} is deleted")));
     }
@@ -148,16 +145,8 @@ pub(crate) fn list_fleets(conn: &Connection) -> Result<Vec<FleetSummary>, Caflee
     .map_err(crate::error::CafleetError::from)
 }
 
-pub(crate) fn get_fleet(
-    conn: &Connection,
-    fleet_id: i64,
-) -> Result<Option<FleetRecord>, CafleetError> {
-    fetch_fleet(conn, fleet_id)
-}
-
 pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<usize, CafleetError> {
-    let fleet = fetch_fleet(conn, fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+    let fleet = require_fleet(conn, fleet_id)?;
     let now = now_stamp();
     if fleet.deleted_at.is_none() {
         conn.execute(

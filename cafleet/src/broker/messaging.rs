@@ -77,23 +77,13 @@ pub(crate) fn insert_message_validated(
 ) -> Result<MessageRecord, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
     super::fleets::require_live_fleet(conn, fleet_id)?;
-    let recipient: Option<(i64, MemberStatus)> = conn
-        .query_row(
-            "SELECT fleet_id, status FROM members WHERE member_id=?1",
-            [to_member_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    let Some((recipient_fleet, recipient_status)) = recipient else {
+    let Some((recipient_fleet, MemberStatus::Active)) =
+        super::members::member_fleet_status(conn, to_member_id)?
+    else {
         return Err(CafleetError::Value(format!(
             "Destination member not found: {to_member_id}"
         )));
     };
-    if recipient_status != MemberStatus::Active {
-        return Err(CafleetError::Value(format!(
-            "Destination member not found: {to_member_id}"
-        )));
-    }
     if recipient_fleet != fleet_id {
         return Err(CafleetError::Value(format!(
             "members {from_member_id} and {to_member_id} are not in the same fleet."
@@ -270,14 +260,7 @@ fn select_listen_snapshot(
     now: &impl Fn() -> Instant,
 ) -> Result<InboxSnapshot, CafleetError> {
     deadline.remaining_at(now())?;
-    let subject: Option<(i64, MemberStatus)> = conn
-        .query_row(
-            "SELECT fleet_id, status FROM members WHERE member_id=?1",
-            [member_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    deadline.remaining_at(now())?;
+    let subject = super::members::member_fleet_status(conn, member_id)?;
     let Some((fleet_id, status)) = subject else {
         return Err(if expected_fleet.is_some() {
             CafleetError::InvalidStoredValue {
@@ -297,13 +280,12 @@ fn select_listen_snapshot(
         return Err(CafleetError::Value(format!("Member {member_id} not found")));
     }
     deadline.remaining_at(now())?;
-    let fleet = super::fleets::fetch_fleet(conn, fleet_id)?.ok_or_else(|| {
+    let fleet = super::fleets::get_fleet(conn, fleet_id)?.ok_or_else(|| {
         CafleetError::InvalidStoredValue {
             field: "fleets.fleet_id".into(),
             value: fleet_id.to_string(),
         }
     })?;
-    deadline.remaining_at(now())?;
     if expected_fleet.is_some() {
         if fleet.deleted_at.is_some() {
             return Ok(InboxSnapshot::Closed {
@@ -320,7 +302,6 @@ fn select_listen_snapshot(
     }
     deadline.remaining_at(now())?;
     let live = super::fleets::require_live_fleet(conn, fleet_id)?;
-    deadline.remaining_at(now())?;
     let root = live
         .director_member_id
         .expect("a live fleet has its root Director");
@@ -332,7 +313,6 @@ fn select_listen_snapshot(
                 value: id.to_string(),
             }
         })?;
-        deadline.remaining_at(now())?;
         if member_id == root {
             break;
         }
@@ -345,16 +325,11 @@ fn select_listen_snapshot(
     ))?;
     deadline.remaining_at(now())?;
     let mut rows = statement.query([member_id])?;
-    deadline.remaining_at(now())?;
     let mut messages = Vec::new();
     loop {
         deadline.remaining_at(now())?;
-        let row = rows.next()?;
-        deadline.remaining_at(now())?;
-        let Some(row) = row else { break };
-        let message = map_message_row(row)?;
-        deadline.remaining_at(now())?;
-        messages.push(message);
+        let Some(row) = rows.next()? else { break };
+        messages.push(map_message_row(row)?);
     }
     Ok(InboxSnapshot::Open { fleet_id, messages })
 }

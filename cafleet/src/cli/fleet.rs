@@ -2,13 +2,16 @@ use clap::Subcommand;
 use rusqlite::Connection;
 use serde_json::Value;
 
-use super::helpers::{emit, resolve_mux};
+use super::helpers::emit;
 use crate::broker;
 use crate::coding_agent::CodingAgent;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::output::{format_fleet_create, format_fleet_delete};
+use crate::output::{
+    format_fleet_create, format_fleet_delete, format_fleet_list, format_fleet_show,
+};
 use crate::presentation;
+use crate::runtime::resolve_mux;
 
 #[derive(Subcommand)]
 pub(crate) enum FleetCommand {
@@ -60,40 +63,13 @@ pub(crate) fn run(
         FleetCommand::List { json } => {
             let fleets = broker::list_fleets(conn)?;
             let payload = Value::Array(fleets.iter().map(presentation::fleet_summary).collect());
-            emit(json, &payload, || {
-                if fleets.is_empty() {
-                    return "No fleets found.".into();
-                }
-                let mut lines = vec!["FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT".into()];
-                for fleet in &fleets {
-                    let director = fleet.director_member_id.map(|id| id.to_string());
-                    lines.push(format!(
-                        "{} {} {} {} {}",
-                        fleet.fleet_id,
-                        director.as_deref().unwrap_or("-"),
-                        fleet.name.as_deref().unwrap_or("-"),
-                        fleet.member_count,
-                        fleet.created_at
-                    ));
-                }
-                lines.join("\n")
-            });
+            emit(json, &payload, || format_fleet_list(&fleets));
             Ok(())
         }
         FleetCommand::Show { fleet_id, json } => {
-            let fleet = broker::get_fleet(conn, fleet_id)?
-                .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+            let fleet = broker::require_fleet(conn, fleet_id)?;
             emit(json, &presentation::fleet(&fleet), || {
-                let mut text = format!(
-                    "fleet_id: {}\nname: {}\ncreated_at: {}",
-                    fleet.fleet_id,
-                    fleet.name.as_deref().unwrap_or("-"),
-                    fleet.created_at
-                );
-                if let Some(deleted) = &fleet.deleted_at {
-                    text.push_str(&format!("\ndeleted_at: {deleted}"));
-                }
-                text
+                format_fleet_show(&fleet)
             });
             Ok(())
         }

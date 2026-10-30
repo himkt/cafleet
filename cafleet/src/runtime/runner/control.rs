@@ -3,7 +3,7 @@ use super::input_protocol::{decode_input_reply, encode_input_request};
 use super::*;
 
 use crate::broker::records::Placement;
-use crate::broker::runtime::{self as storage, CleanupState, RunRecord};
+use crate::broker::runtime::{self as storage, RunRecord};
 use crate::multiplexer::{AnyMultiplexer, MultiplexerContext};
 use serde_json::json;
 use std::io::{ErrorKind, Read, Write};
@@ -11,13 +11,11 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub(super) fn pause(deadline: Instant) -> Result<()> {
     check_deadline(Instant::now(), deadline)?;
-    std::thread::sleep(
-        Duration::from_millis(2).min(deadline.saturating_duration_since(Instant::now())),
-    );
+    nap_until(deadline);
     Ok(())
 }
 pub(super) struct ControlClient {
@@ -221,15 +219,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
             deadline,
             EndpointPhase::Starting,
         )?;
-        let identity = ControlIdentity {
-            database_identity_json: descriptor.database_identity_json.clone(),
-            fleet_id: descriptor.fleet_id,
-            member_id: descriptor.member_id,
-            director_member_id: descriptor.director_member_id,
-            run_id: descriptor.run_id,
-            owner_epoch: descriptor.owner_epoch,
-            launch_nonce: descriptor.launch_nonce.clone(),
-        };
+        let identity = ControlIdentity::from_descriptor(descriptor);
         let result=client.exchange(&json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"kind":"prepare","identity":identity,"remaining_ms":deadline.saturating_duration_since(Instant::now()).as_millis().min(10000)as u64}),deadline)?;
         let prepared = serde_json::from_value(result).map_err(io_error)?;
         self.client = Some(client);
@@ -273,14 +263,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
         if runner.matches()? {
             notes.push("owned runner termination remains unconfirmed".into());
         }
-        Ok(ShutdownOutcome {
-            native_exit: None,
-            cleanup_state: CleanupState::Incomplete,
-            diagnostics: notes,
-            dropped_display_bytes: 0,
-            pending_event_frames: 0,
-            unsaved_observation_gap: 0,
-        })
+        Ok(ShutdownOutcome::new(None, notes))
     }
     fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<()> {
         self.mux
@@ -309,6 +292,8 @@ pub(crate) fn request_shutdown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
     mod launch_readiness_tests {
         use std::io::ErrorKind;
         use std::os::fd::AsRawFd;
@@ -451,11 +436,7 @@ mod tests {
             request
         }
 
-        fn raw_frame(body: &[u8]) -> Vec<u8> {
-            let mut frame = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-            frame.extend_from_slice(body);
-            frame
-        }
+        use crate::runtime::runner::codec::test_support::independent_frame as raw_frame;
 
         #[derive(Clone, Copy)]
         enum StartupInterval {
@@ -729,14 +710,9 @@ mod tests {
         use std::thread::JoinHandle;
 
         type PeerResult<T> = std::result::Result<T, String>;
-        fn frame(body: &[u8]) -> Vec<u8> {
-            let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-            bytes.extend_from_slice(body);
-            bytes
-        }
+        use crate::runtime::runner::codec::test_support::independent_frame as frame;
         fn request(fixture: &Fixture) -> InputControlRequest {
             InputControlRequest {
-                protocol_version: 1,
                 identity: ControlIdentity::from_run(&fixture.run),
                 expires_at_mono_ns: 50_000_000_000,
                 operation: InputControlOperation::SubmitPrompt(SubmitInput {

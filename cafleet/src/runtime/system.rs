@@ -81,67 +81,60 @@ impl CommandRunner for SystemRunner {
     }
 }
 
-fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, RunError> {
-    let started = Instant::now();
+fn spawn_piped(argv: &[String]) -> Result<Child, RunError> {
     let (program, args) = argv.split_first().expect("argv carries the program");
-    if timeout.is_some_and(|timeout| timeout.is_zero()) {
-        return Err(RunError::NotStarted(
-            "command deadline expired before launch".into(),
-        ));
-    }
-    let spawned = Command::new(program)
+    Command::new(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn();
-    let child = match spawned {
-        Ok(child) => child,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(RunError::BinaryNotFound(e.to_string()));
-        }
-        Err(e) => {
-            return Err(RunError::NotStarted(e.to_string()));
-        }
-    };
+        .spawn()
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                RunError::BinaryNotFound(error.to_string())
+            } else {
+                RunError::NotStarted(error.to_string())
+            }
+        })
+}
+
+fn decode(status: ExitStatus, stdout: &[u8], stderr: &[u8]) -> Result<String, RunError> {
+    if status.success() {
+        Ok(String::from_utf8_lossy(stdout).into_owned())
+    } else {
+        Err(RunError::Failed {
+            stderr: String::from_utf8_lossy(stderr).into_owned(),
+        })
+    }
+}
+
+fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, RunError> {
+    let started = Instant::now();
+    if timeout.is_some_and(|timeout| timeout.is_zero()) {
+        return Err(RunError::deadline_expired());
+    }
+    let child = spawn_piped(argv)?;
     if let Some(timeout) = timeout {
         return run_timed(child, timeout.saturating_sub(started.elapsed()));
     }
     let output = child.wait_with_output().map_err(|e| RunError::Failed {
         stderr: e.to_string(),
     })?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(RunError::Failed {
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        })
-    }
+    decode(output.status, &output.stdout, &output.stderr)
 }
 
 const COMMAND_CLEANUP_RESERVE: Duration = Duration::from_millis(250);
 
 fn run_process_until(argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
     let started = Instant::now();
-    let (program, args) = argv.split_first().expect("argv carries the program");
     let cutoff = deadline
         .checked_sub(COMMAND_CLEANUP_RESERVE)
         .filter(|cutoff| *cutoff > started)
         .ok_or_else(TimedRunError::before_launch)?;
-    let child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| TimedRunError {
-            source: if error.kind() == io::ErrorKind::NotFound {
-                RunError::BinaryNotFound(error.to_string())
-            } else {
-                RunError::NotStarted(error.to_string())
-            },
-            cleanup_diagnostics: Vec::new(),
-        })?;
+    let child = spawn_piped(argv).map_err(|source| TimedRunError {
+        source,
+        cleanup_diagnostics: Vec::new(),
+    })?;
     let mut owned = OwnedChild {
         child,
         reaped: false,
@@ -153,13 +146,7 @@ fn run_process_until(argv: &[String], deadline: Instant) -> Result<String, Timed
             if Instant::now() >= cutoff {
                 return Err(RunError::Timeout);
             }
-            if status.success() {
-                Ok(String::from_utf8_lossy(&stdout).into_owned())
-            } else {
-                Err(RunError::Failed {
-                    stderr: String::from_utf8_lossy(&stderr).into_owned(),
-                })
-            }
+            decode(status, &stdout, &stderr)
         },
     );
     result.map_err(|source| TimedRunError {
@@ -272,15 +259,7 @@ fn run_timed(child: Child, timeout: Duration) -> Result<String, RunError> {
     };
     let result = collect_timed(&mut owned, started, timeout);
     match result {
-        Ok((status, stdout, stderr)) => {
-            if status.success() {
-                Ok(String::from_utf8_lossy(&stdout).into_owned())
-            } else {
-                Err(RunError::Failed {
-                    stderr: String::from_utf8_lossy(&stderr).into_owned(),
-                })
-            }
-        }
+        Ok((status, stdout, stderr)) => decode(status, &stdout, &stderr),
         Err(mut primary) => {
             // collect_timed owns the read ends, so they have already closed.
             let mut diagnostics = Vec::new();

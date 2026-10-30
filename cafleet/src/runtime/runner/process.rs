@@ -204,14 +204,7 @@ pub(super) fn recover_descendants(
     run: &crate::broker::runtime::RunRecord,
     clock: ShutdownClock,
 ) -> Result<ShutdownOutcome> {
-    let mut outcome = ShutdownOutcome {
-        native_exit: None,
-        cleanup_state: CleanupState::Complete,
-        diagnostics: Vec::new(),
-        dropped_display_bytes: 0,
-        pending_event_frames: 0,
-        unsaved_observation_gap: 0,
-    };
+    let mut outcome = ShutdownOutcome::complete(None);
     let child = match (run.child_pid, run.child_start_identity.as_ref()) {
         (None, None) => return Ok(outcome),
         (Some(pid), Some(start)) => ProcessIdentity {
@@ -286,9 +279,7 @@ pub(super) fn recover_descendants(
             if !alive {
                 break;
             }
-            std::thread::sleep(
-                Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
-            );
+            nap_until(until);
         }
     }
     for process in owned.values() {
@@ -589,13 +580,7 @@ impl PtySession {
                 }
                 _ => {}
             }
-            std::thread::sleep(
-                Duration::from_millis(2).min(
-                    clock
-                        .storage_deadline()
-                        .saturating_duration_since(Instant::now()),
-                ),
-            );
+            nap_until(clock.storage_deadline());
         }
         match self.survivors() {
             Ok(true) => diagnostics.push("owned descendants remain unconfirmed".into()),
@@ -610,18 +595,7 @@ impl PtySession {
         if self.child.is_some() && self.exit.is_none() {
             diagnostics.push("native child reaping remains unconfirmed".into());
         }
-        ShutdownOutcome {
-            native_exit: self.exit,
-            cleanup_state: if diagnostics.is_empty() {
-                CleanupState::Complete
-            } else {
-                CleanupState::Incomplete
-            },
-            diagnostics,
-            dropped_display_bytes: 0,
-            pending_event_frames: 0,
-            unsaved_observation_gap: 0,
-        }
+        ShutdownOutcome::new(self.exit, diagnostics)
     }
 }
 impl ByteInput for PtySession {

@@ -64,22 +64,17 @@ pub(crate) fn runner_exit_status(native: Option<ChildExit>, complete: bool) -> R
     Ok(if !complete && status == 0 { 1 } else { status })
 }
 
-struct CancellationScopes {
-    identity: Option<usize>,
-    deadlines: Vec<Instant>,
-}
-
 thread_local! {
-    static CANCELLATION_SCOPES: std::cell::RefCell<CancellationScopes> = const {
-        std::cell::RefCell::new(CancellationScopes { identity: None, deadlines: Vec::new() })
-    };
+    /// One deadline per open scope. `with_database_budget`, which encloses every scope,
+    /// already pins the thread's scopes to one connection.
+    static CANCELLATION_DEADLINES: std::cell::RefCell<Vec<Instant>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 fn database_cancelled() -> bool {
-    CANCELLATION_SCOPES.with(|scopes| {
-        let scopes = scopes.borrow();
-        let until = scopes
-            .deadlines
+    CANCELLATION_DEADLINES.with(|deadlines| {
+        let deadlines = deadlines.borrow();
+        let until = deadlines
             .iter()
             .min()
             .expect("a progress handler has an owning scope");
@@ -89,7 +84,6 @@ fn database_cancelled() -> bool {
 
 struct CancellationScope<'a> {
     conn: &'a mut Connection,
-    identity: usize,
     until: Instant,
     stop: Option<std::sync::mpsc::Sender<()>>,
     watchdog: Option<std::thread::JoinHandle<()>>,
@@ -99,21 +93,9 @@ struct CancellationScope<'a> {
 impl<'a> CancellationScope<'a> {
     fn new(conn: &'a mut Connection) -> Result<Self> {
         let until = Deadline::inherited_or_new().instant();
-        let identity = std::ptr::from_ref(conn).addr();
-        CANCELLATION_SCOPES.with(|scopes| {
-            let mut scopes = scopes.borrow_mut();
-            if let Some(owner) = scopes.identity {
-                assert_eq!(
-                    owner, identity,
-                    "nested cancellation scopes use the same connection"
-                );
-            }
-            scopes.identity = Some(identity);
-            scopes.deadlines.push(until);
-        });
+        CANCELLATION_DEADLINES.with(|deadlines| deadlines.borrow_mut().push(until));
         let mut scope = Self {
             conn,
-            identity,
             until,
             stop: None,
             watchdog: None,
@@ -154,15 +136,10 @@ impl<'a> CancellationScope<'a> {
             .map(|worker| worker.join())
             .transpose()
             .map_err(|_| error("SQLite deadline watchdog panicked"));
-        let nested = CANCELLATION_SCOPES.with(|scopes| {
-            let mut scopes = scopes.borrow_mut();
-            assert_eq!(scopes.identity, Some(self.identity));
-            assert_eq!(scopes.deadlines.pop(), Some(self.until));
-            let nested = !scopes.deadlines.is_empty();
-            if !nested {
-                scopes.identity = None;
-            }
-            nested
+        let nested = CANCELLATION_DEADLINES.with(|deadlines| {
+            let mut deadlines = deadlines.borrow_mut();
+            assert_eq!(deadlines.pop(), Some(self.until));
+            !deadlines.is_empty()
         });
         self.active = false;
         let restored = if nested {
@@ -213,6 +190,28 @@ pub(crate) struct ShutdownOutcome {
     pub(crate) unsaved_observation_gap: u64,
 }
 
+impl ShutdownOutcome {
+    /// An outcome whose cleanup is complete exactly when no diagnostic was recorded.
+    pub(crate) fn new(native_exit: Option<ChildExit>, diagnostics: Vec<String>) -> Self {
+        Self {
+            native_exit,
+            cleanup_state: if diagnostics.is_empty() {
+                CleanupState::Complete
+            } else {
+                CleanupState::Incomplete
+            },
+            diagnostics,
+            dropped_display_bytes: 0,
+            pending_event_frames: 0,
+            unsaved_observation_gap: 0,
+        }
+    }
+
+    pub(crate) fn complete(native_exit: Option<ChildExit>) -> Self {
+        Self::new(native_exit, Vec::new())
+    }
+}
+
 pub(crate) trait ShutdownHost {
     fn now(&self) -> Instant;
     fn gate_programmatic_input(&mut self);
@@ -220,12 +219,8 @@ pub(crate) trait ShutdownHost {
     fn drain_and_reap_until(&mut self, deadline: Instant) -> Result<Option<ChildExit>>;
     fn kill_verified_survivors(&mut self) -> Result<()>;
     fn close_pty(&mut self) -> Result<()>;
-    fn final_native_exit(&mut self) -> Result<Option<ChildExit>> {
-        Ok(None)
-    }
-    fn native_was_spawned(&self) -> bool {
-        true
-    }
+    fn final_native_exit(&mut self) -> Result<Option<ChildExit>>;
+    fn native_was_spawned(&self) -> bool;
     fn flush_display_until(&mut self, deadline: Instant) -> Result<u64>;
     fn finish_events_until(&mut self, deadline: Instant) -> Result<(u64, u64)>;
     fn restore_terminal(&mut self) -> Result<()>;
@@ -236,14 +231,7 @@ pub(crate) fn shutdown(
     clock: ShutdownClock,
     native: Option<ChildExit>,
 ) -> ShutdownOutcome {
-    let mut outcome = ShutdownOutcome {
-        native_exit: native,
-        cleanup_state: CleanupState::Complete,
-        diagnostics: Vec::new(),
-        dropped_display_bytes: 0,
-        pending_event_frames: 0,
-        unsaved_observation_gap: 0,
-    };
+    let mut outcome = ShutdownOutcome::complete(native);
     fn collect<T>(result: Result<T>, outcome: &mut ShutdownOutcome) -> Option<T> {
         match result {
             Ok(value) => Some(value),
@@ -253,37 +241,32 @@ pub(crate) fn shutdown(
             }
         }
     }
+    fn reconcile_exit(outcome: &mut ShutdownOutcome, exit: Option<ChildExit>, conflict: &str) {
+        let Some(exit) = exit else {
+            return;
+        };
+        match outcome.native_exit {
+            Some(recorded) if recorded != exit => outcome.diagnostics.push(conflict.into()),
+            Some(_) => {}
+            None => outcome.native_exit = Some(exit),
+        }
+    }
     host.gate_programmatic_input();
     collect(host.term_verified_descendants(), &mut outcome);
-    if let Some(exit) = collect(
+    let drained = collect(
         host.drain_and_reap_until(clock.child_deadline()),
         &mut outcome,
     )
-    .flatten()
-    {
-        if let Some(recorded) = outcome.native_exit {
-            if recorded != exit {
-                outcome
-                    .diagnostics
-                    .push("conflicting native exit status".into());
-            }
-        } else {
-            outcome.native_exit = Some(exit);
-        }
-    }
+    .flatten();
+    reconcile_exit(&mut outcome, drained, "conflicting native exit status");
     collect(host.kill_verified_survivors(), &mut outcome);
     collect(host.close_pty(), &mut outcome);
-    if let Some(exit) = collect(host.final_native_exit(), &mut outcome).flatten() {
-        if let Some(recorded) = outcome.native_exit {
-            if recorded != exit {
-                outcome
-                    .diagnostics
-                    .push("conflicting final native exit status".into());
-            }
-        } else {
-            outcome.native_exit = Some(exit);
-        }
-    }
+    let final_exit = collect(host.final_native_exit(), &mut outcome).flatten();
+    reconcile_exit(
+        &mut outcome,
+        final_exit,
+        "conflicting final native exit status",
+    );
     if let Some(dropped) = collect(
         host.flush_display_until(clock.display_deadline()),
         &mut outcome,
@@ -440,6 +423,12 @@ mod tests {
             }
             fn close_pty(&mut self) -> Result<(), CafleetError> {
                 self.call("close")
+            }
+            fn final_native_exit(&mut self) -> Result<Option<ChildExit>, CafleetError> {
+                Ok(None)
+            }
+            fn native_was_spawned(&self) -> bool {
+                true
             }
             fn flush_display_until(&mut self, deadline: Instant) -> Result<u64, CafleetError> {
                 self.deadlines.push(("display", deadline));

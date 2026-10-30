@@ -2,9 +2,12 @@ use clap::Subcommand;
 use clap::builder::{PossibleValuesParser, TypedValueParser};
 use rusqlite::Connection;
 
-use super::helpers::emit;
+use super::helpers::{checked, emit, nonblank};
 use crate::broker::runtime;
 use crate::error::CafleetError;
+use crate::runtime::runner::{
+    validate_operation_key, validate_permission_reference, validate_request_token,
+};
 
 fn positive_id(value: &str) -> Result<i64, String> {
     let id = value
@@ -14,14 +17,6 @@ fn positive_id(value: &str) -> Result<i64, String> {
         Ok(id)
     } else {
         Err("a positive assigned ID is required".into())
-    }
-}
-
-fn evidence_reference(value: &str) -> Result<String, String> {
-    if value.trim().is_empty() {
-        Err("a nonempty evidence reference is required".into())
-    } else {
-        Ok(value.into())
     }
 }
 
@@ -65,7 +60,7 @@ pub(crate) enum InputCommand {
         #[arg(long, value_enum)]
         disposition: Disposition,
         /// Reference to the Director's recorded evidence for the disposition.
-        #[arg(long, value_parser = evidence_reference)]
+        #[arg(long, value_parser = nonblank("a nonempty evidence reference is required"))]
         evidence_ref: String,
         /// Output in JSON format.
         #[arg(long)]
@@ -127,19 +122,6 @@ pub(crate) fn input(
     }
 }
 
-fn permission_reference(value: &str) -> Result<String, String> {
-    crate::runtime::runner::validate_permission_reference(value)
-        .map_err(|cause| cause.to_string())?;
-    Ok(value.into())
-}
-fn request_token(value: &str) -> Result<String, String> {
-    crate::runtime::runner::validate_request_token(value).map_err(|cause| cause.to_string())?;
-    Ok(value.into())
-}
-fn operation_key(value: &str) -> Result<String, String> {
-    crate::runtime::runner::validate_operation_key(value).map_err(|cause| cause.to_string())?;
-    Ok(value.into())
-}
 fn stored_enum<T>(values: &'static [&'static str]) -> impl TypedValueParser<Value = T>
 where
     T: for<'a> TryFrom<&'a str, Error = CafleetError> + Clone + Send + Sync + 'static,
@@ -184,7 +166,7 @@ pub(crate) enum PermissionCommand {
         #[arg(long, value_parser = positive_id)]
         expected_owner_epoch: i64,
         /// The request token reported by inspection.
-        #[arg(long, value_parser = request_token)]
+        #[arg(long, value_parser = checked(validate_request_token))]
         request_token: String,
         /// The semantic answer.
         #[arg(long, value_parser = stored_enum::<runtime::PermissionDecision>(runtime::PermissionDecision::VALUES))]
@@ -196,13 +178,13 @@ pub(crate) enum PermissionCommand {
         #[arg(long, value_parser = stored_enum::<runtime::DirectorMode>(runtime::DirectorMode::VALUES))]
         director_mode: runtime::DirectorMode,
         /// Evidence reference for the Director mode.
-        #[arg(long, value_parser = permission_reference)]
+        #[arg(long, value_parser = checked(validate_permission_reference))]
         mode_evidence_ref: String,
         /// Evidence reference for the decision.
-        #[arg(long, value_parser = permission_reference)]
+        #[arg(long, value_parser = checked(validate_permission_reference))]
         decision_evidence_ref: String,
         /// Idempotency key of this response.
-        #[arg(long, value_parser = operation_key)]
+        #[arg(long, value_parser = checked(validate_operation_key))]
         operation_key: String,
         /// Output in JSON format.
         #[arg(long)]
@@ -539,47 +521,47 @@ mod tests {
             assert_ne!(error.kind(), clap::error::ErrorKind::InvalidSubcommand);
         }
 
+        const INSPECT_IDS: &[&str] = &["interaction", "--event-id", "--from-member-id"];
+        const RESPOND_IDS: &[&str] = &[
+            "interaction",
+            "--event-id",
+            "--from-member-id",
+            "--expected-run-id",
+            "--expected-owner-epoch",
+        ];
+
         #[test]
-        fn step5_a0_permission_inspect_accepts_positive_id_boundaries_and_json_selection() {
-            accepted(&inspect());
-            for field in ["interaction", "--event-id", "--from-member-id"] {
-                for value in ["1", "9223372036854775807"] {
-                    for json in [false, true] {
-                        let mut args = inspect();
-                        set(&mut args, field, value);
-                        if json {
-                            args.push("--json".into());
+        fn permission_commands_accept_positive_ids_with_json_and_reject_every_other_id() {
+            for (fixture, fields) in [(inspect(), INSPECT_IDS), (respond(), RESPOND_IDS)] {
+                accepted(&fixture);
+                for field in fields {
+                    for value in ["1", "9223372036854775807"] {
+                        for json in [false, true] {
+                            let mut args = fixture.clone();
+                            set(&mut args, field, value);
+                            if json {
+                                args.push("--json".into());
+                            }
+                            accepted(&args);
                         }
-                        accepted(&args);
                     }
-                }
-            }
-        }
-        #[test]
-        fn step5_a0_permission_respond_accepts_positive_id_epoch_boundaries_and_json_selection() {
-            accepted(&respond());
-            for field in [
-                "interaction",
-                "--event-id",
-                "--from-member-id",
-                "--expected-run-id",
-                "--expected-owner-epoch",
-            ] {
-                for value in ["1", "9223372036854775807"] {
-                    for json in [false, true] {
-                        let mut args = respond();
+                    for value in [
+                        "0",
+                        "-1",
+                        "unknown",
+                        "1.0",
+                        "9223372036854775808",
+                        "18446744073709551616",
+                    ] {
+                        let mut args = fixture.clone();
                         set(&mut args, field, value);
-                        if json {
-                            args.push("--json".into());
-                        }
-                        accepted(&args);
+                        rejected(&args);
                     }
                 }
             }
         }
         #[test]
         fn step5_a0_permission_respond_accepts_each_semantic_decision_and_valid_source_mode_pair() {
-            accepted(&respond());
             for decision in ["allow", "deny"] {
                 for (source, mode) in [
                     ("director-auto", "auto"),
@@ -595,50 +577,7 @@ mod tests {
                 }
             }
         }
-        #[test]
-        fn step5_a0_permission_inspect_rejects_invalid_assigned_ids() {
-            accepted(&inspect());
-            for field in ["interaction", "--event-id", "--from-member-id"] {
-                for value in [
-                    "0",
-                    "-1",
-                    "unknown",
-                    "1.0",
-                    "9223372036854775808",
-                    "18446744073709551616",
-                ] {
-                    let mut args = inspect();
-                    set(&mut args, field, value);
-                    rejected(&args);
-                }
-            }
-        }
-        #[test]
-        fn step5_a0_permission_respond_rejects_invalid_assigned_ids_and_epochs() {
-            accepted(&respond());
-            for field in [
-                "interaction",
-                "--event-id",
-                "--from-member-id",
-                "--expected-run-id",
-                "--expected-owner-epoch",
-            ] {
-                for value in [
-                    "0",
-                    "-1",
-                    "unknown",
-                    "1.0",
-                    "9223372036854775808",
-                    "18446744073709551616",
-                ] {
-                    let mut args = respond();
-                    set(&mut args, field, value);
-                    rejected(&args);
-                }
-            }
-        }
         fn required(mut args: Vec<String>, flags: &[&str]) {
-            accepted(&args);
             let mut missing_id = args.clone();
             missing_id.remove(3);
             rejected(&missing_id);
@@ -679,7 +618,6 @@ mod tests {
         }
         #[test]
         fn step5_a0_permission_response_accepts_exact_lowercase_hex_tokens() {
-            accepted(&respond());
             for token in ["0".repeat(64), "f".repeat(64), "0123456789abcdef".repeat(4)] {
                 let mut args = respond();
                 set(&mut args, "--request-token", &token);
@@ -688,7 +626,6 @@ mod tests {
         }
         #[test]
         fn step5_a0_permission_response_rejects_uppercase_nonhex_and_wrong_length_tokens() {
-            accepted(&respond());
             for token in [
                 String::new(),
                 "a".repeat(63),
@@ -708,7 +645,6 @@ mod tests {
         }
         #[test]
         fn step5_a0_permission_response_references_accept_nonblank_utf8_at_exact_byte_boundaries() {
-            accepted(&respond());
             for field in ["--mode-evidence-ref", "--decision-evidence-ref"] {
                 for value in [
                     "x".into(),
@@ -726,7 +662,6 @@ mod tests {
         }
         #[test]
         fn step5_a0_permission_response_references_reject_blank_oversize_and_every_control() {
-            accepted(&respond());
             for field in ["--mode-evidence-ref", "--decision-evidence-ref"] {
                 for value in [
                     String::new(),
@@ -750,7 +685,6 @@ mod tests {
         #[test]
         fn step5_a0_permission_response_operation_key_accepts_literal_nonblank_values_and_rejects_blank()
          {
-            accepted(&respond());
             for key in ["fixture:key", "fixture:literal key 世界"] {
                 let mut args = respond();
                 set(&mut args, "--operation-key", key);
@@ -764,7 +698,6 @@ mod tests {
         }
         #[test]
         fn step5_a0_permission_response_rejects_invalid_decision_source_and_mode_enums() {
-            accepted(&respond());
             for (field, values) in [
                 ("--decision", ["", "approved", "yes", "Allow"]),
                 ("--decision-source", ["", "director_auto", "member", "User"]),
@@ -884,33 +817,6 @@ mod tests {
             ],
         ] {
             assert_eq!(usage_error(&args).exit_code(), 2, "{args:?}");
-        }
-    }
-
-    #[test]
-    fn runtime_read_dispatch_preserves_refused_database_bytes() {
-        for damage in [
-            "DROP TABLE member_input_operations",
-            "ALTER TABLE member_runtime_events RENAME COLUMN notification_state TO broken",
-            "ALTER TABLE runtime_database_identity RENAME COLUMN instance_id TO broken",
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("refused.db");
-            let settings = crate::config::Settings::for_database(&path, None);
-            let mut conn = crate::db::connect(&settings.database_url).unwrap();
-            crate::db::migrate_to_head(&mut conn).unwrap();
-            conn.execute_batch(damage).unwrap();
-            drop(conn);
-            let before = std::fs::read(&path).unwrap();
-            for command in ["event", "input"] {
-                let args =
-                    CliArgs::try_parse_from(["cafleet", command, "show", "1", "--json"]).unwrap();
-                assert!(
-                    crate::cli::dispatch(&settings, args.command).is_err(),
-                    "{damage}"
-                );
-                assert_eq!(std::fs::read(&path).unwrap(), before, "{command}: {damage}");
-            }
         }
     }
 }

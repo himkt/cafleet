@@ -11,14 +11,15 @@ pub(crate) struct ObservationMoment {
     pub(crate) monotonic: Instant,
     pub(crate) observed_at: String,
 }
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ObservationClockKind {
     Real,
-    #[cfg(test)]
     Deterministic,
 }
 pub(crate) trait ObservationClock: Send + Sync {
     fn sample(&self) -> ObservationMoment;
+    #[cfg(test)]
     fn kind(&self) -> ObservationClockKind;
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,8 +30,6 @@ pub(crate) enum ObservationPhase {
     ShutdownDrain,
 }
 #[cfg(test)]
-pub(crate) type ObservationSite = ObservationPhase;
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ObservationOperation {
     Parser,
@@ -38,7 +37,7 @@ pub(crate) enum ObservationOperation {
 }
 #[cfg(test)]
 pub(crate) trait ObservationHooks: Send + Sync {
-    fn before(&self, site: ObservationSite, operation: ObservationOperation) -> Result<()>;
+    fn before(&self, site: ObservationPhase, operation: ObservationOperation) -> Result<()>;
     fn order_shutdown_parsing_after_native_exit(&self, _deadline: Instant) -> bool {
         false
     }
@@ -51,6 +50,7 @@ impl ObservationClock for RealObservationClock {
             observed_at: crate::time::now_stamp(),
         }
     }
+    #[cfg(test)]
     fn kind(&self) -> ObservationClockKind {
         ObservationClockKind::Real
     }
@@ -63,6 +63,7 @@ pub(crate) enum ObservationFailure {
     Sink,
 }
 impl ObservationFailure {
+    pub(crate) const ALL: [Self; 4] = [Self::Parser, Self::Detector, Self::Sequence, Self::Sink];
     pub(crate) fn code(self) -> &'static str {
         match self {
             Self::Parser => "parser_unavailable",
@@ -157,6 +158,7 @@ impl RequestRegion {
             .eq(self.rows.iter().cloned())
     }
 }
+#[derive(Clone)]
 pub(crate) struct ObservedRequest {
     pub(super) request_generation: u64,
     pub(super) answer_matches: Vec<AnswerMatch>,
@@ -172,7 +174,7 @@ pub(crate) struct ObservedRequest {
     pub(super) output_seq: u64,
 }
 impl ObservedRequest {
-    fn same_request(&self, other: &Self) -> bool {
+    pub(super) fn same_request(&self, other: &Self) -> bool {
         self.episode_seq == other.episode_seq
             && self.classification == other.classification
             && self.native_version == other.native_version
@@ -249,11 +251,11 @@ impl ObservationController {
                 && capabilities.detection == run.coverage,
             "observer profile/coverage mismatch",
         )?;
-        let mut pool = EventSequencePool::new();
+        let mut pool = EventSequencePool::default();
         pool.supply(initial)?;
         Ok(Self {
             run: run.clone(),
-            detector: Detector::new(catalog, backend, run.native_version.as_deref())?,
+            detector: Detector::new(catalog, backend, run.native_version.as_deref()),
             tracker: EpisodeTracker::new(run.run_id, 1, policy)?,
             pool,
             pending: None,
@@ -361,7 +363,7 @@ impl ObservationController {
             ] {
                 if let Some(plan) =
                     self.catalog
-                        .answer_plan(backend, version, &observed.rule_id, decision)?
+                        .answer_plan(backend, version, &observed.rule_id, decision)
                     && let Some(matched) = self.detector.match_answer(screen, &plan)?
                 {
                     answer_matches.push(matched);
@@ -464,7 +466,7 @@ impl ObservationController {
         at: &str,
         screen_seq: u64,
     ) -> Result<TransitionDraft> {
-        let evidence=EvidencePolicy::metadata().apply(&serde_json::json!({"backend":self.run.backend,"native_version":self.run.native_version,"profile_version":self.run.profile_version,"rule_id":"runner-lifecycle","screen_seq":screen_seq,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}))?;
+        let evidence = storage::evidence::run_metadata(&self.run, "runner-lifecycle", screen_seq)?;
         Ok(TransitionDraft {
             run_id: self.run.run_id,
             episode_seq: None,
@@ -509,12 +511,8 @@ impl ObservationController {
     }
     fn update(&self, transitions: Vec<TransitionDraft>) -> EpisodeUpdate {
         EpisodeUpdate {
-            visibility: self.visibility,
-            eligibility: self.eligibility,
             transitions,
-            latest_evidence: None,
-            next_deadline: None,
-            effective_policy: None,
+            ..EpisodeUpdate::new(self.visibility, self.eligibility)
         }
     }
     fn gap(&mut self, reason: ObservationFailure, now: &ObservationMoment) -> Result<()> {
@@ -648,11 +646,6 @@ impl ObservationController {
                 && run.child_start_identity.is_some()
                 && run.started_at.is_some(),
             "started requires matching committed native child",
-        )?;
-        #[cfg(not(test))]
-        ensure(
-            clock.kind() == ObservationClockKind::Real,
-            "live observation requires a real clock",
         )?;
         self.started = true;
         self.run = run.clone();
@@ -1625,7 +1618,7 @@ pub(crate) mod native_capture {
                 &self.policy.catalog,
                 backend,
                 run.native_version.as_deref(),
-            )?);
+            ));
             let origin = clock.sample();
             {
                 let mut state = self.state.lock().expect("capture mailbox");
@@ -5782,10 +5775,10 @@ pub(crate) mod native_capture {
             )?);
             let task =
                 CaptureExporterTask::install(&mut port, receiver, config.clone(), limits, hooks);
-            let result = run_with_test_services(
+            let result = run_service(
                 &settings,
                 &config.descriptor_path,
-                RunnerTestServices {
+                RunnerDependencies {
                     catalog,
                     clock: Arc::new(RealObservationClock),
                     writer_hooks: Arc::new(InertWriterHooks),
@@ -7469,10 +7462,10 @@ pub(crate) mod native_capture {
             impl ObservationHooks for ResizeArm {
                 fn before(
                     &self,
-                    site: ObservationSite,
+                    site: ObservationPhase,
                     operation: ObservationOperation,
                 ) -> Result<()> {
-                    if site == ObservationSite::Resize
+                    if site == ObservationPhase::Resize
                         && operation == ObservationOperation::Detector
                         && !self.used.swap(true, Ordering::AcqRel)
                     {
@@ -7541,10 +7534,10 @@ pub(crate) mod native_capture {
                         }
                         Err(error("owned resize pair was not completed"))
                     });
-                    let status = run_with_test_services(
+                    let status = run_service(
                         &settings,
                         &config.descriptor_path,
-                        RunnerTestServices {
+                        RunnerDependencies {
                             catalog,
                             clock: Arc::new(RealObservationClock),
                             writer_hooks: Arc::new(InertWriterHooks),
@@ -8020,7 +8013,6 @@ mod tests {
                     crate::coding_agent::CodingAgent::Codex,
                     Some("synthetic-0.0.1"),
                 )
-                .unwrap()
                 .observe(&terminal.snapshot())
                 .unwrap();
                 assert_eq!(
@@ -8134,12 +8126,8 @@ mod tests {
 
             fn update(transitions: Vec<TransitionDraft>) -> EpisodeUpdate {
                 EpisodeUpdate {
-                    visibility: Visibility::NotVisible,
-                    eligibility: InputEligibility::ComposerEmpty,
                     transitions,
-                    latest_evidence: None,
-                    next_deadline: None,
-                    effective_policy: None,
+                    ..EpisodeUpdate::new(Visibility::NotVisible, InputEligibility::ComposerEmpty)
                 }
             }
 
@@ -8220,12 +8208,12 @@ mod tests {
                 use std::sync::atomic::AtomicBool;
 
                 struct Fault {
-                    site: ObservationSite,
+                    site: ObservationPhase,
                     armed: AtomicBool,
                     calls: AtomicU64,
                 }
                 impl Fault {
-                    fn new(site: ObservationSite) -> Self {
+                    fn new(site: ObservationPhase) -> Self {
                         Self {
                             site,
                             armed: AtomicBool::new(false),
@@ -8239,7 +8227,7 @@ mod tests {
                 impl ObservationHooks for Fault {
                     fn before(
                         &self,
-                        site: ObservationSite,
+                        site: ObservationPhase,
                         operation: ObservationOperation,
                     ) -> Result<()> {
                         if site == self.site && operation == ObservationOperation::Detector {
@@ -8265,12 +8253,12 @@ mod tests {
                     )
                     .unwrap();
                     controller
-                        .set_observation_hooks(Arc::new(Fault::new(ObservationSite::QuietTimer)))
+                        .set_observation_hooks(Arc::new(Fault::new(ObservationPhase::QuietTimer)))
                         .unwrap();
                     assert!(
                         controller
                             .set_observation_hooks(Arc::new(Fault::new(
-                                ObservationSite::QuietTimer
+                                ObservationPhase::QuietTimer
                             )))
                             .is_err()
                     );
@@ -8278,7 +8266,7 @@ mod tests {
                     assert!(
                         case.controller
                             .set_observation_hooks(Arc::new(Fault::new(
-                                ObservationSite::QuietTimer
+                                ObservationPhase::QuietTimer
                             )))
                             .is_err()
                     );
@@ -8287,7 +8275,7 @@ mod tests {
                 #[test]
                 fn runner_review_r3_quiet_detector_failure_returns_typed_held_status_and_preserves_the_episode()
                  {
-                    let fault = Arc::new(Fault::new(ObservationSite::QuietTimer));
+                    let fault = Arc::new(Fault::new(ObservationPhase::QuietTimer));
                     let mut case = LiveCase::with_observation_hooks(Some(fault.clone()));
                     case.clock.set(200);
                     case.terminal
@@ -8328,7 +8316,7 @@ mod tests {
                 #[test]
                 fn runner_review_r3_ordered_adapter_preserves_detector_attribution_and_bounded_metadata()
                  {
-                    let fault = Arc::new(Fault::new(ObservationSite::ChildOutput));
+                    let fault = Arc::new(Fault::new(ObservationPhase::ChildOutput));
                     let mut case = LiveCase::with_observation_hooks(Some(fault.clone()));
                     fault.arm();
                     case.clock.set(200);
@@ -8366,7 +8354,7 @@ mod tests {
                 fn runner_review_r3_clock_and_output_sequence_invariants_propagate_outside_recoverable_failures()
                  {
                     for invariant in ["clock", "sequence"] {
-                        let fault = Arc::new(Fault::new(ObservationSite::ChildOutput));
+                        let fault = Arc::new(Fault::new(ObservationPhase::ChildOutput));
                         let mut case = LiveCase::with_observation_hooks(Some(fault));
                         let before = case.controller.status().gap_count;
                         let result = if invariant == "clock" {

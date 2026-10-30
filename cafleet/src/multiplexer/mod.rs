@@ -15,11 +15,13 @@ pub(crate) const ESCAPE_SETTLE_DELAY: f64 = 0.5;
 pub(crate) const ESCAPE_TIMEOUT: Duration = Duration::from_secs(1);
 pub(crate) const MIN_LITERAL_BUDGET: Duration = Duration::from_millis(500);
 pub(crate) const REVALIDATION_MARGIN: Duration = Duration::from_millis(500);
+const DIRECT_RESERVATION: Duration =
+    Duration::from_millis((SUBMIT_DELAY * 1000.0) as u64).saturating_add(Duration::from_secs(1));
+const ESCAPE_RESERVATION: Duration =
+    DIRECT_RESERVATION.saturating_add(Duration::from_millis((ESCAPE_SETTLE_DELAY * 1000.0) as u64));
 pub(crate) const INPUT_RESERVATION: Duration = REVALIDATION_MARGIN
-    .saturating_add(Duration::from_millis((ESCAPE_SETTLE_DELAY * 1000.0) as u64))
     .saturating_add(MIN_LITERAL_BUDGET)
-    .saturating_add(Duration::from_millis((SUBMIT_DELAY * 1000.0) as u64))
-    .saturating_add(Duration::from_secs(1));
+    .saturating_add(ESCAPE_RESERVATION);
 pub(crate) const INSUFFICIENT_INPUT_BUDGET: &str =
     "insufficient pane input budget for literal input, settle and Enter";
 
@@ -32,10 +34,9 @@ pub(crate) enum Lead {
 impl Lead {
     /// The settle and Enter time a submission keeps back from its literal input.
     pub(crate) fn reserved(self) -> Duration {
-        let submit = Duration::from_secs_f64(SUBMIT_DELAY) + Duration::from_secs(1);
         match self {
-            Lead::Escape => submit + Duration::from_secs_f64(ESCAPE_SETTLE_DELAY),
-            Lead::Direct => submit,
+            Lead::Escape => ESCAPE_RESERVATION,
+            Lead::Direct => DIRECT_RESERVATION,
         }
     }
 }
@@ -156,6 +157,12 @@ pub(crate) enum RunError {
     Failed { stderr: String },
 }
 
+impl RunError {
+    pub(crate) fn deadline_expired() -> Self {
+        Self::NotStarted("command deadline expired before launch".into())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct TimedRunError {
     pub(crate) source: RunError,
@@ -165,7 +172,7 @@ pub(crate) struct TimedRunError {
 impl TimedRunError {
     pub(crate) fn before_launch() -> Self {
         Self {
-            source: RunError::NotStarted("command deadline expired before launch".into()),
+            source: RunError::deadline_expired(),
             cleanup_diagnostics: Vec::new(),
         }
     }
@@ -175,10 +182,7 @@ pub(crate) trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
-        self.run(
-            argv,
-            Some(timeout.as_secs() + u64::from(timeout.subsec_nanos() > 0)),
-        )
+        self.run(argv, Some(whole_seconds(timeout)))
     }
     fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
         let remaining = deadline
@@ -207,11 +211,197 @@ fn whole_seconds(duration: Duration) -> u64 {
     duration.as_secs() + u64::from(duration.subsec_nanos() > 0)
 }
 
+const PLACEMENT_MISMATCH: &str = "press target context does not match the recorded placement";
+
+type RunErrorMapper<'a> = dyn Fn(&[String], Option<u64>, RunError) -> MultiplexerError + 'a;
+
+fn map_run_error(
+    name: &str,
+    argv: &[String],
+    timeout_secs: Option<u64>,
+    error: RunError,
+) -> MultiplexerError {
+    let joined = argv.join(" ");
+    match error {
+        RunError::NotStarted(detail) => MultiplexerError::new(format!(
+            "{name} command was not started: {detail}: {joined}"
+        )),
+        RunError::BinaryNotFound(detail) => {
+            MultiplexerError::new(format!("{name} binary not found: {detail}"))
+        }
+        RunError::Timeout => match timeout_secs {
+            Some(secs) => {
+                MultiplexerError::new(format!("{name} command timed out after {secs}s: {joined}"))
+            }
+            None => MultiplexerError::new(format!(
+                "{name} command timed out at the pane input deadline: {joined}"
+            )),
+        },
+        RunError::Failed { stderr } => MultiplexerError::new(format!(
+            "{name} command failed: {joined}\nstderr: {}",
+            stderr.trim()
+        )),
+    }
+}
+
+fn check_deadline(deadline: crate::input::Deadline) -> Result<(), MultiplexerError> {
+    deadline
+        .remaining()
+        .map(|_| ())
+        .map_err(|error| MultiplexerError::new(error.message()))
+}
+
+fn check_capture_lines(lines: i64) -> Result<(), MultiplexerError> {
+    if lines <= 0 {
+        return Err(MultiplexerError::new(format!(
+            "capture_pane: lines must be positive, got {lines}"
+        )));
+    }
+    Ok(())
+}
+
+/// The runner, environment and error mapping shared by every backend; a
+/// backend adds only its own argv construction and output parsing.
+struct BackendCore {
+    runner: Rc<dyn CommandRunner>,
+    env: std::collections::HashMap<String, String>,
+    name: &'static str,
+    session_variable: &'static str,
+    pane_gone: fn(&str) -> bool,
+}
+
+impl BackendCore {
+    fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+        Self {
+            runner: DeadlineRunner::wrap(self.runner.clone(), deadline),
+            env: self.env.clone(),
+            name: self.name,
+            session_variable: self.session_variable,
+            pane_gone: self.pane_gone,
+        }
+    }
+
+    fn env_var(&self, name: &str) -> Option<&str> {
+        self.env
+            .get(name)
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+    }
+
+    fn map_error(
+        &self,
+        argv: &[String],
+        timeout_secs: Option<u64>,
+        error: RunError,
+    ) -> MultiplexerError {
+        map_run_error(self.name, argv, timeout_secs, error)
+    }
+
+    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, MultiplexerError> {
+        self.runner
+            .run(argv, timeout_secs)
+            .map_err(|error| self.map_error(argv, timeout_secs, error))
+    }
+
+    fn run_tolerating_missing(
+        &self,
+        argv: &[String],
+        ignore_missing: bool,
+        timeout_secs: Option<u64>,
+    ) -> Result<(), MultiplexerError> {
+        match self.runner.run(argv, timeout_secs) {
+            Ok(_) => Ok(()),
+            Err(RunError::Failed { ref stderr }) if ignore_missing && (self.pane_gone)(stderr) => {
+                Ok(())
+            }
+            Err(error) => Err(self.map_error(argv, timeout_secs, error)),
+        }
+    }
+
+    fn ensure_available(&self) -> Result<(), MultiplexerError> {
+        if !self.runner.binary_exists(self.name) {
+            return Err(MultiplexerError::new(format!(
+                "{} binary not found on PATH",
+                self.name
+            )));
+        }
+        if self.env_var(self.session_variable).is_none() {
+            return Err(MultiplexerError::new(format!(
+                "cafleet member commands must be run inside a {} session",
+                self.name
+            )));
+        }
+        Ok(())
+    }
+
+    fn press_run(
+        &self,
+        argv: &[String],
+        deadline: crate::input::Deadline,
+        writing: bool,
+    ) -> Result<String, MultiplexerError> {
+        check_deadline(deadline)?;
+        self.runner
+            .run_until(argv, deadline.instant())
+            .map_err(|error| {
+                let started =
+                    writing && matches!(&error.source, RunError::Failed { .. } | RunError::Timeout);
+                let mut mapped = self.map_error(argv, None, error.source);
+                for diagnostic in error.cleanup_diagnostics {
+                    mapped.message.push('\n');
+                    mapped.message.push_str(&diagnostic);
+                }
+                if started {
+                    mapped.after_write()
+                } else {
+                    mapped
+                }
+            })
+    }
+
+    fn send_keys(
+        &self,
+        argv: &[String],
+        deadline: crate::input::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        let output = self.press_run(argv, deadline, true)?;
+        if !output.trim().is_empty() {
+            return Err(MultiplexerError::new(format!(
+                "{} key acknowledgment was unreadable",
+                self.name
+            ))
+            .after_write());
+        }
+        Ok(())
+    }
+
+    fn send_prompt(
+        &self,
+        text: &str,
+        input: &PaneInput,
+        lead: Lead,
+    ) -> Result<(), MultiplexerError> {
+        if !crate::input::valid_input(text) {
+            return Err(MultiplexerError::new(
+                "send_prompt: text must be one non-empty line without control characters",
+            ));
+        }
+        let bounded = self.bounded(crate::input::Deadline::new());
+        submit_prompt(
+            bounded.runner.as_ref(),
+            input,
+            lead,
+            &|argv, timeout_secs, error| bounded.map_error(argv, timeout_secs, error),
+            self.pane_gone,
+        )
+    }
+}
+
 fn submit_prompt(
     runner: &dyn CommandRunner,
     input: &PaneInput,
     lead: Lead,
-    map_error: fn(&[String], Option<u64>, RunError) -> MultiplexerError,
+    map_error: &RunErrorMapper<'_>,
     pane_gone: fn(&str) -> bool,
 ) -> Result<(), MultiplexerError> {
     let PaneInput {
@@ -313,7 +503,7 @@ impl CommandRunner for DeadlineRunner {
         let remaining = self
             .deadline
             .remaining()
-            .map_err(|_| RunError::NotStarted("command deadline expired before launch".into()))?;
+            .map_err(|_| RunError::deadline_expired())?;
         Ok(Some(
             self.runner
                 .remaining_budget()?
@@ -963,38 +1153,116 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_forwards_the_lead_to_each_backend() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.succeed(3);
-        let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-            runner.clone(),
-            env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
-        ));
-        mux.send_prompt("%5", "hi", Lead::Escape).unwrap();
-        assert_eq!(
-            runner.run_argvs(),
-            vec![
-                argv(&["tmux", "send-keys", "-t", "%5", "Escape"]),
-                argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", "hi"]),
-                argv(&["tmux", "send-keys", "-t", "%5", "Enter"]),
-            ]
-        );
-
-        let runner = FakeRunner::with_binary("herdr");
-        runner.succeed(2);
-        let mux = AnyMultiplexer::Herdr(HerdrMultiplexer::new(
-            runner.clone(),
-            env(&[("HERDR_ENV", "1")]),
-        ));
-        mux.send_prompt("w1:p2", "hi", Lead::Direct).unwrap();
-        assert_eq!(
-            runner.run_argvs(),
-            vec![
-                argv(&["herdr", "pane", "send-text", "w1:p2", "hi"]),
-                argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"]),
-            ]
-        );
+    fn each_backend_send_prompt_stops_at_the_failed_stage_and_carries_its_cause() {
+        const TEXT: &str = "  /help with literal $HOME; !  ";
+        for backend in ["tmux", "herdr"] {
+            let (pane, stages) = match backend {
+                "tmux" => (
+                    "%5",
+                    [
+                        argv(&["tmux", "send-keys", "-t", "%5", "Escape"]),
+                        argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", TEXT]),
+                        argv(&["tmux", "send-keys", "-t", "%5", "Enter"]),
+                    ],
+                ),
+                _ => (
+                    "w1:p2",
+                    [
+                        argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]),
+                        argv(&["herdr", "pane", "send-text", "w1:p2", TEXT]),
+                        argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"]),
+                    ],
+                ),
+            };
+            let mut cases = vec![
+                (Lead::Escape, Some(0), "injected escape failure".to_string()),
+                (Lead::Direct, Some(1), "injected first write failure".into()),
+                (Lead::Escape, Some(1), "injected first write failure".into()),
+                (Lead::Direct, Some(2), "injected enter failure".into()),
+                (Lead::Escape, Some(2), "injected enter failure".into()),
+                (Lead::Direct, None, String::new()),
+            ];
+            if backend == "herdr" {
+                cases.push((
+                    Lead::Escape,
+                    Some(0),
+                    super::test_support::herdr_error_stderr("pane_not_found"),
+                ));
+            }
+            for (lead, failed, stderr) in cases {
+                let context = format!("{backend} {lead:?} {failed:?} {stderr}");
+                let runner = FakeRunner::with_binary(backend);
+                let first = usize::from(lead == Lead::Direct);
+                let last = failed.unwrap_or(2);
+                for _ in first..last {
+                    runner.respond(Ok(String::new()));
+                }
+                if failed.is_some() {
+                    runner.respond(Err(RunError::Failed {
+                        stderr: stderr.clone(),
+                    }));
+                } else {
+                    runner.respond(Ok(String::new()));
+                }
+                let result = adapter(backend, runner.clone()).send_prompt(pane, TEXT, lead);
+                assert_eq!(runner.run_argvs(), stages[first..=last], "{context}");
+                assert_eq!(
+                    runner.events().len(),
+                    2 * (last + 1 - first) - 1,
+                    "{context}"
+                );
+                for event in runner.events() {
+                    if let super::test_support::Event::Run { timeout_secs, .. } = event {
+                        assert!(
+                            timeout_secs.is_some_and(|seconds| seconds > 0 && seconds <= 5),
+                            "{context}"
+                        );
+                    }
+                }
+                match failed {
+                    None => result.unwrap(),
+                    Some(stage) => {
+                        let error = result.unwrap_err();
+                        assert!(
+                            error.to_string().contains(stderr.trim()),
+                            "{context}: {error}"
+                        );
+                        assert_eq!(error.submission_started(), stage > 0, "{context}");
+                    }
+                }
+            }
+        }
     }
+
+    #[test]
+    fn capture_window_drops_only_the_visually_blank_tail_then_keeps_the_last_lines() {
+        for (raw, lines, expected) in [
+            ("l1\nl2\nl3\nx\rY\n", 2, "l3\nx\rY"),
+            ("drawn1\ndrawn2\n\n\n\n\n\n\n", 2, "drawn1\ndrawn2"),
+            (
+                "scrollback\nprompt>\ncomposer\n \n\t\n\n\n",
+                2,
+                "prompt>\ncomposer",
+            ),
+            ("a\n\nb\n\n\n", 3, "a\n\nb"),
+            (
+                "top\nkept \x1b[31mred\x1b[0m\n\x1b[39m\x1b[49m\n\x1b[2K \n\n",
+                2,
+                "top\nkept \x1b[31mred\x1b[0m",
+            ),
+            (
+                "one\ntwo\x1b[0m\n\x1b[39m\x1b[49m\n \x1b[2K\n",
+                2,
+                "one\ntwo\x1b[0m",
+            ),
+            ("one\ntwo\nthree\n\n\n", 2, "two\nthree"),
+            ("raw\nbuffer\n\n \n", 20, "raw\nbuffer"),
+            ("\n \n\n", 2, ""),
+        ] {
+            assert_eq!(capture_window(raw, lines), expected, "{raw:?} {lines}");
+        }
+    }
+
     struct BudgetRunner {
         budgets: RefCell<VecDeque<Duration>>,
         calls: RefCell<Vec<(String, Duration)>>,
@@ -1060,7 +1328,7 @@ mod tests {
                 enter: vec!["enter".into()],
             },
             lead,
-            |_, _, error| MultiplexerError::new(format!("{error:?}")),
+            &|_, _, error| MultiplexerError::new(format!("{error:?}")),
             |cause| cause == "gone",
         )
     }

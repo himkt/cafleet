@@ -55,6 +55,33 @@ fn map_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<RuntimeEventRecord> {
     })
 }
 
+const PAYLOAD_LIMIT: usize = 16 * 1024;
+
+pub(crate) fn latest_event_seq(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<Option<i64>, CafleetError> {
+    conn.query_row(
+        "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
+        [run_id],
+        |row| row.get(0),
+    )
+    .map_err(CafleetError::from)
+}
+
+fn interaction_id_for_episode(
+    conn: &Connection,
+    run_id: i64,
+    episode_seq: i64,
+) -> Result<i64, CafleetError> {
+    conn.query_row(
+        "SELECT interaction_id FROM member_interactions WHERE run_id=?1 AND episode_seq=?2",
+        params![run_id, episode_seq],
+        |row| row.get(0),
+    )
+    .map_err(CafleetError::from)
+}
+
 fn source(kind: RuntimeEventKind) -> &'static str {
     match kind {
         RuntimeEventKind::InteractionOpened
@@ -201,7 +228,7 @@ pub(crate) fn get_event(
     }
     let serialized_payload = payload.to_string();
     require(
-        serialized_payload.len() <= 16 * 1024,
+        serialized_payload.len() <= PAYLOAD_LIMIT,
         "payload_json",
         "payload exceeds bound",
     )?;
@@ -453,11 +480,7 @@ fn apply_interaction(
         )?;
         return Ok(Some(conn.last_insert_rowid()));
     }
-    let id: i64 = conn.query_row(
-        "SELECT interaction_id FROM member_interactions WHERE run_id=?1 AND episode_seq=?2",
-        params![transition.run_id, sequence],
-        |row| row.get(0),
-    )?;
+    let id = interaction_id_for_episode(conn, transition.run_id, sequence)?;
     let current = interaction(conn, id)?;
     require(
         current.classification == class && current.closed_at.is_none(),
@@ -505,16 +528,17 @@ fn payload(
     Ok(payload)
 }
 
-pub(crate) fn persist_transition(
+#[cfg(test)]
+pub(crate) fn persist_event(
     conn: &mut Connection,
     owner: &RunOwner,
     transition: &ObservedTransition,
     mode: PersistenceMode,
 ) -> Result<RuntimeEventRecord, CafleetError> {
-    persist_transition_counted(conn, owner, transition, mode).map(|(event, _)| event)
+    persist_transition(conn, owner, transition, mode).map(|(event, _)| event)
 }
 
-pub(crate) fn persist_transition_counted(
+pub(crate) fn persist_transition(
     conn: &mut Connection,
     owner: &RunOwner,
     transition: &ObservedTransition,
@@ -573,11 +597,7 @@ pub(crate) fn persist_transition_in_transaction(
     if archive_reason.is_none() {
         super::super::fleets::require_live_fleet(conn, run.fleet_id)?;
     }
-    let latest: Option<i64> = conn.query_row(
-        "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
-        [run.run_id],
-        |row| row.get(0),
-    )?;
+    let latest = latest_event_seq(conn, run.run_id)?;
     require(
         latest.is_none_or(|latest| transition.event_seq > latest),
         "event_seq",
@@ -611,7 +631,7 @@ pub(crate) fn persist_transition_in_transaction(
     let event_id = conn.last_insert_rowid();
     let payload = payload(run, transition, event_id, interaction_id)?.to_string();
     require(
-        payload.len() <= 16 * 1024,
+        payload.len() <= PAYLOAD_LIMIT,
         "payload_json",
         "complete payload exceeds bound",
     )?;
@@ -629,30 +649,9 @@ pub(crate) fn persist_transition_in_transaction(
         let cause = transition
             .cause_json
             .as_ref()
-            .ok_or_else(|| invalid("cause_json", "native exit evidence required"))?;
-        let exit_code = cause
-            .get("exit_code")
-            .filter(|value| !value.is_null())
-            .map(|value| {
-                value
-                    .as_i64()
-                    .ok_or_else(|| invalid("exit_code", "integer required"))
-            })
-            .transpose()?;
-        let exit_signal = cause
-            .get("exit_signal")
-            .filter(|value| !value.is_null())
-            .map(|value| {
-                value
-                    .as_i64()
-                    .ok_or_else(|| invalid("exit_signal", "integer required"))
-            })
-            .transpose()?;
-        require(
-            exit_code.is_some() || exit_signal.is_some(),
-            "cause_json",
-            "actual native status required",
-        )?;
+            .expect("validate_cause requires a native exit cause for RunnerExited");
+        let exit_code = cause.get("exit_code").and_then(Value::as_i64);
+        let exit_signal = cause.get("exit_signal").and_then(Value::as_i64);
         conn.execute("UPDATE member_runs SET status='exited',ended_at=?1,exit_code=?2,exit_signal=?3 WHERE run_id=?4",
                 params![transition.observed_at,exit_code,exit_signal,run.run_id])?;
     }
@@ -751,21 +750,13 @@ pub(crate) fn update_interaction_evidence(
                 "evidence_json",
                 "refresh evidence does not match current run/profile/policy/sequence",
             )?;
-            let maximum: Option<i64> = conn.query_row(
-                "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
-                [run.run_id],
-                |row| row.get(0),
-            )?;
+            let maximum = latest_event_seq(conn, run.run_id)?;
             require(
                 after_event_seq > 0 && maximum == Some(after_event_seq),
                 "after_event_seq",
                 "refresh barrier must match committed run maximum",
             )?;
-            let id: i64 = conn.query_row(
-                "SELECT interaction_id FROM member_interactions WHERE run_id=?1 AND episode_seq=?2",
-                params![run.run_id, update.episode_seq],
-                |row| row.get(0),
-            )?;
+            let id = interaction_id_for_episode(conn, run.run_id, update.episode_seq)?;
             let current = interaction(conn, id)?;
             require(
                 current.closed_at.is_none(),
@@ -811,6 +802,12 @@ mod tests {
     use crate::broker::runtime::test_support::*;
     use crate::broker::runtime::{self as storage, *};
     use crate::db::test_support::{TableSnapshot, migrate_to_version, table_rows, table_snapshot};
+
+    const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
+    const REFUSAL_INSTRUCTION: &str = "Verify this event. The member's automatic reviewer refused the operation and no native request is waiting. Dispatch evidence comes only from the member's routed request with its exact command, cwd, environment and refusal; this event and screen captures corroborate it. With no routed request, dispatch nothing and ask the member whether the refused operation is still needed when it next reports or goes idle. For a routed request, decide in the Director session's effective auto mode whether to authorize a separate execution through the routed-command path or to refuse; otherwise obtain the user's permission first. Inspect the actual result and the member's continuation afterward.";
+    const UNAVAILABLE_INSTRUCTION: &str = "Verify this event. Automatic review is unavailable for this member, so native permission forms may appear and each needs a decision, and refusals may stop its work. Supervise the member as interactive, and tell the user when the selected automatic mode cannot apply.";
+    const MULTI_ROW_SENTENCE: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
+
     mod interaction_refresh {
         use super::*;
         use std::time::{Duration, Instant};
@@ -958,7 +955,7 @@ mod tests {
                 kind: RuntimeEventKind::InteractionObscured,
                 ..opening(fixture.owner.run_id, 2, 1, metadata())
             };
-            storage::persist_transition(
+            storage::persist_event(
                 &mut fixture.fixture.conn,
                 &fixture.owner,
                 &obscured,
@@ -995,7 +992,7 @@ mod tests {
                     close_reason: Some(reason),
                     ..closure(fixture.owner.run_id, 2, 1)
                 };
-                storage::persist_transition(
+                storage::persist_event(
                     &mut fixture.fixture.conn,
                     &fixture.owner,
                     &closed,
@@ -1049,7 +1046,7 @@ mod tests {
                 .unwrap()
                 .owner();
             storage::reserve_event_sequences(&mut fixture.fixture.conn, &owner).unwrap();
-            storage::persist_transition(
+            storage::persist_event(
                 &mut fixture.fixture.conn,
                 &owner,
                 &opening(other.run_id, 9, 1, metadata()),
@@ -1276,10 +1273,6 @@ mod tests {
 
         use super::*;
 
-        const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
-
-        const MULTI_ROW_SENTENCE: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
-
         fn action(fixture: &Fixture, event: &RuntimeEventRecord) -> Value {
             let instruction = match event.payload_json["evidence"]["operation_rows"].as_u64() {
                 Some(rows) if rows > 1 => format!("{REVIEW_INSTRUCTION} {MULTI_ROW_SENTENCE}"),
@@ -1459,7 +1452,7 @@ mod tests {
                     ..opening(owner.run_id, 1, 1, metadata())
                 };
                 events.push(
-                    storage::persist_transition(
+                    storage::persist_event(
                         &mut fixture.conn,
                         &owner,
                         &transition,
@@ -1495,7 +1488,7 @@ mod tests {
             let events = transitions
                 .iter()
                 .map(|transition| {
-                    storage::persist_transition(
+                    storage::persist_event(
                         &mut fixture.conn,
                         &owner,
                         transition,
@@ -1543,8 +1536,7 @@ mod tests {
                     ..native_exit(owner.run_id, 1)
                 };
                 events.push(
-                    storage::persist_transition(&mut fixture.conn, &owner, &transition, mode)
-                        .unwrap(),
+                    storage::persist_event(&mut fixture.conn, &owner, &transition, mode).unwrap(),
                 );
             }
             for event in events {
@@ -1581,7 +1573,7 @@ mod tests {
             crate::db::migrate_to_head(&mut fixture.conn).unwrap();
             let owner = fixture.recoverer();
             let before = durable_state(&fixture.conn);
-            let repeated = storage::persist_transition(
+            let repeated = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &opening(owner.run_id, 1, 1, metadata()),
@@ -1603,7 +1595,7 @@ mod tests {
                 .text;
             crate::db::migrate_to_head(&mut fixture.conn).unwrap();
             let owner = fixture.run.owner();
-            storage::persist_transition(
+            storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &closure(owner.run_id, 2, 1),
@@ -1613,7 +1605,7 @@ mod tests {
             crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
             let recovery = fixture.recoverer();
             let before = durable_state(&fixture.conn);
-            let repeated = storage::persist_transition(
+            let repeated = storage::persist_event(
                 &mut fixture.conn,
                 &recovery,
                 &opening(owner.run_id, 1, 1, metadata()),
@@ -1639,13 +1631,8 @@ mod tests {
             changed.observed_at = "2026-10-26T10:00:01.000000+00:00".into();
             let before = durable_state(&fixture.conn);
             assert!(
-                storage::persist_transition(
-                    &mut fixture.conn,
-                    &owner,
-                    &changed,
-                    PersistenceMode::Live
-                )
-                .is_err()
+                storage::persist_event(&mut fixture.conn, &owner, &changed, PersistenceMode::Live)
+                    .is_err()
             );
             assert_eq!(durable_state(&fixture.conn), before);
             assert_eq!(
@@ -1727,14 +1714,14 @@ mod tests {
                 .text;
             crate::db::migrate_to_head(&mut fixture.conn).unwrap();
             let owner = fixture.run.owner();
-            storage::persist_transition(
+            storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &closure(owner.run_id, 2, 1),
                 PersistenceMode::Live,
             )
             .unwrap();
-            let fresh = storage::persist_transition(
+            let fresh = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &opening(owner.run_id, 3, 2, metadata()),
@@ -1793,7 +1780,7 @@ mod tests {
                 }
                 let before = durable_state(&fixture.conn);
                 assert!(
-                    storage::persist_transition(
+                    storage::persist_event(
                         &mut fixture.conn,
                         &owner,
                         &transition,
@@ -1814,7 +1801,7 @@ mod tests {
                         .unwrap();
                 }
                 retried.push(
-                    storage::persist_transition(
+                    storage::persist_event(
                         &mut fixture.conn,
                         &owner,
                         &transition,
@@ -1853,7 +1840,7 @@ mod tests {
                 } else {
                     metadata()
                 };
-                let event = storage::persist_transition(
+                let event = storage::persist_event(
                     &mut fixture.conn,
                     &owner,
                     &opening(owner.run_id, 1, 1, evidence.clone()),
@@ -1895,7 +1882,7 @@ mod tests {
             .unwrap()
             .apply(&raw)
             .unwrap();
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &opening(owner.run_id, 1, 1, evidence),
@@ -1927,7 +1914,7 @@ mod tests {
             .unwrap()
             .apply(&raw_evidence(&"界\u{1b}".repeat(10000)))
             .unwrap();
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &opening(owner.run_id, 1, 1, evidence.clone()),
@@ -1975,7 +1962,7 @@ mod tests {
             .unwrap()
             .apply(&raw)
             .unwrap();
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &opening(owner.run_id, 1, 1, evidence),
@@ -2074,10 +2061,6 @@ mod tests {
     mod automatic_review_events {
         use super::*;
         use crate::broker::runtime::test_support::automatic_review::*;
-
-        const REFUSAL_INSTRUCTION: &str = "Verify this event. The member's automatic reviewer refused the operation and no native request is waiting. Dispatch evidence comes only from the member's routed request with its exact command, cwd, environment and refusal; this event and screen captures corroborate it. With no routed request, dispatch nothing and ask the member whether the refused operation is still needed when it next reports or goes idle. For a routed request, decide in the Director session's effective auto mode whether to authorize a separate execution through the routed-command path or to refuse; otherwise obtain the user's permission first. Inspect the actual result and the member's continuation afterward.";
-        const UNAVAILABLE_INSTRUCTION: &str = "Verify this event. Automatic review is unavailable for this member, so native permission forms may appear and each needs a decision, and refusals may stop its work. Supervise the member as interactive, and tell the user when the selected automatic mode cannot apply.";
-        const MULTI_ROW_SENTENCE: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
 
         #[test]
         fn automatic_refusal_event_routes_a_review_action_to_the_director_inbox() {
@@ -2265,7 +2248,7 @@ mod tests {
                     },
                 ] {
                     assert!(
-                        storage::persist_transition(
+                        storage::persist_event(
                             &mut fixture.conn,
                             &owner,
                             &transition,
@@ -2289,14 +2272,14 @@ mod tests {
                 let owner = fixture.activate();
                 fixture.reserve(&owner);
                 let transition = annotation_event(owner.run_id, 1, kind, metadata());
-                let first = storage::persist_transition(
+                let first = storage::persist_event(
                     &mut fixture.conn,
                     &owner,
                     &transition,
                     PersistenceMode::Live,
                 )
                 .unwrap();
-                let (again, inserted) = storage::persist_transition_counted(
+                let (again, inserted) = storage::persist_transition(
                     &mut fixture.conn,
                     &owner,
                     &transition,
@@ -2309,7 +2292,7 @@ mod tests {
                     (first.event_id, first.message_id)
                 );
                 let recovery = fixture.recoverer();
-                let replayed = storage::persist_transition(
+                let replayed = storage::persist_event(
                     &mut fixture.conn,
                     &recovery,
                     &transition,
@@ -2324,7 +2307,7 @@ mod tests {
                     ..transition
                 };
                 assert!(
-                    storage::persist_transition(
+                    storage::persist_event(
                         &mut fixture.conn,
                         &recovery,
                         &conflicting,
@@ -2346,7 +2329,7 @@ mod tests {
                 fixture.reserve(&owner);
                 crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
                 let recovery = fixture.recoverer();
-                let event = storage::persist_transition(
+                let event = storage::persist_event(
                     &mut fixture.conn,
                     &recovery,
                     &annotation_event(owner.run_id, 1, kind, metadata()),
@@ -2410,7 +2393,7 @@ mod tests {
         let owner = fixture.activate();
         fixture.reserve(&owner);
         let transition = opening(owner.run_id, 1, 1, metadata());
-        let first = storage::persist_transition(
+        let first = storage::persist_event(
             &mut fixture.conn,
             &owner,
             &transition,
@@ -2420,8 +2403,7 @@ mod tests {
         let before = durable_state(&fixture.conn);
         let mut other = fixture.reopen();
         let again =
-            storage::persist_transition(&mut other, &owner, &transition, PersistenceMode::Live)
-                .unwrap();
+            storage::persist_event(&mut other, &owner, &transition, PersistenceMode::Live).unwrap();
         assert_eq!(
             (again.event_id, again.message_id, again.interaction_id),
             (first.event_id, first.message_id, first.interaction_id)
@@ -2445,13 +2427,8 @@ mod tests {
             let owner = fixture.activate();
             fixture.reserve(&owner);
             let original = opening(owner.run_id, 1, 1, metadata());
-            storage::persist_transition(
-                &mut fixture.conn,
-                &owner,
-                &original,
-                PersistenceMode::Live,
-            )
-            .unwrap();
+            storage::persist_event(&mut fixture.conn, &owner, &original, PersistenceMode::Live)
+                .unwrap();
             let mut conflict = original.clone();
             match changed {
                 "time" => conflict.observed_at = "2026-10-26T10:00:01.000000+00:00".into(),
@@ -2465,13 +2442,8 @@ mod tests {
             }
             let before = durable_state(&fixture.conn);
             assert!(
-                storage::persist_transition(
-                    &mut fixture.conn,
-                    &owner,
-                    &conflict,
-                    PersistenceMode::Live
-                )
-                .is_err(),
+                storage::persist_event(&mut fixture.conn, &owner, &conflict, PersistenceMode::Live)
+                    .is_err(),
                 "{changed}"
             );
             assert_eq!(durable_state(&fixture.conn), before, "{changed}");
@@ -2514,7 +2486,7 @@ mod tests {
             }
             let before = durable_state(&fixture.conn);
             assert!(
-                storage::persist_transition(
+                storage::persist_event(
                     &mut fixture.conn,
                     &owner,
                     &opening(owner.run_id, 1, 1, metadata()),
@@ -2535,7 +2507,7 @@ mod tests {
         fixture.conn.execute_batch("CREATE TRIGGER fail_closure BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'closure inbox failure'); END").unwrap();
         let before = durable_state(&fixture.conn);
         assert!(
-            storage::persist_transition(
+            storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &closure(owner.run_id, 2, 1),
@@ -2548,7 +2520,7 @@ mod tests {
             .conn
             .execute_batch("DROP TRIGGER fail_closure")
             .unwrap();
-        let closed = storage::persist_transition(
+        let closed = storage::persist_event(
             &mut fixture.conn,
             &owner,
             &closure(owner.run_id, 2, 1),
@@ -2576,7 +2548,7 @@ mod tests {
         raw["screen_seq"] = json!(121);
         let closing_frame = evidence::EvidencePolicy::metadata().apply(&raw).unwrap();
         assert_ne!(closing_frame, request.evidence_json);
-        let closed = storage::persist_transition(
+        let closed = storage::persist_event(
             &mut fixture.conn,
             &owner,
             &ObservedTransition {
@@ -2635,7 +2607,7 @@ mod tests {
             let transition = opening(owner.run_id, 1, 1, metadata());
             let before = durable_state(&fixture.conn);
             assert!(
-                storage::persist_transition(
+                storage::persist_event(
                     &mut fixture.conn,
                     &owner,
                     &transition,
@@ -2644,7 +2616,7 @@ mod tests {
                 .is_err()
             );
             assert_eq!(durable_state(&fixture.conn), before);
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -2668,7 +2640,7 @@ mod tests {
         let first = fixture.open(&owner);
         crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
         let recovery = fixture.recoverer();
-        let retry = storage::persist_transition(
+        let retry = storage::persist_event(
             &mut fixture.conn,
             &recovery,
             &opening(owner.run_id, 1, 1, metadata()),
@@ -2705,7 +2677,7 @@ mod tests {
         let owner = fixture.activate();
         fixture.reserve(&owner);
         assert!(
-            storage::persist_transition(
+            storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &closure(owner.run_id, 1, 404),
@@ -2713,7 +2685,7 @@ mod tests {
             )
             .is_err()
         );
-        let event = storage::persist_transition(
+        let event = storage::persist_event(
             &mut fixture.conn,
             &owner,
             &opening(owner.run_id, 1, 1, metadata()),
@@ -2765,7 +2737,7 @@ mod tests {
                 close_reason: None,
                 cause_json: cause,
             };
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -2812,7 +2784,7 @@ mod tests {
             }
             let before = durable_state(&fixture.conn);
             assert!(
-                storage::persist_transition(
+                storage::persist_event(
                     &mut fixture.conn,
                     &owner,
                     &transition,
@@ -2844,13 +2816,9 @@ mod tests {
             let owner = fixture.activate();
             fixture.reserve(&owner);
             let exit = native_exit(owner.run_id, 1);
-            let first = storage::persist_transition(
-                &mut fixture.conn,
-                &owner,
-                &exit,
-                PersistenceMode::Live,
-            )
-            .unwrap();
+            let first =
+                storage::persist_event(&mut fixture.conn, &owner, &exit, PersistenceMode::Live)
+                    .unwrap();
             assert_eq!(
                 storage::get_run(&fixture.conn, owner.run_id)
                     .unwrap()
@@ -2864,13 +2832,9 @@ mod tests {
                     params![status, owner.run_id],
                 )
                 .unwrap();
-            let retry = storage::persist_transition(
-                &mut fixture.conn,
-                &owner,
-                &exit,
-                PersistenceMode::Live,
-            )
-            .unwrap();
+            let retry =
+                storage::persist_event(&mut fixture.conn, &owner, &exit, PersistenceMode::Live)
+                    .unwrap();
             assert_eq!(
                 (retry.event_id, retry.message_id),
                 (first.event_id, first.message_id)
@@ -2883,13 +2847,8 @@ mod tests {
             };
             let before = durable_state(&fixture.conn);
             assert!(
-                storage::persist_transition(
-                    &mut fixture.conn,
-                    &owner,
-                    &next,
-                    PersistenceMode::Live
-                )
-                .is_err(),
+                storage::persist_event(&mut fixture.conn, &owner, &next, PersistenceMode::Live)
+                    .is_err(),
                 "{status}"
             );
             assert_eq!(durable_state(&fixture.reopen()), before, "{status}");
@@ -2910,7 +2869,7 @@ mod tests {
             )
             .unwrap();
         crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
-        let opened = storage::persist_transition(
+        let opened = storage::persist_event(
             &mut fixture.conn,
             &owner,
             &opening(owner.run_id, 1, 1, metadata()),
@@ -2919,14 +2878,14 @@ mod tests {
         .unwrap();
         let mut closed = closure(owner.run_id, 2, 1);
         closed.close_reason = Some(InteractionCloseReason::ProcessExited);
-        storage::persist_transition(
+        storage::persist_event(
             &mut fixture.conn,
             &owner,
             &closed,
             PersistenceMode::Recovery,
         )
         .unwrap();
-        let exited = storage::persist_transition(
+        let exited = storage::persist_event(
             &mut fixture.conn,
             &owner,
             &native_exit(owner.run_id, 3),
@@ -2957,7 +2916,7 @@ mod tests {
         };
         let before = durable_state(&fixture.conn);
         assert!(
-            storage::persist_transition(
+            storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -2992,7 +2951,7 @@ mod tests {
                 };
                 let before = durable_state(&fixture.conn);
                 assert!(
-                    storage::persist_transition(
+                    storage::persist_event(
                         &mut fixture.conn,
                         &owner,
                         &transition,
@@ -3041,7 +3000,7 @@ mod tests {
                 Some(json!({"kind":"native_exit","exit_code":7,"exit_signal":null}));
             let before = durable_state(&fixture.conn);
             assert!(
-                storage::persist_transition(
+                storage::persist_event(
                     &mut fixture.conn,
                     &owner,
                     &transition,
@@ -3059,14 +3018,14 @@ mod tests {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
         let opened = fixture.open(&owner);
-        storage::persist_transition(
+        storage::persist_event(
             &mut fixture.conn,
             &owner,
             &closure(owner.run_id, 2, 1),
             PersistenceMode::Live,
         )
         .unwrap();
-        let event = storage::persist_transition(
+        let event = storage::persist_event(
             &mut fixture.conn,
             &owner,
             &native_exit(owner.run_id, 3),
@@ -3098,7 +3057,7 @@ mod tests {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             fixture.reserve(&owner);
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &native_exit(owner.run_id, 1),
@@ -3156,7 +3115,7 @@ mod tests {
             } else {
                 metadata()
             };
-            let event = storage::persist_transition(
+            let event = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &opening(owner.run_id, 1, 1, evidence),

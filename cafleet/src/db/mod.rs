@@ -129,20 +129,16 @@ impl SchemaTable {
     }
 }
 
-struct SchemaShape(Vec<SchemaTable>);
-
-impl SchemaShape {
-    fn matches(&self, conn: &Connection) -> Result<bool, CafleetError> {
-        for table in &self.0 {
-            if !table.matches(conn)? {
-                return Ok(false);
-            }
+fn all_match(tables: &[SchemaTable], conn: &Connection) -> Result<bool, CafleetError> {
+    for table in tables {
+        if !table.matches(conn)? {
+            return Ok(false);
         }
-        Ok(true)
     }
+    Ok(true)
 }
 
-fn read_schema(conn: &Connection) -> Result<SchemaShape, CafleetError> {
+fn read_schema(conn: &Connection) -> Result<Vec<SchemaTable>, CafleetError> {
     let mut tables = conn.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     )?;
@@ -180,10 +176,10 @@ fn read_schema(conn: &Connection) -> Result<SchemaShape, CafleetError> {
             indexes,
         });
     }
-    Ok(SchemaShape(schema))
+    Ok(schema)
 }
 
-fn reference_schema(version: u32) -> Result<SchemaShape, CafleetError> {
+fn reference_schema(version: u32) -> Result<Vec<SchemaTable>, CafleetError> {
     let mut expected = Connection::open_in_memory()?;
     embedded::migrations::runner()
         .set_grouped(true)
@@ -211,13 +207,12 @@ pub(crate) fn schema_matches_version(
     };
     let matches = if version > head {
         reference
-            .0
             .iter()
             .find(|table| table.name == "refinery_schema_history")
             .expect("refinery migrations create their ledger")
             .matches(conn)?
     } else {
-        reference.matches(conn)?
+        all_match(&reference, conn)?
     };
     if let Some(snapshot) = snapshot {
         snapshot.commit()?;
@@ -1794,20 +1789,6 @@ mod tests {
                     );
                 }
                 assert!(RuntimeEventKind::try_from("automatic_review_available").is_err());
-                let fixture = Fixture::new();
-                let run = fixture.run("running").unwrap();
-                for (seq, kind) in (1..).zip(RuntimeEventKind::VALUES) {
-                    let event = insert_event(&fixture, run, seq, kind).unwrap();
-                    let stored: RuntimeEventKind = fixture
-                        .conn
-                        .query_row(
-                            "SELECT kind FROM member_runtime_events WHERE event_id=?1",
-                            [event],
-                            |row| row.get(0),
-                        )
-                        .unwrap();
-                    assert_eq!(stored.as_str(), *kind);
-                }
             }
 
             #[test]
@@ -2341,30 +2322,10 @@ mod tests {
         }
 
         #[test]
-        fn event_kinds_and_archive_reasons_accept_the_specified_domains() {
+        fn archive_reasons_accept_the_specified_domain() {
             let fixture = Fixture::new();
             let run = fixture.run("running").unwrap();
             let event = fixture.archived_event(run, 1).unwrap();
-            for kind in [
-                "coverage_unknown",
-                "interaction_opened",
-                "interaction_obscured",
-                "interaction_closed",
-                "permission_denied_observed",
-                "automatic_refusal_observed",
-                "automatic_review_unavailable",
-                "runner_degraded",
-                "runner_lost",
-                "runner_exited",
-            ] {
-                fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runtime_events SET kind=?1 WHERE event_id=?2",
-                        params![kind, event],
-                    )
-                    .unwrap();
-            }
             for reason in ["member_inactive", "fleet_deleted", "director_inactive"] {
                 fixture
                     .conn

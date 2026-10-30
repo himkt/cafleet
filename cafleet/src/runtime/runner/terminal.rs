@@ -2,10 +2,12 @@ use super::*;
 use nix::sys::termios::{self, SetArg, Termios};
 use std::fs::File;
 
+#[cfg(test)]
 #[derive(Default)]
 struct Callbacks {
     title: String,
 }
+#[cfg(test)]
 impl vt100::Callbacks for Callbacks {
     fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
         self.title = String::from_utf8_lossy(title).into_owned();
@@ -13,9 +15,8 @@ impl vt100::Callbacks for Callbacks {
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct ScreenSnapshot {
-    pub(crate) contents: String,
+    #[cfg(test)]
     pub(crate) title: String,
     pub(crate) rows: u16,
     pub(crate) cols: u16,
@@ -27,7 +28,10 @@ pub(crate) struct ScreenSnapshot {
 }
 
 pub(crate) struct TerminalState {
+    #[cfg(test)]
     parser: vt100::Parser<Callbacks>,
+    #[cfg(not(test))]
+    parser: vt100::Parser,
     sequence: u64,
 }
 pub(crate) enum TerminalObservationError {
@@ -38,13 +42,14 @@ pub(crate) enum TerminalObservationError {
 impl TerminalState {
     pub(crate) fn new(size: TerminalSize) -> Result<Self> {
         size.validate()?;
+        let rows = size.rows.try_into().expect("validated rows");
+        let cols = size.cols.try_into().expect("validated cols");
+        #[cfg(test)]
+        let parser = vt100::Parser::new_with_callbacks(rows, cols, 0, Callbacks::default());
+        #[cfg(not(test))]
+        let parser = vt100::Parser::new(rows, cols, 0);
         Ok(Self {
-            parser: vt100::Parser::new_with_callbacks(
-                size.rows.try_into().expect("validated rows"),
-                size.cols.try_into().expect("validated cols"),
-                0,
-                Callbacks::default(),
-            ),
+            parser,
             sequence: 0,
         })
     }
@@ -78,40 +83,34 @@ impl TerminalState {
         for (index, byte) in bytes.iter().enumerate() {
             if byte.is_ascii_control() {
                 if index > start {
-                    self.feed(&bytes[start..index])
-                        .map_err(TerminalObservationError::Parser)?;
-                    if let Err(cause) = observer.observe(&self.snapshot()) {
-                        if observer.failures_are_fatal() {
-                            return Err(TerminalObservationError::Observer(cause));
-                        }
-                        failure.get_or_insert(cause);
-                    }
+                    self.step(&bytes[start..index], observer, &mut failure)?;
                 }
-                self.feed(&[*byte])
-                    .map_err(TerminalObservationError::Parser)?;
-                if let Err(cause) = observer.observe(&self.snapshot()) {
-                    if observer.failures_are_fatal() {
-                        return Err(TerminalObservationError::Observer(cause));
-                    }
-                    failure.get_or_insert(cause);
-                }
+                self.step(&[*byte], observer, &mut failure)?;
                 start = index + 1;
             }
         }
         if start < bytes.len() {
-            self.feed(&bytes[start..])
-                .map_err(TerminalObservationError::Parser)?;
-            if let Err(cause) = observer.observe(&self.snapshot()) {
-                if observer.failures_are_fatal() {
-                    return Err(TerminalObservationError::Observer(cause));
-                }
-                failure.get_or_insert(cause);
-            }
+            self.step(&bytes[start..], observer, &mut failure)?;
         }
         match failure {
             Some(cause) => Err(TerminalObservationError::Observer(cause)),
             None => Ok(()),
         }
+    }
+    fn step(
+        &mut self,
+        bytes: &[u8],
+        observer: &mut impl ScreenObserver,
+        failure: &mut Option<CafleetError>,
+    ) -> std::result::Result<(), TerminalObservationError> {
+        self.feed(bytes).map_err(TerminalObservationError::Parser)?;
+        if let Err(cause) = observer.observe(&self.snapshot()) {
+            if observer.failures_are_fatal() {
+                return Err(TerminalObservationError::Observer(cause));
+            }
+            failure.get_or_insert(cause);
+        }
+        Ok(())
     }
     pub(crate) fn resize(&mut self, size: TerminalSize) -> Result<()> {
         size.validate()?;
@@ -130,7 +129,7 @@ impl TerminalState {
         let (rows, cols) = screen.size();
         let (cursor_row, cursor_col) = screen.cursor_position();
         ScreenSnapshot {
-            contents: screen.contents(),
+            #[cfg(test)]
             title: self.parser.callbacks().title.clone(),
             rows: rows.get(),
             cols: cols.get(),
@@ -201,7 +200,11 @@ mod tests {
             }
             let expected = whole.snapshot();
             let actual = fragmented.snapshot();
-            assert_eq!(actual.contents, expected.contents, "width={width}");
+            assert_eq!(
+                actual.screen.contents(),
+                expected.screen.contents(),
+                "width={width}"
+            );
             assert_eq!(
                 (actual.cursor_row, actual.cursor_col),
                 (expected.cursor_row, expected.cursor_col)
@@ -220,13 +223,13 @@ mod tests {
         }
         let alternate = terminal.snapshot();
         assert!(alternate.alternate_screen);
-        assert!(alternate.contents.contains("alternate request"));
-        assert!(!alternate.contents.contains("primary composer"));
+        assert!(alternate.screen.contents().contains("alternate request"));
+        assert!(!alternate.screen.contents().contains("primary composer"));
         assert_eq!(alternate.title, "Action Required");
         terminal.feed(b"\x1b[?1049l").unwrap();
         let restored = terminal.snapshot();
         assert!(!restored.alternate_screen);
-        assert_eq!(restored.contents, primary.contents);
+        assert_eq!(restored.screen.contents(), primary.screen.contents());
         assert!(restored.screen_seq > alternate.screen_seq);
     }
 
@@ -239,9 +242,9 @@ mod tests {
             .feed(b"\r\nline two\r\nline three\r\nempty composer")
             .unwrap();
         let current = terminal.snapshot();
-        assert!(!current.contents.contains("old permission request"));
-        assert!(current.contents.contains("empty composer"));
-        assert!(old.contents.contains("old permission request"));
+        assert!(!current.screen.contents().contains("old permission request"));
+        assert!(current.screen.contents().contains("empty composer"));
+        assert!(old.screen.contents().contains("old permission request"));
         assert!(current.screen_seq > old.screen_seq);
     }
 
@@ -259,7 +262,7 @@ mod tests {
             .unwrap();
         let resized = terminal.snapshot();
         assert_eq!((resized.rows, resized.cols), (40, 120));
-        assert!(resized.contents.contains("choice"));
+        assert!(resized.screen.contents().contains("choice"));
         assert!(resized.screen_seq >= before.screen_seq);
     }
 

@@ -1,8 +1,11 @@
 use super::{
     ControlIdentity, DrainedInput, InputControlOperation, InputControlReply, InputControlRequest,
-    InputDrain, InputEligibility, ObservationController, ObservedContinuation, ProgrammaticWrite,
-    PtyIo, SubmissionResult, SubmissionStatus, Visibility, validate_operation_key,
+    InputEligibility, ObservationController, ObservedContinuation, ObservedRequest,
+    ProgrammaticWrite, PtyIo, SubmissionResult, SubmissionStatus, Visibility,
+    validate_operation_key,
 };
+#[cfg(test)]
+use super::{InputDrain, RealInputDeadlineClock, receive_input_expiration};
 use super::{
     InputFailure, ProcessIdentity, Result, RunLock, SubmissionStage, Transport, check_deadline,
     ensure, error, stable_run_identity, with_database_deadline,
@@ -10,17 +13,12 @@ use super::{
 use super::{
     MissingEvidence, PermissionInspectInput, PermissionInspection, PermissionResponseResult,
 };
-#[cfg(test)]
-use super::{RealInputDeadlineClock, receive_input_expiration};
 use crate::broker::records::{MemberKind, Placement};
 use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
-use crate::coding_agent::{
-    AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, SemanticFingerprint, StageGate,
-};
+use crate::coding_agent::{AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, StageGate};
 use crate::coding_agent::{ComposerOperation, coding_agent};
-use crate::digest::{canonical_json, sha256_hex};
 use crate::error::CafleetError;
-use crate::input::{Deadline, inherited_database_deadline, with_database_budget};
+use crate::input::{Deadline, bounded_by_inherited, with_database_budget};
 use rusqlite::{Connection, TransactionBehavior};
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind};
@@ -31,21 +29,17 @@ pub(crate) trait RequestTokenSource: Send {
     fn fill(&mut self, bytes: &mut [u8; 32]) -> Result<()>;
 }
 
-#[expect(
-    dead_code,
-    reason = "the reviewed input phases publish hook boundaries"
-)]
+const RECEIPT_CACHE_CAPACITY: usize = 4096;
+
 pub(crate) enum InputBoundary {
     Reserved,
     BeforeWrite,
     AfterWrite,
     TerminalState,
-    Settled,
-    Retired,
 }
 
 pub(crate) struct InputCheckpoint {
-    pub(crate) input_id: Option<i64>,
+    pub(crate) input_id: i64,
     pub(crate) stage: SubmissionStage,
     pub(crate) written_bytes: u64,
     pub(crate) output_seq: u64,
@@ -90,45 +84,22 @@ pub(crate) struct InputCoordinator {
 
 #[derive(Clone)]
 pub(crate) struct CurrentRequest {
-    request_generation: u64,
+    observed: ObservedRequest,
     identity: ControlIdentity,
     interaction_id: i64,
     event_id: i64,
     message_id: i64,
-    episode_seq: i64,
-    native_version: String,
-    detector_profile_version: String,
-    request_rule_id: String,
-    semantic: SemanticFingerprint,
-    choices: Vec<String>,
-    focus: String,
-    native_correlation: Option<String>,
     manual_generation: u64,
-    output_seq: u64,
-    answer_matches: Vec<AnswerMatch>,
 }
 impl CurrentRequest {
     fn same_request(&self, other: &Self) -> bool {
-        self.request_generation == other.request_generation
+        self.observed.request_generation == other.observed.request_generation
             && self.identity == other.identity
             && self.interaction_id == other.interaction_id
             && self.event_id == other.event_id
             && self.message_id == other.message_id
-            && self.episode_seq == other.episode_seq
-            && self.native_version == other.native_version
-            && self.detector_profile_version == other.detector_profile_version
-            && self.request_rule_id == other.request_rule_id
-            && self.semantic == other.semantic
-            && self.choices == other.choices
-            && self.focus == other.focus
-            && self.native_correlation == other.native_correlation
             && self.manual_generation == other.manual_generation
-            && self.answer_matches.len() == other.answer_matches.len()
-            && self
-                .answer_matches
-                .iter()
-                .zip(&other.answer_matches)
-                .all(|(a, b)| a.same_request(b))
+            && self.observed.same_request(&other.observed)
     }
 }
 
@@ -517,13 +488,8 @@ impl InputCoordinator {
         };
         let result =
             (|| {
-                let deadline = inherited_database_deadline(conn)
-                    .map_or(deadline, |bound| deadline.min(bound.instant()));
+                let deadline = bounded_by_inherited(conn, deadline);
                 check_deadline(Instant::now(), deadline)?;
-                ensure(
-                    request.protocol_version == super::CONTROL_PROTOCOL_VERSION,
-                    "input control protocol version mismatch",
-                )?;
                 request.identity.validate(&self.run)?;
                 let InputControlOperation::PermissionInspect(input) = request.operation else {
                     return Err(error("permission inspection operation required"));
@@ -554,7 +520,7 @@ impl InputCoordinator {
                 };
                 let observed = observation.current_request();
                 if let Some((current, _)) = &self.current_request
-                    && (current.request_generation != observation.request_generation()
+                    && (current.observed.request_generation != observation.request_generation()
                         || current.manual_generation != self.manual_generation
                         || observed.is_none())
                 {
@@ -579,28 +545,18 @@ impl InputCoordinator {
                         "permission inspection durable episode changed",
                     )?;
                     let next = CurrentRequest {
-                        request_generation: observed.request_generation,
+                        observed: observed.clone(),
                         identity: ControlIdentity::from_run(&self.run),
                         interaction_id: interaction.interaction_id,
                         event_id: view.event.event_id,
                         message_id,
-                        episode_seq: observed.episode_seq,
-                        native_version: observed.native_version.clone(),
-                        detector_profile_version: observed.detector_profile_version.clone(),
-                        request_rule_id: observed.request_rule_id.clone(),
-                        semantic: observed.semantic.clone(),
-                        choices: observed.choices.clone(),
-                        focus: observed.focus.clone(),
-                        native_correlation: observed.native_correlation.clone(),
                         manual_generation: self.manual_generation,
-                        output_seq: observed.output_seq,
-                        answer_matches: observed.answer_matches.clone(),
                     };
-                    if !next.answer_matches.is_empty() {
+                    if !next.observed.answer_matches.is_empty() {
                         if let Some((current, _)) = &mut self.current_request
                             && current.same_request(&next)
                         {
-                            current.output_seq = next.output_seq;
+                            current.observed.output_seq = next.observed.output_seq;
                         } else {
                             self.current_request = None;
                             let mut bytes = [0; 32];
@@ -612,14 +568,15 @@ impl InputCoordinator {
                             .current_request
                             .as_ref()
                             .expect("matched current request retained");
-                        let first = current.answer_matches[0].plan().capability();
+                        let first = current.observed.answer_matches[0].plan().capability();
                         answer_profile_version = Some(first.profile_version().to_owned());
-                        if current.answer_matches.iter().all(|m| {
+                        if current.observed.answer_matches.iter().all(|m| {
                             m.plan().capability().answer_rule_id() == first.answer_rule_id()
                         }) {
                             answer_rule_id = Some(first.answer_rule_id().to_owned());
                         }
                         supported_decisions = current
+                            .observed
                             .answer_matches
                             .iter()
                             .map(|m| m.plan().capability().decision())
@@ -663,13 +620,7 @@ impl InputCoordinator {
             })();
         result.map_err(|source| {
             self.current_request = None;
-            InputFailure {
-                source,
-                run_id: Some(self.run.run_id),
-                interaction_id,
-                input_id: None,
-                operation_key: None,
-            }
+            self.run_failure(source, interaction_id, None, None)
         })
     }
 
@@ -728,27 +679,15 @@ impl InputCoordinator {
             token == &selection.request.metadata.request_token
                 && current.same_request(bound)
                 && self.manual_generation == bound.manual_generation
-                && observation.request_generation() == bound.request_generation
-                && observed.request_generation == bound.request_generation
-                && observed.episode_seq == bound.episode_seq
+                && observation.request_generation() == bound.observed.request_generation
+                && observed.request_generation == bound.observed.request_generation
                 && observed.classification == storage::InteractionClass::PermissionRequest
-                && observed.native_version == bound.native_version
-                && observed.detector_profile_version == bound.detector_profile_version
-                && observed.request_rule_id == bound.request_rule_id
-                && observed.semantic == bound.semantic
-                && observed.choices == bound.choices
-                && observed.focus == bound.focus
-                && observed.native_correlation == bound.native_correlation
-                && observed.answer_matches.len() == bound.answer_matches.len()
-                && observed
-                    .answer_matches
-                    .iter()
-                    .zip(&bound.answer_matches)
-                    .all(|(a, b)| a.same_request(b)),
+                && observed.same_request(&bound.observed),
             "permission request token or current plan binding changed",
         )?;
         ensure(
             bound
+                .observed
                 .answer_matches
                 .iter()
                 .any(|m| m.plan() == &selection.plan),
@@ -791,6 +730,7 @@ impl InputCoordinator {
         let bound = &selection.binding;
         let bound_focus = || {
             bound
+                .observed
                 .answer_matches
                 .iter()
                 .find(|matched| matched.plan() == &selection.plan)
@@ -815,7 +755,7 @@ impl InputCoordinator {
             "input or observation changed between answer stages",
         )?;
         ensure(
-            observation.active_episode_seq() == Some(bound.episode_seq),
+            observation.active_episode_seq() == Some(bound.observed.episode_seq),
             "the permission episode changed between answer stages",
         )?;
         let deadline = self
@@ -833,8 +773,8 @@ impl InputCoordinator {
         let observed = observation.current_request();
         let unchanged = observed.is_some_and(|observed| {
             selection.continuation.is_none()
-                && observed.request_generation == bound.request_generation
-                && observed.focus == bound.focus
+                && observed.request_generation == bound.observed.request_generation
+                && observed.focus == bound.observed.focus
         });
         let rebound = match &gate {
             StageGate::Focus(choice) => {
@@ -851,21 +791,24 @@ impl InputCoordinator {
                     .find(|matched| matched.plan() == &selection.plan)
                     .and_then(AnswerMatch::focused_choice_id);
                 ensure(
-                    observed.episode_seq == bound.episode_seq
-                        && observed.request_rule_id == bound.request_rule_id
-                        && observed.semantic == bound.semantic
-                        && observed.choices == bound.choices
-                        && observed.native_correlation == bound.native_correlation
+                    observed.episode_seq == bound.observed.episode_seq
+                        && observed.request_rule_id == bound.observed.request_rule_id
+                        && observed.semantic == bound.observed.semantic
+                        && observed.choices == bound.observed.choices
+                        && observed.native_correlation == bound.observed.native_correlation
                         && focused == Some(choice.as_str()),
                     "the request changed other than to the next stage's focus",
                 )?;
                 PermissionSelection {
                     request: selection.request.clone(),
                     binding: CurrentRequest {
-                        request_generation: observed.request_generation,
-                        focus: observed.focus.clone(),
-                        output_seq: observed.output_seq,
-                        answer_matches: observed.answer_matches.clone(),
+                        observed: ObservedRequest {
+                            request_generation: observed.request_generation,
+                            focus: observed.focus.clone(),
+                            output_seq: observed.output_seq,
+                            answer_matches: observed.answer_matches.clone(),
+                            ..bound.observed.clone()
+                        },
                         ..bound.clone()
                     },
                     continuation: None,
@@ -882,7 +825,8 @@ impl InputCoordinator {
                     return waiting();
                 };
                 ensure(
-                    &continuation.rule_id == rule && continuation.episode_seq == bound.episode_seq,
+                    &continuation.rule_id == rule
+                        && continuation.episode_seq == bound.observed.episode_seq,
                     "a different continuation screen appeared",
                 )?;
                 PermissionSelection {
@@ -934,7 +878,7 @@ impl InputCoordinator {
         )?;
         let interaction = view.interaction.expect("validated permission interaction");
         ensure(
-            interaction.episode_seq == selection.binding.episode_seq
+            interaction.episode_seq == selection.binding.observed.episode_seq
                 && view.event.message_id == Some(selection.binding.message_id)
                 && metadata.expected_owner_epoch == self.run.owner_epoch,
             "permission response current association changed",
@@ -952,10 +896,6 @@ impl InputCoordinator {
     ) -> Result<Option<storage::PermissionReceipt>> {
         check_deadline(Instant::now(), deadline)?;
         super::input_client::validate_respond(input)?;
-        ensure(
-            request.protocol_version == super::CONTROL_PROTOCOL_VERSION,
-            "input protocol version mismatch",
-        )?;
         let mut expected = ControlIdentity::from_run(&self.run);
         expected.owner_epoch = input.expected_owner_epoch;
         ensure(
@@ -1005,19 +945,12 @@ impl InputCoordinator {
         };
         let mut known_id = None;
         let result = (|| {
-            let deadline = inherited_database_deadline(conn)
-                .map_or(deadline, |bound| deadline.min(bound.instant()));
+            let deadline = bounded_by_inherited(conn, deadline);
             let history =
                 self.permission_history(conn, run, request, input, deadline, &mut known_id)?;
             self.retained_projection(&history)
         })();
-        result.map_err(|source| InputFailure {
-            source,
-            run_id: Some(self.run.run_id),
-            interaction_id: Some(input.interaction_id),
-            input_id: known_id,
-            operation_key: Some(input.operation_key.clone()),
-        })
+        result.map_err(|source| self.response_failure(source, input, known_id))
     }
 
     fn permission_received(
@@ -1033,8 +966,7 @@ impl InputCoordinator {
         };
         let mut known_id = None;
         let result = (|| {
-            let deadline = inherited_database_deadline(conn)
-                .map_or(deadline, |bound| deadline.min(bound.instant()));
+            let deadline = bounded_by_inherited(conn, deadline);
             let history =
                 self.permission_history(conn, run, &request, input, deadline, &mut known_id)?;
             if let Some(reply) = self.retained_projection(&history)? {
@@ -1056,6 +988,7 @@ impl InputCoordinator {
                 "permission response token identity changed",
             )?;
             let plan = binding
+                .observed
                 .answer_matches
                 .iter()
                 .find(|matched| matched.plan().capability().decision() == input.decision)
@@ -1104,13 +1037,7 @@ impl InputCoordinator {
                 return Ok(Some(InputControlReply::PermissionResponse(
                     self.permission_result(
                         &selection.request.metadata,
-                        SubmissionResult {
-                            status: SubmissionStatus::Held,
-                            input_id: None,
-                            stage: SubmissionStage::ZeroBytes,
-                            output_seq: None,
-                            reason: Some("another programmatic input is pending".into()),
-                        },
+                        SubmissionResult::held("another programmatic input is pending"),
                     ),
                 )));
             }
@@ -1118,7 +1045,7 @@ impl InputCoordinator {
                 history
                     .as_ref()
                     .is_some_and(|r| self.operations.contains_key(&r.input.input_id))
-                    || self.operations.len() < 4096,
+                    || self.operations.len() < RECEIPT_CACHE_CAPACITY,
                 "input receipt cache is at capacity",
             )?;
             let bytes = Arc::from(selected_answer_stage(&selection.plan, 0)?.bytes());
@@ -1145,13 +1072,7 @@ impl InputCoordinator {
             });
             Ok(None)
         })();
-        result.map_err(|source| InputFailure {
-            source,
-            run_id: Some(self.run.run_id),
-            interaction_id: Some(input.interaction_id),
-            input_id: known_id,
-            operation_key: Some(input.operation_key.clone()),
-        })
+        result.map_err(|source| self.response_failure(source, input, known_id))
     }
 
     fn permission_result(
@@ -1169,6 +1090,36 @@ impl InputCoordinator {
             decision: metadata.decision,
             decision_source: metadata.decision_source,
         }
+    }
+
+    fn run_failure(
+        &self,
+        source: CafleetError,
+        interaction_id: Option<i64>,
+        input_id: Option<i64>,
+        operation_key: Option<String>,
+    ) -> InputFailure {
+        InputFailure {
+            source,
+            run_id: Some(self.run.run_id),
+            interaction_id,
+            input_id,
+            operation_key,
+        }
+    }
+
+    fn response_failure(
+        &self,
+        source: CafleetError,
+        input: &super::PermissionRespondInput,
+        input_id: Option<i64>,
+    ) -> InputFailure {
+        self.run_failure(
+            source,
+            Some(input.interaction_id),
+            input_id,
+            Some(input.operation_key.clone()),
+        )
     }
 
     fn failure(&self, source: CafleetError) -> InputFailure {
@@ -1194,10 +1145,7 @@ impl InputCoordinator {
             .pending
             .as_ref()
             .ok_or_else(|| error("input writer is absent"))?;
-        let mut effective = deadline.min(pending.deadline);
-        if let Some(inherited) = inherited_database_deadline(conn) {
-            effective = effective.min(inherited.instant());
-        }
+        let effective = bounded_by_inherited(conn, deadline.min(pending.deadline));
         check_deadline(Instant::now(), effective)?;
         Ok(effective)
     }
@@ -1295,8 +1243,7 @@ impl InputCoordinator {
             self.pending.is_none(),
             "receipt exclusion requires no active writer",
         )?;
-        let deadline = inherited_database_deadline(conn)
-            .map_or(deadline, |bound| deadline.min(bound.instant()));
+        let deadline = bounded_by_inherited(conn, deadline);
         let binding = self.receipt_guard_snapshot(conn, run, expected, deadline)?;
         Ok(InputGuard {
             retained: None,
@@ -1335,16 +1282,7 @@ impl InputCoordinator {
             return Ok(None);
         };
         transport.validate_observation_drain(&proof, deadline)?;
-        let InputDrain::Quiescent {
-            human_generation, ..
-        } = proof.evidence()
-        else {
-            unreachable!("opaque drain is quiescent")
-        };
-        ensure(
-            human_generation == self.manual_generation && !self.manual_accounting_failed,
-            "permission manual generation changed",
-        )?;
+        self.current_drain_seq(&proof, "permission manual generation changed")?;
         binding.rearm = Some(selection.clone());
         Ok(Some(InputGuard {
             retained: None,
@@ -1379,9 +1317,7 @@ impl InputCoordinator {
         self.validate_receipt_cache(operation)?;
         let mut result = self.result(operation);
         if self.operations.contains_key(&operation.input_id) {
-            let actual = self.retained_checkpoint(operation.input_id)?;
-            result.stage = actual.stage;
-            result.output_seq = Some(actual.output_seq);
+            result.stage = self.retained_checkpoint(operation.input_id)?.stage;
         } else if operation.state == storage::InputState::Settled
             && operation.disposition != Some(storage::InputDisposition::Submitted)
         {
@@ -1401,8 +1337,7 @@ impl InputCoordinator {
         if let ReceiptAction::Retire { input_id } = action {
             return self.retire_received(conn, run, *input_id, deadline);
         }
-        let deadline = inherited_database_deadline(conn)
-            .map_or(deadline, |inherited| deadline.min(inherited.instant()));
+        let deadline = bounded_by_inherited(conn, deadline);
         check_deadline(Instant::now(), deadline)?;
         let mut input_id = None;
         let mut operation_key = None;
@@ -1471,45 +1406,36 @@ impl InputCoordinator {
                         )?;
                         input
                     } else {
-                        if input.kind == storage::InputKind::PermissionResponse {
-                            let owner = self.run.owner();
+                        let owner = self.run.owner();
+                        let permission = if input.kind == storage::InputKind::PermissionResponse {
                             let receipt = storage::get_permission_response(&tx, *id)?;
                             let guard = self.acquire_receipt_guard(&tx, run, &receipt, deadline)?;
-                            let proof = if *disposition == storage::InputDisposition::NotSubmitted
-                                && guard
-                                    .binding
-                                    .as_ref()
-                                    .expect("receipt guard has its binding")
-                                    .zero_known
-                            {
-                                Some(guard.zero_byte_retirement(
-                                    &owner,
-                                    *id,
-                                    receipt.response.metadata.interaction_id,
-                                )?)
-                            } else {
-                                None
-                            };
-                            storage::settle_permission_response_in_transaction(
-                                &tx,
-                                &owner,
-                                &input,
-                                *disposition,
-                                evidence_ref,
-                                proof.as_ref(),
-                                deadline,
-                            )?
-                            .input
+                            Some((guard, receipt.response.metadata.interaction_id))
                         } else {
-                            storage::settle_input_in_transaction(
-                                &tx,
-                                &self.run.owner(),
-                                *id,
-                                *expected,
-                                *disposition,
-                                evidence_ref,
-                            )?
-                        }
+                            None
+                        };
+                        let proof = match &permission {
+                            Some((guard, interaction_id))
+                                if *disposition == storage::InputDisposition::NotSubmitted
+                                    && guard
+                                        .binding
+                                        .as_ref()
+                                        .expect("receipt guard has its binding")
+                                        .zero_known =>
+                            {
+                                Some(guard.zero_byte_retirement(&owner, *id, *interaction_id)?)
+                            }
+                            _ => None,
+                        };
+                        storage::settle_any_input_in_transaction(
+                            &tx,
+                            &owner,
+                            &input,
+                            *disposition,
+                            evidence_ref,
+                            proof.as_ref(),
+                            deadline,
+                        )?
                     };
                     check_deadline(Instant::now(), deadline)?;
                     tx.commit()?;
@@ -1528,13 +1454,7 @@ impl InputCoordinator {
             }
         })();
         result.map_err(|source| {
-            CafleetError::from(InputFailure {
-                source,
-                run_id: Some(self.run.run_id),
-                interaction_id: None,
-                input_id,
-                operation_key,
-            })
+            CafleetError::from(self.run_failure(source, None, input_id, operation_key))
         })
     }
 
@@ -1545,8 +1465,7 @@ impl InputCoordinator {
         input_id: i64,
         deadline: Instant,
     ) -> Result<InputControlReply> {
-        let deadline = inherited_database_deadline(conn)
-            .map_or(deadline, |inherited| deadline.min(inherited.instant()));
+        let deadline = bounded_by_inherited(conn, deadline);
         check_deadline(Instant::now(), deadline)?;
         let mut operation_key = None;
         let result = (|| {
@@ -1567,7 +1486,7 @@ impl InputCoordinator {
                 operation_key = Some(input.operation_key.clone());
                 self.validate_receipt_cache(&input)?;
                 ensure(
-                    input.run_id == self.run.run_id && input.state == storage::InputState::Settled,
+                    input.state == storage::InputState::Settled,
                     "retirement requires this run's settled input",
                 )?;
                 ensure(
@@ -1578,15 +1497,6 @@ impl InputCoordinator {
                     ensure(
                         !retained.leased && !retained.attempt_available,
                         "retirement requires an unleased consumed attempt",
-                    )?;
-                    ensure(
-                        retained.operation.run_id == input.run_id
-                            && retained.operation.operation_key == input.operation_key
-                            && retained.operation.kind == input.kind
-                            && retained.operation.payload_digest == input.payload_digest
-                            && retained.operation.message_id == input.message_id
-                            && retained.operation.permission_response == input.permission_response,
-                        "retirement cache identity changed",
                     )?;
                 }
                 check_deadline(Instant::now(), deadline)?;
@@ -1599,13 +1509,7 @@ impl InputCoordinator {
             }))
         })();
         result.map_err(|source| {
-            CafleetError::from(InputFailure {
-                source,
-                run_id: Some(self.run.run_id),
-                interaction_id: None,
-                input_id: Some(input_id),
-                operation_key,
-            })
+            CafleetError::from(self.run_failure(source, None, Some(input_id), operation_key))
         })
     }
 
@@ -1620,26 +1524,15 @@ impl InputCoordinator {
     }
 
     fn result(&self, operation: &storage::InputOperation) -> SubmissionResult {
-        use storage::{InputDisposition, InputState};
-        let (status, mut stage, reason) = match (operation.state, operation.disposition) {
-            (InputState::Accepted, _)
-            | (InputState::Settled, Some(InputDisposition::Submitted)) => {
-                (SubmissionStatus::Accepted, SubmissionStage::Submitted, None)
-            }
-            (InputState::InProgress | InputState::Uncertain, _) => {
-                (SubmissionStatus::Uncertain, SubmissionStage::Unknown, None)
-            }
-            (InputState::Ready, _) => (
-                SubmissionStatus::Held,
-                SubmissionStage::ZeroBytes,
-                Some("input requires live proven-zero revalidation".into()),
-            ),
-            (InputState::Settled, _) => (
-                SubmissionStatus::Rejected,
-                SubmissionStage::ZeroBytes,
-                Some("input operation key is consumed".into()),
-            ),
-        };
+        use storage::InputState;
+        let (status, mut stage, reason) = super::input_client::durable_outcome(operation)
+            .unwrap_or_else(|| {
+                (
+                    SubmissionStatus::Held,
+                    SubmissionStage::ZeroBytes,
+                    Some("input requires live proven-zero revalidation".into()),
+                )
+            });
         let retained = self.operations.get(&operation.input_id).map(|_| {
             self.retained_checkpoint(operation.input_id)
                 .expect("present input cache supplies its checkpoint")
@@ -1656,7 +1549,8 @@ impl InputCoordinator {
             status,
             input_id: retained
                 .as_ref()
-                .map_or(Some(operation.input_id), |point| point.input_id),
+                .map_or(operation.input_id, |point| point.input_id)
+                .into(),
             stage,
             output_seq: retained.map(|point| point.output_seq),
             reason,
@@ -1681,16 +1575,13 @@ impl InputCoordinator {
                     &mut RealInputDeadlineClock,
                 )
             })
-            .map_err(|source| InputFailure {
-                source,
-                run_id: Some(self.run.run_id),
-                interaction_id: None,
-                input_id: None,
-                operation_key: match &request.operation {
+            .map_err(|source| {
+                let operation_key = match &request.operation {
                     InputControlOperation::SubmitPrompt(input)
                     | InputControlOperation::SubmitExec(input) => Some(input.operation_key.clone()),
                     _ => None,
-                },
+                };
+                self.run_failure(source, None, None, operation_key)
             })?;
         self.handle_received(conn, run, request, observation, deadline)
     }
@@ -1713,10 +1604,6 @@ impl InputCoordinator {
         let mut known_key = None;
         let result = (|| {
             check_deadline(Instant::now(), deadline)?;
-            ensure(
-                request.protocol_version == super::CONTROL_PROTOCOL_VERSION,
-                "input protocol version mismatch",
-            )?;
             let mut expected = ControlIdentity::from_run(&self.run);
             ensure(
                 request.identity.owner_epoch > 0,
@@ -1777,7 +1664,7 @@ impl InputCoordinator {
                 crate::input::valid_input(&input.literal),
                 "composer submission requires one nonempty line without control characters",
             )?;
-            let digest = sha256_hex(canonical_json(&serde_json::json!({"run_id":self.run.run_id,"kind":input.input_kind.as_str(),"message_id":input.message_id,"literal":input.literal})).as_bytes());
+            let digest = storage::input_payload_digest(self.run.run_id, &input);
             let retained = with_database_deadline(conn, deadline, |conn| {
                 ensure(
                     storage::database_identity(conn)? == self.run.database_identity_json,
@@ -1797,42 +1684,30 @@ impl InputCoordinator {
             }
             request.identity.validate(&self.run)?;
             if self.pending.is_some() || !Self::composer_eligible(observation) {
-                return Ok(Some(InputControlReply::Submission(SubmissionResult {
-                    status: SubmissionStatus::Held,
-                    input_id: None,
-                    stage: SubmissionStage::ZeroBytes,
-                    output_seq: None,
-                    reason: Some("ordinary composer input is held".into()),
-                })));
+                return Ok(Some(InputControlReply::Submission(SubmissionResult::held(
+                    "ordinary composer input is held",
+                ))));
             }
             ensure(
-                self.operations.len() < 4096,
+                self.operations.len() < RECEIPT_CACHE_CAPACITY,
                 "input receipt cache is at capacity",
             )?;
             with_database_deadline(conn, deadline, |conn| self.validate_live(conn, run))?;
-            let Some(native) = self.run.native_version.as_deref() else {
-                return Ok(Some(InputControlReply::Submission(SubmissionResult {
-                    status: SubmissionStatus::Held,
-                    input_id: None,
-                    stage: SubmissionStage::ZeroBytes,
-                    output_seq: None,
-                    reason: Some("matching executable composer plan is unavailable".into()),
-                })));
+            let composer = match self.run.native_version.as_deref() {
+                Some(native) => {
+                    let backend = coding_agent(&self.run.backend)
+                        .ok_or_else(|| error("unknown input backend"))?;
+                    self.services
+                        .catalog
+                        .composer_plan(backend, native, composer_operation)
+                        .map(|plan| (native, backend, plan))
+                }
+                None => None,
             };
-            let backend =
-                coding_agent(&self.run.backend).ok_or_else(|| error("unknown input backend"))?;
-            let Some(plan) =
-                self.services
-                    .catalog
-                    .composer_plan(backend, native, composer_operation)?
-            else {
-                return Ok(Some(InputControlReply::Submission(SubmissionResult {
-                    status: SubmissionStatus::Held,
-                    input_id: None,
-                    stage: SubmissionStage::ZeroBytes,
-                    output_seq: None,
-                    reason: Some("matching executable composer plan is unavailable".into()),
-                })));
+            let Some((native, backend, plan)) = composer else {
+                return Ok(Some(InputControlReply::Submission(SubmissionResult::held(
+                    "matching executable composer plan is unavailable",
+                ))));
             };
             ensure(
                 plan.backend() == backend
@@ -1860,13 +1735,7 @@ impl InputCoordinator {
             });
             Ok(None)
         })();
-        result.map_err(|source| InputFailure {
-            source,
-            run_id: Some(self.run.run_id),
-            interaction_id: None,
-            input_id: known_input_id,
-            operation_key: known_key,
-        })
+        result.map_err(|source| self.run_failure(source, None, known_input_id, known_key))
     }
 
     fn retained_checkpoint(&self, input_id: i64) -> Result<InputCheckpoint> {
@@ -1875,7 +1744,7 @@ impl InputCoordinator {
             .get(&input_id)
             .ok_or_else(|| error("retained input operation is absent"))?;
         Ok(InputCheckpoint {
-            input_id: Some(input_id),
+            input_id,
             stage: retained.stage,
             written_bytes: retained.written_bytes,
             output_seq: retained.output_seq,
@@ -1908,33 +1777,50 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> Result<Option<u64>> {
-        if let Some(permission) = self.pending.as_ref().and_then(|p| p.permission.as_ref()) {
+        let permission = self.pending.as_ref().and_then(|p| p.permission.as_ref());
+        if let Some(permission) = permission {
             self.validate_permission_binding(permission, observation)?;
         }
         let Some(proof) = transport.take_input_drain() else {
             return Ok(None);
         };
-        if let Some(permission) = self.pending.as_ref().and_then(|p| p.permission.as_ref()) {
-            self.validate_permission_binding(permission, observation)?;
-            transport.validate_observation_drain(&proof, deadline)?;
-        } else {
-            transport.validate_input_drain(&proof, deadline)?;
-            if !Self::composer_eligible(observation) {
-                return Ok(None);
-            }
+        if !Self::validate_taken_drain(
+            transport,
+            &proof,
+            observation,
+            permission.is_some(),
+            deadline,
+        )? {
+            return Ok(None);
         }
-        let InputDrain::Quiescent {
-            human_generation,
-            output_seq,
-        } = proof.evidence()
-        else {
-            unreachable!("opaque drain is quiescent");
-        };
+        self.current_drain_seq(&proof, "input manual generation changed")
+            .map(Some)
+    }
+
+    /// A permission drain needs only a healthy observation; composer input also needs an
+    /// empty, eligible composer, and reports `false` when the composer is not eligible.
+    fn validate_taken_drain(
+        transport: &Transport,
+        proof: &DrainedInput,
+        observation: &ObservationController,
+        permission: bool,
+        deadline: Instant,
+    ) -> Result<bool> {
+        if permission {
+            transport.validate_observation_drain(proof, deadline)?;
+            Ok(true)
+        } else {
+            transport.validate_input_drain(proof, deadline)?;
+            Ok(Self::composer_eligible(observation))
+        }
+    }
+
+    fn current_drain_seq(&self, proof: &DrainedInput, message: &str) -> Result<u64> {
         ensure(
-            human_generation == self.manual_generation && !self.manual_accounting_failed,
-            "input manual generation changed",
+            proof.human_generation() == self.manual_generation && !self.manual_accounting_failed,
+            message,
         )?;
-        Ok(Some(output_seq))
+        Ok(proof.output_seq())
     }
 
     fn validate_write_now(
@@ -1988,8 +1874,6 @@ impl InputCoordinator {
                 check_deadline(Instant::now(), effective)?;
                 tx.rollback().map_err(crate::error::CafleetError::from)
             });
-            let effective = inherited_database_deadline(conn)
-                .map_or(effective, |bound| effective.min(bound.instant()));
             match result {
                 Ok(()) => {
                     check_deadline(Instant::now(), effective)?;
@@ -2026,7 +1910,17 @@ impl InputCoordinator {
             };
             if let Some(permission) = &pending.permission {
                 self.validate_permission_binding(permission, observation)?;
-                transport.validate_observation_drain(&proof, effective)?;
+            }
+            if !Self::validate_taken_drain(
+                transport,
+                &proof,
+                observation,
+                pending.permission.is_some(),
+                effective,
+            )? {
+                return Ok(None);
+            }
+            if let Some(permission) = &pending.permission {
                 let retained = self
                     .operations
                     .get(
@@ -2048,27 +1942,12 @@ impl InputCoordinator {
                 )?;
                 let stage = selected_answer_stage(&selection.plan, *next_stage)?;
                 ensure(
-                    stage.required_rule_id() == selection.binding.request_rule_id
+                    stage.required_rule_id() == selection.binding.observed.request_rule_id
                         && stage.required_choice_id() == selection.plan.choice_id(),
                     "permission stage rule or choice changed",
                 )?;
-            } else {
-                transport.validate_input_drain(&proof, effective)?;
-                if !Self::composer_eligible(observation) {
-                    return Ok(None);
-                }
             }
-            let InputDrain::Quiescent {
-                human_generation,
-                output_seq,
-            } = proof.evidence()
-            else {
-                unreachable!("opaque drain is quiescent");
-            };
-            ensure(
-                human_generation == self.manual_generation && !self.manual_accounting_failed,
-                "input manual generation changed",
-            )?;
+            let output_seq = self.current_drain_seq(&proof, "input manual generation changed")?;
             let id = pending
                 .input_id
                 .ok_or_else(|| error("armed input has no reservation"))?;
@@ -2087,8 +1966,6 @@ impl InputCoordinator {
             {
                 return Ok(None);
             }
-            let effective = inherited_database_deadline(conn)
-                .map_or(effective, |bound| effective.min(bound.instant()));
             check_deadline(Instant::now(), effective)?;
             Ok(Some((id, proof, effective, output_seq)))
         })()
@@ -2152,14 +2029,11 @@ impl InputCoordinator {
                     else {
                         return Ok(None);
                     };
-                    let InputDrain::Quiescent { output_seq, .. } = guard
+                    let output_seq = guard
                         .proof
                         .as_ref()
                         .expect("rearm guard retains its drain")
-                        .evidence()
-                    else {
-                        unreachable!("opaque drain is quiescent")
-                    };
+                        .output_seq();
                     let proof = guard.zero_byte_retirement(
                         &owner,
                         ready.input.input_id,
@@ -2406,10 +2280,7 @@ impl InputCoordinator {
             let completed = match (write, persisted) {
                 (Ok(_), Ok(operation)) => Ok(operation),
                 (Err(primary), Ok(_)) | (Ok(_), Err(primary)) => Err(primary),
-                (Err(primary), Err(bookkeeping)) => Err(CafleetError::WithDiagnostics {
-                    cause: Box::new(primary),
-                    diagnostics: vec![bookkeeping.message().into_owned()],
-                }),
+                (Err(primary), Err(bookkeeping)) => Err(with_diagnostic(primary, &bookkeeping)),
             };
             self.pending.as_mut().expect("completed input").phase = InputPhase::Blocked;
             let operation = completed?;
@@ -2486,10 +2357,7 @@ impl InputCoordinator {
                     .operation = operation;
                 source
             }
-            Err(bookkeeping) => CafleetError::WithDiagnostics {
-                cause: Box::new(source),
-                diagnostics: vec![bookkeeping.message().into_owned()],
-            },
+            Err(bookkeeping) => with_diagnostic(source, &bookkeeping),
         }
     }
 
@@ -2585,20 +2453,14 @@ impl InputCoordinator {
             .and_then(|count| {
                 usize::try_from(count).map_err(|_| error("manual input delta exceeds count range"))
             })
-            .and_then(|count| {
-                if count == 0 {
-                    Ok(())
-                } else {
-                    self.observe_manual(count)
-                }
-            });
+            .and_then(|count| self.observe_manual(count));
         if accounting.is_err() {
             self.manual_accounting_failed = true;
         }
         combine_manual_progress(progress, accounting).map_err(|source| self.failure(source))
     }
 
-    pub(crate) fn observe_manual(&mut self, count: usize) -> Result<()> {
+    fn observe_manual(&mut self, count: usize) -> Result<()> {
         if count > 0 {
             self.current_request = None;
         }
@@ -2626,10 +2488,14 @@ fn combine_manual_progress<T>(progress: Result<T>, accounting: Result<()>) -> Re
     match (progress, accounting) {
         (Ok(value), Ok(())) => Ok(value),
         (Err(cause), Ok(())) | (Ok(_), Err(cause)) => Err(cause),
-        (Err(primary), Err(accounting)) => Err(CafleetError::WithDiagnostics {
-            cause: Box::new(primary),
-            diagnostics: vec![accounting.message().into_owned()],
-        }),
+        (Err(primary), Err(accounting)) => Err(with_diagnostic(primary, &accounting)),
+    }
+}
+
+fn with_diagnostic(cause: CafleetError, diagnostic: &CafleetError) -> CafleetError {
+    CafleetError::WithDiagnostics {
+        cause: Box::new(cause),
+        diagnostics: vec![diagnostic.message().into_owned()],
     }
 }
 
@@ -3196,15 +3062,18 @@ mod tests {
                         .unwrap()
                         .is_none()
                 );
-                let canonical = format!(
-                    "{{\"kind\":\"prompt\",\"literal\":{},\"message_id\":null,\"run_id\":{}}}",
-                    serde_json::to_string(LITERAL).unwrap(),
-                    h.fixture.run.run_id,
-                );
                 let new = storage::NewInput {
                     operation_key: key.into(),
                     kind: storage::InputKind::Prompt,
-                    payload_digest: sha256_hex(canonical.as_bytes()),
+                    payload_digest: storage::input_payload_digest(
+                        h.fixture.run.run_id,
+                        &SubmitInput {
+                            operation_key: key.into(),
+                            input_kind: storage::InputKind::Prompt,
+                            message_id: None,
+                            literal: LITERAL.into(),
+                        },
+                    ),
                     message_id: None,
                 };
                 let mut independent =
@@ -4009,12 +3878,10 @@ mod tests {
                         InputBoundary::BeforeWrite => "before",
                         InputBoundary::AfterWrite => "after",
                         InputBoundary::TerminalState => "terminal",
-                        InputBoundary::Settled => "settled",
-                        InputBoundary::Retired => "retired",
                     };
                     self.points.lock().unwrap().push(Point {
                         boundary,
-                        id: state.input_id,
+                        id: Some(state.input_id),
                         count: state.written_bytes,
                         seq: state.output_seq,
                     });
@@ -4290,7 +4157,6 @@ mod tests {
                 pub(crate) fn request(&self, key: &str) -> InputControlRequest {
                     let run = &self.fixture.run;
                     InputControlRequest {
-                        protocol_version: 1,
                         identity: ControlIdentity {
                             database_identity_json: run.database_identity_json.clone(),
                             fleet_id: run.fleet_id,
@@ -4533,11 +4399,6 @@ mod tests {
                 body,
             );
         }
-        pub(super) const CLAUDE_PERMISSION_SCREEN: &str = include_str!(
-            "../../coding_agent/profiles/native/claude-2.1.302-default-permission-1.json"
-        );
-        const CLAUDE_IDLE_SCREEN: &str =
-            include_str!("../../coding_agent/profiles/native/claude-2.1.302-idle-composer-1.json");
 
         // The same byte stream the profile tests replay into a terminal for a committed native screen.
         pub(super) fn native_screen_bytes(fixture: &str) -> Vec<u8> {
@@ -4587,25 +4448,15 @@ mod tests {
                         rows: 36,
                         cols: 120,
                     },
-                    screen: native_screen_bytes(CLAUDE_IDLE_SCREEN),
+                    screen: native_screen_bytes(
+                        crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                            "claude-2.1.302-idle-composer-1",
+                        ),
+                    ),
                 },
                 |h| with_counted_tokens(h, body),
             );
         }
-
-        pub(super) const OPENCODE_IDLE_SCREEN: &str =
-            include_str!("../../coding_agent/profiles/native/opencode-2.1.4-idle-composer-1.json");
-        pub(super) const OPENCODE_ALLOW_SCREEN: &str = include_str!(
-            "../../coding_agent/profiles/native/opencode-2.1.4-allow-pre-stage-1.json"
-        );
-        pub(super) const OPENCODE_DENY_1_SCREEN: &str =
-            include_str!("../../coding_agent/profiles/native/opencode-2.1.4-deny-pre-stage-1.json");
-        pub(super) const OPENCODE_DENY_2_SCREEN: &str =
-            include_str!("../../coding_agent/profiles/native/opencode-2.1.4-deny-pre-stage-2.json");
-        pub(super) const OPENCODE_DENY_3_SCREEN: &str =
-            include_str!("../../coding_agent/profiles/native/opencode-2.1.4-deny-pre-stage-3.json");
-        pub(super) const OPENCODE_ALWAYS_SCREEN: &str =
-            include_str!("../../coding_agent/profiles/native/opencode-2.1.4-focus-always-1.json");
 
         pub(super) fn with_opencode_inspection(
             body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
@@ -4623,7 +4474,11 @@ mod tests {
                         rows: 36,
                         cols: 120,
                     },
-                    screen: native_screen_bytes(OPENCODE_IDLE_SCREEN),
+                    screen: native_screen_bytes(
+                        crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                            "opencode-2.1.4-idle-composer-1",
+                        ),
+                    ),
                 },
                 |h| with_counted_tokens(h, body),
             );
@@ -4746,6 +4601,86 @@ mod tests {
         pub(super) fn inspect(h: &mut Host, ids: (i64, i64, i64, i64)) -> PermissionInspection {
             h.drain();
             inspect_request(h, request(h, ids), h.until).unwrap()
+        }
+
+        #[test]
+        fn current_request_binding_compares_every_field_except_output_seq() {
+            with_inspection(|h, _, _| {
+                let first = stable_form(h);
+                inspect(h, first);
+                let (current, _) = h
+                    .coordinator
+                    .current_request
+                    .clone()
+                    .expect("an inspected request is current");
+                form(h, "OTHER_INSPECTION_OPERATION", "synthetic-only");
+                settled_ids(h);
+                let other = h
+                    .controller
+                    .current_request()
+                    .expect("the redrawn request is observed")
+                    .clone();
+                assert!(other.semantic != current.observed.semantic);
+                assert!(current.same_request(&current.clone()));
+                let mut moved = current.clone();
+                moved.observed.output_seq += 1;
+                assert!(current.same_request(&moved), "output_seq stays unbound");
+                type Mutation<'a> = (&'a str, Box<dyn Fn(&mut CurrentRequest) + 'a>);
+                let mutations: [Mutation; 16] = [
+                    (
+                        "request_generation",
+                        Box::new(|r| r.observed.request_generation += 1),
+                    ),
+                    ("identity", Box::new(|r| r.identity.owner_epoch += 1)),
+                    ("interaction_id", Box::new(|r| r.interaction_id += 1)),
+                    ("event_id", Box::new(|r| r.event_id += 1)),
+                    ("message_id", Box::new(|r| r.message_id += 1)),
+                    ("manual_generation", Box::new(|r| r.manual_generation += 1)),
+                    ("episode_seq", Box::new(|r| r.observed.episode_seq += 1)),
+                    (
+                        "classification",
+                        Box::new(|r| {
+                            r.observed.classification = storage::InteractionClass::Question
+                        }),
+                    ),
+                    (
+                        "native_version",
+                        Box::new(|r| r.observed.native_version.push('x')),
+                    ),
+                    (
+                        "detector_profile_version",
+                        Box::new(|r| r.observed.detector_profile_version.push('x')),
+                    ),
+                    (
+                        "request_rule_id",
+                        Box::new(|r| r.observed.request_rule_id.push('x')),
+                    ),
+                    (
+                        "semantic",
+                        Box::new(|r| r.observed.semantic = other.semantic.clone()),
+                    ),
+                    ("choices", Box::new(|r| r.observed.choices.push("x".into()))),
+                    ("focus", Box::new(|r| r.observed.focus.push('x'))),
+                    (
+                        "native_correlation",
+                        Box::new(|r| {
+                            r.observed.native_correlation =
+                                Some(format!("{:?}-changed", r.observed.native_correlation));
+                        }),
+                    ),
+                    (
+                        "answer_matches",
+                        Box::new(|r| {
+                            r.observed.answer_matches.pop();
+                        }),
+                    ),
+                ];
+                for (field, mutate) in mutations {
+                    let mut changed = current.clone();
+                    mutate(&mut changed);
+                    assert!(!current.same_request(&changed), "{field} binds the request");
+                }
+            });
         }
         fn token(value: &PermissionInspection) -> String {
             let token = value
@@ -5100,8 +5035,7 @@ mod tests {
             use crate::runtime::runner::{TerminalSize, TerminalState};
             let catalog =
                 ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
-            let detector =
-                Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1")).unwrap();
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1"));
             let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
             terminal
                 .feed(&inspection_fixture_form(
@@ -5169,10 +5103,9 @@ mod tests {
         use super::super::*;
         use super::ordinary_prompt::support::{Host, Pty};
         use super::permission_inspection_contracts::{
-            CLAUDE_PERMISSION_SCREEN, counts, detail_rewrite, form, inspect, inspect_request,
-            native_screen_bytes, request as inspection_target, settled_ids, stable_detailed_form,
-            stable_form, with_claude_inspection, with_definition, with_inspection,
-            with_redacted_inspection,
+            counts, detail_rewrite, form, inspect, inspect_request, native_screen_bytes,
+            request as inspection_target, settled_ids, stable_detailed_form, stable_form,
+            with_claude_inspection, with_definition, with_inspection, with_redacted_inspection,
         };
         use crate::broker::runtime::{DecisionSource, DirectorMode, PermissionDecision};
         use crate::coding_agent::CodingAgent;
@@ -5208,15 +5141,12 @@ mod tests {
                 operation_key: key.into(),
             }
         }
-        fn copy(input: &PermissionRespondInput) -> PermissionRespondInput {
-            serde_json::from_value(serde_json::to_value(input).unwrap()).unwrap()
-        }
         fn handle(
             h: &mut Host,
             input: &PermissionRespondInput,
         ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
             let mut request = h.request("unused-response-key");
-            request.operation = InputControlOperation::PermissionRespond(copy(input));
+            request.operation = InputControlOperation::PermissionRespond(input.clone());
             h.coordinator.handle_received(
                 &mut h.fixture.conn,
                 &h.fixture.run,
@@ -5489,22 +5419,20 @@ mod tests {
         }
 
         fn claude_blocked_form(h: &mut Host) -> (i64, i64, i64, i64) {
-            h.pty
-                .child
-                .bytes
-                .extend(native_screen_bytes(CLAUDE_PERMISSION_SCREEN));
+            h.pty.child.bytes.extend(native_screen_bytes(
+                crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                    "claude-2.1.302-default-permission-1",
+                ),
+            ));
             settled_ids(h)
         }
 
-        const CLAUDE_BOXED_SINGLE_ROW_SCREEN: &str = include_str!(
-            "../../coding_agent/profiles/native/claude-2.1.302-boxed-single-row-permission-1.json"
-        );
-
         fn claude_boxed_single_row_form(h: &mut Host) -> (i64, i64, i64, i64) {
-            h.pty
-                .child
-                .bytes
-                .extend(native_screen_bytes(CLAUDE_BOXED_SINGLE_ROW_SCREEN));
+            h.pty.child.bytes.extend(native_screen_bytes(
+                crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                    "claude-2.1.302-boxed-single-row-permission-1",
+                ),
+            ));
             settled_ids(h)
         }
 
@@ -5619,7 +5547,7 @@ mod tests {
             let captured = writes.concat();
             assert_eq!(captured.len(), 441);
             assert_eq!(
-                sha256_hex(&captured),
+                crate::digest::sha256_hex(&captured),
                 "014fe1213f56da769340abaf3cb46961c682a58d16fbccd7e16e62ca8e582e9e"
             );
             with_claude_inspection(|h, _, _| {
@@ -5799,7 +5727,7 @@ mod tests {
                 h.coordinator.fence(h.until).unwrap();
                 h.pty.child.bytes.extend(b"\x1b[0m");
                 let lookup = |h: &mut Host, key: &str| {
-                    let mut retained = copy(&input);
+                    let mut retained = input.clone();
                     retained.operation_key = key.into();
                     let mut request = h.request("unused-response-key");
                     request.operation = InputControlOperation::PermissionRespond(retained);
@@ -6510,6 +6438,7 @@ mod tests {
                     .as_ref()
                     .unwrap()
                     .0
+                    .observed
                     .answer_matches
                     .iter()
                     .find(|matched| {
@@ -6666,7 +6595,7 @@ mod tests {
                 let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
                 let run = storage::get_run(&h.fixture.conn, h.fixture.run.run_id).unwrap();
                 let point = h.coordinator.retained_checkpoint(id).unwrap();
-                let mut other = copy(&input);
+                let mut other = input.clone();
                 other.operation_key = "response:other-pending".into();
                 assert!(handle(h, &other).unwrap().is_none());
                 let pending = h.coordinator.pending.as_ref().unwrap();
@@ -7088,7 +7017,6 @@ mod tests {
                         "synthetic-permission",
                         input.decision,
                     )
-                    .unwrap()
                     .unwrap();
                 let cap = plan.capability();
                 let request = storage::NewPermissionResponse {
@@ -7194,7 +7122,7 @@ mod tests {
                 let expired = Instant::now() + Duration::from_millis(100);
                 assert!(expired < h.until);
                 let mut request = h.request("unused-cacheless-ready-expiry");
-                request.operation = InputControlOperation::PermissionRespond(copy(&input));
+                request.operation = InputControlOperation::PermissionRespond(input.clone());
                 assert!(
                     h.coordinator
                         .handle_received(
@@ -7515,10 +7443,7 @@ mod tests {
         }
 
         mod gated {
-            use super::super::permission_inspection_contracts::{
-                OPENCODE_ALLOW_SCREEN, OPENCODE_ALWAYS_SCREEN, OPENCODE_DENY_1_SCREEN,
-                OPENCODE_DENY_2_SCREEN, OPENCODE_DENY_3_SCREEN, with_opencode_inspection,
-            };
+            use super::super::permission_inspection_contracts::with_opencode_inspection;
             use super::*;
             use crate::coding_agent::profiles::catalog::test_support::{
                 gated_fixture_definition, gated_fixture_form, gated_reason_dialog,
@@ -7551,7 +7476,7 @@ mod tests {
                 deadline: Instant,
             ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
                 let mut request = h.request("unused-gated-response-key");
-                request.operation = InputControlOperation::PermissionRespond(copy(input));
+                request.operation = InputControlOperation::PermissionRespond(input.clone());
                 h.coordinator.handle_received(
                     &mut h.fixture.conn,
                     &h.fixture.run,
@@ -7983,7 +7908,14 @@ mod tests {
             #[test]
             fn opencode_allow_enters_on_the_focused_allow_once() {
                 with_opencode_inspection(|h, _, _| {
-                    show(h, native_screen_bytes(OPENCODE_ALLOW_SCREEN));
+                    show(
+                        h,
+                        native_screen_bytes(
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-allow-pre-stage-1",
+                            ),
+                        ),
+                    );
                     let ids = settled_ids(h);
                     let inspected = inspect(h, ids);
                     assert!(inspected.request_token.is_some());
@@ -8009,7 +7941,14 @@ mod tests {
             #[test]
             fn opencode_deny_moves_the_focus_selects_reject_and_submits_the_empty_reason() {
                 with_opencode_inspection(|h, calls, _| {
-                    show(h, native_screen_bytes(OPENCODE_DENY_1_SCREEN));
+                    show(
+                        h,
+                        native_screen_bytes(
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-deny-pre-stage-1",
+                            ),
+                        ),
+                    );
                     let ids = settled_ids(h);
                     let inspected = inspect(h, ids);
                     let input = command(
@@ -8024,11 +7963,25 @@ mod tests {
                     assert_eq!(h.pty.offers, offers(&[b"h"]));
                     show(
                         h,
-                        opencode_screen(OPENCODE_DENY_2_SCREEN, OPENCODE_DENY_1_SCREEN),
+                        opencode_screen(
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-deny-pre-stage-2",
+                            ),
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-deny-pre-stage-1",
+                            ),
+                        ),
                     );
                     write_stage(h, 2);
                     assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
-                    show(h, native_screen_bytes(OPENCODE_DENY_3_SCREEN));
+                    show(
+                        h,
+                        native_screen_bytes(
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-deny-pre-stage-3",
+                            ),
+                        ),
+                    );
                     assert!(interaction_open(h, ids.1));
                     arm_stage(h, 3);
                     h.drain();
@@ -8046,7 +7999,14 @@ mod tests {
             #[test]
             fn opencode_focus_on_always_allow_after_the_first_deny_stage_fails_uncertain() {
                 with_opencode_inspection(|h, _, _| {
-                    show(h, native_screen_bytes(OPENCODE_DENY_1_SCREEN));
+                    show(
+                        h,
+                        native_screen_bytes(
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-deny-pre-stage-1",
+                            ),
+                        ),
+                    );
                     let ids = settled_ids(h);
                     let deadline = soon(3000);
                     let input = admit(
@@ -8059,7 +8019,14 @@ mod tests {
                     let id = write_stage(h, 1);
                     show(
                         h,
-                        opencode_screen(OPENCODE_ALWAYS_SCREEN, OPENCODE_DENY_1_SCREEN),
+                        opencode_screen(
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-focus-always-1",
+                            ),
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-deny-pre-stage-1",
+                            ),
+                        ),
                     );
                     let outcome = settle(h, deadline);
                     assert_uncertain(h, id, outcome);
@@ -8077,10 +8044,24 @@ mod tests {
             #[test]
             fn opencode_reject_dialog_reached_by_human_input_offers_no_token() {
                 with_opencode_inspection(|h, _, _| {
-                    show(h, native_screen_bytes(OPENCODE_DENY_1_SCREEN));
+                    show(
+                        h,
+                        native_screen_bytes(
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-deny-pre-stage-1",
+                            ),
+                        ),
+                    );
                     let ids = settled_ids(h);
                     assert!(inspect(h, ids).request_token.is_some());
-                    show(h, native_screen_bytes(OPENCODE_DENY_3_SCREEN));
+                    show(
+                        h,
+                        native_screen_bytes(
+                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                                "opencode-2.1.4-deny-pre-stage-3",
+                            ),
+                        ),
+                    );
                     std::thread::sleep(Duration::from_millis(150));
                     h.drain();
                     blocked_reason(h, ids);

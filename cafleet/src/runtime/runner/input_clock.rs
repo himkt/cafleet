@@ -37,13 +37,11 @@ impl InputDeadlineClock for RealInputDeadlineClock {
             .checked_mul(1_000_000_000)
             .and_then(|value| value.checked_add(nanoseconds))
             .ok_or_else(|| error("monotonic clock nanoseconds overflow"))?;
-        let sample = InputClockSample {
+        Ok(InputClockSample {
             before,
             monotonic_ns,
             after,
-        };
-        sample.validate()?;
-        Ok(sample)
+        })
     }
 }
 

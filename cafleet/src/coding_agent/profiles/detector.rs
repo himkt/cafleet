@@ -1,5 +1,7 @@
 use super::CodingAgent;
-use super::catalog::{Capture, Profile, ProfileCatalog, Rule};
+use super::catalog::{
+    Capture, CursorRule, MatcherScope, Profile, ProfileCatalog, Rule, ScreenSelector,
+};
 use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::error::CafleetError;
@@ -288,8 +290,8 @@ fn qualifying_regions(
     screen: &ScreenSnapshot,
     lines: &[LogicalLine],
 ) -> Vec<Candidate> {
-    if (rule.region.screen == "primary" && screen.alternate_screen)
-        || (rule.region.screen == "alternate" && !screen.alternate_screen)
+    if (rule.region.screen == ScreenSelector::Primary && screen.alternate_screen)
+        || (rule.region.screen == ScreenSelector::Alternate && !screen.alternate_screen)
     {
         return Vec::new();
     }
@@ -320,15 +322,14 @@ fn qualifying_regions(
                 && screen.cursor_row < region.bottom
                 && (screen.cursor_col < region.right
                     || (region.right == screen.cols && screen.cursor_col == screen.cols));
-            let qualified = match rule.region.cursor.as_str() {
-                "at_end" => {
+            let qualified = match rule.region.cursor {
+                CursorRule::AtEnd => {
                     last.boundaries.get(found.end())
                         == Some(&(screen.cursor_row, screen.cursor_col))
                 }
-                "inside" => inside,
-                "outside" => !inside,
-                "any" => true,
-                _ => unreachable!("compiled cursor enum"),
+                CursorRule::Inside => inside,
+                CursorRule::Outside => !inside,
+                CursorRule::Any => true,
             };
             if qualified {
                 regions.push((start, end, region));
@@ -348,7 +349,7 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
     let mut focuses = BTreeMap::new();
     let mut spans = BTreeMap::new();
     for matcher in &rule.matchers {
-        let texts = if matcher.scope == "region" {
+        let texts = if matcher.scope == MatcherScope::Region {
             vec![region_text.as_str()]
         } else {
             selected.iter().map(|line| line.text.as_str()).collect()
@@ -383,7 +384,7 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
             matcher.id.clone(),
             serde_json::to_string(&(&matcher.id, &full, &named)).expect("focus strings serialize"),
         );
-        if matcher.scope == "line" {
+        if matcher.scope == MatcherScope::Line {
             spans.insert(matcher.id.clone(), located);
         }
         values.insert(matcher.id.clone(), named);
@@ -499,13 +500,6 @@ impl Detector {
             .iter()
             .find(|r| r.id == observed.rule_id)
             .expect("selected compiled request rule");
-        if !rule
-            .choices
-            .iter()
-            .any(|c| c.id == plan.choice_id() && c.scope == "single_request")
-        {
-            return Ok(None);
-        }
         let Some(matched) = match_rule(rule, screen, &logical_lines(screen)?) else {
             return Ok(None);
         };
@@ -543,12 +537,12 @@ impl Detector {
         catalog: &ProfileCatalog,
         backend: CodingAgent,
         version: Option<&str>,
-    ) -> Result<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             backend,
             version: version.map(str::to_owned),
             profile: catalog.matching(backend, version).cloned(),
-        })
+        }
     }
     fn annotation_blocks(
         &self,
@@ -645,7 +639,7 @@ impl Detector {
                     || [profile.detection.as_ref(), profile.composer.as_ref()]
                         .into_iter()
                         .flatten()
-                        .any(|cap| !cap.fixtures.is_empty() && cap.rules.contains(&rule.id))
+                        .any(|cap| cap.rules.contains(&rule.id))
             })
             .filter_map(|rule| match_rule(rule, screen, &lines))
             .collect::<Vec<_>>();
@@ -843,7 +837,6 @@ pub(crate) mod test_support {
     pub(crate) fn observation(definition: &Value, screen: &ScreenSnapshot) -> ScreenObservation {
         let catalog = ProfileCatalog::from_definitions(definition).unwrap();
         Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
-            .unwrap()
             .observe(screen)
             .unwrap()
     }
@@ -876,8 +869,7 @@ mod tests {
     #[test]
     fn permission_inspection_answer_match_uses_complete_current_rule_choice_and_focus() {
         let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
-        let detector =
-            Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1")).unwrap();
+        let detector = Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1"));
         let plan = catalog
             .answer_plan(
                 CodingAgent::Codex,
@@ -885,7 +877,6 @@ mod tests {
                 "synthetic-permission",
                 PermissionDecision::Allow,
             )
-            .unwrap()
             .unwrap();
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
         terminal
@@ -949,13 +940,14 @@ mod tests {
     }
 
     const CLAUDE_VERSION: &str = "2.1.302";
-    const NATIVE_SCREEN: &str = include_str!("native/claude-2.1.302-default-permission-1.json");
-    const ALLOW_SCREEN: &str = include_str!("native/claude-2.1.302-allow-pre-stage-1.json");
-    const DENY_SCREEN: &str = include_str!("native/claude-2.1.302-deny-pre-stage-1.json");
-    const IDLE_SCREEN: &str = include_str!("native/claude-2.1.302-idle-composer-1.json");
 
     fn native_screen(change: impl FnOnce(&mut Vec<String>), alternate: bool) -> ScreenSnapshot {
-        replay_native_fixture(NATIVE_SCREEN, change, alternate, None)
+        replay_native_fixture(
+            bundled_screen("claude-2.1.302-default-permission-1"),
+            change,
+            alternate,
+            None,
+        )
     }
     fn allow_or_deny_plan(decision: PermissionDecision) -> AnswerPlan {
         ProfileCatalog::bundled()
@@ -966,14 +958,12 @@ mod tests {
                 "claude-bash-permission",
                 decision,
             )
-            .unwrap()
             .expect("measured bundled answer plan")
     }
 
     fn claude_answer(screen: &ScreenSnapshot, plan: &AnswerPlan) -> Option<AnswerMatch> {
         let catalog = ProfileCatalog::bundled().unwrap();
         Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
-            .unwrap()
             .match_answer(screen, plan)
             .unwrap()
     }
@@ -981,8 +971,16 @@ mod tests {
     #[test]
     fn bundled_claude_answer_plans_match_their_measured_pre_stage_screens_and_bind_focus() {
         for (decision, fixture, choice) in [
-            (PermissionDecision::Allow, ALLOW_SCREEN, "allow-once"),
-            (PermissionDecision::Deny, DENY_SCREEN, "deny-once"),
+            (
+                PermissionDecision::Allow,
+                bundled_screen("claude-2.1.302-allow-pre-stage-1"),
+                "allow-once",
+            ),
+            (
+                PermissionDecision::Deny,
+                bundled_screen("claude-2.1.302-deny-pre-stage-1"),
+                "deny-once",
+            ),
         ] {
             let plan = allow_or_deny_plan(decision);
             let screen = replay_native_fixture(fixture, |_| {}, true, None);
@@ -1028,7 +1026,12 @@ mod tests {
 
     #[test]
     fn bundled_claude_idle_composer_is_a_verified_non_interaction_distinct_from_the_form() {
-        let idle = claude_observation(&replay_native_fixture(IDLE_SCREEN, |_| {}, true, None));
+        let idle = claude_observation(&replay_native_fixture(
+            bundled_screen("claude-2.1.302-idle-composer-1"),
+            |_| {},
+            true,
+            None,
+        ));
         assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
         assert_eq!(idle.match_evidence, MatchEvidence::Complete);
         assert!(idle.verified_noninteraction);
@@ -1052,17 +1055,22 @@ mod tests {
     #[test]
     fn bundled_claude_idle_rule_rejects_drafts_primary_copies_and_a_cursor_off_the_prefix_end() {
         let draft = claude_observation(&replay_native_fixture(
-            IDLE_SCREEN,
+            bundled_screen("claude-2.1.302-idle-composer-1"),
             |lines| lines[31] = "❯\u{a0}hello".into(),
             true,
             Some((31, 7)),
         ));
         assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "typed draft");
         assert!(!draft.verified_noninteraction);
-        let primary = claude_observation(&replay_native_fixture(IDLE_SCREEN, |_| {}, false, None));
+        let primary = claude_observation(&replay_native_fixture(
+            bundled_screen("claude-2.1.302-idle-composer-1"),
+            |_| {},
+            false,
+            None,
+        ));
         assert!(!primary.verified_noninteraction, "primary-screen copy");
         let away = claude_observation(&replay_native_fixture(
-            IDLE_SCREEN,
+            bundled_screen("claude-2.1.302-idle-composer-1"),
             |_| {},
             true,
             Some((31, 0)),
@@ -1077,7 +1085,6 @@ mod tests {
     fn claude_observation(screen: &ScreenSnapshot) -> ScreenObservation {
         let catalog = ProfileCatalog::bundled().unwrap();
         Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
-            .unwrap()
             .observe(screen)
             .unwrap()
     }
@@ -1114,7 +1121,6 @@ mod tests {
         let catalog = ProfileCatalog::bundled().unwrap();
         for version in ["2.1.301", "2.1.306"] {
             let fallback = Detector::new(&catalog, CodingAgent::Claude, Some(version))
-                .unwrap()
                 .observe(&screen)
                 .unwrap();
             assert_eq!(fallback.kind, observation.kind, "{version}");
@@ -1130,7 +1136,6 @@ mod tests {
             assert_eq!(fallback.raw_evidence["native_version"], version);
         }
         let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
-            .unwrap()
             .observe(&screen)
             .unwrap();
         assert_eq!(unprobed.kind, ObservationKind::Unknown);
@@ -1160,18 +1165,18 @@ mod tests {
         assert_ne!(headless.kind, permission, "form without its heading");
     }
 
-    const WRAPPED_SCREEN: &str = include_str!("native/claude-2.1.302-wrapped-permission-1.json");
-    const WRAPPED_ALLOW_SCREEN: &str =
-        include_str!("native/claude-2.1.302-wrapped-allow-pre-stage-1.json");
-    const WRAPPED_DENY_SCREEN: &str =
-        include_str!("native/claude-2.1.302-wrapped-deny-pre-stage-1.json");
     const WRAPPED_OPERATION: &str =
         "/tmp/cafleet-194/claude-wrap-cells-001/permission-\nprobe allow";
     const WRAPPED_COMMAND: &str = "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow";
     const NATIVE_OPERATION: &str = "/private/tmp/cafleet-194/cells-002/permission-probe allow";
 
     fn wrapped_screen(change: impl FnOnce(&mut Vec<String>), alternate: bool) -> ScreenSnapshot {
-        replay_native_fixture(WRAPPED_SCREEN, change, alternate, None)
+        replay_native_fixture(
+            bundled_screen("claude-2.1.302-wrapped-permission-1"),
+            change,
+            alternate,
+            None,
+        )
     }
 
     // Replaces the 120-column fixture's single operation row (row 18) with `rows`, taking the extra
@@ -1239,11 +1244,11 @@ mod tests {
         );
         for (fixture, operation) in [
             (
-                WRAPPED_ALLOW_SCREEN,
+                bundled_screen("claude-2.1.302-wrapped-allow-pre-stage-1"),
                 "/tmp/cafleet-194/claude-wrap-ans-allow-001/permiss\nion-probe allow",
             ),
             (
-                WRAPPED_DENY_SCREEN,
+                bundled_screen("claude-2.1.302-wrapped-deny-pre-stage-1"),
                 "/tmp/cafleet-194/claude-wrap-ans-deny-001/permissi\non-probe deny",
             ),
         ] {
@@ -1253,12 +1258,10 @@ mod tests {
         }
         let catalog = ProfileCatalog::bundled().unwrap();
         let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
-            .unwrap()
             .observe(&screen)
             .unwrap();
         assert_eq!(unprobed.kind, ObservationKind::Unknown);
         let fallback = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.306"))
-            .unwrap()
             .observe(&screen)
             .unwrap();
         assert_ne!(fallback.kind, ObservationKind::Unknown);
@@ -1272,11 +1275,11 @@ mod tests {
         );
         for (fixture, operation) in [
             (
-                ALLOW_SCREEN,
+                bundled_screen("claude-2.1.302-allow-pre-stage-1"),
                 "/private/tmp/cafleet-194/ans-allow-001/permission-probe allow",
             ),
             (
-                DENY_SCREEN,
+                bundled_screen("claude-2.1.302-deny-pre-stage-1"),
                 "/private/tmp/cafleet-194/ans-deny-001/permission-probe deny",
             ),
         ] {
@@ -1402,7 +1405,9 @@ mod tests {
 
     #[test]
     fn bundled_claude_operation_is_only_the_rows_between_the_dashed_rules() {
-        let screen = serde_json::from_str::<Value>(WRAPPED_SCREEN).unwrap();
+        let screen =
+            serde_json::from_str::<Value>(bundled_screen("claude-2.1.302-wrapped-permission-1"))
+                .unwrap();
         let transcript = screen["lines"][13].as_str().unwrap();
         assert!(transcript.starts_with("  ⎿  $ "));
         assert_eq!(
@@ -1522,9 +1527,6 @@ mod tests {
         );
     }
 
-    const BOXED_SCREEN: &str = include_str!("native/claude-2.1.302-boxed-permission-1.json");
-    const BOXED_SINGLE_ROW_SCREEN: &str =
-        include_str!("native/claude-2.1.302-boxed-single-row-permission-1.json");
     const BOXED_PATH: &str =
         "/tmp/cafleet-194/claude-boxed-cells-089-wide-operation-probe-01/permission-probe";
     const BOXED_SINGLE_ROW_COMMAND: &str =
@@ -1532,7 +1534,12 @@ mod tests {
 
     #[test]
     fn bundled_claude_detects_the_native_boxed_form_and_reports_its_displayed_gutter_rows() {
-        let screen = replay_native_fixture(BOXED_SCREEN, |_| {}, true, None);
+        let screen = replay_native_fixture(
+            bundled_screen("claude-2.1.302-boxed-permission-1"),
+            |_| {},
+            true,
+            None,
+        );
         assert_eq!((screen.rows, screen.cols), (36, 89));
         assert_eq!((screen.cursor_row, screen.cursor_col), (27, 1));
         let observation = claude_observation(&screen);
@@ -1552,7 +1559,9 @@ mod tests {
 
     #[test]
     fn bundled_claude_boxed_form_tolerates_the_written_spaces_before_its_closing_line() {
-        let fixture = serde_json::from_str::<Value>(BOXED_SCREEN).unwrap();
+        let fixture =
+            serde_json::from_str::<Value>(bundled_screen("claude-2.1.302-boxed-permission-1"))
+                .unwrap();
         assert_eq!(fixture["lines"][32], "   4. No");
         assert_eq!(
             fixture["lines"][33], "  ",
@@ -1561,7 +1570,7 @@ mod tests {
         assert_eq!(fixture["lines"][34], " Esc to cancel · Tab to amend");
         let operation = format!("│ {BOXED_PATH}\n│ allow");
         let cleared = claude_observation(&replay_native_fixture(
-            BOXED_SCREEN,
+            bundled_screen("claude-2.1.302-boxed-permission-1"),
             |lines| lines[33].clear(),
             true,
             None,
@@ -1569,14 +1578,24 @@ mod tests {
         assert_claude_request(&cleared, &operation);
         assert!(
             cleared.fingerprint
-                == claude_observation(&replay_native_fixture(BOXED_SCREEN, |_| {}, true, None))
-                    .fingerprint
+                == claude_observation(&replay_native_fixture(
+                    bundled_screen("claude-2.1.302-boxed-permission-1"),
+                    |_| {},
+                    true,
+                    None
+                ))
+                .fingerprint
         );
     }
 
     #[test]
     fn bundled_claude_detects_the_native_single_row_box_and_keeps_its_gutter() {
-        let screen = replay_native_fixture(BOXED_SINGLE_ROW_SCREEN, |_| {}, true, None);
+        let screen = replay_native_fixture(
+            bundled_screen("claude-2.1.302-boxed-single-row-permission-1"),
+            |_| {},
+            true,
+            None,
+        );
         assert_eq!((screen.rows, screen.cols), (36, 120));
         assert_eq!((screen.cursor_row, screen.cursor_col), (23, 1));
         let observation = claude_observation(&screen);
@@ -1616,7 +1635,7 @@ mod tests {
         let headless = claude_observation(&wrapped_screen(|lines| lines[17].clear(), true));
         assert_ne!(headless.kind, permission, "form without its heading");
         let outside = claude_observation(&replay_native_fixture(
-            WRAPPED_SCREEN,
+            bundled_screen("claude-2.1.302-wrapped-permission-1"),
             |_| {},
             true,
             Some((12, 0)),
@@ -1648,13 +1667,13 @@ mod tests {
         for (decision, fixture, choice, byte) in [
             (
                 PermissionDecision::Allow,
-                WRAPPED_ALLOW_SCREEN,
+                bundled_screen("claude-2.1.302-wrapped-allow-pre-stage-1"),
                 "allow-once",
                 b'1',
             ),
             (
                 PermissionDecision::Deny,
-                WRAPPED_DENY_SCREEN,
+                bundled_screen("claude-2.1.302-wrapped-deny-pre-stage-1"),
                 "deny-once",
                 b'4',
             ),
@@ -1706,17 +1725,11 @@ mod tests {
     }
 
     const CODEX_VERSION: &str = "0.163.0";
-    const CODEX_PERMISSION_SCREEN: &str =
-        include_str!("native/codex-0.163.0-on-request-permission-1.json");
-    const CODEX_ALLOW_SCREEN: &str = include_str!("native/codex-0.163.0-allow-pre-stage-1.json");
-    const CODEX_DENY_SCREEN: &str = include_str!("native/codex-0.163.0-deny-pre-stage-1.json");
-    const CODEX_IDLE_SCREEN: &str = include_str!("native/codex-0.163.0-idle-composer-1.json");
     const CODEX_CHOICES: [&str; 2] = ["Yes, proceed", "No, and tell Codex what to do differently"];
 
     fn codex_observation(screen: &ScreenSnapshot) -> ScreenObservation {
         let catalog = ProfileCatalog::bundled().unwrap();
         Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
-            .unwrap()
             .observe(screen)
             .unwrap()
     }
@@ -1730,14 +1743,12 @@ mod tests {
                 "codex-exec-approval",
                 decision,
             )
-            .unwrap()
             .expect("measured bundled Codex answer plan")
     }
 
     fn codex_answer(screen: &ScreenSnapshot, plan: &AnswerPlan) -> Option<AnswerMatch> {
         let catalog = ProfileCatalog::bundled().unwrap();
         Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
-            .unwrap()
             .match_answer(screen, plan)
             .unwrap()
     }
@@ -1746,7 +1757,12 @@ mod tests {
         change: impl FnOnce(&mut Vec<String>),
         cursor: Option<(u16, u16)>,
     ) -> ScreenSnapshot {
-        replay_native_fixture(CODEX_PERMISSION_SCREEN, change, true, cursor)
+        replay_native_fixture(
+            bundled_screen("codex-0.163.0-on-request-permission-1"),
+            change,
+            true,
+            cursor,
+        )
     }
 
     // Writing the full-width cursor row last leaves the terminal in its pending-wrap state, which an
@@ -1831,7 +1847,6 @@ mod tests {
         let catalog = ProfileCatalog::bundled().unwrap();
         for version in ["0.162.0", "0.164.0"] {
             let fallback = Detector::new(&catalog, CodingAgent::Codex, Some(version))
-                .unwrap()
                 .observe(&screen)
                 .unwrap();
             assert_eq!(fallback.kind, observation.kind, "{version}");
@@ -1843,7 +1858,6 @@ mod tests {
             assert_eq!(fallback.raw_evidence["native_version"], version);
         }
         let unprobed = Detector::new(&catalog, CodingAgent::Codex, None)
-            .unwrap()
             .observe(&screen)
             .unwrap();
         assert_eq!(unprobed.kind, ObservationKind::Unknown);
@@ -1852,7 +1866,10 @@ mod tests {
     #[test]
     fn bundled_codex_detection_counts_a_pending_wrap_cursor_on_the_full_width_closing_row_as_inside()
      {
-        let screen = replay_with_pending_wrap(CODEX_PERMISSION_SCREEN, |_| {});
+        let screen = replay_with_pending_wrap(
+            bundled_screen("codex-0.163.0-on-request-permission-1"),
+            |_| {},
+        );
         assert_eq!(
             (screen.cursor_row, screen.cursor_col),
             (35, 120),
@@ -1867,7 +1884,10 @@ mod tests {
         assert!(
             observation.fingerprint == codex_observation(&codex_form(|_| {}, None)).fingerprint
         );
-        for fixture in [CODEX_ALLOW_SCREEN, CODEX_DENY_SCREEN] {
+        for fixture in [
+            bundled_screen("codex-0.163.0-allow-pre-stage-1"),
+            bundled_screen("codex-0.163.0-deny-pre-stage-1"),
+        ] {
             let pre_stage = codex_observation(&replay_with_pending_wrap(fixture, |_| {}));
             assert_eq!(
                 pre_stage.kind,
@@ -1880,7 +1900,7 @@ mod tests {
     fn bundled_codex_detector_rejects_copies_that_are_not_the_live_approval_form() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
         let primary = codex_observation(&replay_native_fixture(
-            CODEX_PERMISSION_SCREEN,
+            bundled_screen("codex-0.163.0-on-request-permission-1"),
             |_| {},
             false,
             None,
@@ -1932,11 +1952,11 @@ mod tests {
         );
         for (fixture, operation) in [
             (
-                CODEX_ALLOW_SCREEN,
+                bundled_screen("codex-0.163.0-allow-pre-stage-1"),
                 "/tmp/cafleet-194/codex-ans-allow-001/permission-probe allow",
             ),
             (
-                CODEX_DENY_SCREEN,
+                bundled_screen("codex-0.163.0-deny-pre-stage-1"),
                 "/tmp/cafleet-194/codex-ans-deny-001/permission-probe deny",
             ),
         ] {
@@ -1953,8 +1973,16 @@ mod tests {
     #[test]
     fn bundled_codex_answer_plans_match_their_measured_pre_stage_screens_and_bind_focus() {
         for (decision, fixture, choice) in [
-            (PermissionDecision::Allow, CODEX_ALLOW_SCREEN, "allow-once"),
-            (PermissionDecision::Deny, CODEX_DENY_SCREEN, "deny-once"),
+            (
+                PermissionDecision::Allow,
+                bundled_screen("codex-0.163.0-allow-pre-stage-1"),
+                "allow-once",
+            ),
+            (
+                PermissionDecision::Deny,
+                bundled_screen("codex-0.163.0-deny-pre-stage-1"),
+                "deny-once",
+            ),
         ] {
             let plan = codex_plan(decision);
             let screen = replay_native_fixture(fixture, |_| {}, true, None);
@@ -2004,7 +2032,7 @@ mod tests {
     #[test]
     fn bundled_codex_idle_composer_is_a_verified_non_interaction_distinct_from_the_form() {
         let idle = codex_observation(&replay_native_fixture(
-            CODEX_IDLE_SCREEN,
+            bundled_screen("codex-0.163.0-idle-composer-1"),
             |_| {},
             true,
             None,
@@ -2025,7 +2053,7 @@ mod tests {
     #[test]
     fn bundled_codex_idle_rule_rejects_drafts_primary_copies_and_a_cursor_off_the_prefix_end() {
         let draft = codex_observation(&replay_native_fixture(
-            CODEX_IDLE_SCREEN,
+            bundled_screen("codex-0.163.0-idle-composer-1"),
             |lines| lines[32] = "› hello".into(),
             true,
             Some((32, 7)),
@@ -2033,14 +2061,14 @@ mod tests {
         assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "typed draft");
         assert!(!draft.verified_noninteraction);
         let primary = codex_observation(&replay_native_fixture(
-            CODEX_IDLE_SCREEN,
+            bundled_screen("codex-0.163.0-idle-composer-1"),
             |_| {},
             false,
             None,
         ));
         assert!(!primary.verified_noninteraction, "primary-screen copy");
         let away = codex_observation(&replay_native_fixture(
-            CODEX_IDLE_SCREEN,
+            bundled_screen("codex-0.163.0-idle-composer-1"),
             |_| {},
             true,
             Some((32, 0)),
@@ -2070,13 +2098,12 @@ mod tests {
         }
 
         fn detector() -> Detector {
-            Detector::new(&gated_catalog(), CodingAgent::Codex, Some(VERSION)).unwrap()
+            Detector::new(&gated_catalog(), CodingAgent::Codex, Some(VERSION))
         }
 
         fn gated_plan(decision: PermissionDecision) -> AnswerPlan {
             gated_catalog()
                 .answer_plan(CodingAgent::Codex, VERSION, GATED_RULE, decision)
-                .unwrap()
                 .unwrap()
         }
 
@@ -2582,7 +2609,6 @@ mod tests {
     fn runtime_detector_unsupported_version_reports_absent_evidence_without_nearby_profile() {
         let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
         let value = Detector::new(&catalog, CodingAgent::Claude, Some(VERSION))
-            .unwrap()
             .observe(&terminal(&lines("write disposable.txt"), 80, false).snapshot())
             .unwrap();
         assert!(matches!(value.kind, ObservationKind::Unknown));
@@ -2769,7 +2795,6 @@ mod tests {
             let catalog = ProfileCatalog::from_definitions(&annotated()).unwrap();
             let rows = refusal_screen(&["write one.txt"]);
             let observed = Detector::new(&catalog, CodingAgent::Claude, Some(VERSION))
-                .unwrap()
                 .observe(&terminal(&rows, 80, false).snapshot())
                 .unwrap();
             assert!(observed.annotations.is_empty());

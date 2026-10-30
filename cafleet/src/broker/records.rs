@@ -178,10 +178,7 @@ mod tests {
     use crate::error::CafleetError;
 
     fn fixture() -> (tempfile::TempDir, rusqlite::Connection, i64, i64) {
-        let dir = tempfile::Builder::new()
-            .prefix(".typed-records-")
-            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "typed-records");
         (dir, conn, fleet, director)

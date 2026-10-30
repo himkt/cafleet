@@ -76,9 +76,8 @@ impl CodingAgent {
         executable: &Path,
         deadline: Instant,
     ) -> Result<String, CafleetError> {
-        let fail = |detail: String| {
-            CafleetError::App(format!("{} --version {detail}", self.binary_name()))
-        };
+        let fail =
+            |detail: String| CafleetError::App(format!("{} --version {detail}", self.name()));
         let mut child = Command::new(executable)
             .arg("--version")
             .stdin(Stdio::null())
@@ -214,24 +213,12 @@ mod tests {
         #[test]
         fn native_version_probe_records_the_single_version_token_of_a_version_only_invocation() {
             let dir = tempfile::tempdir().unwrap();
-            let only_version =
-                "[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nread -r ignored || true";
-            for (index, (output, expected)) in [
-                ("2.1.302 (Claude Code)", "2.1.302"),
-                ("codex-cli 0.163.0", "0.163.0"),
-                ("opencode v2.1.4", "2.1.4"),
-                ("1.2.3-beta.1", "1.2.3-beta.1"),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let path = stub(
-                    dir.path(),
-                    &format!("native-{index}"),
-                    &format!("{only_version}\nprintf '%s\\n' '{output}'\nprintf 'ignored\\n' >&2"),
-                );
-                assert_eq!(probe(&path).unwrap(), expected, "{output}");
-            }
+            let path = stub(
+                dir.path(),
+                "native",
+                "[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nread -r ignored || true\nprintf '%s\\n' '2.1.302 (Claude Code)'\nprintf 'ignored\\n' >&2",
+            );
+            assert_eq!(probe(&path).unwrap(), "2.1.302");
         }
 
         #[test]
@@ -239,12 +226,6 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             for (index, (case, body)) in [
                 ("nonzero exit", "printf '2.1.302\\n'; exit 1"),
-                ("no version token", "printf 'Claude Code\\n'"),
-                ("two version tokens", "printf '2.1.302 2.1.303\\n'"),
-                (
-                    "v-prefixed and plain version tokens",
-                    "printf 'v2.1.4 2.1.5\\n'",
-                ),
                 (
                     "version outside the first line",
                     "printf 'Claude Code\\n2.1.302\\n'",
@@ -329,22 +310,16 @@ mod tests {
         #[test]
         fn native_launch_identity_runs_an_unprofiled_version_under_the_newest_bundled_profile() {
             let catalog = ProfileCatalog::bundled().unwrap();
-            for (backend, pinned, probes) in [
-                (CodingAgent::Claude, "2.1.302", ["2.1.306", "2.1.301"]),
-                (CodingAgent::Codex, "0.163.0", ["0.164.0", "0.162.0"]),
-                (CodingAgent::Opencode, "2.1.4", ["2.1.5", "2.1.3"]),
-            ] {
-                let exact = catalog.capabilities(backend, Some(pinned));
-                let profile = exact
+            for (backend, pinned, probes) in
+                crate::coding_agent::profiles::catalog::test_support::BUNDLED_PROBES
+            {
+                let profile = catalog
+                    .capabilities(backend, Some(pinned))
                     .profile_version
-                    .clone()
                     .expect("each backend bundles a profile for its pinned version");
                 for probe in probes {
                     let identity = native_launch_identity(backend, Ok(probe.into()), &catalog);
                     assert_eq!(identity.native_version.as_deref(), Some(probe));
-                    assert_eq!(identity.profile_version.as_deref(), Some(profile.as_str()));
-                    assert_eq!(identity.profile_match, Some(ProfileMatch::Fallback));
-                    assert_eq!(identity.coverage, exact.detection, "{backend:?} {probe}");
                     assert_eq!(identity.coverage, Coverage::Tested, "{backend:?} {probe}");
                     assert_eq!(
                         identity.warning,

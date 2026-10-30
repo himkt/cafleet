@@ -1,5 +1,5 @@
 use super::CodingAgent;
-use super::catalog::{Fixture, ProfileCatalog};
+use super::catalog::ProfileCatalog;
 use crate::error::CafleetError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,13 +28,7 @@ impl ComposerOperation {
 pub(super) struct ComposerSubmission {
     pub(crate) prefix: Vec<u8>,
     pub(crate) submit: Vec<u8>,
-    pub(crate) fixtures: Vec<Fixture>,
-}
-
-impl ComposerSubmission {
-    pub(super) fn native_provenance(&self) -> bool {
-        self.fixtures.iter().all(|fixture| fixture.kind == "native")
-    }
+    pub(crate) fixture_ids: Vec<String>,
 }
 
 pub(crate) struct ComposerPlan {
@@ -97,31 +91,23 @@ impl ProfileCatalog {
         backend: CodingAgent,
         native_version: &str,
         operation: ComposerOperation,
-    ) -> Result<Option<ComposerPlan>, CafleetError> {
-        let Some(profile) = self.matching(backend, Some(native_version)) else {
-            return Ok(None);
-        };
-        let Some(submission) = &profile.submissions[operation.index()] else {
-            return Ok(None);
-        };
+    ) -> Option<ComposerPlan> {
+        let profile = self.matching(backend, Some(native_version))?;
+        let submission = profile.submissions[operation.index()].as_ref()?;
         let observation = profile
             .composer
             .as_ref()
             .expect("executable composer requires validated observation provenance");
-        Ok(Some(ComposerPlan {
+        Some(ComposerPlan {
             backend,
             native_version: native_version.into(),
             profile_version: profile.version.clone(),
             rule_ids: observation.rules.clone(),
-            fixture_ids: submission
-                .fixtures
-                .iter()
-                .map(|fixture| fixture.id.clone())
-                .collect(),
+            fixture_ids: submission.fixture_ids.clone(),
             operation,
             prefix: submission.prefix.clone(),
             submit: submission.submit.clone(),
-        }))
+        })
     }
 }
 
@@ -181,7 +167,6 @@ pub(crate) mod test_support {
     pub(crate) fn plan(catalog: &ProfileCatalog, operation: ComposerOperation) -> ComposerPlan {
         catalog
             .composer_plan(CodingAgent::Codex, VERSION, operation)
-            .unwrap()
             .expect("valid selected operation has an executable plan")
     }
 
@@ -255,7 +240,6 @@ mod tests {
             assert!(
                 catalog
                     .composer_plan(CodingAgent::Codex, VERSION, operation)
-                    .unwrap()
                     .is_none()
             );
         }
@@ -294,7 +278,6 @@ mod tests {
                 assert!(
                     catalog
                         .composer_plan(CodingAgent::Codex, VERSION, operation)
-                        .unwrap()
                         .is_none()
                 );
             }
@@ -318,7 +301,6 @@ mod tests {
         assert!(
             catalog
                 .composer_plan(CodingAgent::Codex, VERSION, ComposerOperation::Exec)
-                .unwrap()
                 .is_none()
         );
         let actual = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
@@ -343,7 +325,6 @@ mod tests {
         assert!(
             catalog
                 .composer_plan(CodingAgent::Codex, VERSION, ComposerOperation::Prompt)
-                .unwrap()
                 .is_none()
         );
         let actual = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
@@ -403,19 +384,9 @@ mod tests {
                 "{backend:?}"
             );
             for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                assert!(
-                    bundled
-                        .composer_plan(backend, VERSION, operation)
-                        .unwrap()
-                        .is_none()
-                );
+                assert!(bundled.composer_plan(backend, VERSION, operation).is_none());
                 if backend != CodingAgent::Codex {
-                    assert!(
-                        catalog
-                            .composer_plan(backend, VERSION, operation)
-                            .unwrap()
-                            .is_none()
-                    );
+                    assert!(catalog.composer_plan(backend, VERSION, operation).is_none());
                     capabilities(
                         &catalog,
                         backend,

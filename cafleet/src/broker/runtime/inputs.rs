@@ -64,6 +64,15 @@ fn validate_input(
     Ok(input)
 }
 
+pub(crate) fn input_payload_digest(
+    run_id: i64,
+    input: &crate::runtime::runner::SubmitInput,
+) -> String {
+    let payload = json!({"run_id":run_id,"kind":input.input_kind.as_str(),
+        "message_id":input.message_id,"literal":input.literal});
+    crate::digest::sha256_hex(crate::digest::canonical_json(&payload).as_bytes())
+}
+
 pub(crate) fn get_input(conn: &Connection, input_id: i64) -> Result<InputOperation, CafleetError> {
     let input = conn
         .query_row(
@@ -232,12 +241,6 @@ pub(crate) fn settle_input(
     disposition: InputDisposition,
     evidence_ref: &str,
 ) -> Result<InputOperation, CafleetError> {
-    nonblank(evidence_ref, "evidence_ref")?;
-    require(
-        expected != InputState::Settled,
-        "state",
-        "settled operations retain their disposition",
-    )?;
     owned_transaction(conn, owner, |conn, _run| {
         settle_input_in_transaction(conn, owner, input_id, expected, disposition, evidence_ref)
     })
@@ -352,10 +355,15 @@ fn stamp_preview(
     Ok(())
 }
 
+pub(crate) const UNRESOLVED_INPUT_STATES: &str = "('in_progress','accepted','uncertain')";
+
 pub(super) fn require_capacity(conn: &Connection, run_id: i64) -> Result<(), CafleetError> {
     let unresolved: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain')",
-        [run_id], |row| row.get(0),
+        &format!(
+            "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN {UNRESOLVED_INPUT_STATES}"
+        ),
+        [run_id],
+        |row| row.get(0),
     )?;
     require(
         unresolved < 4096,
@@ -370,6 +378,35 @@ mod tests {
     use crate::broker::members::test_support::register;
     use crate::broker::runtime::test_support::*;
     use crate::broker::runtime::{self as storage, *};
+
+    #[test]
+    fn input_payload_digest_hashes_the_key_sorted_payload() {
+        use crate::runtime::runner::SubmitInput;
+        let literal = "say \"hi\" λ";
+        let preview = SubmitInput {
+            operation_key: "preview:7:9".into(),
+            input_kind: InputKind::Preview,
+            message_id: Some(9),
+            literal: literal.into(),
+        };
+        let prompt = SubmitInput {
+            operation_key: "prompt:7".into(),
+            input_kind: InputKind::Prompt,
+            message_id: None,
+            literal: literal.into(),
+        };
+        let quoted = serde_json::to_string(literal).unwrap();
+        let expected = |kind: &str, message_id: &str| {
+            crate::digest::sha256_hex(
+                format!(
+                    "{{\"kind\":\"{kind}\",\"literal\":{quoted},\"message_id\":{message_id},\"run_id\":7}}"
+                )
+                .as_bytes(),
+            )
+        };
+        assert_eq!(input_payload_digest(7, &preview), expected("preview", "9"));
+        assert_eq!(input_payload_digest(7, &prompt), expected("prompt", "null"));
+    }
 
     #[test]
     fn receipt_key_digest_and_settled_disposition_survive_reconnection() {

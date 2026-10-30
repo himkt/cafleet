@@ -4,7 +4,7 @@ use std::time::Instant;
 pub(crate) const CONTROL_PROTOCOL_VERSION: u32 = 1;
 pub(crate) const MAX_CONTROL_FRAME: usize = 65536;
 
-fn validate_version(frame: &Value) -> Result<()> {
+pub(super) fn validate_version(frame: &Value) -> Result<()> {
     ensure(
         frame.is_object()
             && frame.get("protocol_version").and_then(Value::as_u64)
@@ -70,20 +70,6 @@ impl ControlDecoder {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the compatible Value decoder remains available beside the shared admitted framer"
-        )
-    )]
-    pub(crate) fn feed(&mut self, bytes: &[u8]) -> Result<Vec<Value>> {
-        self.feed_admitted(bytes, Instant::now())?
-            .into_iter()
-            .map(|frame| decode_legacy_control_body(frame.body()))
-            .collect()
-    }
-
     pub(super) fn feed_admitted(
         &mut self,
         mut bytes: &[u8],
@@ -140,31 +126,41 @@ impl ControlDecoder {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// A `u32` big-endian length prefix followed by `body`, built without the production framer.
+    pub(crate) fn independent_frame(body: &[u8]) -> Vec<u8> {
+        let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    pub(crate) fn feed_values(decoder: &mut ControlDecoder, bytes: &[u8]) -> Result<Vec<Value>> {
+        decoder
+            .feed_admitted(bytes, Instant::now())?
+            .into_iter()
+            .map(|frame| decode_legacy_control_body(frame.body()))
+            .collect()
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::test_support::{feed_values, independent_frame as frame};
     use super::*;
     mod input_frames_tests {
         use super::*;
         use std::time::{Duration, Instant};
 
-        fn frame(body: &[u8]) -> Vec<u8> {
-            let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-            bytes.extend_from_slice(body);
-            bytes
-        }
         fn later(origin: Instant, millis: u64) -> Instant {
             origin.checked_add(Duration::from_millis(millis)).unwrap()
-        }
-        fn legacy() {
-            let mut decoder = ControlDecoder::new();
-            let body = br#"{"protocol_version":1,"kind":"health"}"#;
-            assert_eq!(decoder.feed(&frame(body)).unwrap().len(), 1);
-            decoder.finish().unwrap();
         }
 
         #[test]
         fn step5_wire_f1_every_split_and_single_byte_feed_retains_first_consumption_time() {
-            legacy();
             let body = br#"{"protocol_version":1,"kind":"health","text":"literal \u4e16\u754c"}"#;
+            let value: Value = serde_json::from_slice(body).unwrap();
             let bytes = frame(body);
             let t = Instant::now();
             for cut in 0..bytes.len() {
@@ -173,6 +169,11 @@ mod tests {
                 let frames = decoder.feed_admitted(&bytes[cut..], later(t, 100)).unwrap();
                 assert_eq!(frames.len(), 1, "split {cut}");
                 assert_eq!(frames[0].body(), body, "split {cut}");
+                assert_eq!(
+                    decode_legacy_control_body(frames[0].body()).unwrap(),
+                    value,
+                    "split {cut}"
+                );
                 assert_eq!(
                     frames[0].admitted_at(),
                     if cut == 0 { later(t, 100) } else { t },
@@ -197,7 +198,6 @@ mod tests {
 
         #[test]
         fn step5_wire_f2_empty_feeds_leave_admission_unset_and_preserve_partial_frame_time() {
-            legacy();
             let t = Instant::now();
             let body = br#"{"protocol_version":1,"kind":"health"}"#;
             let bytes = frame(body);
@@ -220,23 +220,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_f3_coalesced_frames_share_read_time_without_aggregate_cap() {
-            legacy();
-            let t = Instant::now();
-            let body = vec![b'x'; 65536];
-            let mut decoder = ControlDecoder::new();
-            let frames = decoder.feed_admitted(&frame(&body).repeat(3), t).unwrap();
-            assert_eq!(frames.len(), 3);
-            for observed in frames {
-                assert_eq!(observed.body(), body);
-                assert_eq!(observed.admitted_at(), t);
-            }
-            decoder.finish().unwrap();
-        }
-
-        #[test]
         fn step5_wire_f4_partial_complete_and_new_tail_keep_each_first_header_time() {
-            legacy();
             let bodies = [b"first".as_slice(), b"second", b"third"];
             let encoded = bodies.map(frame);
             let t = Instant::now();
@@ -268,7 +252,6 @@ mod tests {
 
         #[test]
         fn step5_wire_f5_inclusive_body_limit_and_header_only_oversize_rejection() {
-            legacy();
             let t = Instant::now();
             let body = vec![b'x'; 65536];
             let mut decoder = ControlDecoder::new();
@@ -292,7 +275,6 @@ mod tests {
 
         #[test]
         fn step5_wire_f6_eof_rejects_each_partial_boundary_and_empty_body_reaches_consumer() {
-            legacy();
             let t = Instant::now();
             let body = br#"{"protocol_version":1,"kind":"health"}"#;
             let bytes = frame(body);
@@ -308,12 +290,11 @@ mod tests {
             assert!(frames[0].body().is_empty());
             assert_eq!(frames[0].admitted_at(), t);
             decoder.finish().unwrap();
-            assert!(ControlDecoder::new().feed(&frame(&[])).is_err());
+            assert!(feed_values(&mut ControlDecoder::new(), &frame(&[])).is_err());
         }
 
         #[test]
         fn step5_wire_f7_raw_bytes_preserve_whitespace_and_invalid_json_for_consumer_validation() {
-            legacy();
             let t = Instant::now();
             for (body, valid) in [
             (
@@ -331,7 +312,10 @@ mod tests {
             assert_eq!(frames[0].body(), body);
             assert_eq!(frames[0].admitted_at(), t);
             decoder.finish().unwrap();
-            assert_eq!(ControlDecoder::new().feed(&frame(body)).is_ok(), valid);
+            assert_eq!(
+                feed_values(&mut ControlDecoder::new(), &frame(body)).is_ok(),
+                valid
+            );
         }
         }
     }
@@ -346,12 +330,6 @@ mod tests {
         use std::os::unix::net::UnixListener;
         use std::time::{Duration, Instant};
 
-        fn independently_framed(body: &[u8]) -> Vec<u8> {
-            let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-            bytes.extend_from_slice(body);
-            bytes
-        }
-
         #[test]
         fn runner_review_codec_encoding_pins_big_endian_length_and_required_version() {
             assert_eq!(CONTROL_PROTOCOL_VERSION, 1);
@@ -362,44 +340,19 @@ mod tests {
                 json!({"protocol_version":1,"error":"literal\nerror"}),
             ] {
                 let body = serde_json::to_vec(&value).unwrap();
-                assert_eq!(
-                    encode_control_frame(&value).unwrap(),
-                    independently_framed(&body)
-                );
+                assert_eq!(encode_control_frame(&value).unwrap(), frame(&body));
             }
-        }
-
-        #[test]
-        fn runner_review_codec_decodes_every_header_and_body_split() {
-            let value = json!({"protocol_version":1,"kind":"health","text":"literal\n世界"});
-            let bytes = independently_framed(&serde_json::to_vec(&value).unwrap());
-            for cut in 0..bytes.len() {
-                let mut decoder = ControlDecoder::new();
-                assert!(decoder.feed(&bytes[..cut]).unwrap().is_empty());
-                assert_eq!(
-                    decoder.feed(&bytes[cut..]).unwrap().as_slice(),
-                    std::slice::from_ref(&value)
-                );
-                decoder.finish().unwrap();
-            }
-            let mut decoder = ControlDecoder::new();
-            let mut observed = Vec::new();
-            for byte in bytes {
-                observed.extend(decoder.feed(&[byte]).unwrap());
-            }
-            assert_eq!(observed, [value]);
-            decoder.finish().unwrap();
         }
 
         #[test]
         fn runner_review_codec_keeps_json_whitespace_and_multiple_frames_independent() {
             let request = b"{\n  \"protocol_version\": 1,\n  \"kind\": \"health\"\n}";
             let reply = json!({"protocol_version":1,"result":"line one\nline two"});
-            let mut bytes = independently_framed(request);
-            bytes.extend(independently_framed(&serde_json::to_vec(&reply).unwrap()));
+            let mut bytes = frame(request);
+            bytes.extend(frame(&serde_json::to_vec(&reply).unwrap()));
             let mut decoder = ControlDecoder::new();
             assert_eq!(
-                decoder.feed(&bytes).unwrap(),
+                feed_values(&mut decoder, &bytes).unwrap(),
                 [serde_json::from_slice::<Value>(request).unwrap(), reply]
             );
             decoder.finish().unwrap();
@@ -427,8 +380,7 @@ mod tests {
                     assert!(encode_control_frame(&value).is_err(), "{value}");
                     let mut decoder = ControlDecoder::new();
                     assert!(
-                        decoder
-                            .feed(&independently_framed(&serde_json::to_vec(&value).unwrap()))
+                        feed_values(&mut decoder, &frame(&serde_json::to_vec(&value).unwrap()))
                             .is_err(),
                         "{value}"
                     );
@@ -440,10 +392,7 @@ mod tests {
         fn runner_review_codec_rejects_empty_malformed_and_nonobject_bodies() {
             for body in [b"".as_slice(), b"{", b"\xff", b"[]", b"null", b"1"] {
                 let mut decoder = ControlDecoder::new();
-                assert!(
-                    decoder.feed(&independently_framed(body)).is_err(),
-                    "{body:?}"
-                );
+                assert!(feed_values(&mut decoder, &frame(body)).is_err(), "{body:?}");
             }
             for value in [Value::Null, json!([]), json!(1)] {
                 assert!(encode_control_frame(&value).is_err());
@@ -460,38 +409,17 @@ mod tests {
             let encoded = encode_control_frame(&value).unwrap();
             assert_eq!(encoded.len(), 65540);
             assert_eq!(&encoded[..4], &65536u32.to_be_bytes());
-            let frames = independently_framed(&body).repeat(3);
+            let t = Instant::now();
             let mut decoder = ControlDecoder::new();
-            assert_eq!(decoder.feed(&frames).unwrap(), vec![value.clone(); 3]);
+            let frames = decoder.feed_admitted(&frame(&body).repeat(3), t).unwrap();
+            assert_eq!(frames.len(), 3);
+            for observed in frames {
+                assert_eq!(observed.admitted_at(), t);
+                assert_eq!(decode_legacy_control_body(observed.body()).unwrap(), value);
+            }
             decoder.finish().unwrap();
             value["result"] = json!("x".repeat(65537 - overhead));
             assert!(encode_control_frame(&value).is_err());
-        }
-
-        #[test]
-        fn runner_review_codec_rejects_oversized_lengths_at_the_fourth_header_byte() {
-            for size in [65537u32, u32::MAX] {
-                let header = size.to_be_bytes();
-                let mut decoder = ControlDecoder::new();
-                for byte in &header[..3] {
-                    assert!(decoder.feed(&[*byte]).unwrap().is_empty());
-                }
-                assert!(decoder.feed(&header[3..]).is_err());
-            }
-        }
-
-        #[test]
-        fn runner_review_codec_eof_rejects_partial_headers_and_bodies() {
-            let bytes = independently_framed(br#"{"protocol_version":1,"result":null}"#);
-            ControlDecoder::new().finish().unwrap();
-            for cut in 1..bytes.len() {
-                let mut decoder = ControlDecoder::new();
-                assert!(decoder.feed(&bytes[..cut]).unwrap().is_empty());
-                assert!(decoder.finish().is_err(), "prefix {cut}");
-            }
-            let mut decoder = ControlDecoder::new();
-            assert_eq!(decoder.feed(&bytes).unwrap().len(), 1);
-            decoder.finish().unwrap();
         }
 
         #[test]
@@ -569,7 +497,7 @@ mod tests {
                             request["identity"],
                             serde_json::to_value(expected_identity).unwrap()
                         );
-                        for byte in independently_framed(&serde_json::to_vec(&reply).unwrap()) {
+                        for byte in frame(&serde_json::to_vec(&reply).unwrap()) {
                             write_fixture_bytes(&mut stream, &[byte], deadline);
                         }
                     });

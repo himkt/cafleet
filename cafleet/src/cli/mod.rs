@@ -61,11 +61,7 @@ pub fn run() -> Result<(), CafleetError> {
     dispatch(&settings, args.command)
 }
 
-fn invocation_connection(database_url: &str) -> Result<rusqlite::Connection, CafleetError> {
-    invocation_connection_with_deadline(database_url, crate::input::Deadline::new())
-}
-
-fn invocation_connection_with_deadline(
+fn invocation_connection(
     database_url: &str,
     deadline: crate::input::Deadline,
 ) -> Result<rusqlite::Connection, CafleetError> {
@@ -110,10 +106,14 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
         }) => {
             let deadline = crate::input::Deadline::inherited_or_new();
             let keys = crate::multiplexer::PressKeys::parse(&keys)?;
-            let mut conn = invocation_connection_with_deadline(&settings.database_url, deadline)
-                .map_err(|cause| CafleetError::WithDiagnostics {
-                    cause: Box::new(cause),
-                    diagnostics: vec![format!("keys were not dispatched to member {member_id}.")],
+            let mut conn =
+                invocation_connection(&settings.database_url, deadline).map_err(|cause| {
+                    CafleetError::WithDiagnostics {
+                        cause: Box::new(cause),
+                        diagnostics: vec![format!(
+                            "keys were not dispatched to member {member_id}."
+                        )],
+                    }
                 })?;
             member::press(&mut conn, settings, member_id, &keys, json, deadline)
         }
@@ -121,12 +121,13 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
             let deadline = crate::input::Deadline::new();
             runtime::permission_preflight(&command)
                 .map_err(|source| runtime::permission_error(&command, source))?;
-            let mut conn = invocation_connection_with_deadline(&settings.database_url, deadline)
+            let mut conn = invocation_connection(&settings.database_url, deadline)
                 .map_err(|source| runtime::permission_error(&command, source))?;
             runtime::permission(&mut conn, settings, command, deadline)
         }
         mut command => {
-            let mut conn = invocation_connection(&settings.database_url)?;
+            let mut conn =
+                invocation_connection(&settings.database_url, crate::input::Deadline::new())?;
             if let Command::Member(command) = &mut command {
                 member::prepare_input(command)?;
             }
@@ -185,6 +186,9 @@ mod tests {
             "PRAGMA application_id=42",
             "UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
             "ALTER TABLE messages RENAME COLUMN text TO wrong",
+            "ALTER TABLE member_runtime_events RENAME COLUMN notification_state TO broken",
+            "ALTER TABLE runtime_database_identity RENAME COLUMN instance_id TO broken",
+            "DROP TABLE member_input_operations",
         ] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("registry.db");
@@ -196,20 +200,25 @@ mod tests {
             conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
                 .unwrap();
             let before = crate::db::test_support::wal_snapshot(&path);
-            for command in [
-                Command::Fleet(fleet::FleetCommand::List { json: true }),
-                Command::Member(member::MemberCommand::Show {
-                    member_id: 1,
-                    json: true,
-                }),
-                Command::Message(message::MessageCommand::Poll {
-                    member_id: 1,
-                    json: true,
-                }),
+            for args in [
+                &["fleet", "list", "--json"][..],
+                &["member", "show", "1", "--json"],
+                &["message", "poll", "1", "--json"],
+                &["member", "recover", "1", "--json"],
+                &["event", "show", "1", "--json"],
+                &["input", "show", "1", "--json"],
             ] {
-                assert!(dispatch(&settings, command).is_err(), "{mutation}");
+                assert!(
+                    dispatch(&settings, parse(args)).is_err(),
+                    "{mutation}: {args:?}"
+                );
                 for (file, bytes) in &before {
-                    assert_eq!(&std::fs::read(file).unwrap(), bytes, "{}", file.display());
+                    assert_eq!(
+                        &std::fs::read(file).unwrap(),
+                        bytes,
+                        "{mutation}: {args:?}: {}",
+                        file.display()
+                    );
                 }
             }
             conn.execute_batch("ROLLBACK").unwrap();
@@ -220,7 +229,13 @@ mod tests {
     fn ordinary_commands_require_storage_without_creating_a_missing_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("missing.db");
-        assert!(invocation_connection(&format!("sqlite:///{}", path.display())).is_err());
+        assert!(
+            invocation_connection(
+                &format!("sqlite:///{}", path.display()),
+                crate::input::Deadline::new()
+            )
+            .is_err()
+        );
         assert!(!path.exists());
     }
 
@@ -449,9 +464,18 @@ mod tests {
             ] {
                 let args: Vec<_> = base.iter().copied().chain(source).collect();
                 match (base[0], parse(&args)) {
-                    ("member", Command::Member(member::MemberCommand::Create { fleet_id, .. })) => {
-                        assert_eq!(fleet_id, 17)
-                    }
+                    (
+                        "member",
+                        Command::Member(member::MemberCommand::Create {
+                            fleet_id,
+                            name,
+                            description,
+                            ..
+                        }),
+                    ) => assert_eq!(
+                        (fleet_id, name.as_str(), description.as_str()),
+                        (17, "worker", "work")
+                    ),
                     ("member", Command::Member(member::MemberCommand::Exec { member_id, .. })) => {
                         assert_eq!(member_id, 17)
                     }

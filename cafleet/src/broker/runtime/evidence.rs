@@ -258,6 +258,19 @@ fn validate_operation_rows(object: &Map<String, Value>) -> Result<(), CafleetErr
     )
 }
 
+/// The metadata evidence of a run-scoped event that no screen form produced.
+pub(crate) fn run_metadata(
+    run: &super::RunRecord,
+    rule_id: &str,
+    screen_seq: u64,
+) -> Result<Value, CafleetError> {
+    EvidencePolicy::metadata().apply(&json!({
+        "backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,
+        "rule_id":rule_id,"screen_seq":screen_seq,"operation":null,"choices":null,"native_request_id":null,
+        "excerpt":null,"truncated":false,"sensitive":false
+    }))
+}
+
 pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
     let object = value
         .as_object()
@@ -621,7 +634,7 @@ mod tests {
             let transformed = policy.apply(&raw_evidence(SECRET)).unwrap();
             let transition = opening(owner.run_id, 1, 1, transformed.clone());
             assert!(!serde_json::to_string(&transition).unwrap().contains(SECRET));
-            let first = storage::persist_transition(
+            let first = storage::persist_event(
                 &mut fixture.conn,
                 &owner,
                 &transition,
@@ -634,7 +647,7 @@ mod tests {
                 evidence_json: transformed,
                 ..transition
             };
-            storage::persist_transition(&mut fixture.conn, &owner, &update, PersistenceMode::Live)
+            storage::persist_event(&mut fixture.conn, &owner, &update, PersistenceMode::Live)
                 .unwrap();
             assert_no_secret(&fixture.conn, SECRET);
             let current = storage::get_event(&fixture.reopen(), first.event_id).unwrap();
@@ -671,7 +684,7 @@ mod tests {
             .unwrap();
         let owner = fixture.activate();
         fixture.reserve(&owner);
-        let event = storage::persist_transition(
+        let event = storage::persist_event(
             &mut fixture.conn,
             &owner,
             &opening(owner.run_id, 1, 1, transformed),

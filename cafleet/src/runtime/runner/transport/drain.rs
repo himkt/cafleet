@@ -25,23 +25,15 @@ fn unsettled_health(health: &ObservationHealth) -> Option<String> {
     }
 }
 
-fn before_deadline(deadline: Instant) -> Result<()> {
-    if Instant::now() >= deadline {
-        Err(CafleetError::DeadlineExceeded)
-    } else {
-        Ok(())
-    }
-}
-
 struct DeadlineObserver<'a, O> {
     inner: &'a mut O,
     deadline: Instant,
 }
 impl<O: ScreenObserver> ScreenObserver for DeadlineObserver<'_, O> {
     fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()> {
-        before_deadline(self.deadline)?;
+        check_deadline(Instant::now(), self.deadline)?;
         self.inner.observe(screen)?;
-        before_deadline(self.deadline)
+        check_deadline(Instant::now(), self.deadline)
     }
 
     fn failures_are_fatal(&self) -> bool {
@@ -49,9 +41,9 @@ impl<O: ScreenObserver> ScreenObserver for DeadlineObserver<'_, O> {
     }
 
     fn parser_failure(&mut self) -> Result<()> {
-        before_deadline(self.deadline)?;
+        check_deadline(Instant::now(), self.deadline)?;
         self.inner.parser_failure()?;
-        before_deadline(self.deadline)
+        check_deadline(Instant::now(), self.deadline)
     }
 }
 
@@ -66,7 +58,7 @@ impl Transport {
     ) -> Result<InputDrain> {
         self.invalidate_input_drain();
         self.drain_blocker = None;
-        before_deadline(deadline)?;
+        check_deadline(Instant::now(), deadline)?;
         let mut remaining = DrainBudget {
             human: self.limits.bytes_per_tick,
             child: self.limits.bytes_per_tick,
@@ -74,7 +66,7 @@ impl Transport {
             display: self.limits.bytes_per_tick,
         };
         for _ in 0..ROUND_LIMIT {
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
             let human_read = if self.outer_eof {
                 AvailableRead::Skipped
             } else {
@@ -96,13 +88,13 @@ impl Transport {
                 AvailableRead::Eof => self.outer_eof = true,
                 _ => {}
             }
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
             if remaining.manual > 0 && !self.input.is_empty() {
                 let written = write_pending(&mut self.input, remaining.manual, |bytes| {
                     pty.try_write(bytes)
                 })?;
                 remaining.manual -= written;
-                before_deadline(deadline)?;
+                check_deadline(Instant::now(), deadline)?;
             }
             let child_read = self.read_drain_child(
                 pty,
@@ -121,20 +113,20 @@ impl Transport {
                 AvailableRead::Eof => self.child_eof = true,
                 _ => {}
             }
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
             if remaining.display > 0 && !self.display.is_empty() {
                 let written = write_pending(&mut self.display, remaining.display, |bytes| {
                     display.try_write(bytes)
                 })?;
                 remaining.display -= written;
-                before_deadline(deadline)?;
+                check_deadline(Instant::now(), deadline)?;
             }
             match display.try_flush() {
                 Ok(()) => {}
                 Err(cause) if cause.kind() == ErrorKind::WouldBlock => {}
                 Err(cause) => return Err(io_error(cause)),
             }
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
             let ended = if interrupted {
                 Some("terminal input interrupted")
             } else if self.outer_eof {
@@ -156,7 +148,7 @@ impl Transport {
                     return Ok(self.pending("observation incomplete".into()));
                 }
                 let health = observer.input_health();
-                before_deadline(deadline)?;
+                check_deadline(Instant::now(), deadline)?;
                 let Some(health) = health else {
                     return Ok(self.pending("observation health unavailable".into()));
                 };
@@ -164,7 +156,7 @@ impl Transport {
                     return Ok(self.pending(reason));
                 }
                 let output_seq = self.terminal.snapshot().screen_seq;
-                before_deadline(deadline)?;
+                check_deadline(Instant::now(), deadline)?;
                 self.input_drain = Some(DrainedInput {
                     instance: self.input_instance.clone(),
                     turn: self.input_turn,
@@ -210,11 +202,11 @@ impl Transport {
     ) -> Result<()> {
         let observation_complete_before = self.observation_complete;
         self.observation_complete = false;
-        before_deadline(deadline)?;
+        check_deadline(Instant::now(), deadline)?;
         #[cfg(test)]
         if let Some(hooks) = &self.observation_hooks {
             hooks.before(self.observation_phase, ObservationOperation::Parser)?;
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
         }
         let mut bounded = DeadlineObserver {
             inner: observer,
@@ -223,7 +215,7 @@ impl Transport {
         match self.terminal.feed_observed_classified(bytes, &mut bounded) {
             Ok(()) => {
                 self.observation_complete = observation_complete_before;
-                before_deadline(deadline)
+                check_deadline(Instant::now(), deadline)
             }
             Err(TerminalObservationError::Observer(cause)) => Err(cause),
             Err(TerminalObservationError::Parser(cause)) => match bounded.parser_failure() {
@@ -718,7 +710,7 @@ mod tests {
                 transport.snapshot().screen_seq,
                 u64::try_from(child_bytes.len()).unwrap()
             );
-            assert!(transport.snapshot().contents.contains("child"));
+            assert!(transport.snapshot().screen.contents().contains("child"));
             assert_eq!(transport.pending_input_bytes(), 0);
             assert_eq!(transport.pending_display_bytes(), 0);
             assert_eq!(h.observations.health_reads.get(), 1);
@@ -1371,7 +1363,7 @@ mod tests {
             }
             self.records.borrow_mut().push(CallbackRecord {
                 sequence: screen.screen_seq,
-                contents: screen.contents.clone(),
+                contents: screen.screen.contents(),
                 entered,
                 returned: Instant::now(),
             });
@@ -1504,7 +1496,7 @@ mod tests {
             assert_eq!(pty.reader.bytes, child_bytes);
             assert_eq!(transport.pending_display_bytes(), child_bytes.len());
             assert_eq!(transport.snapshot().screen_seq, 0);
-            assert_eq!(transport.snapshot().contents, "");
+            assert_eq!(transport.snapshot().screen.contents(), "");
             assert!(h.observations.screens.borrow().is_empty());
             assert_eq!(
                 *h.trace.borrow(),
@@ -1586,7 +1578,7 @@ mod tests {
             );
             assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(transport.pending_display_bytes(), 0);
-            assert_eq!(transport.snapshot().contents, "TAIL\nsuffix");
+            assert_eq!(transport.snapshot().screen.contents(), "TAIL\nsuffix");
             assert_eq!(transport.snapshot().screen_seq, 17);
             assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
             let observed = records.borrow();
@@ -1651,7 +1643,7 @@ mod tests {
             assert_eq!(output.flushes, 0);
             assert_eq!(h.observations.health_reads.get(), 0);
             assert_eq!(transport.snapshot().screen_seq, 5);
-            assert_eq!(transport.snapshot().contents, "head");
+            assert_eq!(transport.snapshot().screen.contents(), "head");
             assert_eq!(transport.snapshot().cursor_row, 0);
             assert_eq!(transport.snapshot().cursor_col, 0);
             assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
@@ -1750,7 +1742,7 @@ mod tests {
                 );
                 assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
                 assert_eq!(records.borrow().len(), 2);
-                assert_eq!(transport.snapshot().contents, "head");
+                assert_eq!(transport.snapshot().screen.contents(), "head");
                 assert!(output.bytes.is_empty() && output.offered.is_empty());
                 assert_eq!(
                     transport.pending_display_bytes(),
@@ -1773,7 +1765,7 @@ mod tests {
                 ));
                 assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
                 assert_eq!(records.borrow().len(), 6);
-                assert_eq!(transport.snapshot().contents, "TAIL\nsuffix");
+                assert_eq!(transport.snapshot().screen.contents(), "TAIL\nsuffix");
                 assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
                 assert_eq!(transport.pending_display_bytes(), 0);
                 17
@@ -1802,7 +1794,7 @@ mod tests {
     struct OneParserFailure(std::sync::atomic::AtomicBool);
 
     impl ObservationHooks for OneParserFailure {
-        fn before(&self, _: ObservationSite, operation: ObservationOperation) -> Result<()> {
+        fn before(&self, _: ObservationPhase, operation: ObservationOperation) -> Result<()> {
             if matches!(operation, ObservationOperation::Parser)
                 && self.0.swap(false, std::sync::atomic::Ordering::AcqRel)
             {
@@ -1849,7 +1841,7 @@ mod tests {
                 Some(ObservationFailure::Parser)
             ));
             assert_eq!(transport.snapshot().screen_seq, 0);
-            assert_eq!(transport.snapshot().contents, "");
+            assert_eq!(transport.snapshot().screen.contents(), "");
             assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(transport.human_generation(), 5);
             assert_incomplete_observation_stays_fenced(
@@ -1899,7 +1891,7 @@ mod tests {
                     );
                     assert_eq!(transport.human_generation(), 5);
                     assert_eq!(transport.snapshot().screen_seq, 17);
-                    assert_eq!(transport.snapshot().contents, "TAIL\nsuffix");
+                    assert_eq!(transport.snapshot().screen.contents(), "TAIL\nsuffix");
                     assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
                     assert_eq!(transport.pending_display_bytes(), 17);
                     assert!(output.bytes.is_empty());

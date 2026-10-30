@@ -1,5 +1,4 @@
 use super::codec::AdmittedControlFrame;
-pub(super) use super::control::request;
 use super::input::{InertInputHooks, InputCoordinator, InputServices, RequestTokenSource};
 use super::input_clock::{RealInputDeadlineClock, receive_input_expiration};
 use super::input_protocol::{ServiceControlRequest, decode_service_request, encode_input_reply};
@@ -13,7 +12,7 @@ use crate::broker::{
 };
 use crate::config::Settings;
 use filedescriptor::FileDescriptor;
-use rusqlite::params;
+use rusqlite::{Connection, params};
 use serde_json::json;
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
@@ -126,6 +125,178 @@ struct PendingInputClient {
     deadline: Instant,
 }
 
+struct NativeIo<'a> {
+    input: &'a mut NonblockingFile,
+    pty: &'a mut PtySession,
+    output: &'a mut NonblockingFile,
+    transport: &'a mut Transport,
+    controller: &'a mut ObservationController,
+    writer: &'a EventWriter,
+    clock: &'a dyn ObservationClock,
+}
+impl NativeIo<'_> {
+    fn quiesce(
+        &mut self,
+        coordinator: &mut InputCoordinator,
+        deadline: Instant,
+    ) -> std::result::Result<InputDrain, InputFailure> {
+        coordinator.progress_with_manual(self.transport, |transport| {
+            transport.quiesce_for_input(
+                self.input,
+                self.pty,
+                self.output,
+                &mut self.controller.observer(self.writer, self.clock),
+                deadline,
+            )
+        })
+    }
+    fn observe_exit(
+        &mut self,
+        native_exit: &mut Option<ChildExit>,
+    ) -> Result<Option<ShutdownClock>> {
+        let Some(exit) = self.pty.try_wait()? else {
+            return Ok(None);
+        };
+        *native_exit = Some(exit);
+        self.controller
+            .child_exited(exit, &self.transport.snapshot(), self.writer, self.clock)?;
+        Ok(Some(ShutdownClock::new(Instant::now())))
+    }
+}
+
+struct InputRequest<'a, 'n> {
+    native: &'a mut NativeIo<'n>,
+    conn: &'a mut Connection,
+    run: &'a RunRecord,
+    coordinator: &'a mut Option<InputCoordinator>,
+    admitted_at: Instant,
+}
+impl InputRequest<'_, '_> {
+    fn deadline(&self, request: &InputControlRequest) -> Result<Instant> {
+        receive_input_expiration(
+            request.expires_at_mono_ns,
+            self.admitted_at,
+            None,
+            &mut RealInputDeadlineClock,
+        )
+    }
+    fn inspect(self, request: InputControlRequest) -> Result<InputControlReply> {
+        let InputControlOperation::PermissionInspect(input) = &request.operation else {
+            unreachable!("inspection receives an inspection operation");
+        };
+        let interaction_id = input.interaction_id;
+        let run_id = self.run.run_id;
+        self.inspect_within_deadline(request).map_err(|source| {
+            CafleetError::from(InputFailure {
+                source,
+                run_id: Some(run_id),
+                interaction_id: Some(interaction_id),
+                input_id: None,
+                operation_key: None,
+            })
+        })
+    }
+    fn inspect_within_deadline(self, request: InputControlRequest) -> Result<InputControlReply> {
+        let deadline = self.deadline(&request)?;
+        request.identity.validate(self.run)?;
+        let coordinator = self
+            .coordinator
+            .as_mut()
+            .ok_or_else(|| error("native input has not started"))?;
+        self.native
+            .quiesce(coordinator, deadline)
+            .map_err(CafleetError::from)?;
+        coordinator
+            .inspect_received(
+                self.conn,
+                self.run,
+                request,
+                (&*self.native.controller, &mut *self.native.transport),
+                deadline,
+            )
+            .map_err(CafleetError::from)
+    }
+    fn submit(
+        self,
+        request: InputControlRequest,
+        pending: &mut Option<PendingInputClient>,
+        client_id: u64,
+    ) -> Result<Option<InputControlReply>> {
+        let response_context = match &request.operation {
+            InputControlOperation::PermissionRespond(input) => {
+                Some((input.interaction_id, input.operation_key.clone()))
+            }
+            _ => None,
+        };
+        let run_id = self.run.run_id;
+        self.submit_within_deadline(request, response_context.is_some(), pending, client_id)
+            .map_err(|source| match response_context {
+                Some((interaction_id, operation_key)) => CafleetError::from(InputFailure {
+                    source,
+                    run_id: Some(run_id),
+                    interaction_id: Some(interaction_id),
+                    input_id: None,
+                    operation_key: Some(operation_key),
+                }),
+                None => source,
+            })
+    }
+    fn submit_within_deadline(
+        self,
+        request: InputControlRequest,
+        responds: bool,
+        pending: &mut Option<PendingInputClient>,
+        client_id: u64,
+    ) -> Result<Option<InputControlReply>> {
+        let deadline = self.deadline(&request)?;
+        let coordinator = self
+            .coordinator
+            .as_mut()
+            .ok_or_else(|| error("native input has not started"))?;
+        if responds {
+            if let Some(reply) = coordinator
+                .retained_permission_response(self.conn, self.run, &request, deadline)
+                .map_err(CafleetError::from)?
+            {
+                return Ok(Some(reply));
+            }
+            let admission = self
+                .native
+                .quiesce(coordinator, deadline)
+                .map_err(CafleetError::from)?;
+            if matches!(admission, InputDrain::Pending) {
+                return Err(error(format!(
+                    "permission request is blocked: {}",
+                    self.native
+                        .transport
+                        .drain_blocker()
+                        .expect("a Pending drain names its reason")
+                )));
+            }
+        }
+        let reply = coordinator
+            .handle_received(
+                self.conn,
+                self.run,
+                request,
+                self.native.controller,
+                deadline,
+            )
+            .map_err(CafleetError::from)?;
+        if reply.is_none() {
+            ensure(
+                pending.is_none(),
+                "accepted pending input already has a client",
+            )?;
+            *pending = Some(PendingInputClient {
+                id: client_id,
+                deadline,
+            });
+        }
+        Ok(reply)
+    }
+}
+
 impl Client {
     fn poll(&mut self) -> Result<Vec<AdmittedControlFrame>> {
         let mut requests = Vec::new();
@@ -229,9 +400,7 @@ impl LiveShutdown<'_> {
                     return Ok(());
                 }
             }
-            std::thread::sleep(
-                Duration::from_millis(2).min(deadline.saturating_duration_since(Instant::now())),
-            );
+            nap_until(deadline);
         }
         Err(CafleetError::DeadlineExceeded)
     }
@@ -296,9 +465,7 @@ impl ShutdownHost for LiveShutdown<'_> {
             if !self.pty.survivors()? && progress.child_eof {
                 break;
             }
-            std::thread::sleep(
-                Duration::from_millis(2).min(deadline.saturating_duration_since(Instant::now())),
-            );
+            nap_until(deadline);
         }
         self.pty.try_wait()
     }
@@ -311,13 +478,7 @@ impl ShutdownHost for LiveShutdown<'_> {
             if (self.pty.try_wait()?.is_some() || !self.pty.has_child()) && !self.pty.survivors()? {
                 break;
             }
-            std::thread::sleep(
-                Duration::from_millis(2).min(
-                    self.clock
-                        .storage_deadline()
-                        .saturating_duration_since(Instant::now()),
-                ),
-            );
+            nap_until(self.clock.storage_deadline());
         }
         self.send_exit()?;
         ensure(
@@ -332,9 +493,7 @@ impl ShutdownHost for LiveShutdown<'_> {
     fn flush_display_until(&mut self, deadline: Instant) -> Result<u64> {
         while self.transport.pending_display_bytes() > 0 && Instant::now() < deadline {
             self.transport.flush_display(self.output)?;
-            std::thread::sleep(
-                Duration::from_millis(2).min(deadline.saturating_duration_since(Instant::now())),
-            );
+            nap_until(deadline);
         }
         Ok(self.transport.discard_display_tail() as u64)
     }
@@ -356,7 +515,7 @@ impl ShutdownHost for LiveShutdown<'_> {
                 self.observation_clock,
                 ObservationPhase::ShutdownDrain,
             )?;
-            std::thread::sleep(Duration::from_millis(2));
+            nap_until(deadline);
         }
         let (pending, gap) = self.writer.finish(deadline);
         Ok((
@@ -386,40 +545,14 @@ impl ShutdownHost for LiveShutdown<'_> {
     }
 }
 
-struct RunnerDependencies {
-    catalog: crate::coding_agent::ProfileCatalog,
-    clock: Arc<dyn ObservationClock>,
-    writer_hooks: Option<Arc<dyn WriterHooks>>,
-    #[cfg(test)]
-    capture: Option<NativeCapturePort>,
-    #[cfg(test)]
-    observation_hooks: Option<Arc<dyn ObservationHooks>>,
-}
-#[cfg(test)]
-pub(crate) struct RunnerTestServices {
+pub(crate) struct RunnerDependencies {
     pub(crate) catalog: crate::coding_agent::ProfileCatalog,
     pub(crate) clock: Arc<dyn ObservationClock>,
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
+    #[cfg(test)]
     pub(crate) capture: Option<NativeCapturePort>,
+    #[cfg(test)]
     pub(crate) observation_hooks: Option<Arc<dyn ObservationHooks>>,
-}
-#[cfg(test)]
-pub(crate) fn run_with_test_services(
-    settings: &Settings,
-    descriptor: &Path,
-    services: RunnerTestServices,
-) -> Result<i32> {
-    run_service(
-        settings,
-        descriptor,
-        RunnerDependencies {
-            catalog: services.catalog,
-            clock: services.clock,
-            writer_hooks: Some(services.writer_hooks),
-            capture: services.capture,
-            observation_hooks: services.observation_hooks,
-        },
-    )
 }
 pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
     run_service(
@@ -428,7 +561,7 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
         RunnerDependencies {
             catalog: crate::coding_agent::ProfileCatalog::bundled()?,
             clock: Arc::new(RealObservationClock),
-            writer_hooks: None,
+            writer_hooks: Arc::new(InertWriterHooks),
             #[cfg(test)]
             capture: None,
             #[cfg(test)]
@@ -436,11 +569,13 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
         },
     )
 }
-fn run_service(
+pub(crate) fn run_service(
     settings: &Settings,
     descriptor_path: &Path,
-    mut services: RunnerDependencies,
+    services: RunnerDependencies,
 ) -> Result<i32> {
+    #[cfg(test)]
+    let mut services = services;
     let mut conn = crate::db::connect(&settings.database_url)?;
     crate::diagnosis::classify_selected_schema(
         &conn,
@@ -538,22 +673,13 @@ fn run_service(
         controller.set_observation_hooks(hooks.clone())?;
         transport.set_observation_hooks(hooks)?;
     }
-    let mut writer = if let Some(hooks) = services.writer_hooks.take() {
-        EventWriter::start_with_hooks(
-            settings.database_url.clone(),
-            run.clone(),
-            lock.clone(),
-            artifacts.paths.outbox.clone(),
-            hooks,
-        )?
-    } else {
-        EventWriter::start(
-            settings.database_url.clone(),
-            run.clone(),
-            lock.clone(),
-            artifacts.paths.outbox.clone(),
-        )?
-    };
+    let mut writer = EventWriter::start_with_hooks(
+        settings.database_url.clone(),
+        run.clone(),
+        lock.clone(),
+        artifacts.paths.outbox.clone(),
+        services.writer_hooks.clone(),
+    )?;
     let terminate = Arc::new(AtomicBool::new(false));
     let resize = Arc::new(AtomicBool::new(false));
     let _signals = SignalGuards::new(terminate.clone(), resize.clone())?;
@@ -568,6 +694,15 @@ fn run_service(
     let mut native_exit = None;
     let loop_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
         || -> Result<ShutdownClock> {
+            let mut native = NativeIo {
+                input: &mut input,
+                pty: &mut pty,
+                output: &mut output,
+                transport: &mut transport,
+                controller: &mut controller,
+                writer: &writer,
+                clock: services.clock.as_ref(),
+            };
             loop {
                 let mut tick_progress = TransportProgress::default();
                 if terminate.load(Ordering::Acquire) {
@@ -618,148 +753,37 @@ fn run_service(
                                     InputControlOperation::PermissionInspect(_)
                                 ) =>
                             {
-                                let interaction_id = match &request.operation {
-                                    InputControlOperation::PermissionInspect(input) => {
-                                        input.interaction_id
-                                    }
-                                    _ => unreachable!("matched inspection operation"),
-                                };
-                                let result = (|| -> Result<InputControlReply> {
-                                    let deadline = receive_input_expiration(
-                                        request.expires_at_mono_ns,
-                                        frame.admitted_at(),
-                                        None,
-                                        &mut RealInputDeadlineClock,
-                                    )?;
-                                    request.identity.validate(&run)?;
-                                    let coordinator = coordinator
-                                        .as_mut()
-                                        .ok_or_else(|| error("native input has not started"))?;
-                                    coordinator
-                                        .progress_with_manual(&mut transport, |transport| {
-                                            transport.quiesce_for_input(
-                                                &mut input,
-                                                &mut pty,
-                                                &mut output,
-                                                &mut controller
-                                                    .observer(&writer, services.clock.as_ref()),
-                                                deadline,
-                                            )
-                                        })
-                                        .map_err(CafleetError::from)?;
-                                    coordinator
-                                        .inspect_received(
-                                            &mut conn,
-                                            &run,
-                                            *request,
-                                            (&controller, &mut transport),
-                                            deadline,
-                                        )
-                                        .map_err(CafleetError::from)
-                                })()
-                                .map_err(|source| {
-                                    CafleetError::from(InputFailure {
-                                        source,
-                                        run_id: Some(run.run_id),
-                                        interaction_id: Some(interaction_id),
-                                        input_id: None,
-                                        operation_key: None,
-                                    })
-                                });
-                                let replied = match &result {
-                                    Ok(reply) => client.reply_input(Ok(reply)),
-                                    Err(cause) => client.reply_input(Err(cause)),
-                                };
-                                if replied.is_err() {
+                                let result = InputRequest {
+                                    native: &mut native,
+                                    conn: &mut conn,
+                                    run: &run,
+                                    coordinator: &mut coordinator,
+                                    admitted_at: frame.admitted_at(),
+                                }
+                                .inspect(*request);
+                                if client.reply_input(result.as_ref()).is_err() {
                                     client.closed = true;
                                     break;
                                 }
                                 continue;
                             }
                             Ok(ServiceControlRequest::Input(request)) => {
-                                let response_context = match &request.operation {
-                                    InputControlOperation::PermissionRespond(input) => {
-                                        Some((input.interaction_id, input.operation_key.clone()))
-                                    }
-                                    _ => None,
-                                };
-                                let result = (|| -> Result<Option<InputControlReply>> {
-                                    let deadline = receive_input_expiration(
-                                        request.expires_at_mono_ns,
-                                        frame.admitted_at(),
-                                        None,
-                                        &mut RealInputDeadlineClock,
-                                    )?;
-                                    let coordinator = coordinator
-                                        .as_mut()
-                                        .ok_or_else(|| error("native input has not started"))?;
-                                    if response_context.is_some() {
-                                        if let Some(reply) = coordinator
-                                            .retained_permission_response(
-                                                &mut conn, &run, &request, deadline,
-                                            )
-                                            .map_err(CafleetError::from)?
-                                        {
-                                            return Ok(Some(reply));
-                                        }
-                                        let admission = coordinator
-                                            .progress_with_manual(&mut transport, |transport| {
-                                                transport.quiesce_for_input(
-                                                    &mut input,
-                                                    &mut pty,
-                                                    &mut output,
-                                                    &mut controller
-                                                        .observer(&writer, services.clock.as_ref()),
-                                                    deadline,
-                                                )
-                                            })
-                                            .map_err(CafleetError::from)?;
-                                        if matches!(admission, InputDrain::Pending) {
-                                            return Err(error(format!(
-                                                "permission request is blocked: {}",
-                                                transport
-                                                    .drain_blocker()
-                                                    .expect("a Pending drain names its reason")
-                                            )));
-                                        }
-                                    }
-                                    let reply = coordinator
-                                        .handle_received(
-                                            &mut conn,
-                                            &run,
-                                            *request,
-                                            &controller,
-                                            deadline,
-                                        )
-                                        .map_err(CafleetError::from)?;
-                                    if reply.is_none() {
-                                        ensure(
-                                            pending_input_client.is_none(),
-                                            "accepted pending input already has a client",
-                                        )?;
-                                        pending_input_client = Some(PendingInputClient {
-                                            id: client.id,
-                                            deadline,
-                                        });
-                                    }
-                                    Ok(reply)
-                                })()
-                                .map_err(|source| match response_context {
-                                    Some((interaction_id, operation_key)) => {
-                                        CafleetError::from(InputFailure {
-                                            source,
-                                            run_id: Some(run.run_id),
-                                            interaction_id: Some(interaction_id),
-                                            input_id: None,
-                                            operation_key: Some(operation_key),
-                                        })
-                                    }
-                                    None => source,
-                                });
-                                let replied = match &result {
-                                    Ok(Some(reply)) => client.reply_input(Ok(reply)),
-                                    Err(cause) => client.reply_input(Err(cause)),
-                                    Ok(None) => Ok(()),
+                                let result = InputRequest {
+                                    native: &mut native,
+                                    conn: &mut conn,
+                                    run: &run,
+                                    coordinator: &mut coordinator,
+                                    admitted_at: frame.admitted_at(),
+                                }
+                                .submit(
+                                    *request,
+                                    &mut pending_input_client,
+                                    client.id,
+                                );
+                                let replied = match result.as_ref().map(Option::as_ref).transpose()
+                                {
+                                    Some(reply) => client.reply_input(reply),
+                                    None => Ok(()),
                                 };
                                 if replied.is_err() {
                                     client.closed = true;
@@ -857,32 +881,37 @@ fn run_service(
                                         },
                                     )?;
                                     #[cfg(test)]
-                                    if let Some(port) = &mut services.capture {
-                                        let (prepared, placement) = with_database_deadline(
-                                            &mut conn,
-                                            handshake_deadline,
-                                            |conn| {
-                                                let prepared = storage::get_run(conn, run.run_id)?;
-                                                let placement = broker::get_member(
-                                                    conn,
-                                                    run.member_id,
-                                                    run.fleet_id,
-                                                )?
-                                                .and_then(|member| member.placement)
-                                                .ok_or_else(|| {
-                                                    error("capture prepared placement missing")
-                                                })?;
-                                                Ok((prepared, placement))
-                                            },
-                                        )?;
-                                        port.bind_service_prepared(
-                                            &prepared,
-                                            &placement,
-                                            &descriptor.spawn,
-                                            services.clock.as_ref(),
-                                        )?;
-                                    }
-                                    let child = pty.spawn(&descriptor.spawn)?;
+                                    let capture_placement = match &mut services.capture {
+                                        Some(port) => {
+                                            let (prepared, placement) = with_database_deadline(
+                                                &mut conn,
+                                                handshake_deadline,
+                                                |conn| {
+                                                    let prepared =
+                                                        storage::get_run(conn, run.run_id)?;
+                                                    let placement = broker::get_member(
+                                                        conn,
+                                                        run.member_id,
+                                                        run.fleet_id,
+                                                    )?
+                                                    .and_then(|member| member.placement)
+                                                    .ok_or_else(|| {
+                                                        error("capture prepared placement missing")
+                                                    })?;
+                                                    Ok((prepared, placement))
+                                                },
+                                            )?;
+                                            port.bind_service_prepared(
+                                                &prepared,
+                                                &placement,
+                                                &descriptor.spawn,
+                                                native.clock,
+                                            )?;
+                                            Some(placement)
+                                        }
+                                        None => None,
+                                    };
+                                    let child = native.pty.spawn(&descriptor.spawn)?;
                                     with_database_deadline(
                                         &mut conn,
                                         handshake_deadline,
@@ -899,20 +928,16 @@ fn run_service(
                                     started = true;
                                     #[cfg(test)]
                                     if let Some(mut port) = services.capture.take() {
-                                        let placement =
-                                            broker::get_member(&conn, run.member_id, run.fleet_id)?
-                                                .and_then(|member| member.placement)
-                                                .ok_or_else(|| {
-                                                    error("capture running placement missing")
-                                                })?;
+                                        let placement = capture_placement
+                                            .expect("a bound capture retains its placement");
                                         port.finalize_source(&run, &placement, &child)?;
-                                        controller.attach_capture(port)?;
+                                        native.controller.attach_capture(port)?;
                                     }
-                                    controller.started(
+                                    native.controller.started(
                                         &run,
-                                        &transport.snapshot(),
-                                        &writer,
-                                        services.clock.as_ref(),
+                                        &native.transport.snapshot(),
+                                        native.writer,
+                                        native.clock,
                                     )?;
                                     coordinator = Some(InputCoordinator::new(
                                         &mut conn,
@@ -941,9 +966,9 @@ fn run_service(
                                             start_identity,
                                         },
                                     ),
-                                    output_seq: transport.snapshot().screen_seq,
+                                    output_seq: native.transport.snapshot().screen_seq,
                                     observation: if started {
-                                        Some(controller.health(&writer))
+                                        Some(native.controller.health(native.writer))
                                     } else {
                                         None
                                     },
@@ -995,76 +1020,51 @@ fn run_service(
                         "selected database was replaced; input fenced",
                     )?;
                     if resize.swap(false, Ordering::AcqRel) {
-                        transport.resize(&mut pty, terminal_size(&terminal)?)?;
-                        controller
-                            .observer_for(
-                                &writer,
-                                services.clock.as_ref(),
-                                ObservationPhase::Resize,
-                            )
-                            .observe(&transport.snapshot())?;
+                        native
+                            .transport
+                            .resize(native.pty, terminal_size(&terminal)?)?;
+                        native
+                            .controller
+                            .observer_for(native.writer, native.clock, ObservationPhase::Resize)
+                            .observe(&native.transport.snapshot())?;
                     }
                     let coordinator = coordinator
                         .as_mut()
                         .ok_or_else(|| error("running service requires input coordinator"))?;
                     let progress = coordinator
-                        .progress_with_manual(&mut transport, |transport| {
+                        .progress_with_manual(native.transport, |transport| {
                             transport.tick(
-                                &mut input,
-                                &mut pty,
-                                &mut output,
-                                &mut controller.observer(&writer, services.clock.as_ref()),
+                                native.input,
+                                native.pty,
+                                native.output,
+                                &mut native.controller.observer(native.writer, native.clock),
                             )
                         })
                         .map_err(CafleetError::from)?;
-                    record_observation_failure(
-                        &mut controller,
-                        &progress,
-                        services.clock.as_ref(),
+                    record_observation_failure(native.controller, &progress, native.clock)?;
+                    native.controller.poll(
+                        &native.transport.snapshot(),
+                        native.writer,
+                        native.clock,
                     )?;
-                    controller.poll(&transport.snapshot(), &writer, services.clock.as_ref())?;
                     if progress.outer_eof {
                         return Ok(ShutdownClock::new(Instant::now()));
                     }
                     tick_progress = progress;
-                    if let Some(exit) = pty.try_wait()? {
-                        native_exit = Some(exit);
-                        controller.child_exited(
-                            exit,
-                            &transport.snapshot(),
-                            &writer,
-                            services.clock.as_ref(),
-                        )?;
-                        return Ok(ShutdownClock::new(Instant::now()));
+                    if let Some(clock) = native.observe_exit(&mut native_exit)? {
+                        return Ok(clock);
                     }
                     if let Some(pending) = &pending_input_client {
                         let deadline = pending.deadline;
-                        let drained =
-                            coordinator.progress_with_manual(&mut transport, |transport| {
-                                transport.quiesce_for_input(
-                                    &mut input,
-                                    &mut pty,
-                                    &mut output,
-                                    &mut controller.observer(&writer, services.clock.as_ref()),
-                                    deadline,
-                                )
-                            });
-                        let result = match drained {
+                        let result = match native.quiesce(coordinator, deadline) {
                             Err(failure) => Err(CafleetError::from(failure)),
                             Ok(InputDrain::Pending) => Ok(None),
                             Ok(InputDrain::Quiescent { .. }) => {
                                 if terminate.load(Ordering::Acquire) {
                                     return Ok(ShutdownClock::new(Instant::now()));
                                 }
-                                if let Some(exit) = pty.try_wait()? {
-                                    native_exit = Some(exit);
-                                    controller.child_exited(
-                                        exit,
-                                        &transport.snapshot(),
-                                        &writer,
-                                        services.clock.as_ref(),
-                                    )?;
-                                    return Ok(ShutdownClock::new(Instant::now()));
+                                if let Some(clock) = native.observe_exit(&mut native_exit)? {
+                                    return Ok(clock);
                                 }
                                 if resize.load(Ordering::Acquire) {
                                     Ok(None)
@@ -1073,9 +1073,9 @@ fn run_service(
                                         .advance(
                                             &mut conn,
                                             &run,
-                                            &mut transport,
-                                            &mut pty,
-                                            &controller,
+                                            native.transport,
+                                            native.pty,
+                                            native.controller,
                                             deadline,
                                         )
                                         .map_err(CafleetError::from)
@@ -1091,12 +1091,10 @@ fn run_service(
                                 .iter_mut()
                                 .find(|client| client.id == pending.id && !client.closed)
                             {
-                                let replied = match &result {
-                                    Ok(Some(reply)) => client.reply_input(Ok(reply)),
-                                    Err(cause) => client.reply_input(Err(cause)),
-                                    Ok(None) => unreachable!("completed input has a reply"),
-                                };
-                                if replied.is_err() {
+                                let reply = result.as_ref().map(|reply| {
+                                    reply.as_ref().expect("completed input has a reply")
+                                });
+                                if client.reply_input(reply).is_err() {
                                     client.closed = true;
                                 }
                             }
@@ -1105,7 +1103,7 @@ fn run_service(
                 }
                 std::thread::sleep(tick_sleep(
                     &tick_progress,
-                    controller.status().next_deadline,
+                    native.controller.status().next_deadline,
                     Instant::now(),
                 ));
             }
@@ -1259,9 +1257,7 @@ pub(crate) mod test_support {
     pub(crate) fn wire_frame(value: &Value) -> Vec<u8> {
         let body = serde_json::to_vec(value).unwrap();
         assert!(body.len() <= 65536);
-        let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-        bytes.extend(body);
-        bytes
+        crate::runtime::runner::codec::test_support::independent_frame(&body)
     }
 
     pub(crate) struct Wire(pub(crate) UnixStream);
@@ -2056,7 +2052,12 @@ pub(crate) mod test_support {
                             panic!("owned control disconnected before a complete reply");
                         }
                         Ok(count) => {
-                            let mut frames = self.decoder.feed(&bytes[..count]).unwrap();
+                            let mut frames =
+                                crate::runtime::runner::codec::test_support::feed_values(
+                                    &mut self.decoder,
+                                    &bytes[..count],
+                                )
+                                .unwrap();
                             if !frames.is_empty() {
                                 assert_eq!(frames.len(), 1);
                                 self.decoder.finish().unwrap();
@@ -2433,7 +2434,7 @@ pub(crate) mod test_support {
                 .map_err(io_error)?;
             let catalog = ProfileCatalog::from_definitions(&value["catalog"])?;
             private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
-            let services = RunnerTestServices {
+            let services = RunnerDependencies {
                 catalog,
                 clock: Arc::new(Clock),
                 writer_hooks: Arc::new(Hooks {
@@ -2442,7 +2443,7 @@ pub(crate) mod test_support {
                 capture: None,
                 observation_hooks: super::review_failures::hooks(&value, config.parent().unwrap())?,
             };
-            run_with_test_services(settings, descriptor, services)
+            run_service(settings, descriptor, services)
         }
         pub(crate) fn private_write(path: &Path, bytes: &[u8]) {
             let mut file = std::fs::OpenOptions::new()
@@ -2560,7 +2561,7 @@ pub(crate) mod test_support {
         pub(crate) const CANARY: &str = "private-observation-fault-canary-194";
 
         pub(crate) struct Hooks {
-            pub(crate) site: ObservationSite,
+            pub(crate) site: ObservationPhase,
             pub(crate) operation: ObservationOperation,
             pub(crate) directory: std::path::PathBuf,
             pub(crate) buffered_tail: Option<BufferedTail>,
@@ -2649,7 +2650,7 @@ pub(crate) mod test_support {
             }
             fn before(
                 &self,
-                site: ObservationSite,
+                site: ObservationPhase,
                 operation: ObservationOperation,
             ) -> Result<(), CafleetError> {
                 if site != self.site || operation != self.operation {
@@ -2684,10 +2685,10 @@ pub(crate) mod test_support {
                 return Ok(None);
             };
             let site = match selected["site"].as_str() {
-                Some("child_output") => ObservationSite::ChildOutput,
-                Some("quiet_timer") => ObservationSite::QuietTimer,
-                Some("resize") => ObservationSite::Resize,
-                Some("shutdown_drain") => ObservationSite::ShutdownDrain,
+                Some("child_output") => ObservationPhase::ChildOutput,
+                Some("quiet_timer") => ObservationPhase::QuietTimer,
+                Some("resize") => ObservationPhase::Resize,
+                Some("shutdown_drain") => ObservationPhase::ShutdownDrain,
                 _ => return Err(error("owned observation fault site required")),
             };
             let operation = match selected["operation"].as_str() {
@@ -3502,7 +3503,8 @@ mod tests {
                 let fixture = ServiceFixture::startup_refusal(|fixture, spec| {
                     synthetic(fixture, spec);
                     let run = &fixture.run;
-                    let evidence=storage::evidence::EvidencePolicy::metadata().apply(&json!({"backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,"rule_id":"runner-lifecycle","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
+                    let evidence =
+                        storage::evidence::run_metadata(run, "runner-lifecycle", 1).unwrap();
                     if interaction {
                         seeded = Some(evidence.to_string());
                         fixture.conn.execute("INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json) VALUES(?1,1,'permission_request',?2,'2026-10-26T17:00:00Z',?3)",rusqlite::params![run.run_id,evidence["evidence_digest"].as_str().unwrap(),evidence.to_string()]).unwrap();
@@ -3899,11 +3901,7 @@ mod tests {
         use std::io::Write;
         use std::net::Shutdown;
 
-        fn frame(body: &[u8]) -> Vec<u8> {
-            let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-            bytes.extend_from_slice(body);
-            bytes
-        }
+        use crate::runtime::runner::codec::test_support::independent_frame as frame;
         fn pair() -> (Client, UnixStream) {
             let (stream, peer) = UnixStream::pair().unwrap();
             stream.set_nonblocking(true).unwrap();

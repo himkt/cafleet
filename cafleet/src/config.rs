@@ -25,14 +25,17 @@ impl Settings {
                 format!("sqlite:///{home}/.local/share/cafleet/cafleet_v8.db")
             }
         };
+        let max_text_len = match lookup("CAFLEET_MAX_TEXT_LEN") {
+            None => 200,
+            Some(raw) => raw.parse().map_err(|_| {
+                CafleetError::App(format!(
+                    "CAFLEET_MAX_TEXT_LEN must be a non-negative integer (got '{raw}')"
+                ))
+            })?,
+        };
         Ok(Settings {
             database_url,
-            max_text_len: parse_numeric(
-                &lookup,
-                "CAFLEET_MAX_TEXT_LEN",
-                200,
-                "a non-negative integer",
-            )?,
+            max_text_len,
             multiplexer: lookup("CAFLEET_MULTIPLEXER"),
         })
     }
@@ -52,20 +55,6 @@ impl Settings {
             _ => None,
         })
         .unwrap()
-    }
-}
-
-fn parse_numeric<T: std::str::FromStr>(
-    lookup: &impl Fn(&str) -> Option<String>,
-    name: &str,
-    default: T,
-    expectation: &str,
-) -> Result<T, CafleetError> {
-    match lookup(name) {
-        None => Ok(default),
-        Some(raw) => raw
-            .parse()
-            .map_err(|_| CafleetError::App(format!("{name} must be {expectation} (got '{raw}')"))),
     }
 }
 
@@ -130,20 +119,17 @@ mod tests {
     }
 
     #[test]
-    fn non_integer_max_text_len_fails_loudly() {
-        let result = Settings::from_lookup(|name| match name {
-            "CAFLEET_MAX_TEXT_LEN" => Some("twenty".to_string()),
-            _ => None,
-        });
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn negative_max_text_len_fails_loudly() {
-        let result = Settings::from_lookup(|name| match name {
-            "CAFLEET_MAX_TEXT_LEN" => Some("-1".to_string()),
-            _ => None,
-        });
-        assert!(result.is_err());
+    fn non_integer_or_negative_max_text_len_fails_loudly() {
+        for raw in ["twenty", "-1"] {
+            let error = Settings::from_lookup(|name| match name {
+                "CAFLEET_MAX_TEXT_LEN" => Some(raw.to_string()),
+                _ => None,
+            })
+            .unwrap_err();
+            assert_eq!(
+                error.message(),
+                format!("CAFLEET_MAX_TEXT_LEN must be a non-negative integer (got '{raw}')")
+            );
+        }
     }
 }

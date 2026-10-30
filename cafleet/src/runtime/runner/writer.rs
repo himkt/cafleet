@@ -122,6 +122,7 @@ impl Pending {
     }
 }
 impl EventWriter {
+    #[cfg(test)]
     pub(crate) fn start(
         database_url: String,
         run: RunRecord,
@@ -196,10 +197,7 @@ impl EventWriter {
                         }
                     }
                     if Instant::now() < next {
-                        std::thread::sleep(
-                            Duration::from_millis(2)
-                                .min(next.saturating_duration_since(Instant::now())),
-                        );
+                        nap_until(next);
                         continue;
                     }
                     let result = (|| -> Result<()> {
@@ -577,9 +575,7 @@ impl EventWriter {
             .expect("shutdown deadline");
         if let Some(thread) = self.thread.as_ref() {
             while !thread.is_finished() && Instant::now() < until {
-                std::thread::sleep(
-                    Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
-                );
+                nap_until(until);
             }
         }
         if self
@@ -827,9 +823,12 @@ pub(crate) mod test_support {
     pub(crate) const AVAILABLE_RULE: &str = "codex-auto-review-indicator";
 
     pub(crate) fn unavailable(fixture: &WriterFixture, sequence: i64) -> ObservedTransition {
-        let evidence = storage::evidence::EvidencePolicy::metadata()
-                .apply(&serde_json::json!({"backend":fixture.fixture.run.backend,"native_version":fixture.fixture.run.native_version,"profile_version":fixture.fixture.run.profile_version,"rule_id":UNAVAILABLE_RULE,"screen_seq":sequence,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}))
-                .unwrap();
+        let evidence = storage::evidence::run_metadata(
+            &fixture.fixture.run,
+            UNAVAILABLE_RULE,
+            u64::try_from(sequence).unwrap(),
+        )
+        .unwrap();
         ObservedTransition {
             kind: RuntimeEventKind::AutomaticReviewUnavailable,
             evidence_json: evidence,
@@ -919,7 +918,12 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn transition(fixture: &WriterFixture, sequence: i64) -> ObservedTransition {
-        let evidence=storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":fixture.fixture.run.backend,"native_version":fixture.fixture.run.native_version,"profile_version":fixture.fixture.run.profile_version,"rule_id":"runner-lifecycle","screen_seq":sequence,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
+        let evidence = storage::evidence::run_metadata(
+            &fixture.fixture.run,
+            "runner-lifecycle",
+            u64::try_from(sequence).unwrap(),
+        )
+        .unwrap();
         ObservedTransition {
             run_id: fixture.fixture.run.run_id,
             event_seq: sequence,

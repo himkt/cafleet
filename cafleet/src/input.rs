@@ -22,15 +22,8 @@ impl Deadline {
     }
     pub(crate) fn inherited_or_new() -> Self {
         DATABASE_WAITS
-            .with(|waits| {
-                waits
-                    .borrow()
-                    .frames
-                    .iter()
-                    .map(|frame| frame.deadline)
-                    .min_by_key(|deadline| deadline.0)
-            })
-            .unwrap_or_default()
+            .with(|waits| waits.borrow().innermost_deadline())
+            .unwrap_or_else(Deadline::new)
     }
     pub(crate) fn new() -> Self {
         Self::until(Instant::now() + Duration::from_secs(5))
@@ -59,21 +52,14 @@ impl Deadline {
                 .expect("a monotonic deadline lies far past the clock origin"),
         )
     }
-
-    pub(crate) fn retry(self) -> bool {
-        match self.remaining() {
-            Ok(left) => {
-                std::thread::sleep(left.min(Duration::from_millis(50)));
-                self.remaining().is_ok()
-            }
-            Err(_) => false,
-        }
-    }
 }
 
-impl Default for Deadline {
-    fn default() -> Self {
-        Self::new()
+pub(crate) fn member_pane_input_error(member_id: i64) -> impl FnOnce(CafleetError) -> CafleetError {
+    move |error| {
+        CafleetError::App(format!(
+            "member {member_id} pane input: {}",
+            error.message()
+        ))
     }
 }
 
@@ -88,13 +74,22 @@ struct DatabaseWaits {
     frames: Vec<DatabaseWait>,
 }
 
+impl DatabaseWaits {
+    fn innermost_deadline(&self) -> Option<Deadline> {
+        self.frames
+            .iter()
+            .map(|frame| frame.deadline)
+            .min_by_key(|deadline| deadline.0)
+    }
+}
+
 thread_local! {
     static DATABASE_WAITS: std::cell::RefCell<DatabaseWaits> = const {
         std::cell::RefCell::new(DatabaseWaits { identity: None, frames: Vec::new() })
     };
 }
 
-pub(crate) fn inherited_database_deadline(conn: &Connection) -> Option<Deadline> {
+fn inherited_database_deadline(conn: &Connection) -> Option<Deadline> {
     DATABASE_WAITS.with(|waits| {
         let waits = waits.borrow();
         if waits.frames.is_empty() {
@@ -109,12 +104,12 @@ pub(crate) fn inherited_database_deadline(conn: &Connection) -> Option<Deadline>
             Some(std::ptr::from_ref(conn).addr()),
             "inherited database scopes use the same connection"
         );
-        waits
-            .frames
-            .iter()
-            .map(|frame| frame.deadline)
-            .min_by_key(|deadline| deadline.instant())
+        waits.innermost_deadline()
     })
+}
+
+pub(crate) fn bounded_by_inherited(conn: &Connection, until: Instant) -> Instant {
+    inherited_database_deadline(conn).map_or(until, |inherited| until.min(inherited.instant()))
 }
 
 fn remaining_database_wait() -> Option<Duration> {
@@ -478,12 +473,8 @@ pub(crate) fn lock_deletion<S, T>(
         let mut targets = targets
             .into_iter()
             .map(|(member_id, placement)| {
-                let path = lock_path(&settings.database_url, &placement).map_err(|error| {
-                    CafleetError::App(format!(
-                        "member {member_id} pane input: {}",
-                        error.message()
-                    ))
-                })?;
+                let path = lock_path(&settings.database_url, &placement)
+                    .map_err(member_pane_input_error(member_id))?;
                 Ok((path, member_id, placement))
             })
             .collect::<Result<Vec<_>, CafleetError>>()?;
@@ -493,17 +484,15 @@ pub(crate) fn lock_deletion<S, T>(
         for (_, member_id, placement) in targets {
             let guard = loop {
                 deadline.remaining()?;
-                match PaneLock::try_acquire(&settings.database_url, &placement).map_err(
-                    |error| {
-                        CafleetError::App(format!(
-                            "member {member_id} pane input: {}",
-                            error.message()
-                        ))
-                    },
-                )? {
-                    Some(guard) => break guard,
-                    None if deadline.retry() => {}
-                    None => return Err(busy(member_id)),
+                if let Some(guard) = PaneLock::try_acquire(&settings.database_url, &placement)
+                    .map_err(member_pane_input_error(member_id))?
+                {
+                    break guard;
+                }
+                let left = deadline.remaining().map_err(|_| busy(member_id))?;
+                std::thread::sleep(left.min(Duration::from_millis(50)));
+                if deadline.remaining().is_err() {
+                    return Err(busy(member_id));
                 }
             };
             guards.push(guard);
@@ -556,13 +545,7 @@ pub(crate) fn lock_member_with_reservation(
         placement,
         deadline.reserving(reservation),
     )
-    .map_err(|error| {
-        CafleetError::App(format!(
-            "member {} pane input: {}",
-            member.member_id,
-            error.message()
-        ))
-    })?
+    .map_err(member_pane_input_error(member.member_id))?
     else {
         return Ok(None);
     };

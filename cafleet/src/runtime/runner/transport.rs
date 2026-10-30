@@ -24,11 +24,11 @@ pub(super) struct DrainedInput {
 }
 
 impl DrainedInput {
-    pub(super) fn evidence(&self) -> InputDrain {
-        InputDrain::Quiescent {
-            human_generation: self.human_generation,
-            output_seq: self.output_seq,
-        }
+    pub(super) fn human_generation(&self) -> u64 {
+        self.human_generation
+    }
+    pub(super) fn output_seq(&self) -> u64 {
+        self.output_seq
     }
 }
 
@@ -478,7 +478,7 @@ pub(crate) mod test_support {
                 ordering.borrow_mut().push("observe");
             }
             self.screens
-                .push((screen.screen_seq, screen.contents.clone()));
+                .push((screen.screen_seq, screen.screen.contents()));
             if self.fail {
                 Err(CafleetError::App(
                     "fixture observation queue unavailable".into(),

@@ -1,8 +1,6 @@
 use super::*;
 use std::io::{Seek, SeekFrom};
 
-const DESCRIPTOR_LIMIT: u64 = 1024 * 1024;
-
 struct PinnedFile {
     file: File,
     identity: Value,
@@ -86,12 +84,7 @@ impl RecoveryDescriptor {
         let mut file = open_private(&path, false)?;
         let file_identity = identity(&file.metadata().map_err(io_error)?);
         let bytes = read_bounded(&mut file, until)?;
-        let descriptor: LaunchDescriptor =
-            serde_json::from_slice(&bytes).map_err(|_| error("malformed launch descriptor"))?;
-        ensure(
-            descriptor.schema_version == 1,
-            "unsupported launch descriptor schema",
-        )?;
+        let descriptor = LaunchDescriptor::parse(&bytes)?;
         ensure(
             descriptor.database_identity_json == run.database_identity_json
                 && descriptor.fleet_id == run.fleet_id

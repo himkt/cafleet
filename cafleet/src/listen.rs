@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::{self, Write};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::time::{Duration, Instant};
@@ -44,29 +44,20 @@ impl ListenIo for BrokerListener<'_> {
 }
 
 #[derive(Default)]
-struct EmittedMessages {
-    pending: HashMap<i64, bool>,
-}
+struct EmittedMessages(HashSet<i64>);
 
 impl EmittedMessages {
     fn reconcile(&mut self, messages: &[MessageRecord]) {
-        for is_pending in self.pending.values_mut() {
-            *is_pending = false;
-        }
-        for message in messages {
-            if let Some(is_pending) = self.pending.get_mut(&message.message_id) {
-                *is_pending = true;
-            }
-        }
-        self.pending.retain(|_, is_pending| *is_pending);
+        let live: HashSet<i64> = messages.iter().map(|m| m.message_id).collect();
+        self.0.retain(|id| live.contains(id));
     }
 
     fn contains(&self, message_id: i64) -> bool {
-        self.pending.contains_key(&message_id)
+        self.0.contains(&message_id)
     }
 
     fn flushed(&mut self, message_id: i64) {
-        self.pending.insert(message_id, true);
+        self.0.insert(message_id);
     }
 }
 
@@ -296,7 +287,7 @@ fn run_on_descriptor(
 mod tests {
     use super::run_on_descriptor;
     use nix::fcntl::{FcntlArg, OFlag, fcntl};
-    use std::cell::{Cell, RefCell};
+    use std::cell::Cell;
     use std::io::{self, Write};
     use std::os::fd::{AsFd, OwnedFd};
     use std::time::{Duration, Instant};
@@ -311,33 +302,10 @@ mod tests {
     use crate::input::Deadline;
     use crate::listen::{ListenIo, ListenOutput, listen, write_json_line};
     use crate::receive::Clock;
+    use crate::receive::test_support::TestClock;
 
-    struct TestClock {
-        origin: Instant,
-        elapsed: Cell<Duration>,
-        sleeps: RefCell<Vec<Duration>>,
-    }
-
-    impl TestClock {
-        fn new() -> Self {
-            Self {
-                origin: Instant::now() + Duration::from_secs(10_000),
-                elapsed: Cell::new(Duration::ZERO),
-                sleeps: RefCell::new(Vec::new()),
-            }
-        }
-    }
-
-    impl Clock for TestClock {
-        fn now(&self) -> Instant {
-            self.origin + self.elapsed.get()
-        }
-
-        fn sleep(&self, duration: Duration) {
-            assert!(!duration.is_zero(), "idle checks advance the clock");
-            self.sleeps.borrow_mut().push(duration);
-            self.elapsed.set(self.elapsed.get() + duration);
-        }
+    fn test_clock() -> TestClock {
+        TestClock::starting_at(Instant::now() + Duration::from_secs(10_000))
     }
 
     struct ScriptedInbox<'a, F> {
@@ -413,7 +381,7 @@ mod tests {
 
     #[test]
     fn an_unacked_a_allows_one_second_idle_sleeps_before_b_arrives_without_repeating_a() {
-        let clock = TestClock::new();
+        let clock = test_clock();
         let mut io = ScriptedInbox {
             clock: &clock,
             snapshots: Vec::new(),
@@ -456,7 +424,7 @@ mod tests {
 
     #[test]
     fn idle_checks_use_the_remaining_monotonic_lease_without_heartbeats() {
-        let clock = TestClock::new();
+        let clock = test_clock();
         let mut io = ScriptedInbox {
             clock: &clock,
             snapshots: Vec::new(),
@@ -496,7 +464,7 @@ mod tests {
 
     #[test]
     fn activity_keeps_the_original_expiry_and_every_work_budget_is_at_most_five_seconds() {
-        let clock = TestClock::new();
+        let clock = test_clock();
         let mut io = ScriptedInbox {
             clock: &clock,
             snapshots: Vec::new(),
@@ -534,7 +502,7 @@ mod tests {
             (InboxClosure::MemberInactive, "member_inactive"),
             (InboxClosure::FleetDeleted, "fleet_deleted"),
         ] {
-            let clock = TestClock::new();
+            let clock = test_clock();
             let mut io = ScriptedInbox {
                 clock: &clock,
                 snapshots: Vec::new(),
@@ -569,7 +537,7 @@ mod tests {
     #[test]
     fn startup_validation_errors_precede_ready_and_midstream_errors_preserve_complete_records() {
         for fail_at in [1, 2] {
-            let clock = TestClock::new();
+            let clock = test_clock();
             let mut io = ScriptedInbox {
                 clock: &clock,
                 snapshots: Vec::new(),
@@ -603,7 +571,7 @@ mod tests {
 
     #[test]
     fn a_startup_snapshot_that_outlives_the_lease_fails_before_emitting_ready() {
-        let clock = TestClock::new();
+        let clock = test_clock();
         let mut io = ScriptedInbox {
             clock: &clock,
             snapshots: Vec::new(),
@@ -630,7 +598,7 @@ mod tests {
 
     #[test]
     fn a_snapshot_budget_failure_terminates_the_stream_instead_of_becoming_a_timeout() {
-        let clock = TestClock::new();
+        let clock = test_clock();
         let mut io = ScriptedInbox {
             clock: &clock,
             snapshots: Vec::new(),
@@ -659,7 +627,7 @@ mod tests {
     #[test]
     fn output_failure_stops_before_another_snapshot_and_retains_only_flushed_records() {
         for fail_at in [0, 1, 2] {
-            let clock = TestClock::new();
+            let clock = test_clock();
             let mut io = ScriptedInbox {
                 clock: &clock,
                 snapshots: Vec::new(),
@@ -683,7 +651,7 @@ mod tests {
 
     #[test]
     fn an_ack_output_race_preserves_the_snapshot_record_and_a_restart_replays_only_pending_ids() {
-        let clock = TestClock::new();
+        let clock = test_clock();
         let acknowledged = Cell::new(false);
         let mut io = ScriptedInbox {
             clock: &clock,
@@ -725,7 +693,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(event_ids(&output.output), [10, 11]);
-        let clock = TestClock::new();
+        let clock = test_clock();
         let mut io = ScriptedInbox {
             clock: &clock,
             snapshots: Vec::new(),
@@ -745,7 +713,7 @@ mod tests {
 
     #[test]
     fn a_failed_final_closed_record_is_an_output_error() {
-        let clock = TestClock::new();
+        let clock = test_clock();
         let mut io = ScriptedInbox {
             clock: &clock,
             snapshots: Vec::new(),
