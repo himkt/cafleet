@@ -11,6 +11,7 @@ jobs:
     name: ${{ matrix.task }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         task: [lint, test]
     steps:
