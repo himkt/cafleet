@@ -437,6 +437,16 @@
       "cols": 120,
       "source_ref": "native/opencode-2.1.4-exec-post-submit-1.json",
       "sha256": "6c9d577c6faa488da3ba88f94c0c6690154dcc549d3563e4abffa161ffeaefec"
+    },
+    {
+      "id": "claude-2.1.308-auto-tip-padded-question-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 35,
+      "cols": 200,
+      "source_ref": "native/claude-2.1.308-auto-tip-padded-question-1.json",
+      "sha256": "f3108eecd8fef6590b3b0ec7677ab3b98109512c7866968caaffdf2ecc8ee09f"
     }
   ],
   "profiles": [
@@ -451,19 +461,19 @@
           "observation": "permission_request",
           "region": {
             "screen": "alternate",
-            "start_pattern": "^ Bash command$",
-            "end_pattern": "^ Esc to cancel · Tab to amend$",
+            "start_pattern": "^ Bash command\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^ Bash command$"},
+            {"id": "heading", "scope": "line", "pattern": "^ Bash command\\s*$"},
             {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
-            {"id": "approval", "scope": "line", "pattern": "^ This command requires approval$"},
-            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?$"},
+            {"id": "approval", "scope": "line", "pattern": "^ This command requires approval\\s*$"},
+            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?\\s*$"},
             {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
-            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)$"},
-            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)$"}
+            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"},
+            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"}
           ],
           "extract": {
             "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
@@ -504,20 +514,20 @@
           "observation": "permission_request",
           "region": {
             "screen": "alternate",
-            "start_pattern": "^ Bash command$",
-            "end_pattern": "^ Esc to cancel · Tab to amend$",
+            "start_pattern": "^ Bash command\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^ Bash command$"},
+            {"id": "heading", "scope": "line", "pattern": "^ Bash command\\s*$"},
             {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
             {"id": "ask_rule", "scope": "line", "pattern": "^ │ Ask rule \\S"},
-            {"id": "auto_hint", "scope": "line", "pattern": "^ /permissions to let auto mode decide$"},
+            {"id": "auto_hint", "scope": "line", "pattern": "^ /permissions to let auto mode decide\\s*$"},
             {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?\\s*$"},
             {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
-            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)$"},
-            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 2\\. (?P<label>No)$"}
+            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"},
+            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 2\\. (?P<label>No)\\s*$"}
           ],
           "extract": {
             "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
@@ -536,20 +546,20 @@
           "observation": "permission_request",
           "region": {
             "screen": "alternate",
-            "start_pattern": "^ Bash command$",
-            "end_pattern": "^ Esc to cancel · Tab to amend$",
+            "start_pattern": "^ Bash command\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^ Bash command$"},
+            {"id": "heading", "scope": "line", "pattern": "^ Bash command\\s*$"},
             {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
-            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?$"},
+            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?\\s*$"},
             {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
-            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)$"},
-            {"id": "access", "scope": "line", "pattern": "^ [❯ ] 2\\. Yes, and always allow access to \\S.* from this project$"},
-            {"id": "switch", "scope": "line", "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you$"},
-            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)$"}
+            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"},
+            {"id": "access", "scope": "line", "pattern": "^ [❯ ] 2\\. Yes, and always allow access to \\S.* from this project\\s*$"},
+            {"id": "switch", "scope": "line", "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you\\s*$"},
+            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"}
           ],
           "extract": {
             "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
@@ -568,15 +578,15 @@
           "observation": "question",
           "region": {
             "screen": "alternate",
-            "start_pattern": "^ {2,3}Teach auto mode about your environment\\?$",
-            "end_pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel$",
+            "start_pattern": "^ {2,3}Teach auto mode about your environment\\?\\s*$",
+            "end_pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel\\s*$",
             "max_rows": 14,
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^ {2,3}Teach auto mode about your environment\\?$"},
+            {"id": "heading", "scope": "line", "pattern": "^ {2,3}Teach auto mode about your environment\\?\\s*$"},
             {"id": "focus", "scope": "line", "pattern": "^ {2,3}❯ \\S"},
-            {"id": "footer", "scope": "line", "pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel$"}
+            {"id": "footer", "scope": "line", "pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel\\s*$"}
           ],
           "extract": {"operation": null, "choices": [], "native_request_id": null},
           "verified_noninteraction": false,
@@ -725,7 +735,8 @@
             "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1",
             "claude-2.1.302-auto-verbose-refusal-above-form-1",
             "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1",
-            "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1"
+            "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1",
+            "claude-2.1.308-auto-tip-padded-question-1"
           ]
         },
         "composer": {

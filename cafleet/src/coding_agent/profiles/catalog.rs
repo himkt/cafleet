@@ -944,6 +944,7 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = bundled![
     "opencode-2.1.4-exec-empty-composer-1",
     "opencode-2.1.4-exec-typed-literal-1",
     "opencode-2.1.4-exec-post-submit-1",
+    "claude-2.1.308-auto-tip-padded-question-1",
 ];
 
 fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {
@@ -3472,11 +3473,17 @@ mod tests {
         const UNKNOWN: ObservationKind = ObservationKind::Unknown;
         const INDICATOR: (&str, Option<&str>) = (INDICATOR_RULE, None);
 
-        const CLASSIFICATION: [Expected; 38] = [
+        const CLASSIFICATION: [Expected; 39] = [
             (
                 "claude-2.1.302-access-allow-continuation-1",
                 COMPOSER,
                 IDLE_RULE,
+                &[],
+            ),
+            (
+                "claude-2.1.308-auto-tip-padded-question-1",
+                FORM,
+                TIP_RULE,
                 &[],
             ),
             (TIP_ALLOW_PRE_STAGE, FORM, TIP_RULE, &[]),
