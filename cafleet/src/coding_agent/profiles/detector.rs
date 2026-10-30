@@ -216,27 +216,11 @@ fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
             }
             *line.boundaries.last_mut().expect("cell end boundary") = (row, col + width);
         }
-        if !screen.screen.row_wrapped(row)
-            || row + 1 == screen.rows
-            || full_width_separator(screen, row, end)
-        {
+        if !screen.screen.row_wrapped(row) || row + 1 == screen.rows {
             lines.push(current.take().expect("current logical line"));
         }
     }
     Ok(lines)
-}
-/// A native CLI can print a separator exactly as wide as the screen and continue by autowrap,
-/// which marks the row as wrapped; the separator still ends its own displayed line.
-fn full_width_separator(screen: &ScreenSnapshot, row: u16, end: u16) -> bool {
-    end == screen.cols
-        && (0..screen.cols).all(|col| {
-            screen.screen.cell(row, col).is_some_and(|cell| {
-                cell.contents()
-                    .chars()
-                    .next()
-                    .is_some_and(|ch| ('\u{2500}'..='\u{257f}').contains(&ch))
-            })
-        })
 }
 struct Matched {
     rule: Rule,
@@ -917,73 +901,6 @@ mod tests {
     use crate::coding_agent::profiles::*;
     use crate::runtime::runner::*;
     use serde_json::{Value, json};
-
-    fn wide_tip_form(cols: u16, autowrapped_separators: bool) -> ScreenSnapshot {
-        let separator = "╌".repeat(usize::from(cols));
-        let rows = [
-            " Bash command".to_owned(),
-            " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below"
-                .to_owned(),
-            " Create empty file wp-mark".to_owned(),
-            separator.clone(),
-            " touch wp-mark".to_owned(),
-            separator,
-            " Do you want to proceed?".to_owned(),
-            " ❯ 1. Yes".to_owned(),
-            "   2. Yes, and always allow access to /tmp/x from this project".to_owned(),
-            "   3. Yes, and switch to auto mode · auto mode handles these prompts for you"
-                .to_owned(),
-            "   4. No".to_owned(),
-            String::new(),
-            " Esc to cancel · Tab to amend".to_owned(),
-        ];
-        let mut bytes = b"\x1b[?1049h\x1b[2J\x1b[13;1H".to_vec();
-        for (index, row) in rows.iter().enumerate() {
-            bytes.extend_from_slice(row.as_bytes());
-            let separator_row = row.starts_with('╌');
-            if index + 1 < rows.len() && !(autowrapped_separators && separator_row) {
-                bytes.extend_from_slice(b"\r\n");
-            }
-        }
-        bytes.extend_from_slice(b"\x1b[20;2H");
-        let mut terminal = TerminalState::new(TerminalSize { rows: 35, cols }).unwrap();
-        terminal.feed(&bytes).unwrap();
-        terminal.snapshot()
-    }
-
-    #[test]
-    fn bundled_claude_wide_tip_form_is_detected_whether_its_separators_are_explicit_or_autowrapped()
-    {
-        let catalog = ProfileCatalog::bundled().unwrap();
-        let detector = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.308"));
-        for cols in [149, 200] {
-            for autowrapped in [false, true] {
-                let context = format!("cols={cols} autowrapped={autowrapped}");
-                let observed = detector.observe(&wide_tip_form(cols, autowrapped)).unwrap();
-                assert_eq!(
-                    observed.kind,
-                    ObservationKind::Interaction(InteractionClass::PermissionRequest),
-                    "{context}"
-                );
-                assert_eq!(
-                    observed.rule_id, "claude-bash-permission-auto-tip",
-                    "{context}"
-                );
-                assert_eq!(
-                    observed.raw_evidence["operation"], "touch wp-mark",
-                    "{context}"
-                );
-                assert_eq!(observed.raw_evidence["operation_rows"], 1, "{context}");
-            }
-        }
-        let mut terminal = TerminalState::new(TerminalSize { rows: 4, cols: 10 }).unwrap();
-        terminal.feed(b"\x1b[2J\x1b[1;1Habcdefghijklmnop").unwrap();
-        let lines = logical_lines(&terminal.snapshot()).unwrap();
-        assert!(
-            lines.iter().any(|line| line.text == "abcdefghijklmnop"),
-            "ordinary wrapped long text still joins into one logical line"
-        );
-    }
 
     #[test]
     fn permission_inspection_answer_match_uses_complete_current_rule_choice_and_focus() {
