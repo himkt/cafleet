@@ -446,7 +446,7 @@
       "rows": 35,
       "cols": 200,
       "source_ref": "native/claude-2.1.308-auto-tip-padded-question-1.json",
-      "sha256": "f3108eecd8fef6590b3b0ec7677ab3b98109512c7866968caaffdf2ecc8ee09f"
+      "sha256": "e6b51216c0268f087f1e5e099b3e3a79db81c60b608af2a1397f3ff6afafd6b3"
     }
   ],
   "profiles": [
