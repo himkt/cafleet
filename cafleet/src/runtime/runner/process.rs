@@ -504,16 +504,35 @@ impl PtySession {
         Ok(())
     }
     pub(crate) fn survivors(&mut self) -> Result<bool> {
-        self.refresh_owned()?;
+        self.survivors_with(&mut NativeProcessObservations)
+    }
+
+    fn survivors_with(&mut self, observed: &mut impl ProcessObservations) -> Result<bool> {
+        self.refresh_owned_with(observed)?;
         for process in self.owned.values() {
-            if stopped(process.pid)? {
+            if observed.stopped(process.pid)? {
                 continue;
             }
-            if let Some(current) = ProcessIdentity::read(process.pid)? {
+            if let Some(current) = observed.identity(process.pid)? {
                 ensure(
                     current == *process,
                     "owned PID generation changed during cleanup",
                 )?;
+                return Ok(true);
+            }
+        }
+        self.unpinned_group_member(observed)
+    }
+
+    /// A live member of the native's process group still belongs to this run even when the
+    /// ownership refresh never pinned it, so cleanup must not report it as gone.
+    fn unpinned_group_member(&self, observed: &mut impl ProcessObservations) -> Result<bool> {
+        let Some(native) = &self.native else {
+            return Ok(false);
+        };
+        let group = i32::try_from(native.pid).map_err(io_error)?;
+        for pid in observed.members(group)? {
+            if observed.identity(pid)?.is_some() && !observed.stopped(pid)? {
                 return Ok(true);
             }
         }
@@ -1196,6 +1215,28 @@ mod tests {
             script.finished();
             let expected = [(A, identity(A)), (B, identity(B))].into_iter().collect();
             assert_state(&session, &expected, false, clock);
+        }
+
+        #[test]
+        fn survivors_report_a_live_group_member_the_closed_refresh_never_pinned() {
+            let mut session = inert(&[]);
+            session.group_closed = true;
+            let mut script = Script::new([members(&[B])].into_iter().chain(active(identity(B))));
+            assert!(session.survivors_with(&mut script).unwrap());
+            script.finished();
+        }
+
+        #[test]
+        fn survivors_ignore_a_zombie_group_member_once_owned_processes_are_gone() {
+            let mut session = inert(&[]);
+            session.group_closed = true;
+            let mut script = Script::new([
+                members(&[B]),
+                observed(identity(B)),
+                Step::Stopped(B, Ok(true)),
+            ]);
+            assert!(!session.survivors_with(&mut script).unwrap());
+            script.finished();
         }
 
         #[test]
