@@ -2490,7 +2490,11 @@ impl InputCoordinator {
             self.operations.remove(&id);
             let mut queued = deferred.queued;
             queued.attempt_deadline = None;
-            queued.composer_busy_since = composer_busy.then_some(now);
+            queued.composer_busy_since = if composer_busy {
+                queued.composer_busy_since.or(Some(now))
+            } else {
+                None
+            };
             self.queue.push_front(queued);
         } else {
             self.cancel_deferred(
@@ -6155,6 +6159,52 @@ mod tests {
                         assert_eq!(input.delivery_reason, None);
                     },
                 );
+            }
+
+            #[test]
+            fn composer_busy_onset_survives_a_busy_requeue_and_still_reaches_idle_timeout() {
+                with_busy_host(busy_catalog(), fallback_program(), |host| {
+                    busy(host);
+                    let request = host.request("prompt:flickering-composer");
+                    let id = queued(host, request, "composer_busy");
+                    let near_bound = crate::time::format_utc(
+                        chrono::Utc::now() - chrono::Duration::seconds(178),
+                    );
+                    host.coordinator
+                        .set_queued_composer_busy_since(id, &near_bound);
+                    host.show(SCREEN.to_vec());
+                    while row(host, id).state == storage::InputState::Ready {
+                        assert!(
+                            Instant::now() < host.until,
+                            "a verified empty composer starts the attempt"
+                        );
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(host.pty.offers.is_empty());
+                    host.show(DRAFT.to_vec());
+                    hold_turns(host);
+                    assert_eq!(row(host, id).state, storage::InputState::Ready);
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "the busy requeue writes zero bytes: {:?}",
+                        host.pty.offers
+                    );
+                    turns_until(host, |host| delivered(host, id));
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![
+                            b"\x1b".to_vec(),
+                            LITERAL.as_bytes().to_vec(),
+                            b"\r".to_vec()
+                        ],
+                        "the retained onset reaches the 3-minute bound"
+                    );
+                    let input = row(host, id);
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
+                    assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
+                });
             }
 
             #[test]
