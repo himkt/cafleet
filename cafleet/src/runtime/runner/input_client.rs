@@ -542,14 +542,6 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         deadline.remaining()?;
         held.release()?;
         let reply = host.exchange(expected_run, &request, deadline.instant());
-        ensure(
-            held.reacquire_within(Deadline::until(
-                deadline
-                    .instant()
-                    .max(Instant::now() + std::time::Duration::from_secs(1)),
-            ))?,
-            "pane input lock remained busy after the runner submission",
-        )?;
         let reply = reply.map_err(CafleetError::from)?;
         let InputControlReply::Submission(reply) = reply else {
             return Err(error("ordinary submission requires a submission reply"));
@@ -557,6 +549,22 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         let recorded = find_submission(conn, &identity, attempt.request, deadline)
             .map_err(CafleetError::from)?;
         context.input_id = recorded.as_ref().map(|input| input.input_id);
+        if !held.reacquire_within(Deadline::until(
+            deadline
+                .instant()
+                .max(Instant::now() + std::time::Duration::from_secs(1)),
+        ))? {
+            return Err(error(match context.input_id {
+                Some(input_id) => format!(
+                    "pane input lock remained busy after the runner reported {}; inspect the result with cafleet input show {input_id} --json",
+                    reply.status.as_str()
+                ),
+                None => format!(
+                    "pane input lock remained busy after the runner reported {}",
+                    reply.status.as_str()
+                ),
+            }));
+        }
         with_database_budget(conn, deadline, |conn| {
             held.validate_binding(&settings.database_url, expected_placement)?;
             validate_submission_target(conn, settings, expected_run, expected_placement)
@@ -4267,6 +4275,99 @@ mod tests {
                     .count(),
                 1
             );
+        });
+    }
+
+    /// Takes the pane lock as soon as the runner replies, so the client cannot reacquire it.
+    struct LockTakingHost {
+        inner: SocketHost,
+        taken: Option<PaneLock>,
+    }
+
+    impl InputCommandHost for LockTakingHost {
+        fn lock(
+            &mut self,
+            settings: &Settings,
+            run: &RunRecord,
+            placement: &Placement,
+            deadline: Deadline,
+        ) -> std::result::Result<Option<PaneLock>, InputFailure> {
+            self.inner.lock(settings, run, placement, deadline)
+        }
+
+        fn health(
+            &mut self,
+            run: &RunRecord,
+            deadline: Instant,
+        ) -> std::result::Result<HealthSnapshot, InputFailure> {
+            self.inner.health(run, deadline)
+        }
+
+        fn exchange(
+            &mut self,
+            run: &RunRecord,
+            request: &InputControlRequest,
+            deadline: Instant,
+        ) -> std::result::Result<InputControlReply, InputFailure> {
+            let reply = self.inner.exchange(run, request, deadline)?;
+            self.taken = PaneLock::acquire_within(
+                &self.inner.settings.database_url,
+                &self.inner.placement,
+                Deadline::until(Instant::now() + Duration::from_secs(1)),
+            )
+            .unwrap();
+            assert!(self.taken.is_some(), "the released pane lock is taken");
+            Ok(reply)
+        }
+    }
+
+    #[test]
+    fn external_input_lock_reacquire_failure_after_the_runner_reply_reports_the_known_input_id() {
+        with_input_service(|fixture, outer| {
+            let (settings, run, placement) = service_target(fixture);
+            let request = ordinary(&run, "reacquire-failure");
+            let until = outer.min(Instant::now() + Duration::from_secs(4));
+            let attempt =
+                PreparedSubmission::new(&request, until, &mut super::super::RealInputDeadlineClock)
+                    .unwrap();
+            let held = PaneLock::try_acquire(&settings.database_url, &placement)
+                .unwrap()
+                .unwrap();
+            let mut inner = SocketHost::new(&settings, &placement, until);
+            inner.expiration = Some(attempt.expiration.monotonic_ns());
+            let mut host = LockTakingHost { inner, taken: None };
+            let failure = match submit_wrapped_input_under_pane_lock_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                &run,
+                &placement,
+                &held,
+                &attempt,
+                Deadline::until(until),
+                &mut host,
+            ) {
+                Err(failure) => failure,
+                Ok(result) => panic!(
+                    "a lock that cannot be reacquired fails: {:?}",
+                    result.input_id
+                ),
+            };
+            let row =
+                storage::find_input(&fixture.fixture.conn, run.run_id, &request.operation_key)
+                    .unwrap()
+                    .expect("the runner committed the submission receipt");
+            assert_eq!(
+                failure.input_id,
+                Some(row.input_id),
+                "the failure names the input the runner already submitted"
+            );
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(request.operation_key.as_str())
+            );
+            drop(host.taken.take());
+            drop(held);
+            wait_input_service_record(fixture, &request.literal, outer);
         });
     }
 

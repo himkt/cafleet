@@ -547,7 +547,26 @@ mod tests {
         }
 
         #[test]
-        fn runtime_presentation_renders_a_profiled_run_without_match_metadata() {
+        fn runtime_presentation_renders_a_profiled_run_on_member_and_event_surfaces() {
+            const RUNTIME_KEYS: [&str; 17] = [
+                "run_id",
+                "resolved_mode",
+                "status",
+                "reachability",
+                "owner_epoch",
+                "last_health_at",
+                "coverage",
+                "current_interaction_id",
+                "unresolved_input_ids",
+                "owner_kind",
+                "owner_pid",
+                "owner_start_identity",
+                "runner_pid",
+                "runner_start_identity",
+                "child_pid",
+                "child_start_identity",
+                "effective_policy",
+            ];
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             let event = fixture.open(&owner);
@@ -563,7 +582,7 @@ mod tests {
                 .unwrap();
             let runtime = &crate::presentation::member(&member)["runtime"];
             assert_eq!(runtime["coverage"], "tested");
-            assert!(runtime.get("profile_match").is_none());
+            assert_key_order(runtime, &RUNTIME_KEYS);
             let line = format!(
                 "Runtime: run={} mode=never status=running coverage=tested review=-",
                 owner.run_id
@@ -573,10 +592,9 @@ mod tests {
                 format!("{} worker active\n{line}", fixture.member)
             );
             let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
-            assert!(
-                crate::presentation::runtime_event(&view)["run"]
-                    .get("profile_match")
-                    .is_none()
+            assert_key_order(
+                &crate::presentation::runtime_event(&view)["run"],
+                &RUNTIME_KEYS,
             );
             assert_eq!(
                 crate::output::format_runtime_event(&view)

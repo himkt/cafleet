@@ -3076,12 +3076,28 @@ mod tests {
                 attempted_before,
                 "an attempt that may have written bytes keeps its reconciliation state"
             );
+            let results = |case: &Case| -> i64 {
+                case.fixture
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                        rusqlite::params![case.fixture.run.run_id, deferred],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(
+                results(&case),
+                1,
+                "the recovery settlement publishes its deferred result"
+            );
             case.recover(&mut new_host()).unwrap();
             assert_eq!(
                 storage::get_input(&case.fixture.conn, deferred).unwrap(),
                 settled,
                 "a repeated recovery leaves the settled receipt unchanged"
             );
+            assert_eq!(results(&case), 1, "the result is published once");
         }
     }
 }

@@ -129,6 +129,40 @@ pub(super) fn loss_transitions(
     });
     Ok(transitions)
 }
+fn publish_delivery_results<S: OutboxIo>(
+    conn: &mut Connection,
+    result: &mut RecoveryCompletion,
+    outbox: &mut Outbox<S>,
+    host: &mut impl RecoveryHost,
+    until: Instant,
+) -> Result<()> {
+    let unpublished = with_database_deadline(conn, until, |conn| {
+        storage::unpublished_delivery_results(conn, result.run.run_id)
+    })?;
+    for chunk in unpublished.chunks(256) {
+        let sequences = with_database_deadline(conn, until, |conn| {
+            storage::reserve_event_sequences(conn, &result.run.owner())
+        })?;
+        refresh(conn, result, until)?;
+        let evidence = storage::evidence::run_metadata(&result.run, "runtime-recovery", 0)?;
+        for (event_seq, &(input_id, stage)) in sequences.zip(chunk) {
+            let transition = ObservedTransition {
+                run_id: result.run.run_id,
+                event_seq,
+                episode_seq: None,
+                kind: RuntimeEventKind::InputDeliveryResult,
+                classification: None,
+                observed_at: crate::time::now_stamp(),
+                evidence_json: evidence.clone(),
+                close_reason: None,
+                cause_json: Some(storage::input_delivery_result_cause(input_id, stage, None)),
+            };
+            outbox.append_recovery(conn, &transition, until)?;
+            persist(conn, result, &transition, None, false, host, until)?;
+        }
+    }
+    Ok(())
+}
 pub(super) fn terminal_outcome(conn: &Connection, run: &RunRecord) -> Result<Option<RunStatus>> {
     let terminal: Option<String> = conn.query_row(
         "SELECT kind FROM member_runtime_events WHERE run_id=?1 AND kind IN ('runner_exited','runner_lost') ORDER BY event_seq DESC LIMIT 1",
@@ -192,6 +226,7 @@ fn perform(
             RunStatus::Lost
         }
     };
+    publish_delivery_results(conn, result, &mut outbox, host, until)?;
     let cleanup = host.cleanup_owned(&result.run, clock)?;
     for diagnostic in &cleanup.diagnostics {
         result.report.cleanup_diagnostics.push(json!(diagnostic));

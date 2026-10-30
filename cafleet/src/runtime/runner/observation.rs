@@ -849,6 +849,11 @@ impl ObservationController {
         if self.pending.is_none()
             && self.gap.is_none()
             && !writer.status().degraded
+            && self
+                .delivery_results
+                .get_mut()
+                .expect("delivery result queue is never poisoned")
+                .is_empty()
             && let Some(exit) = self.exit.take()
         {
             self.terminal_fenced = true;

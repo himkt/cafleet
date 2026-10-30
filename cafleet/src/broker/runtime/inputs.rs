@@ -244,6 +244,67 @@ pub(crate) fn begin_deferred_attempt(
     })
 }
 
+/// Returns a reserved immediate request that wrote zero bytes to the queue, clearing its unexecuted
+/// selection and recording why it was deferred.
+pub(crate) fn requeue_zero_byte_immediate(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    defer_reason: &str,
+) -> Result<InputOperation, CafleetError> {
+    owned_transaction(conn, owner, |conn, run| {
+        let input = owned_input(conn, run, input_id)?;
+        require(
+            input.state == InputState::InProgress
+                && input.deferred_at.is_none()
+                && input.kind != InputKind::PermissionResponse,
+            "member_input_operations.state",
+            "only an immediate ordinary attempt returns to the queue",
+        )?;
+        let now = now_stamp();
+        let changed = conn.execute(
+            "UPDATE member_input_operations SET state='ready',updated_at=?1,delivery_method=NULL,delivery_reason=NULL,deferred_at=?1,defer_reason=?2 WHERE input_id=?3 AND state='in_progress'",
+            params![now, defer_reason, input_id],
+        )?;
+        require(
+            changed == 1,
+            "member_input_operations.state",
+            "input CAS failed",
+        )?;
+        get_input(conn, input_id)
+    })
+}
+
+/// The deferred inputs of a run whose first result is durable but whose result event is not, with
+/// the stage that event reports. Recovery publishes these after the live writer is gone.
+pub(crate) fn unpublished_delivery_results(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<Vec<(i64, &'static str)>, CafleetError> {
+    let mut statement = conn.prepare(
+        "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND deferred_at IS NOT NULL AND input_id NOT IN (SELECT json_extract(payload_json,'$.input_id') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result') ORDER BY input_id",
+    )?;
+    let ids = statement
+        .query_map([run_id], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut results = Vec::new();
+    for input_id in ids {
+        let delivery = get_input(conn, input_id)?
+            .delivery()
+            .expect("a deferred input is an ordinary input");
+        let stage = match delivery.status {
+            DeliveryStatus::Submitted => "submitted",
+            DeliveryStatus::NotSubmitted => "zero_bytes",
+            DeliveryStatus::Uncertain => "unknown",
+            DeliveryStatus::Queued | DeliveryStatus::Held | DeliveryStatus::NotApplicable => {
+                continue;
+            }
+        };
+        results.push((input_id, stage));
+    }
+    Ok(results)
+}
+
 /// Settles every queued receipt of a run whose runner was lost, after ownership fencing has
 /// established that its in-memory payload and writer are gone.
 pub(crate) fn settle_lost_deferred(

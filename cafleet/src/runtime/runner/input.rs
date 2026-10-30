@@ -99,8 +99,20 @@ struct QueuedInput {
     literal: String,
     operation: ComposerOperation,
     payload_digest_version: i64,
+    deferred_at: chrono::DateTime<chrono::FixedOffset>,
     attempt_deadline: Option<Instant>,
     obstacle: &'static str,
+}
+
+fn deferred_at(
+    operation: &storage::InputOperation,
+) -> Result<chrono::DateTime<chrono::FixedOffset>> {
+    let deferred_at = operation
+        .deferred_at
+        .as_deref()
+        .ok_or_else(|| error("a queued input records when it was deferred"))?;
+    chrono::DateTime::parse_from_rfc3339(deferred_at)
+        .map_err(|_| error("queued input deferral time is not RFC 3339"))
 }
 
 type DeliverySelection = (
@@ -259,6 +271,8 @@ struct ComposerDelivery {
     manual_generation: Option<u64>,
     pane: Option<PaneLock>,
     payload_digest_version: i64,
+    literal: String,
+    operation: ComposerOperation,
     deferred: Option<DeferredAttempt>,
 }
 
@@ -606,6 +620,27 @@ enum WriteValidation {
     Contended,
 }
 
+#[cfg(test)]
+impl InputCoordinator {
+    pub(crate) fn set_queued_deferred_at(&mut self, input_id: i64, deferred_at: &str) {
+        let deferred_at =
+            chrono::DateTime::parse_from_rfc3339(deferred_at).expect("RFC 3339 deferral time");
+        let attempt = self
+            .pending
+            .as_mut()
+            .and_then(|pending| pending.composer.as_mut())
+            .and_then(|composer| composer.deferred.as_mut())
+            .map(|deferred| &mut deferred.queued);
+        let queued = self
+            .queue
+            .iter_mut()
+            .chain(attempt)
+            .find(|queued| queued.input_id == input_id)
+            .expect("the input is queued or in its deferred attempt");
+        queued.deferred_at = deferred_at;
+    }
+}
+
 impl InputCoordinator {
     pub(super) fn inspect_received(
         &mut self,
@@ -758,9 +793,12 @@ impl InputCoordinator {
         })
     }
 
-    pub(crate) fn fence(&mut self, deadline: Instant) -> Result<()> {
+    /// Cancels queued work as `runner_stopped` and returns the settled input IDs, whose results
+    /// the caller publishes before the run's exit event.
+    pub(crate) fn fence(&mut self, deadline: Instant) -> Result<Vec<i64>> {
         self.current_request = None;
         self.input_fenced = true;
+        let mut settled = Vec::new();
         if !self.queue.is_empty() {
             let mut conn = crate::db::connect(&self.database_url)?;
             let owner = self.run.owner();
@@ -774,9 +812,11 @@ impl InputCoordinator {
                         "runner_stopped",
                     )
                 })?;
+                settled.push(queued.input_id);
             }
         }
-        check_deadline(Instant::now(), deadline)
+        check_deadline(Instant::now(), deadline)?;
+        Ok(settled)
     }
     fn permission_blocker(&self, observation: &ObservationController) -> Option<String> {
         let status = observation.status();
@@ -1881,6 +1921,7 @@ impl InputCoordinator {
                             literal: input.literal,
                             operation: composer_operation,
                             payload_digest_version,
+                            deferred_at: deferred_at(&operation)?,
                             attempt_deadline: None,
                             obstacle: "delivery_budget_exhausted",
                         });
@@ -1919,6 +1960,8 @@ impl InputCoordinator {
                     manual_generation: None,
                     pane: None,
                     payload_digest_version,
+                    literal: input.literal,
+                    operation: composer_operation,
                     deferred: None,
                 }),
                 ready: None,
@@ -1994,6 +2037,14 @@ impl InputCoordinator {
         }))
     }
 
+    /// A started deferred attempt holds the pane and advances its stages on every tick.
+    pub(super) fn deferred_attempt_writing(&self) -> bool {
+        self.pending
+            .as_ref()
+            .and_then(|pending| pending.composer.as_ref())
+            .is_some_and(|composer| composer.deferred.is_some() && composer.pane.is_some())
+    }
+
     pub(super) fn has_deferred_work(&self) -> bool {
         !self.queue.is_empty()
             || self
@@ -2053,21 +2104,9 @@ impl InputCoordinator {
             head.attempt_deadline = None;
             return Ok(());
         }
-        let (head_id, operation, kind, literal) = (
-            head.input_id,
-            head.operation,
-            head.request.kind,
-            head.literal.clone(),
-        );
-        let deferred_at = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
-            storage::get_input(conn, head_id)
-        })?
-        .deferred_at
-        .ok_or_else(|| error("a queued input records when it was deferred"))?;
-        let deferred_at = chrono::DateTime::parse_from_rfc3339(&deferred_at)
-            .map_err(|_| error("queued input deferral time is not RFC 3339"))?;
+        let (operation, kind, literal) = (head.operation, head.request.kind, head.literal.clone());
         let idle_timeout =
-            chrono::Utc::now().signed_duration_since(deferred_at) >= COMPOSER_BUSY_BOUND;
+            chrono::Utc::now().signed_duration_since(head.deferred_at) >= COMPOSER_BUSY_BOUND;
         let Some(selection) =
             self.select_delivery(observation, operation, kind, &literal, idle_timeout)?
         else {
@@ -2163,6 +2202,8 @@ impl InputCoordinator {
                 manual_generation: None,
                 pane: Some(pane),
                 payload_digest_version: head.payload_digest_version,
+                literal: head.literal.clone(),
+                operation: head.operation,
                 deferred: Some(DeferredAttempt {
                     queued: head,
                     obstacle: "delivery_budget_exhausted",
@@ -2241,6 +2282,91 @@ impl InputCoordinator {
             self.operations.remove(&id);
         }
         Ok(true)
+    }
+
+    /// Queues an immediate ordinary request that has written zero bytes once an interaction or a
+    /// composer that is not verified empty supersedes its selected method, replying `queued`.
+    fn immediate_preflight(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        observation: &ObservationController,
+        deadline: Instant,
+    ) -> Result<Option<InputControlReply>> {
+        let Some(pending) = self.pending.as_ref() else {
+            return Ok(None);
+        };
+        let Some(composer) = pending.composer.as_ref() else {
+            return Ok(None);
+        };
+        let zero_bytes = composer.written_stages == 0
+            && pending.input_id.is_none_or(|id| {
+                self.operations
+                    .get(&id)
+                    .is_some_and(|retained| retained.stage == SubmissionStage::ZeroBytes)
+            });
+        if composer.deferred.is_some() || pending.permission.is_some() || !zero_bytes {
+            return Ok(None);
+        }
+        let status = observation.status();
+        let defer_reason = match ordinary_blocker(&status) {
+            Some(OrdinaryBlocker::Interaction) => {
+                if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
+                    "interaction_candidate"
+                } else {
+                    "interaction_open"
+                }
+            }
+            None if composer.requires_empty_composer() && !Self::composer_eligible(observation) => {
+                "composer_busy"
+            }
+            _ => return Ok(None),
+        };
+        let mut pending = self.pending.take().expect("immediate pending input");
+        let composer = pending
+            .composer
+            .take()
+            .expect("immediate composer delivery");
+        let operation = match pending.input_id {
+            Some(id) => {
+                self.operations.remove(&id);
+                with_database_deadline(conn, deadline, |conn| {
+                    storage::requeue_zero_byte_immediate(conn, &self.run.owner(), id, defer_reason)
+                })?
+            }
+            None => {
+                let reservation = with_database_deadline(conn, deadline, |conn| {
+                    self.validate_live(conn, run)?;
+                    storage::reserve_input_with_provenance(
+                        conn,
+                        &self.run.owner(),
+                        &pending.request,
+                        storage::NewReservation {
+                            selection: None,
+                            defer_reason: Some(defer_reason),
+                            payload_digest_version: composer.payload_digest_version,
+                        },
+                    )
+                })?;
+                match reservation {
+                    storage::InputReservation::Inserted(operation) => operation,
+                    storage::InputReservation::Existing(operation) => {
+                        return Ok(Some(InputControlReply::Submission(self.result(&operation))));
+                    }
+                }
+            }
+        };
+        self.queue.push_back(QueuedInput {
+            input_id: operation.input_id,
+            request: pending.request,
+            literal: composer.literal,
+            operation: composer.operation,
+            payload_digest_version: composer.payload_digest_version,
+            deferred_at: deferred_at(&operation)?,
+            attempt_deadline: None,
+            obstacle: "delivery_budget_exhausted",
+        });
+        Ok(Some(InputControlReply::Submission(self.result(&operation))))
     }
 
     fn finish_deferred(
@@ -2583,6 +2709,9 @@ impl InputCoordinator {
             }
             if self.deferred_preflight(conn, observation)? {
                 return Ok(None);
+            }
+            if let Some(reply) = self.immediate_preflight(conn, run, observation, deadline)? {
+                return Ok(Some(reply));
             }
             let deferred = self
                 .pending
@@ -4155,23 +4284,35 @@ mod tests {
                     HostProfile::metadata(),
                     |host| {
                         super::super::permission_inspection_contracts::stable_form(host);
-                        let deadline = Instant::now() + Duration::from_millis(1200);
-                        let mut reply =
-                            host.handle(prompt_request(host, "prompt:blocked")).unwrap();
-                        while reply.is_none() && Instant::now() < deadline {
+                        let reply = submitted(
+                            host.handle(prompt_request(host, "prompt:blocked"))
+                                .unwrap()
+                                .expect("an open interaction queues the input immediately"),
+                        );
+                        assert_eq!(reply.status, SubmissionStatus::Queued);
+                        assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
+                        assert_eq!(
+                            reply
+                                .delivery
+                                .as_ref()
+                                .and_then(|delivery| delivery.reason.as_deref()),
+                            Some("interaction_open")
+                        );
+                        let receipt = storage::get_input(
+                            &host.fixture.conn,
+                            reply.input_id.expect("queued work has a durable input ID"),
+                        )
+                        .unwrap();
+                        assert_eq!(receipt.state, storage::InputState::Ready);
+                        assert!(receipt.deferred_at.is_some());
+                        assert_eq!(receipt.defer_reason.as_deref(), Some("interaction_open"));
+                        let until = Instant::now() + Duration::from_millis(1200);
+                        while Instant::now() < until {
                             host.drain();
-                            reply = host.advance();
+                            host.advance();
                             std::thread::sleep(Duration::from_millis(5));
                         }
                         assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
-                        if let Some(reply) = reply {
-                            let reply = submitted(reply);
-                            assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
-                            assert!(!matches!(
-                                reply.status,
-                                SubmissionStatus::Accepted | SubmissionStatus::Uncertain
-                            ));
-                        }
                     },
                 );
             }
@@ -4670,8 +4811,24 @@ mod tests {
                     form(host);
                     let id = queued(host, host.request("prompt:shutdown"), "interaction_open");
                     host.coordinator.finish_pending_attempt();
-                    host.coordinator.fence(host.until).unwrap();
+                    let settled = host.coordinator.fence(host.until).unwrap();
+                    assert_eq!(settled, vec![id]);
                     assert_not_submitted(host, id, "runner_stopped");
+                    for input_id in settled {
+                        host.controller.publish_delivery_result(
+                            storage::input_delivery_result_cause(
+                                input_id,
+                                SubmissionStage::ZeroBytes.as_str(),
+                                None,
+                            ),
+                        );
+                    }
+                    host.drain();
+                    assert_eq!(
+                        result_events(host, id),
+                        1,
+                        "the shutdown settlement publishes its deferred result"
+                    );
                     assert!(host.pty.offers.is_empty());
                     close(host);
                     for _ in 0..10 {
@@ -4682,6 +4839,7 @@ mod tests {
                         host.pty.offers.is_empty(),
                         "a stopped queue is never replayed"
                     );
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
                 });
             }
         }
@@ -4785,13 +4943,7 @@ mod tests {
                     let expired = crate::time::format_utc(
                         chrono::Utc::now() - chrono::Duration::seconds(181),
                     );
-                    host.fixture
-                        .conn
-                        .execute(
-                            "UPDATE member_input_operations SET deferred_at=?1 WHERE input_id=?2",
-                            rusqlite::params![expired, id],
-                        )
-                        .unwrap();
+                    host.coordinator.set_queued_deferred_at(id, &expired);
                     turns_until(host, |host| {
                         matches!(
                             row(host, id).state,
@@ -4840,7 +4992,7 @@ mod tests {
 
             /// The prompt-plan catalog with a classified draft composer, so a draft is a busy
             /// composer rather than an unclassifiable screen.
-            fn busy_catalog() -> ProfileCatalog {
+            pub(super) fn busy_catalog() -> ProfileCatalog {
                 let mut definition = catalog_definition();
                 let mut draft = definition["profiles"][0]["rules"][0].clone();
                 draft["id"] = serde_json::json!("synthetic-composer-draft");
@@ -4899,6 +5051,51 @@ mod tests {
                             InputEligibility::Hold(GateReason::Draft | GateReason::Unknown)
                         ));
                         busy_then_profile(host);
+                    });
+                }
+            }
+
+            #[test]
+            fn composer_busy_selection_requeues_with_zero_bytes_when_the_screen_blocks_before_the_first_write()
+             {
+                type Case = (fn() -> ProfileCatalog, fn(&mut Host), &'static str);
+                let cases: [Case; 2] = [
+                    (
+                        super::staged_delivery::permission_catalog,
+                        super::deferred_queue::form,
+                        "interaction_open",
+                    ),
+                    (
+                        busy_catalog,
+                        |host| host.show(DRAFT.to_vec()),
+                        "composer_busy",
+                    ),
+                ];
+                for (catalog, block, reason) in cases {
+                    with_catalog_host(catalog(), encoded(), |host| {
+                        let key = "prompt:blocked-after-selection";
+                        let request = host.request(key);
+                        assert!(
+                            host.handle(request).unwrap().is_none(),
+                            "{reason}: an eligible composer selects its method immediately"
+                        );
+                        block(host);
+                        drive_for(host, Duration::from_millis(800));
+                        assert!(
+                            host.pty.offers.is_empty(),
+                            "{reason}: no byte, Escape included: {:?}",
+                            host.pty.offers
+                        );
+                        let requeued =
+                            storage::find_input(&host.fixture.conn, host.fixture.run.run_id, key)
+                                .unwrap()
+                                .unwrap_or_else(|| panic!("{reason}: a durable requeued receipt"));
+                        assert_eq!(requeued.state, storage::InputState::Ready, "{reason}");
+                        assert_eq!(requeued.defer_reason.as_deref(), Some(reason));
+                        assert_eq!(requeued.delivery_method, None, "{reason}");
+                        host.show(SCREEN.to_vec());
+                        turns_until(host, |host| delivered(host, requeued.input_id));
+                        assert_eq!(host.pty.program, vec![encoded()], "{reason}");
                     });
                 }
             }
@@ -4972,13 +5169,7 @@ mod tests {
                     let just_inside = crate::time::format_utc(
                         chrono::Utc::now() - chrono::Duration::seconds(170),
                     );
-                    host.fixture
-                        .conn
-                        .execute(
-                            "UPDATE member_input_operations SET deferred_at=?1 WHERE input_id=?2",
-                            rusqlite::params![just_inside, id],
-                        )
-                        .unwrap();
+                    host.coordinator.set_queued_deferred_at(id, &just_inside);
                     drive_for(host, Duration::from_millis(500));
                     assert!(
                         host.pty.offers.is_empty(),
@@ -4987,13 +5178,7 @@ mod tests {
                     let expired = crate::time::format_utc(
                         chrono::Utc::now() - chrono::Duration::seconds(181),
                     );
-                    host.fixture
-                        .conn
-                        .execute(
-                            "UPDATE member_input_operations SET deferred_at=?1 WHERE input_id=?2",
-                            rusqlite::params![expired, id],
-                        )
-                        .unwrap();
+                    host.coordinator.set_queued_deferred_at(id, &expired);
                     turns_until(host, |host| delivered(host, id));
                     assert_eq!(
                         host.pty.stage_bytes(),
@@ -6969,7 +7154,9 @@ mod tests {
             for (case, block) in [
                 (
                     "fenced input",
-                    (|h: &mut Host| h.coordinator.fence(h.until).unwrap()) as fn(&mut Host),
+                    (|h: &mut Host| {
+                        h.coordinator.fence(h.until).unwrap();
+                    }) as fn(&mut Host),
                 ),
                 ("failed manual accounting", |h: &mut Host| {
                     h.coordinator.manual_generation = u64::MAX;
@@ -7493,7 +7680,9 @@ mod tests {
         fn permission_rearm_reports_the_named_blocked_reason_before_live_validation() {
             for (block, reason) in [
                 (
-                    (|h: &mut Host| h.coordinator.fence(h.until).unwrap()) as fn(&mut Host),
+                    (|h: &mut Host| {
+                        h.coordinator.fence(h.until).unwrap();
+                    }) as fn(&mut Host),
                     "permission input is fenced",
                 ),
                 (

@@ -689,6 +689,7 @@ pub(crate) fn run_service(
     let mut started = false;
     let mut coordinator = None::<InputCoordinator>;
     let mut pending_input_client = None::<PendingInputClient>;
+    let mut deferred_retry = DeferredRetry::default();
     let mut shutdown_client = None;
     let mut failure = None;
     let mut native_exit = None;
@@ -1084,6 +1085,7 @@ pub(crate) fn run_service(
                         };
                         if !matches!(result, Ok(None)) {
                             coordinator.finish_pending_attempt();
+                            deferred_retry.wake();
                             let pending = pending_input_client
                                 .take()
                                 .expect("completed input retains its original client");
@@ -1099,7 +1101,13 @@ pub(crate) fn run_service(
                                 }
                             }
                         }
-                    } else if coordinator.has_deferred_work() {
+                    } else if coordinator.has_deferred_work()
+                        && deferred_retry.due(
+                            coordinator.deferred_attempt_writing(),
+                            native.controller.status(),
+                            Instant::now(),
+                        )
+                    {
                         let deadline = Instant::now() + Duration::from_secs(5);
                         if let Ok(InputDrain::Quiescent { .. }) =
                             native.quiesce(coordinator, deadline)
@@ -1158,12 +1166,23 @@ pub(crate) fn run_service(
     };
     if let Some(coordinator) = coordinator.as_mut() {
         coordinator.finish_pending_attempt();
-        if let Err(cause) = coordinator.fence(clock.storage_deadline()) {
-            let message = cause.message();
-            if let Some(prior) = &mut failure {
-                prior.push_str(&format!("; input fence: {message}"));
-            } else {
-                failure = Some(message.into_owned());
+        match coordinator.fence(clock.storage_deadline()) {
+            Ok(settled) => {
+                for input_id in settled {
+                    controller.publish_delivery_result(storage::input_delivery_result_cause(
+                        input_id,
+                        super::input_protocol::SubmissionStage::ZeroBytes.as_str(),
+                        None,
+                    ));
+                }
+            }
+            Err(cause) => {
+                let message = cause.message();
+                if let Some(prior) = &mut failure {
+                    prior.push_str(&format!("; input fence: {message}"));
+                } else {
+                    failure = Some(message.into_owned());
+                }
             }
         }
     }
@@ -1237,6 +1256,30 @@ pub(crate) fn run_service(
 }
 
 const IDLE_TICK_SLEEP: Duration = Duration::from_millis(2);
+const DEFERRED_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Paces queued-input retries on the 100 ms timer, waking early when the observed gate changes,
+/// such as an interaction closing or a candidate clearing, or when an active input completes.
+#[derive(Default)]
+struct DeferredRetry {
+    next_at: Option<Instant>,
+    gate: Option<(Visibility, InputEligibility)>,
+}
+impl DeferredRetry {
+    fn due(&mut self, writing: bool, status: ObservationStatus, now: Instant) -> bool {
+        let gate = (status.visibility, status.eligibility);
+        let due =
+            writing || self.gate != Some(gate) || self.next_at.is_none_or(|next_at| now >= next_at);
+        if due {
+            self.gate = Some(gate);
+            self.next_at = Some(now + DEFERRED_RETRY_INTERVAL);
+        }
+        due
+    }
+    fn wake(&mut self) {
+        self.next_at = None;
+    }
+}
 
 fn tick_sleep(
     progress: &TransportProgress,
