@@ -1122,10 +1122,11 @@ pub(crate) fn run_service(
                                 deadline,
                             )
                         {
-                            eprintln!(
-                                "member runtime: deferred input: {}",
-                                CafleetError::from(failure).message()
-                            );
+                            let failure = CafleetError::from(failure);
+                            if coordinator.deferred_failed() {
+                                return Err(failure);
+                            }
+                            eprintln!("member runtime: deferred input: {}", failure.message());
                         }
                     }
                 }

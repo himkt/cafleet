@@ -90,6 +90,7 @@ pub(crate) struct InputCoordinator {
     database_url: String,
     queue: std::collections::VecDeque<QueuedInput>,
     finalization: Option<PendingFinalization>,
+    deferred_failed: bool,
 }
 
 /// A deferred input's terminal zero-byte transaction that storage prevented; it holds only
@@ -2103,6 +2104,12 @@ impl InputCoordinator {
             .is_some_and(|composer| composer.deferred.is_some() && composer.pane.is_some())
     }
 
+    /// A deferred terminal transaction failed permanently: ordinary input is fenced and the runner
+    /// must stop, so fenced recovery settles and publishes the receipt.
+    pub(super) fn deferred_failed(&self) -> bool {
+        self.deferred_failed
+    }
+
     pub(super) fn has_deferred_work(&self) -> bool {
         !self.queue.is_empty()
             || self.finalization.is_some()
@@ -2148,7 +2155,11 @@ impl InputCoordinator {
                 });
                 return Ok(());
             }
-            Err(cause) => return Err(cause),
+            Err(cause) => {
+                self.input_fenced = true;
+                self.deferred_failed = true;
+                return Err(cause);
+            }
         };
         if let Some(retained) = self.operations.get_mut(&input_id) {
             retained.operation = operation;
@@ -3118,6 +3129,22 @@ impl InputCoordinator {
                 self.checkpoint(id, InputBoundary::BeforeWrite, effective)?;
                 return Ok(None);
             }
+            if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer.as_ref())
+                && composer.written_stages > 0
+                && matches!(
+                    ordinary_blocker(&observation.status()),
+                    Some(OrdinaryBlocker::Interaction)
+                )
+            {
+                terminal_bookkeeping = true;
+                let deferred = composer.deferred.is_some();
+                let reply = self.stop_composer_stages(conn, run, id, effective)?;
+                if deferred {
+                    Self::publish_result(observation, id, SubmissionStage::Partial);
+                    return Ok(None);
+                }
+                return Ok(Some(reply));
+            }
             let bytes = self
                 .pending
                 .as_ref()
@@ -3558,6 +3585,7 @@ impl InputCoordinator {
             database_url,
             queue: std::collections::VecDeque::new(),
             finalization: None,
+            deferred_failed: false,
         })
     }
 
@@ -4674,6 +4702,41 @@ mod tests {
                 );
             }
 
+            #[test]
+            fn staged_new_interaction_after_the_settle_before_the_submit_write_is_uncertain() {
+                with_profile_host(
+                    permission_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    |host| {
+                        until_literal_written(host, prompt_request(host, "prompt:armed-race"));
+                        std::thread::sleep(SETTLE + Duration::from_millis(50));
+                        while host.pending_snapshot().4 != InputPhase::Armed {
+                            assert!(Instant::now() < host.until, "the submit stage arms");
+                            host.drain();
+                            assert!(host.advance().is_none());
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
+                        super::super::permission_inspection_contracts::form(
+                            host,
+                            "write raced.txt",
+                            "synthetic-only",
+                        );
+                        let reply = finish_after_interruption(host);
+                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                        assert_eq!(reply.stage, SubmissionStage::Partial);
+                        host.show(SCREEN.to_vec());
+                        super::composer_busy::hold_turns(host);
+                        assert_eq!(
+                            host.pty.stage_bytes(),
+                            vec![LITERAL.as_bytes().to_vec()],
+                            "no submit byte is written after the interaction closes"
+                        );
+                    },
+                );
+            }
+
             fn placement(host: &Host) -> crate::broker::records::Placement {
                 crate::broker::get_member(
                     &host.fixture.conn,
@@ -5494,7 +5557,17 @@ mod tests {
             #[test]
             fn queue_head_permanent_settle_failure_surfaces_instead_of_retrying() {
                 with_permission_host(Duration::from_secs(60), |host| {
-                    let id = queued_for_a_moved_target(host);
+                    form(host);
+                    let id = queued(host, host.request("prompt:storage"), "interaction_open");
+                    let later = queued(host, host.request("prompt:later"), "interaction_open");
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    close(host);
                     host.fixture
                         .conn
                         .authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
@@ -5541,7 +5614,20 @@ mod tests {
                             >,
                         )
                         .unwrap();
+                    assert!(
+                        host.coordinator.input_fenced,
+                        "a permanent failure fences ordinary input for recovery"
+                    );
+                    for _ in 0..40 {
+                        host.drain();
+                        let _ = host.try_advance();
+                    }
                     assert_eq!(row(host, id).state, storage::InputState::Ready);
+                    assert_eq!(
+                        row(host, later).state,
+                        storage::InputState::Ready,
+                        "no later queued input is dispatched after the failure"
+                    );
                     assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
                 });
             }
