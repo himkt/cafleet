@@ -2057,7 +2057,7 @@ impl InputCoordinator {
             head.obstacle = "observer_unavailable";
             return Ok(());
         }
-        let target = with_database_deadline(conn, attempt_deadline, |conn| {
+        let target = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
             if let Some(message_id) = message_id {
                 let message = crate::broker::get_message(conn, message_id)?;
                 if message.status != crate::broker::records::MessageStatus::InputRequired {
@@ -4811,6 +4811,139 @@ mod tests {
             }
         }
 
+        mod composer_busy {
+            use super::deferred_queue::{queued, row, turns_until};
+            use super::*;
+            use crate::broker::runtime::DeliveryMethod;
+
+            const DRAFT: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic draft\r\nDraft end";
+
+            /// The prompt-plan catalog with a classified draft composer, so a draft is a busy
+            /// composer rather than an unclassifiable screen.
+            fn busy_catalog() -> ProfileCatalog {
+                let mut definition = catalog_definition();
+                let mut draft = definition["profiles"][0]["rules"][0].clone();
+                draft["id"] = serde_json::json!("synthetic-composer-draft");
+                draft["observation"] = serde_json::json!("composer_draft");
+                draft["region"]["start_pattern"] = serde_json::json!("^Synthetic draft$");
+                draft["region"]["end_pattern"] = serde_json::json!("^Draft end$");
+                draft["matchers"] = serde_json::json!([{"id":"draft","scope":"line","pattern":"^Synthetic draft$"}]);
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(draft);
+                definition["profiles"][0]["capabilities"]["composer"]["rule_ids"] =
+                    serde_json::json!(["synthetic-composer-empty", "synthetic-composer-draft"]);
+                ProfileCatalog::from_definitions(&definition).unwrap()
+            }
+
+            fn busy(host: &mut Host) {
+                host.show(DRAFT.to_vec());
+                assert_eq!(
+                    host.controller.health(&host.writer).eligibility,
+                    InputEligibility::Hold(GateReason::Draft)
+                );
+            }
+
+            fn fallback_program() -> Vec<u8> {
+                let mut bytes = b"\x1b".to_vec();
+                bytes.extend_from_slice(LITERAL.as_bytes());
+                bytes.push(b'\r');
+                bytes
+            }
+
+            fn drive_for(host: &mut Host, duration: Duration) {
+                let until = Instant::now() + duration;
+                while Instant::now() < until {
+                    host.drain();
+                    host.advance();
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+
+            fn delivered(host: &Host, input_id: i64) -> bool {
+                matches!(
+                    row(host, input_id).state,
+                    storage::InputState::Accepted | storage::InputState::Settled
+                )
+            }
+
+            #[test]
+            fn composer_busy_queues_with_zero_bytes_and_drains_by_profile_when_the_composer_empties()
+             {
+                with_catalog_host(busy_catalog(), encoded(), |host| {
+                    busy(host);
+                    let request = host.request("prompt:busy-composer");
+                    let id = queued(host, request, "composer_busy");
+                    assert_eq!(row(host, id).defer_reason.as_deref(), Some("composer_busy"));
+                    drive_for(host, Duration::from_millis(1500));
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "a busy composer receives no byte, Escape included: {:?}",
+                        host.pty.offers
+                    );
+                    assert_eq!(row(host, id).state, storage::InputState::Ready);
+                    host.show(SCREEN.to_vec());
+                    turns_until(host, |host| delivered(host, id));
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                    );
+                    let input = row(host, id);
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
+                    assert_eq!(input.delivery_reason, None);
+                    assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
+                });
+            }
+
+            #[test]
+            fn composer_busy_falls_back_with_idle_timeout_five_minutes_after_deferred_at() {
+                with_catalog_host(busy_catalog(), fallback_program(), |host| {
+                    busy(host);
+                    let request = host.request("prompt:idle-timeout");
+                    let id = queued(host, request, "composer_busy");
+                    let just_inside = crate::time::format_utc(
+                        chrono::Utc::now() - chrono::Duration::seconds(290),
+                    );
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_input_operations SET deferred_at=?1 WHERE input_id=?2",
+                            rusqlite::params![just_inside, id],
+                        )
+                        .unwrap();
+                    drive_for(host, Duration::from_millis(500));
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "no Escape before the 5-minute bound"
+                    );
+                    let expired = crate::time::format_utc(
+                        chrono::Utc::now() - chrono::Duration::seconds(301),
+                    );
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_input_operations SET deferred_at=?1 WHERE input_id=?2",
+                            rusqlite::params![expired, id],
+                        )
+                        .unwrap();
+                    turns_until(host, |host| delivered(host, id));
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![
+                            b"\x1b".to_vec(),
+                            LITERAL.as_bytes().to_vec(),
+                            b"\r".to_vec()
+                        ]
+                    );
+                    let input = row(host, id);
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
+                    assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
+                    assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
+                });
+            }
+        }
+
         mod sql {
             use super::*;
             use crate::input::{Deadline, with_database_budget};
@@ -5165,15 +5298,10 @@ mod tests {
                 }
             }
 
-            /// The method-independent wrapped preview the runner reconstructs from the broker
-            /// message: the visible line ending at the resume clause.
             pub(in crate::runtime::runner::input) fn canonical_preview(
                 message: &crate::broker::records::MessageRecord,
             ) -> String {
-                format!(
-                    "[cafleet msg {} from {} {}] {} [cafleet] Resume your work if something was still running.",
-                    message.message_id, message.from_member_id, message.created_at, message.text
-                )
+                crate::delivery::canonical_preview_line(message)
             }
 
             pub(in crate::runtime::runner::input) fn preview_request(

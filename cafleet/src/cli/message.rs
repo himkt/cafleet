@@ -4,6 +4,7 @@ use clap::{Args, Subcommand};
 
 use super::helpers::{emit, resolve_body};
 use crate::broker;
+use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::{
@@ -108,8 +109,8 @@ pub(crate) fn run(
                 broker::send_message(conn, from_member_id, to_member_id, &text)
             })?;
             let message_id = message.message_id;
-            let notification_sent = if from_member_id == to_member_id {
-                false
+            let outcome = if from_member_id == to_member_id {
+                None
             } else {
                 match crate::delivery::deliver_pending(
                     conn,
@@ -123,18 +124,23 @@ pub(crate) fn run(
                         if let AttemptEnd::Failed(error) = &outcome.end {
                             eprintln!("Message {message_id} was persisted. {}", error.error);
                         }
-                        outcome.sent.contains(&message_id)
+                        Some(outcome)
                     }
                     Err(error) => {
                         eprintln!("Message {message_id} was persisted. {}", error.message());
-                        false
+                        None
                     }
                 }
             };
+            let notification_sent = outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.sent.contains(&message_id));
+            let (input_id, delivery) =
+                send_delivery(conn, &message, notification_sent, outcome.as_ref())?;
             emit(
                 json,
-                &presentation::send_outcome(&message, notification_sent),
-                || format_message_sent(&message, settings.max_text_len),
+                &presentation::send_outcome(&message, notification_sent, input_id, &delivery),
+                || format_message_sent(&message, settings.max_text_len, input_id, &delivery),
             );
             Ok(())
         }
@@ -186,4 +192,58 @@ pub(crate) fn run(
             Ok(())
         }
     }
+}
+
+/// The newly sent message's delivery: broker-only for self-sends and the root Director, its
+/// preview receipt for a wrapped recipient, and the multiplexer path otherwise.
+fn send_delivery(
+    conn: &Connection,
+    message: &crate::broker::records::MessageRecord,
+    notification_sent: bool,
+    outcome: Option<&crate::receive::AttemptOutcome>,
+) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
+    let projection = |status, method, reason: Option<&str>| DeliveryProjection {
+        status,
+        method,
+        reason: reason.map(str::to_owned),
+    };
+    if message.from_member_id == message.to_member_id {
+        return Ok((
+            None,
+            projection(DeliveryStatus::NotApplicable, None, Some("self_send")),
+        ));
+    }
+    let fleet = broker::active_member_fleet(conn, message.to_member_id)?
+        .ok_or_else(|| CafleetError::App(format!("Member {} not found", message.to_member_id)))?;
+    let recipient = broker::get_member(conn, message.to_member_id, fleet)?
+        .ok_or_else(|| CafleetError::App(format!("Member {} not found", message.to_member_id)))?;
+    if recipient.kind == crate::broker::records::MemberKind::Director {
+        return Ok((
+            None,
+            projection(DeliveryStatus::NotApplicable, None, Some("director_stdout")),
+        ));
+    }
+    if let Some(runtime) = &recipient.runtime {
+        let key = format!("preview:{}:{}", runtime.run.run_id, message.message_id);
+        if let Some(input) = crate::broker::runtime::find_input(conn, runtime.run.run_id, &key)?
+            && let Some(delivery) = input.delivery()
+        {
+            return Ok((Some(input.input_id), delivery));
+        }
+    } else if notification_sent {
+        return Ok((
+            None,
+            projection(
+                DeliveryStatus::Submitted,
+                Some(DeliveryMethod::Unwrapped),
+                None,
+            ),
+        ));
+    }
+    let reason = match outcome.map(|outcome| &outcome.end) {
+        Some(AttemptEnd::BudgetExhausted) => "delivery_budget_exhausted",
+        Some(AttemptEnd::Failed(_)) | None => "notification_failed",
+        Some(AttemptEnd::Held | AttemptEnd::NoPending | AttemptEnd::Drained) => "notification_held",
+    };
+    Ok((None, projection(DeliveryStatus::Held, None, Some(reason))))
 }

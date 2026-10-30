@@ -88,8 +88,38 @@ pub(crate) fn message_envelope(row: &MessageRecord) -> Value {
     json!({"message":message(row)})
 }
 
-pub(crate) fn send_outcome(row: &MessageRecord, notification_sent: bool) -> Value {
-    json!({"message":message(row),"notification_sent":notification_sent})
+pub(crate) fn send_outcome(
+    row: &MessageRecord,
+    notification_sent: bool,
+    input_id: Option<i64>,
+    delivery: &crate::broker::runtime::DeliveryProjection,
+) -> Value {
+    json!({"message":message(row),"notification_sent":notification_sent,
+        "input_id":input_id,"delivery":delivery.to_json()})
+}
+
+pub(crate) fn member_prompt(
+    member_id: i64,
+    pane_id: &str,
+    text: &str,
+    input_id: Option<i64>,
+    delivery: &crate::broker::runtime::DeliveryProjection,
+) -> Value {
+    json!({"member_id":member_id,"pane_id":pane_id,"text":text,"input_id":input_id,
+        "delivery":delivery.to_json()})
+}
+
+pub(crate) fn member_exec(
+    member_id: i64,
+    pane_id: &str,
+    coding_agent: &str,
+    command: &str,
+    input_id: Option<i64>,
+    delivery: &crate::broker::runtime::DeliveryProjection,
+) -> Value {
+    json!({"member_id":member_id,"pane_id":pane_id,"coding_agent":coding_agent,"command":command,
+        "dispatched":delivery.status == crate::broker::runtime::DeliveryStatus::Submitted,
+        "input_id":input_id,"delivery":delivery.to_json()})
 }
 
 pub(crate) fn member_capture(capture: &crate::capture::MemberCapture) -> Value {
@@ -222,6 +252,128 @@ mod tests {
                     diagnostics[1]
                 )
             );
+        }
+    }
+
+    mod delivery_outcomes {
+        use crate::broker::records::MessageRecord;
+        use crate::broker::runtime::test_support::assert_key_order;
+        use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
+        use serde_json::{Value, json};
+
+        fn projection(
+            status: DeliveryStatus,
+            method: Option<DeliveryMethod>,
+            reason: Option<&str>,
+        ) -> DeliveryProjection {
+            DeliveryProjection {
+                status,
+                method,
+                reason: reason.map(str::to_owned),
+            }
+        }
+
+        fn cases() -> [(bool, Option<i64>, DeliveryProjection, Value); 6] {
+            [
+                (
+                    true,
+                    Some(5),
+                    projection(
+                        DeliveryStatus::Submitted,
+                        Some(DeliveryMethod::Profile),
+                        None,
+                    ),
+                    json!({"status":"submitted","method":"profile","reason":null}),
+                ),
+                (
+                    false,
+                    Some(6),
+                    projection(DeliveryStatus::Queued, None, Some("interaction_open")),
+                    json!({"status":"queued","method":null,"reason":"interaction_open"}),
+                ),
+                (
+                    false,
+                    None,
+                    projection(DeliveryStatus::Held, None, Some("observer_unavailable")),
+                    json!({"status":"held","method":null,"reason":"observer_unavailable"}),
+                ),
+                (
+                    false,
+                    Some(7),
+                    projection(
+                        DeliveryStatus::Uncertain,
+                        Some(DeliveryMethod::Fallback),
+                        Some("composer_unverified"),
+                    ),
+                    json!({"status":"uncertain","method":"fallback","reason":"composer_unverified"}),
+                ),
+                (
+                    false,
+                    None,
+                    projection(DeliveryStatus::NotApplicable, None, Some("director_stdout")),
+                    json!({"status":"not_applicable","method":null,"reason":"director_stdout"}),
+                ),
+                (
+                    false,
+                    None,
+                    projection(DeliveryStatus::NotApplicable, None, Some("self_send")),
+                    json!({"status":"not_applicable","method":null,"reason":"self_send"}),
+                ),
+            ]
+        }
+
+        #[test]
+        fn send_outcome_appends_input_id_and_ordered_delivery_after_its_existing_keys() {
+            let message = MessageRecord::fixture(9, 2, 3, "hello");
+            for (sent, input_id, delivery, expected) in cases() {
+                let output = crate::presentation::send_outcome(&message, sent, input_id, &delivery);
+                assert_key_order(
+                    &output,
+                    &["message", "notification_sent", "input_id", "delivery"],
+                );
+                assert_key_order(&output["delivery"], &["status", "method", "reason"]);
+                assert_eq!(output["notification_sent"], sent);
+                assert_eq!(output["input_id"], json!(input_id));
+                assert_eq!(output["delivery"], expected);
+                assert_eq!(output["message"], crate::presentation::message(&message));
+            }
+        }
+
+        #[test]
+        fn prompt_and_exec_outcomes_append_delivery_and_dispatch_only_on_submission() {
+            for (_, input_id, delivery, expected) in cases().into_iter().take(4) {
+                let prompt =
+                    crate::presentation::member_prompt(7, "%2", "do it", input_id, &delivery);
+                assert_key_order(
+                    &prompt,
+                    &["member_id", "pane_id", "text", "input_id", "delivery"],
+                );
+                assert_eq!(
+                    prompt,
+                    json!({"member_id":7,"pane_id":"%2","text":"do it","input_id":input_id,"delivery":expected})
+                );
+                let exec = crate::presentation::member_exec(
+                    7, "%2", "codex", "ls -l", input_id, &delivery,
+                );
+                assert_key_order(
+                    &exec,
+                    &[
+                        "member_id",
+                        "pane_id",
+                        "coding_agent",
+                        "command",
+                        "dispatched",
+                        "input_id",
+                        "delivery",
+                    ],
+                );
+                assert_eq!(
+                    exec["dispatched"],
+                    delivery.status == DeliveryStatus::Submitted,
+                    "{expected}"
+                );
+                assert_eq!(exec["delivery"], expected);
+            }
         }
     }
 
