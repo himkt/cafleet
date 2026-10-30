@@ -725,9 +725,25 @@ impl Detector {
 pub(crate) mod test_support {
     use super::*;
     use crate::coding_agent::profiles::catalog::test_support::{
-        VERSION, simple_definition, synthetic_definitions,
+        VERSION, bundled_fixture, simple_definition, synthetic_definitions,
     };
     use crate::runtime::runner::{TerminalSize, TerminalState};
+
+    pub(crate) fn bundled_screen(id: &str) -> &'static str {
+        std::str::from_utf8(bundled_fixture(id).1).expect("bundled fixtures are UTF-8 JSON")
+    }
+
+    pub(crate) fn bundled_observe(
+        backend: CodingAgent,
+        version: &str,
+        id: &str,
+    ) -> ScreenObservation {
+        let screen = replay_native_fixture(bundled_screen(id), |_| {}, true, None);
+        Detector::new(&ProfileCatalog::bundled().unwrap(), backend, Some(version))
+            .observe(&screen)
+            .unwrap()
+    }
+
     pub(crate) fn replay_native_fixture(
         fixture: &str,
         change: impl FnOnce(&mut Vec<String>),
@@ -735,6 +751,33 @@ pub(crate) mod test_support {
         cursor: Option<(u16, u16)>,
     ) -> ScreenSnapshot {
         let screen: Value = serde_json::from_str(fixture).unwrap();
+        let mut terminal = TerminalState::new(fixture_size(&screen)).unwrap();
+        terminal
+            .feed(&fixture_bytes(&screen, change, alternate, cursor))
+            .unwrap();
+        terminal.snapshot()
+    }
+
+    /// The byte stream that paints a committed native screen, using its own screen mode and cursor.
+    pub(crate) fn native_fixture_bytes(fixture: &str) -> Vec<u8> {
+        let screen: Value = serde_json::from_str(fixture).unwrap();
+        let alternate = screen["alternate_screen"].as_bool().unwrap();
+        fixture_bytes(&screen, |_| {}, alternate, None)
+    }
+
+    fn fixture_size(screen: &Value) -> TerminalSize {
+        TerminalSize {
+            rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
+            cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
+        }
+    }
+
+    fn fixture_bytes(
+        screen: &Value,
+        change: impl FnOnce(&mut Vec<String>),
+        alternate: bool,
+        cursor: Option<(u16, u16)>,
+    ) -> Vec<u8> {
         let mut lines: Vec<String> = screen["lines"]
             .as_array()
             .unwrap()
@@ -742,32 +785,25 @@ pub(crate) mod test_support {
             .map(|line| line.as_str().unwrap().to_owned())
             .collect();
         change(&mut lines);
-        let mut terminal = TerminalState::new(TerminalSize {
-            rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
-            cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
-        })
-        .unwrap();
+        let mut bytes = Vec::new();
         if alternate {
-            terminal.feed(b"\x1b[?1049h").unwrap();
+            bytes.extend(b"\x1b[?1049h");
         }
-        terminal.feed(b"\x1b[2J").unwrap();
+        bytes.extend(b"\x1b[2J");
         for (row, line) in lines.iter().enumerate() {
             if !line.is_empty() {
-                terminal
-                    .feed(format!("\x1b[{};1H{line}", row + 1).as_bytes())
-                    .unwrap();
+                bytes.extend(format!("\x1b[{};1H{line}", row + 1).into_bytes());
             }
         }
-        let backgrounds = background_rewrite(&screen, &terminal.snapshot());
-        terminal.feed(&backgrounds).unwrap();
+        let mut written = TerminalState::new(fixture_size(screen)).unwrap();
+        written.feed(&bytes).unwrap();
+        bytes.extend(background_rewrite(screen, &written.snapshot()));
         let (row, col) = cursor.unwrap_or((
             u16::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap(),
             u16::try_from(screen["cursor_col"].as_u64().unwrap()).unwrap(),
         ));
-        terminal
-            .feed(format!("\x1b[{};{}H", row + 1, col + 1).as_bytes())
-            .unwrap();
-        terminal.snapshot()
+        bytes.extend(format!("\x1b[{};{}H", row + 1, col + 1).into_bytes());
+        bytes
     }
 
     /// Repaints each `cell_backgrounds` run over the already written text, so the replayed
@@ -949,139 +985,6 @@ mod tests {
             None,
         )
     }
-    fn allow_or_deny_plan(decision: PermissionDecision) -> AnswerPlan {
-        ProfileCatalog::bundled()
-            .unwrap()
-            .answer_plan(
-                CodingAgent::Claude,
-                CLAUDE_VERSION,
-                "claude-bash-permission",
-                decision,
-            )
-            .expect("measured bundled answer plan")
-    }
-
-    fn claude_answer(screen: &ScreenSnapshot, plan: &AnswerPlan) -> Option<AnswerMatch> {
-        let catalog = ProfileCatalog::bundled().unwrap();
-        Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
-            .match_answer(screen, plan)
-            .unwrap()
-    }
-
-    #[test]
-    fn bundled_claude_answer_plans_match_their_measured_pre_stage_screens_and_bind_focus() {
-        for (decision, fixture, choice) in [
-            (
-                PermissionDecision::Allow,
-                bundled_screen("claude-2.1.302-allow-pre-stage-1"),
-                "allow-once",
-            ),
-            (
-                PermissionDecision::Deny,
-                bundled_screen("claude-2.1.302-deny-pre-stage-1"),
-                "deny-once",
-            ),
-        ] {
-            let plan = allow_or_deny_plan(decision);
-            let screen = replay_native_fixture(fixture, |_| {}, true, None);
-            let matched = claude_answer(&screen, &plan).expect("pre-stage form matches its plan");
-            assert_eq!(matched.choices(), &["Yes".to_owned(), "No".to_owned()]);
-            assert_eq!(matched.plan().choice_id(), choice);
-            assert!(!matched.focus().is_empty());
-            assert!(Some(matched.semantic()) == claude_observation(&screen).fingerprint.as_ref());
-            let moved = replay_native_fixture(
-                fixture,
-                |lines| {
-                    lines[23] = lines[23].replacen('❯', " ", 1);
-                    lines[24] = lines[24].replacen("   2.", " ❯ 2.", 1);
-                },
-                true,
-                Some((24, 1)),
-            );
-            let refocused =
-                claude_answer(&moved, &plan).expect("a moved focus still identifies the form");
-            assert!(refocused.semantic() == matched.semantic());
-            assert_ne!(
-                refocused.focus(),
-                matched.focus(),
-                "token binding sees the focus move"
-            );
-            let unfocused = replay_native_fixture(
-                fixture,
-                |lines| lines[23] = lines[23].replacen('❯', " ", 1),
-                true,
-                None,
-            );
-            assert!(
-                claude_answer(&unfocused, &plan).is_none(),
-                "{decision:?} without ❯"
-            );
-            let primary = replay_native_fixture(fixture, |_| {}, false, None);
-            assert!(
-                claude_answer(&primary, &plan).is_none(),
-                "{decision:?} primary screen"
-            );
-        }
-    }
-
-    #[test]
-    fn bundled_claude_idle_composer_is_a_verified_non_interaction_distinct_from_the_form() {
-        let idle = claude_observation(&replay_native_fixture(
-            bundled_screen("claude-2.1.302-idle-composer-1"),
-            |_| {},
-            true,
-            None,
-        ));
-        assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
-        assert_eq!(idle.match_evidence, MatchEvidence::Complete);
-        assert!(idle.verified_noninteraction);
-        assert_eq!(idle.rule_id, "claude-idle-composer");
-        assert_eq!(idle.raw_evidence["operation"], Value::Null);
-        assert_eq!(idle.raw_evidence["operation_rows"], Value::Null);
-        let region = idle
-            .matched_region
-            .expect("the idle rule locates its composer");
-        assert!(region.top >= 12, "{region:?}");
-        let form = claude_observation(&native_screen(|_| {}, true));
-        assert_eq!(form.rule_id, "claude-bash-permission");
-        assert_eq!(
-            form.kind,
-            ObservationKind::Interaction(InteractionClass::PermissionRequest)
-        );
-        assert_eq!(form.match_evidence, MatchEvidence::Complete);
-        assert!(!form.verified_noninteraction);
-    }
-
-    #[test]
-    fn bundled_claude_idle_rule_rejects_drafts_primary_copies_and_a_cursor_off_the_prefix_end() {
-        let draft = claude_observation(&replay_native_fixture(
-            bundled_screen("claude-2.1.302-idle-composer-1"),
-            |lines| lines[31] = "❯\u{a0}hello".into(),
-            true,
-            Some((31, 7)),
-        ));
-        assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "typed draft");
-        assert!(!draft.verified_noninteraction);
-        let primary = claude_observation(&replay_native_fixture(
-            bundled_screen("claude-2.1.302-idle-composer-1"),
-            |_| {},
-            false,
-            None,
-        ));
-        assert!(!primary.verified_noninteraction, "primary-screen copy");
-        let away = claude_observation(&replay_native_fixture(
-            bundled_screen("claude-2.1.302-idle-composer-1"),
-            |_| {},
-            true,
-            Some((31, 0)),
-        ));
-        assert!(
-            !away.verified_noninteraction,
-            "cursor before the prefix end"
-        );
-        assert_ne!(away.kind, ObservationKind::ComposerEmpty);
-    }
-
     fn claude_observation(screen: &ScreenSnapshot) -> ScreenObservation {
         let catalog = ProfileCatalog::bundled().unwrap();
         Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
@@ -1662,68 +1565,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn bundled_claude_answer_plans_match_the_wrapped_pre_stage_forms_and_bind_focus() {
-        for (decision, fixture, choice, byte) in [
-            (
-                PermissionDecision::Allow,
-                bundled_screen("claude-2.1.302-wrapped-allow-pre-stage-1"),
-                "allow-once",
-                b'1',
-            ),
-            (
-                PermissionDecision::Deny,
-                bundled_screen("claude-2.1.302-wrapped-deny-pre-stage-1"),
-                "deny-once",
-                b'4',
-            ),
-        ] {
-            let plan = allow_or_deny_plan(decision);
-            assert_eq!(plan.stages().len(), 1);
-            assert_eq!(plan.stages()[0].bytes(), &[byte]);
-            let screen = replay_native_fixture(fixture, |_| {}, true, None);
-            assert_eq!((screen.cursor_row, screen.cursor_col), (27, 1));
-            let matched =
-                claude_answer(&screen, &plan).expect("wrapped pre-stage form matches its plan");
-            assert_eq!(matched.choices(), &["Yes".to_owned(), "No".to_owned()]);
-            assert_eq!(matched.plan().choice_id(), choice);
-            assert!(!matched.focus().is_empty());
-            assert!(Some(matched.semantic()) == claude_observation(&screen).fingerprint.as_ref());
-            let moved = replay_native_fixture(
-                fixture,
-                |lines| {
-                    lines[27] = lines[27].replacen('❯', " ", 1);
-                    lines[28] = lines[28].replacen("   2.", " ❯ 2.", 1);
-                },
-                true,
-                Some((28, 1)),
-            );
-            let refocused = claude_answer(&moved, &plan)
-                .expect("a moved focus still identifies the wrapped form");
-            assert!(refocused.semantic() == matched.semantic());
-            assert_ne!(
-                refocused.focus(),
-                matched.focus(),
-                "token binding sees the focus move"
-            );
-            let unfocused = replay_native_fixture(
-                fixture,
-                |lines| lines[27] = lines[27].replacen('❯', " ", 1),
-                true,
-                None,
-            );
-            assert!(
-                claude_answer(&unfocused, &plan).is_none(),
-                "{decision:?} without ❯"
-            );
-            let primary = replay_native_fixture(fixture, |_| {}, false, None);
-            assert!(
-                claude_answer(&primary, &plan).is_none(),
-                "{decision:?} primary screen"
-            );
-        }
-    }
-
     const CODEX_VERSION: &str = "0.163.0";
     const CODEX_CHOICES: [&str; 2] = ["Yes, proceed", "No, and tell Codex what to do differently"];
 
@@ -1731,25 +1572,6 @@ mod tests {
         let catalog = ProfileCatalog::bundled().unwrap();
         Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
             .observe(screen)
-            .unwrap()
-    }
-
-    fn codex_plan(decision: PermissionDecision) -> AnswerPlan {
-        ProfileCatalog::bundled()
-            .unwrap()
-            .answer_plan(
-                CodingAgent::Codex,
-                CODEX_VERSION,
-                "codex-exec-approval",
-                decision,
-            )
-            .expect("measured bundled Codex answer plan")
-    }
-
-    fn codex_answer(screen: &ScreenSnapshot, plan: &AnswerPlan) -> Option<AnswerMatch> {
-        let catalog = ProfileCatalog::bundled().unwrap();
-        Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
-            .match_answer(screen, plan)
             .unwrap()
     }
 
@@ -1970,114 +1792,320 @@ mod tests {
         }
     }
 
+    fn bundled_detector(backend: CodingAgent, version: &str) -> Detector {
+        Detector::new(&ProfileCatalog::bundled().unwrap(), backend, Some(version))
+    }
+
+    struct PreStageForms {
+        backend: CodingAgent,
+        version: &'static str,
+        rule: &'static str,
+        answers: [(PermissionDecision, &'static str, &'static str, u8); 2],
+        choices: [&'static str; 2],
+        glyph: char,
+        focus_row: usize,
+        second_choice: (&'static str, &'static str),
+        cursor_follows_focus: bool,
+    }
+
+    const PRE_STAGE_FORMS: [PreStageForms; 3] = [
+        PreStageForms {
+            backend: CodingAgent::Claude,
+            version: CLAUDE_VERSION,
+            rule: "claude-bash-permission",
+            answers: [
+                (
+                    PermissionDecision::Allow,
+                    "claude-2.1.302-allow-pre-stage-1",
+                    "allow-once",
+                    b'1',
+                ),
+                (
+                    PermissionDecision::Deny,
+                    "claude-2.1.302-deny-pre-stage-1",
+                    "deny-once",
+                    b'4',
+                ),
+            ],
+            choices: ["Yes", "No"],
+            glyph: '❯',
+            focus_row: 23,
+            second_choice: ("   2.", " ❯ 2."),
+            cursor_follows_focus: true,
+        },
+        PreStageForms {
+            backend: CodingAgent::Claude,
+            version: CLAUDE_VERSION,
+            rule: "claude-bash-permission",
+            answers: [
+                (
+                    PermissionDecision::Allow,
+                    "claude-2.1.302-wrapped-allow-pre-stage-1",
+                    "allow-once",
+                    b'1',
+                ),
+                (
+                    PermissionDecision::Deny,
+                    "claude-2.1.302-wrapped-deny-pre-stage-1",
+                    "deny-once",
+                    b'4',
+                ),
+            ],
+            choices: ["Yes", "No"],
+            glyph: '❯',
+            focus_row: 27,
+            second_choice: ("   2.", " ❯ 2."),
+            cursor_follows_focus: true,
+        },
+        PreStageForms {
+            backend: CodingAgent::Codex,
+            version: CODEX_VERSION,
+            rule: "codex-exec-approval",
+            answers: [
+                (
+                    PermissionDecision::Allow,
+                    "codex-0.163.0-allow-pre-stage-1",
+                    "allow-once",
+                    b'y',
+                ),
+                (
+                    PermissionDecision::Deny,
+                    "codex-0.163.0-deny-pre-stage-1",
+                    "deny-once",
+                    b'3',
+                ),
+            ],
+            choices: CODEX_CHOICES,
+            glyph: '›',
+            focus_row: 30,
+            second_choice: ("  2.", "› 2."),
+            cursor_follows_focus: false,
+        },
+    ];
+
     #[test]
-    fn bundled_codex_answer_plans_match_their_measured_pre_stage_screens_and_bind_focus() {
-        for (decision, fixture, choice) in [
-            (
-                PermissionDecision::Allow,
-                bundled_screen("codex-0.163.0-allow-pre-stage-1"),
-                "allow-once",
-            ),
-            (
-                PermissionDecision::Deny,
-                bundled_screen("codex-0.163.0-deny-pre-stage-1"),
-                "deny-once",
-            ),
-        ] {
-            let plan = codex_plan(decision);
-            let screen = replay_native_fixture(fixture, |_| {}, true, None);
-            let matched = codex_answer(&screen, &plan).expect("pre-stage form matches its plan");
+    fn bundled_answer_plans_match_their_measured_pre_stage_forms_and_bind_focus() {
+        for forms in PRE_STAGE_FORMS {
+            let detector = bundled_detector(forms.backend, forms.version);
+            let answer = |screen: &ScreenSnapshot, plan: &AnswerPlan| {
+                detector.match_answer(screen, plan).unwrap()
+            };
+            let focus = u16::try_from(forms.focus_row).unwrap();
+            for (decision, id, choice, byte) in forms.answers {
+                let plan = ProfileCatalog::bundled()
+                    .unwrap()
+                    .answer_plan(forms.backend, forms.version, forms.rule, decision)
+                    .expect("measured bundled answer plan");
+                assert_eq!(plan.stages().len(), 1, "{id}");
+                assert_eq!(plan.stages()[0].bytes(), &[byte], "{id}");
+                let fixture = bundled_screen(id);
+                let screen = replay_native_fixture(fixture, |_| {}, true, None);
+                if forms.cursor_follows_focus {
+                    assert_eq!((screen.cursor_row, screen.cursor_col), (focus, 1), "{id}");
+                }
+                let matched = answer(&screen, &plan).expect("pre-stage form matches its plan");
+                assert_eq!(
+                    matched.choices(),
+                    forms.choices.map(str::to_owned).as_slice(),
+                    "{id}"
+                );
+                assert_eq!(matched.plan().choice_id(), choice, "{id}");
+                assert!(!matched.focus().is_empty(), "{id}");
+                assert!(
+                    Some(matched.semantic())
+                        == detector.observe(&screen).unwrap().fingerprint.as_ref(),
+                    "{id}"
+                );
+                let (choice_two, focused_choice_two) = forms.second_choice;
+                let moved = replay_native_fixture(
+                    fixture,
+                    |lines| {
+                        lines[forms.focus_row] =
+                            lines[forms.focus_row].replacen(forms.glyph, " ", 1);
+                        lines[forms.focus_row + 1] =
+                            lines[forms.focus_row + 1].replacen(choice_two, focused_choice_two, 1);
+                    },
+                    true,
+                    forms.cursor_follows_focus.then_some((focus + 1, 1)),
+                );
+                let refocused =
+                    answer(&moved, &plan).expect("a moved focus still identifies the form");
+                assert!(refocused.semantic() == matched.semantic(), "{id}");
+                assert_ne!(
+                    refocused.focus(),
+                    matched.focus(),
+                    "{id}: token binding sees the focus move"
+                );
+                let unfocused = replay_native_fixture(
+                    fixture,
+                    |lines| {
+                        lines[forms.focus_row] =
+                            lines[forms.focus_row].replacen(forms.glyph, " ", 1)
+                    },
+                    true,
+                    None,
+                );
+                assert!(
+                    answer(&unfocused, &plan).is_none(),
+                    "{id} without its focus glyph"
+                );
+                let primary = replay_native_fixture(fixture, |_| {}, false, None);
+                assert!(answer(&primary, &plan).is_none(), "{id} primary screen");
+            }
+        }
+    }
+
+    struct IdleComposer {
+        backend: CodingAgent,
+        version: &'static str,
+        idle: &'static str,
+        idle_rule: &'static str,
+        composer_top: u16,
+        prompt_row: usize,
+        draft: &'static str,
+        form: &'static str,
+        form_rule: &'static str,
+    }
+
+    const IDLE_COMPOSERS: [IdleComposer; 2] = [
+        IdleComposer {
+            backend: CodingAgent::Claude,
+            version: CLAUDE_VERSION,
+            idle: "claude-2.1.302-idle-composer-1",
+            idle_rule: "claude-idle-composer",
+            composer_top: 12,
+            prompt_row: 31,
+            draft: "❯\u{a0}hello",
+            form: "claude-2.1.302-default-permission-1",
+            form_rule: "claude-bash-permission",
+        },
+        IdleComposer {
+            backend: CodingAgent::Codex,
+            version: CODEX_VERSION,
+            idle: "codex-0.163.0-idle-composer-1",
+            idle_rule: "codex-idle-composer",
+            composer_top: 32,
+            prompt_row: 32,
+            draft: "› hello",
+            form: "codex-0.163.0-on-request-permission-1",
+            form_rule: "codex-exec-approval",
+        },
+    ];
+
+    #[test]
+    fn bundled_idle_composers_are_verified_non_interactions_distinct_from_the_form() {
+        for composer in IDLE_COMPOSERS {
+            let detector = bundled_detector(composer.backend, composer.version);
+            let observe = |id: &str| {
+                detector
+                    .observe(&replay_native_fixture(
+                        bundled_screen(id),
+                        |_| {},
+                        true,
+                        None,
+                    ))
+                    .unwrap()
+            };
+            let idle = observe(composer.idle);
             assert_eq!(
-                matched.choices(),
-                CODEX_CHOICES.map(str::to_owned).as_slice()
+                idle.kind,
+                ObservationKind::ComposerEmpty,
+                "{}",
+                composer.idle
             );
-            assert_eq!(matched.plan().choice_id(), choice);
-            assert!(!matched.focus().is_empty());
-            assert!(Some(matched.semantic()) == codex_observation(&screen).fingerprint.as_ref());
-            let moved = replay_native_fixture(
-                fixture,
-                |lines| {
-                    lines[30] = lines[30].replacen('›', " ", 1);
-                    lines[31] = lines[31].replacen("  2.", "› 2.", 1);
-                },
-                true,
-                None,
+            assert_eq!(
+                idle.match_evidence,
+                MatchEvidence::Complete,
+                "{}",
+                composer.idle
             );
-            let refocused =
-                codex_answer(&moved, &plan).expect("a moved focus still identifies the form");
-            assert!(refocused.semantic() == matched.semantic());
-            assert_ne!(
-                refocused.focus(),
-                matched.focus(),
-                "token binding sees the focus move"
+            assert!(idle.verified_noninteraction, "{}", composer.idle);
+            assert_eq!(idle.rule_id, composer.idle_rule);
+            assert_eq!(
+                idle.raw_evidence["operation"],
+                Value::Null,
+                "{}",
+                composer.idle
             );
-            let unfocused = replay_native_fixture(
-                fixture,
-                |lines| lines[30] = lines[30].replacen('›', " ", 1),
-                true,
-                None,
+            assert_eq!(
+                idle.raw_evidence["operation_rows"],
+                Value::Null,
+                "{}",
+                composer.idle
             );
+            let region = idle
+                .matched_region
+                .expect("the idle rule locates its composer");
             assert!(
-                codex_answer(&unfocused, &plan).is_none(),
-                "{decision:?} without ›"
+                region.top >= composer.composer_top,
+                "{}: {region:?}",
+                composer.idle
             );
-            let primary = replay_native_fixture(fixture, |_| {}, false, None);
-            assert!(
-                codex_answer(&primary, &plan).is_none(),
-                "{decision:?} primary screen"
+            let form = observe(composer.form);
+            assert_eq!(form.rule_id, composer.form_rule);
+            assert_eq!(
+                form.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "{}",
+                composer.form
             );
+            assert_eq!(
+                form.match_evidence,
+                MatchEvidence::Complete,
+                "{}",
+                composer.form
+            );
+            assert!(!form.verified_noninteraction, "{}", composer.form);
         }
     }
 
     #[test]
-    fn bundled_codex_idle_composer_is_a_verified_non_interaction_distinct_from_the_form() {
-        let idle = codex_observation(&replay_native_fixture(
-            bundled_screen("codex-0.163.0-idle-composer-1"),
-            |_| {},
-            true,
-            None,
-        ));
-        assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
-        assert_eq!(idle.match_evidence, MatchEvidence::Complete);
-        assert!(idle.verified_noninteraction);
-        assert_eq!(idle.rule_id, "codex-idle-composer");
-        let region = idle
-            .matched_region
-            .expect("the idle rule locates its composer");
-        assert_eq!((region.top, region.bottom), (32, 33), "{region:?}");
-        let form = codex_observation(&codex_form(|_| {}, None));
-        assert_eq!(form.rule_id, "codex-exec-approval");
-        assert!(!form.verified_noninteraction);
-    }
-
-    #[test]
-    fn bundled_codex_idle_rule_rejects_drafts_primary_copies_and_a_cursor_off_the_prefix_end() {
-        let draft = codex_observation(&replay_native_fixture(
-            bundled_screen("codex-0.163.0-idle-composer-1"),
-            |lines| lines[32] = "› hello".into(),
-            true,
-            Some((32, 7)),
-        ));
-        assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "typed draft");
-        assert!(!draft.verified_noninteraction);
-        let primary = codex_observation(&replay_native_fixture(
-            bundled_screen("codex-0.163.0-idle-composer-1"),
-            |_| {},
-            false,
-            None,
-        ));
-        assert!(!primary.verified_noninteraction, "primary-screen copy");
-        let away = codex_observation(&replay_native_fixture(
-            bundled_screen("codex-0.163.0-idle-composer-1"),
-            |_| {},
-            true,
-            Some((32, 0)),
-        ));
-        assert!(
-            !away.verified_noninteraction,
-            "cursor before the prefix end"
-        );
-        assert_ne!(away.kind, ObservationKind::ComposerEmpty);
+    fn bundled_idle_rules_reject_drafts_primary_copies_and_a_cursor_off_the_prefix_end() {
+        for composer in IDLE_COMPOSERS {
+            let detector = bundled_detector(composer.backend, composer.version);
+            let row = u16::try_from(composer.prompt_row).unwrap();
+            let observe =
+                |change: &dyn Fn(&mut Vec<String>), alternate: bool, cursor: Option<(u16, u16)>| {
+                    detector
+                        .observe(&replay_native_fixture(
+                            bundled_screen(composer.idle),
+                            change,
+                            alternate,
+                            cursor,
+                        ))
+                        .unwrap()
+                };
+            let draft = observe(
+                &|lines: &mut Vec<String>| lines[composer.prompt_row] = composer.draft.into(),
+                true,
+                Some((row, 7)),
+            );
+            assert_ne!(
+                draft.kind,
+                ObservationKind::ComposerEmpty,
+                "{} typed draft",
+                composer.idle
+            );
+            assert!(!draft.verified_noninteraction, "{}", composer.idle);
+            let primary = observe(&|_: &mut Vec<String>| {}, false, None);
+            assert!(
+                !primary.verified_noninteraction,
+                "{} primary-screen copy",
+                composer.idle
+            );
+            let away = observe(&|_: &mut Vec<String>| {}, true, Some((row, 0)));
+            assert!(
+                !away.verified_noninteraction,
+                "{} cursor before the prefix end",
+                composer.idle
+            );
+            assert_ne!(
+                away.kind,
+                ObservationKind::ComposerEmpty,
+                "{}",
+                composer.idle
+            );
+        }
     }
 
     #[test]

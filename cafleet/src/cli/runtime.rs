@@ -561,7 +561,7 @@ mod tests {
             }
         }
         #[test]
-        fn step5_a0_permission_respond_accepts_each_semantic_decision_and_valid_source_mode_pair() {
+        fn permission_respond_accepts_each_semantic_decision_and_valid_source_mode_pair() {
             for decision in ["allow", "deny"] {
                 for (source, mode) in [
                     ("director-auto", "auto"),
@@ -594,11 +594,11 @@ mod tests {
             accepted(&args);
         }
         #[test]
-        fn step5_a0_permission_inspect_requires_its_interaction_event_and_director() {
+        fn permission_inspect_requires_its_interaction_event_and_director() {
             required(inspect(), &["--event-id", "--from-member-id"]);
         }
         #[test]
-        fn step5_a0_permission_respond_requires_each_snapshot_decision_and_provenance_field() {
+        fn permission_respond_requires_each_snapshot_decision_and_provenance_field() {
             required(
                 respond(),
                 &[
@@ -617,7 +617,7 @@ mod tests {
             );
         }
         #[test]
-        fn step5_a0_permission_response_accepts_exact_lowercase_hex_tokens() {
+        fn permission_response_accepts_exact_lowercase_hex_tokens() {
             for token in ["0".repeat(64), "f".repeat(64), "0123456789abcdef".repeat(4)] {
                 let mut args = respond();
                 set(&mut args, "--request-token", &token);
@@ -625,7 +625,7 @@ mod tests {
             }
         }
         #[test]
-        fn step5_a0_permission_response_rejects_uppercase_nonhex_and_wrong_length_tokens() {
+        fn permission_response_rejects_uppercase_nonhex_and_wrong_length_tokens() {
             for token in [
                 String::new(),
                 "a".repeat(63),
@@ -644,7 +644,7 @@ mod tests {
             }
         }
         #[test]
-        fn step5_a0_permission_response_references_accept_nonblank_utf8_at_exact_byte_boundaries() {
+        fn permission_response_references_accept_nonblank_utf8_at_exact_byte_boundaries() {
             for field in ["--mode-evidence-ref", "--decision-evidence-ref"] {
                 for value in [
                     "x".into(),
@@ -661,7 +661,7 @@ mod tests {
             }
         }
         #[test]
-        fn step5_a0_permission_response_references_reject_blank_oversize_and_every_control() {
+        fn permission_response_references_reject_blank_oversize_and_every_control() {
             for field in ["--mode-evidence-ref", "--decision-evidence-ref"] {
                 for value in [
                     String::new(),
@@ -683,8 +683,7 @@ mod tests {
             }
         }
         #[test]
-        fn step5_a0_permission_response_operation_key_accepts_literal_nonblank_values_and_rejects_blank()
-         {
+        fn permission_response_operation_key_accepts_literal_nonblank_values_and_rejects_blank() {
             for key in ["fixture:key", "fixture:literal key 世界"] {
                 let mut args = respond();
                 set(&mut args, "--operation-key", key);
@@ -697,7 +696,7 @@ mod tests {
             }
         }
         #[test]
-        fn step5_a0_permission_response_rejects_invalid_decision_source_and_mode_enums() {
+        fn permission_response_rejects_invalid_decision_source_and_mode_enums() {
             for (field, values) in [
                 ("--decision", ["", "approved", "yes", "Allow"]),
                 ("--decision-source", ["", "director_auto", "member", "User"]),

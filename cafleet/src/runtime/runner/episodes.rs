@@ -736,6 +736,7 @@ impl EventSequencePool {
 pub(crate) mod test_support {
     use super::*;
     use crate::coding_agent::ScreenObservation;
+    use serde_json::json;
     pub(crate) const NOW: &str = "2026-10-26T15:35:00.000000+00:00";
     pub(crate) fn tracker() -> EpisodeTracker {
         EpisodeTracker::new(1, 1, EvidencePolicy::metadata()).unwrap()
@@ -761,6 +762,100 @@ pub(crate) mod test_support {
             RuntimeEventKind::InteractionOpened
         );
         update
+    }
+
+    pub(crate) fn is_annotation_event(transition: &TransitionDraft) -> bool {
+        matches!(
+            transition.kind,
+            RuntimeEventKind::AutomaticRefusalObserved
+                | RuntimeEventKind::AutomaticReviewUnavailable
+        )
+    }
+
+    pub(crate) type PolicyChange = (AutomaticReview, Option<String>, String, String);
+
+    #[derive(Default)]
+    pub(crate) struct Held {
+        pub(crate) events: Vec<TransitionDraft>,
+        pub(crate) policy: Vec<PolicyChange>,
+    }
+
+    /// Replays one backend's bundled fixtures through a tracker at 50 ms steps, numbering
+    /// every frame so each observation carries a fresh `screen_seq`.
+    pub(crate) struct Run {
+        tracker: EpisodeTracker,
+        origin: Instant,
+        sequence: u64,
+        observe: fn(&str) -> ScreenObservation,
+    }
+
+    impl Run {
+        pub(crate) fn new(policy: EvidencePolicy, observe: fn(&str) -> ScreenObservation) -> Self {
+            Self {
+                tracker: EpisodeTracker::new(1, 1, policy).unwrap(),
+                origin: Instant::now(),
+                sequence: 0,
+                observe,
+            }
+        }
+
+        pub(crate) fn next_frame(&mut self, id: &str) -> ScreenObservation {
+            self.sequence += 1;
+            let mut value = (self.observe)(id);
+            value.output_seq = self.sequence;
+            value.raw_evidence["screen_seq"] = json!(self.sequence);
+            for block in &mut value.annotations {
+                block.raw_evidence["screen_seq"] = json!(self.sequence);
+            }
+            value
+        }
+
+        pub(crate) fn observe(&mut self, value: &ScreenObservation, millis: u64) -> EpisodeUpdate {
+            self.tracker
+                .observe(value, self.origin + Duration::from_millis(millis), NOW)
+                .unwrap()
+        }
+
+        fn steps(&mut self, id: &str, from: u64, until: u64) -> Vec<EpisodeUpdate> {
+            (from..=until)
+                .step_by(50)
+                .map(|millis| {
+                    let value = self.next_frame(id);
+                    self.observe(&value, millis)
+                })
+                .collect()
+        }
+
+        pub(crate) fn hold(&mut self, id: &str, from: u64, until: u64) -> Held {
+            let mut held = Held::default();
+            for update in self.steps(id, from, until) {
+                held.policy
+                    .extend(update.effective_policy.as_ref().map(|observation| {
+                        (
+                            observation.automatic_review,
+                            observation.observed_mode.clone(),
+                            observation.rule_id.clone(),
+                            observation.observed_at.clone(),
+                        )
+                    }));
+                held.events
+                    .extend(update.transitions.into_iter().filter(is_annotation_event));
+            }
+            held
+        }
+
+        pub(crate) fn episode(&mut self, id: &str, from: u64, until: u64) -> Vec<TransitionDraft> {
+            self.steps(id, from, until)
+                .into_iter()
+                .flat_map(|update| update.transitions)
+                .filter(|transition| {
+                    matches!(
+                        transition.kind,
+                        RuntimeEventKind::InteractionOpened | RuntimeEventKind::InteractionClosed
+                    )
+                })
+                .collect()
+        }
     }
 }
 

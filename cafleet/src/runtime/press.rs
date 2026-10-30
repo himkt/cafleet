@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_press_entry_uses_the_outer_wrapped_placement_and_held_lock_under_one_deadline() {
+    fn press_entry_uses_the_outer_wrapped_placement_and_held_lock_under_one_deadline() {
         let mut fixture = Fixture::new();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, probe, mux) = setup(&fixture, Mode::Success, until);
@@ -405,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_press_entry_refuses_director_backend_mismatch_and_a_busy_shared_lock_before_probes() {
+    fn press_entry_refuses_director_backend_mismatch_and_a_busy_shared_lock_before_probes() {
         let mut fixture = Fixture::new();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, probe, mux) = setup(&fixture, Mode::Success, until);
@@ -479,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_press_entry_rechecks_full_placement_and_original_expiry_after_actual_metadata() {
+    fn press_entry_rechecks_full_placement_and_original_expiry_after_actual_metadata() {
         for mode in [Mode::ChangePlacement, Mode::ExpireMetadata] {
             let mut fixture = Fixture::new();
             let until = Instant::now() + Duration::from_secs(2);
@@ -517,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_press_entry_keeps_prelaunch_and_started_effects_distinct_with_cleanup_before_effect() {
+    fn press_entry_keeps_prelaunch_and_started_effects_distinct_with_cleanup_before_effect() {
         for mode in [Mode::NotStarted, Mode::StartedFailure] {
             let mut fixture = Fixture::new();
             let until = Instant::now() + Duration::from_secs(2);

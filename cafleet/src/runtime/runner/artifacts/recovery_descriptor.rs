@@ -161,8 +161,7 @@ mod tests {
     use crate::runtime::runner::*;
     use std::time::{Duration, Instant};
     #[test]
-    fn runner_recovery_review_r4_historical_descriptor_pin_remove_uses_the_supplied_connection_budget()
-     {
+    fn runner_recovery_historical_descriptor_pin_remove_uses_the_supplied_connection_budget() {
         for takeovers in [1, 2] {
             let mut case = described_creator();
             let lock = case.held.as_ref().unwrap().clone();
@@ -207,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_recovery_review_r4_descriptor_pin_drop_preserves_path_for_explicit_completion() {
+    fn runner_recovery_descriptor_pin_drop_preserves_path_for_explicit_completion() {
         let mut case = described_creator();
         let bytes = owned_bytes(&case);
         let lock = case.held.as_ref().unwrap().clone();
@@ -226,8 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_recovery_review_r4_descriptor_remove_revalidates_owner_and_expired_deadline_before_dispatch()
-     {
+    fn runner_recovery_descriptor_remove_revalidates_owner_and_expired_deadline_before_dispatch() {
         for changed in ["epoch", "deadline"] {
             let mut case = described_creator();
             let before = identity(&case.artifacts.paths.descriptor);
@@ -274,8 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_recovery_review_r4_actual_descriptor_unlink_closure_failure_preserves_file_and_retries()
-     {
+    fn runner_recovery_actual_descriptor_unlink_closure_failure_preserves_file_and_retries() {
         let mut case = described_creator();
         let bytes = owned_bytes(&case);
         let lock = case.held.as_ref().unwrap().clone();

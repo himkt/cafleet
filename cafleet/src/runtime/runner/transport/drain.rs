@@ -598,14 +598,8 @@ mod tests {
         let mut harness = Harness::new();
         let primary = catch_unwind(AssertUnwindSafe(|| body(&mut harness)));
         let cleanup = catch_unwind(AssertUnwindSafe(|| harness.finish()));
-        if let Err(primary) = primary {
-            if cleanup.is_err() {
-                eprintln!("input-drain fixture cleanup also failed; primary failure is retained");
-            }
-            resume_unwind(primary);
-        }
-        if let Err(cleanup) = cleanup {
-            resume_unwind(cleanup);
+        if let Err(panic) = primary.and(cleanup) {
+            resume_unwind(panic);
         }
     }
 
@@ -654,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d1_actual_quiet_round_seals_health_without_granting_composer_eligibility() {
+    fn drain_actual_quiet_round_seals_health_without_granting_composer_eligibility() {
         with_harness(|h| {
             let mut transport = transport(32, 32, 32);
             assert_eq!(transport.human_generation(), 0);
@@ -684,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d2_fragmented_reads_and_partial_writes_preserve_real_bytes_and_sequence() {
+    fn drain_fragmented_reads_and_partial_writes_preserve_real_bytes_and_sequence() {
         with_harness(|h| {
             h.control();
             let human_bytes = "literal 世界\r".as_bytes();
@@ -727,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d3_interrupted_reads_require_a_later_actual_same_round_wouldblock_pair() {
+    fn drain_interrupted_reads_require_a_later_actual_same_round_wouldblock_pair() {
         for human_interrupted in [true, false] {
             with_harness(|h| {
                 h.control();
@@ -752,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d4_eof_is_not_a_quiet_read_and_adds_no_manual_generation() {
+    fn drain_eof_is_not_a_quiet_read_and_adds_no_manual_generation() {
         for human_eof in [true, false] {
             with_harness(|h| {
                 h.control();
@@ -775,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d5_round_and_separate_byte_quotas_bound_continuously_readable_sources() {
+    fn drain_round_and_separate_byte_quotas_bound_continuously_readable_sources() {
         for (bytes, width, expected_reads, expected_bytes) in [(64, 1, 8, 8), (4, usize::MAX, 1, 4)]
         {
             with_harness(|h| {
@@ -829,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d6_full_manual_queue_supplies_no_read_proof_and_preserves_order_on_release() {
+    fn drain_full_manual_queue_supplies_no_read_proof_and_preserves_order_on_release() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(16, 4, 32);
@@ -860,7 +854,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d7_display_and_prefetched_child_pressure_require_real_later_drain() {
+    fn drain_display_and_prefetched_child_pressure_require_real_later_drain() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(16, 32, 4);
@@ -929,7 +923,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d8_absent_health_keeps_manual_observation_progress_without_a_proof() {
+    fn drain_absent_health_keeps_manual_observation_progress_without_a_proof() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(32, 32, 32);
@@ -957,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d9_actual_controller_gap_health_prevents_quiet_proof() {
+    fn drain_actual_controller_gap_health_prevents_quiet_proof() {
         with_harness(|h| {
             h.control();
             h.controller
@@ -982,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d10_real_pending_writer_commit_blocks_health_until_release_and_persistence() {
+    fn drain_real_pending_writer_commit_blocks_health_until_release_and_persistence() {
         with_harness(|h| {
             h.control();
             h.hooks.pause(WriterBoundary::Persist);
@@ -1036,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d11_tick_and_drain_keep_actual_human_counts_before_later_errors() {
+    fn drain_tick_and_drain_keep_actual_human_counts_before_later_errors() {
         for quiesce in [false, true] {
             for failure in ["pty", "child", "display", "flush", "observer", "zero"] {
                 with_harness(|h| {
@@ -1105,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d12_opaque_proof_is_single_use_and_diagnostic_copies_supply_no_authority() {
+    fn drain_opaque_proof_is_single_use_and_diagnostic_copies_supply_no_authority() {
         with_harness(|h| {
             let mut other = transport(32, 32, 32);
             let mut transport = transport(32, 32, 32);
@@ -1132,7 +1126,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d13_mutating_entrypoints_invalidate_before_success_or_later_failure() {
+    fn drain_mutating_entrypoints_invalidate_before_success_or_later_failure() {
         for operation in [
             "tick",
             "tick-error",
@@ -1250,8 +1244,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d14_original_expiry_prevents_later_io_and_proof_while_retaining_completed_reads()
-    {
+    fn drain_original_expiry_prevents_later_io_and_proof_while_retaining_completed_reads() {
         with_harness(|h| {
             let mut transport = transport(32, 32, 32);
             h.seal(&mut transport);
@@ -1461,7 +1454,6 @@ mod tests {
             (after_tick, tick_proof),
             (after_resize, resize_proof),
         ];
-        eprintln!("observation-incomplete later quiet/tick/resize outcomes: {outcomes:?}");
         assert!(
             outcomes
                 .iter()
@@ -1471,7 +1463,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_delayed_positive_child_read_keeps_display_and_lifetime_fence() {
+    fn drain_incomplete_delayed_positive_child_read_keeps_display_and_lifetime_fence() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);
@@ -1546,7 +1538,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_complete_control_observes_every_fragment_and_can_seal() {
+    fn drain_incomplete_complete_control_observes_every_fragment_and_can_seal() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);
@@ -1686,17 +1678,17 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_mid_observer_expiry_preserves_prefix_and_lifetime_fence() {
+    fn drain_incomplete_mid_observer_expiry_preserves_prefix_and_lifetime_fence() {
         incomplete_callback_case(CallbackFault::Expire);
     }
 
     #[test]
-    fn step5_drain_incomplete_mid_observer_error_before_expiry_keeps_primary_and_fence() {
+    fn drain_incomplete_mid_observer_error_before_expiry_keeps_primary_and_fence() {
         incomplete_callback_case(CallbackFault::Fail);
     }
 
     #[test]
-    fn step5_drain_incomplete_mid_observer_error_after_expiry_keeps_primary_and_fence() {
+    fn drain_incomplete_mid_observer_error_after_expiry_keeps_primary_and_fence() {
         incomplete_callback_case(CallbackFault::ExpireAndFail);
     }
 
@@ -1782,12 +1774,12 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_ordinary_fatal_observer_error_retains_chunk_and_fence() {
+    fn drain_incomplete_ordinary_fatal_observer_error_retains_chunk_and_fence() {
         incomplete_tick_case(true);
     }
 
     #[test]
-    fn step5_drain_incomplete_ordinary_nonfatal_observer_error_retains_reporting_and_fence() {
+    fn drain_incomplete_ordinary_nonfatal_observer_error_retains_reporting_and_fence() {
         incomplete_tick_case(false);
     }
 
@@ -1808,7 +1800,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_ordinary_parser_fault_cannot_be_cleared_by_later_success() {
+    fn drain_incomplete_ordinary_parser_fault_cannot_be_cleared_by_later_success() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);
@@ -1855,7 +1847,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_complete_observation_then_display_error_preserves_eligibility() {
+    fn drain_incomplete_complete_observation_then_display_error_preserves_eligibility() {
         for quiesce in [false, true] {
             for discard in [false, true] {
                 with_harness(|h| {
@@ -1926,7 +1918,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_prefetch_consumption_control_observes_once_and_can_seal() {
+    fn drain_incomplete_prefetch_consumption_control_observes_once_and_can_seal() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);
@@ -1953,7 +1945,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_discarding_unobserved_prefetch_keeps_lifetime_fence() {
+    fn drain_incomplete_discarding_unobserved_prefetch_keeps_lifetime_fence() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);

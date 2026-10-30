@@ -225,8 +225,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn step5_composer_e1_observation_only_definition_preserves_observation_without_executable_plans()
-     {
+    fn composer_observation_only_definition_preserves_observation_without_executable_plans() {
         let value = simple_definition("composer_empty", true);
         let catalog = ProfileCatalog::from_definitions(&value).unwrap();
         capabilities(
@@ -258,8 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_composer_e2_nullable_operations_and_absent_composer_keep_executable_coverage_unknown()
-    {
+    fn composer_nullable_operations_and_absent_composer_keep_executable_coverage_unknown() {
         for value in [definition(None, None), definitions()] {
             let catalog = ProfileCatalog::from_definitions(&value).unwrap();
             let observation = if value["profiles"][0]["capabilities"]["composer"].is_null() {
@@ -285,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_composer_e3_prompt_plan_retains_exact_selected_metadata_and_independent_coverage() {
+    fn composer_prompt_plan_retains_exact_selected_metadata_and_independent_coverage() {
         let catalog = ProfileCatalog::from_definitions(&definition(Some("7e"), None)).unwrap();
         metadata(
             &plan(&catalog, ComposerOperation::Prompt),
@@ -309,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_composer_e4_exec_plan_retains_exact_selected_metadata_and_independent_coverage() {
+    fn composer_exec_plan_retains_exact_selected_metadata_and_independent_coverage() {
         let catalog = ProfileCatalog::from_definitions(&definition(None, Some("6b6c"))).unwrap();
         metadata(
             &plan(&catalog, ComposerOperation::Exec),
@@ -333,8 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_composer_e5_operation_provenance_and_exact_selection_do_not_authorize_other_profiles()
-    {
+    fn composer_operation_provenance_and_exact_selection_do_not_authorize_other_profiles() {
         let mut value = definition(Some("7e"), Some("6b6c"));
         value["profiles"][0]["rules"]
             .as_array_mut()
@@ -400,8 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_composer_e6_prompt_preserves_literal_utf8_between_empty_prefix_and_tested_submit_bytes()
-     {
+    fn composer_prompt_preserves_literal_utf8_between_empty_prefix_and_tested_submit_bytes() {
         let catalog = ProfileCatalog::from_definitions(&definition(Some("7e"), None)).unwrap();
         let literal = "  literal 世界 '$x' `backticks` \\\"quotes\\\"  ";
         let bytes = plan(&catalog, ComposerOperation::Prompt)
@@ -412,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_composer_e7_exec_owns_exact_bang_space_prefix_without_changing_the_caller_literal() {
+    fn composer_exec_owns_exact_bang_space_prefix_without_changing_the_caller_literal() {
         let catalog = ProfileCatalog::from_definitions(&definition(None, Some("6b6c"))).unwrap();
         let literal = "printf '%s' 世界 '$x' `literal`";
         let bytes = plan(&catalog, ComposerOperation::Exec)
@@ -423,7 +419,7 @@ mod tests {
         assert_eq!(&bytes[2..2 + literal.len()], literal.as_bytes());
     }
     #[test]
-    fn step5_composer_e15_native_payload_limit_counts_prefix_utf8_literal_and_submit_bytes() {
+    fn composer_native_payload_limit_counts_prefix_utf8_literal_and_submit_bytes() {
         for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
             for submit_length in [1, 32] {
                 let hex = "6b".repeat(submit_length);
@@ -456,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_composer_e16_plans_withhold_debug_serialization_and_private_bytes_from_errors() {
+    fn composer_plans_withhold_debug_serialization_and_private_bytes_from_errors() {
         assert_no_debug_or_serialize!(ComposerPlan);
         const SUBMIT: &str = "E16_PRIVATE_SUBMIT";
         const LITERAL: &str = "E16_PRIVATE_LITERAL";

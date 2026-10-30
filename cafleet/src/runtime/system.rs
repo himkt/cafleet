@@ -500,31 +500,11 @@ pub(crate) mod test_support {
                 .cleanup_deadline
                 .map_or(deadline, |original| original.min(deadline));
             self.cleanup_deadline = Some(deadline);
-            match self.child.try_wait() {
-                Ok(Some(_)) => return,
-                Ok(None) => {}
-                Err(cause) => {
-                    eprintln!(
-                        "owned child {} cleanup status failed: {cause}",
-                        self.child.id()
-                    );
-                    return;
-                }
+            if !matches!(self.child.try_wait(), Ok(None)) {
+                return;
             }
-            if let Err(cause) = self.child.kill() {
-                eprintln!("owned child {} kill failed: {cause}", self.child.id());
-            }
-            match self.poll_until(deadline) {
-                Ok(Some(_)) => {}
-                Ok(None) => eprintln!(
-                    "owned child {} remained unreaped at its cleanup deadline",
-                    self.child.id()
-                ),
-                Err(cause) => eprintln!(
-                    "owned child {} reap polling failed: {cause}",
-                    self.child.id()
-                ),
-            }
+            drop(self.child.kill());
+            drop(self.poll_until(deadline));
         }
     }
     impl Deref for TestChild {
@@ -856,7 +836,7 @@ mod tests {
     mod test_child {
         use super::super::test_support::TestChild;
         #[test]
-        fn runner_batch2_owned_child_guard_cleans_up_when_identity_setup_unwinds() {
+        fn owned_child_guard_cleans_up_when_identity_setup_unwinds() {
             let mut identity = None;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let child = TestChild::new(
@@ -881,7 +861,7 @@ mod tests {
         }
     }
     #[test]
-    fn step5_press_absolute_runner_reserves_cleanup_and_reaps_the_actual_direct_child() {
+    fn press_absolute_runner_reserves_cleanup_and_reaps_the_actual_direct_child() {
         let fixture = ProcessFixture::new();
         let argv = vec![
             "/bin/sh".into(),

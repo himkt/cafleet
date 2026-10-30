@@ -516,7 +516,6 @@ impl RecoveryHost for NativeRecoveryHost {
 pub(crate) mod test_support {
     use rusqlite::Connection;
     use serde_json::json;
-    use sha2::{Digest, Sha256};
 
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::records::Placement;
@@ -637,13 +636,69 @@ pub(crate) mod test_support {
                 storage::get_run(&self.fixture.conn, self.fixture.run.run_id).unwrap();
         }
 
+        /// Commits a live `RunnerExited` transition and leaves the run's cleanup incomplete, the
+        /// state an owner leaves when it dies after recording its native exit.
+        pub(crate) fn exited_pending_cleanup(
+            &mut self,
+            code: Option<i64>,
+            signal: Option<i64>,
+        ) -> (ObservedTransition, RuntimeEventRecord) {
+            let transition = exited(&self.fixture.run, 1, code, signal);
+            let event = storage::persist_event(
+                &mut self.fixture.conn,
+                &self.fixture.run.owner(),
+                &transition,
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            assert_eq!(
+                self.fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET cleanup_state='incomplete' WHERE run_id=?1",
+                        [self.fixture.run.run_id],
+                    )
+                    .unwrap(),
+                1
+            );
+            self.refresh();
+            (transition, event)
+        }
+
         pub(crate) fn recover(&mut self, host: &mut Host) -> TestResult<RecoveryReport> {
+            self.recover_with(host, None)
+        }
+
+        pub(crate) fn recover_held(
+            &mut self,
+            expected: &RunRecord,
+            held: &crate::input::PaneLock,
+            host: &mut Host,
+        ) -> TestResult<RecoveryCompletion> {
+            recover_member_with_held_pane_lock(
+                &mut self.fixture.conn,
+                &self.settings,
+                self.fixture.run.member_id,
+                expected,
+                &self.placement,
+                None,
+                host.deadline,
+                held,
+                host,
+            )
+        }
+
+        pub(crate) fn recover_with(
+            &mut self,
+            host: &mut Host,
+            claim: Option<&OwnerTerminationAttestation>,
+        ) -> TestResult<RecoveryReport> {
             self.release();
             recover_member_with_host(
                 &mut self.fixture.conn,
                 &self.settings,
                 self.fixture.run.member_id,
-                None,
+                claim,
                 host.deadline,
                 host,
             )
@@ -775,15 +830,12 @@ pub(crate) mod test_support {
                     (after + Duration::from_secs(seconds)).min(until),
                 )
             });
-            eprintln!(
-                "recovery cleanup clock: observed={observed:?}, entry_bounds={bounds:?}, original_cap={until:?}"
-            );
             assert!(
                 observed
                     .iter()
                     .zip(bounds)
                     .all(|(actual, (lower, upper))| *actual >= lower && *actual <= upper),
-                "cleanup carries the one clock captured at common coordinator entry"
+                "cleanup carries the one clock captured at common coordinator entry: observed={observed:?}, entry_bounds={bounds:?}, original_cap={until:?}"
             );
         }
         pub(crate) fn check(&self, deadline: Instant) -> TestResult<()> {
@@ -961,13 +1013,7 @@ pub(crate) mod test_support {
             cause_json: Some(json!({"kind":"native_exit","exit_code":code,"exit_signal":signal})),
         }
     }
-    pub(crate) fn frame(transition: &ObservedTransition) -> Vec<u8> {
-        let body = serde_json::to_vec(transition).unwrap();
-        let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-        bytes.extend_from_slice(&Sha256::digest(&body));
-        bytes.extend(body);
-        bytes
-    }
+    pub(crate) use crate::runtime::runner::writer::test_support::frame;
     pub(crate) fn events(case: &Case) -> Vec<RuntimeEventView> {
         let ids = case
             .fixture
@@ -1021,21 +1067,6 @@ pub(crate) mod test_support {
                 expected_owner_epoch: run.owner_epoch,
                 evidence_ref: "audit:owned-fixture-termination".into(),
             }
-        }
-        pub(crate) fn recover_claim(
-            case: &mut Case,
-            host: &mut Host,
-            claim: &OwnerTerminationAttestation,
-        ) -> TestResult<RecoveryReport> {
-            case.release();
-            recover_member_with_host(
-                &mut case.fixture.conn,
-                &case.settings,
-                case.fixture.run.member_id,
-                Some(claim),
-                host.deadline,
-                host,
-            )
         }
         pub(crate) fn assert_loss(case: &Case, report: &RecoveryReport, original: &RunRecord) {
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
@@ -1157,17 +1188,6 @@ pub(crate) mod test_support {
             assert_eq!(run.cleanup_state, CleanupState::Incomplete);
             secret_free(&serde_json::to_string(&run.cleanup_diagnostics_json).unwrap());
         }
-        pub(crate) fn recover(case: &mut Case, host: &mut Host) -> TestResult<RecoveryReport> {
-            case.release();
-            recover_member_with_host(
-                &mut case.fixture.conn,
-                &case.settings,
-                case.fixture.run.member_id,
-                None,
-                host.deadline,
-                host,
-            )
-        }
     }
 
     pub(crate) mod relationships {
@@ -1198,25 +1218,7 @@ pub(crate) mod test_support {
 
         pub(crate) fn established_terminal() -> Case {
             let mut case = Case::new();
-            let transition = exited(&case.fixture.run, 1, Some(7), None);
-            storage::persist_event(
-                &mut case.fixture.conn,
-                &case.fixture.run.owner(),
-                &transition,
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            assert_eq!(
-                case.fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET cleanup_state='incomplete' WHERE run_id=?1",
-                        [case.fixture.run.run_id],
-                    )
-                    .unwrap(),
-                1
-            );
-            case.refresh();
+            case.exited_pending_cleanup(Some(7), None);
             assert_eq!(case.fixture.run.status, RunStatus::Exited);
             assert_eq!(case.fixture.run.exit_code, Some(7));
             assert_eq!(case.fixture.run.cleanup_state, CleanupState::Incomplete);
@@ -1375,17 +1377,9 @@ pub(crate) mod test_support {
                     (actual != expected).then_some(actual.name.as_str())
                 })
                 .collect::<Vec<_>>();
-            let current = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
-            eprintln!(
-                "relationship refusal: stage={stage:?}, relationship={relationship:?}, returned_error={}, changed={changed:?}, epoch={}, cleanup={:?}, gap={}",
-                result.is_err(),
-                current.owner_epoch,
-                current.cleanup_state,
-                current.observation_gap_count
-            );
             assert!(
                 actual.as_slice() == expected.as_ref().unwrap().as_slice(),
-                "relationship refusal preserves the exact database after the injected change: {stage:?}/{relationship:?}"
+                "relationship refusal preserves the exact database after the injected change: {stage:?}/{relationship:?} changed {changed:?}"
             );
             assert!(
                 result.is_err(),
@@ -1435,6 +1429,28 @@ pub(crate) mod test_support {
             }
         }
 
+        pub(crate) const LIFECYCLES: [Lifecycle; 3] = [
+            Lifecycle::MemberInactive,
+            Lifecycle::DirectorInactive,
+            Lifecycle::FleetDeleted,
+        ];
+
+        /// Ends `lifecycle` before recovery; the member goes through real deregistration, which
+        /// also deletes its placement.
+        pub(crate) fn end_lifecycle(case: &mut Case, lifecycle: Lifecycle) {
+            if matches!(lifecycle, Lifecycle::MemberInactive) {
+                assert!(
+                    crate::broker::deregister_member(
+                        &mut case.fixture.conn,
+                        case.fixture.run.member_id
+                    )
+                    .unwrap()
+                );
+            } else {
+                lifecycle.apply(&case.fixture.conn, &case.fixture.run);
+            }
+        }
+
         pub(crate) fn retained_history(conn: &Connection) -> Vec<TableSnapshot> {
             rows(conn)
                 .into_iter()
@@ -1451,11 +1467,7 @@ pub(crate) mod test_support {
         }
 
         pub(crate) fn historical_control(stage: Stage) {
-            for lifecycle in [
-                Lifecycle::MemberInactive,
-                Lifecycle::DirectorInactive,
-                Lifecycle::FleetDeleted,
-            ] {
+            for lifecycle in LIFECYCLES {
                 let mut case = prepare(stage);
                 let original = case.fixture.run.clone();
                 let mutation = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
@@ -1558,6 +1570,52 @@ mod tests {
             std::fs::rename(temporary, path).unwrap();
         }
 
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        enum ChildMode {
+            /// Owns the run and stops its writer after the persisted frame's fsync.
+            Writer,
+            /// Owns the run and stops its writer before the frame is appended.
+            Unsynced,
+            /// Recovers with an operator claim and holds its exceptional transaction open.
+            Transaction,
+            /// The first of two competing exceptional recoveries, held before its commit.
+            ExceptionalFirst,
+            /// The competing exceptional recovery whose original epoch becomes stale.
+            ExceptionalStale,
+            /// Recovers and holds the takeover until released.
+            Hold,
+            /// Recovers without pausing.
+            Recover,
+        }
+        impl ChildMode {
+            const ALL: [Self; 7] = [
+                Self::Writer,
+                Self::Unsynced,
+                Self::Transaction,
+                Self::ExceptionalFirst,
+                Self::ExceptionalStale,
+                Self::Hold,
+                Self::Recover,
+            ];
+            fn name(self) -> &'static str {
+                match self {
+                    Self::Writer => "writer",
+                    Self::Unsynced => "unsynced",
+                    Self::Transaction => "transaction",
+                    Self::ExceptionalFirst => "exceptional_first",
+                    Self::ExceptionalStale => "exceptional_stale",
+                    Self::Hold => "hold",
+                    Self::Recover => "recover",
+                }
+            }
+            fn parse(name: &str) -> Self {
+                Self::ALL
+                    .into_iter()
+                    .find(|mode| mode.name() == name)
+                    .unwrap_or_else(|| panic!("unknown owned recovery helper mode {name:?}"))
+            }
+        }
+
         struct Task {
             child: TestChild,
             log: PathBuf,
@@ -1566,11 +1624,12 @@ mod tests {
         impl Task {
             fn spawn(
                 case: &Case,
-                mode: &str,
+                mode: ChildMode,
                 marker: &Path,
                 release: &Path,
                 result: &Path,
             ) -> Self {
+                let mode = mode.name();
                 let config = case.fixture._dir.path().join(format!("{mode}-config.json"));
                 write_json(
                     &config,
@@ -1664,9 +1723,7 @@ mod tests {
         }
         impl Drop for Release {
             fn drop(&mut self) {
-                if let Err(error) = std::fs::write(&self.0, b"release") {
-                    eprintln!("owned recovery release failed: {error}");
-                }
+                drop(std::fs::write(&self.0, b"release"));
             }
         }
 
@@ -1677,7 +1734,7 @@ mod tests {
             let marker = case.fixture._dir.path().join("fsynced.json");
             let release = case.fixture._dir.path().join("writer-release");
             let result = case.fixture._dir.path().join("unused-result.json");
-            let mut task = Task::spawn(&case, "writer", &marker, &release, &result);
+            let mut task = Task::spawn(&case, ChildMode::Writer, &marker, &release, &result);
             let snapshot = task.await_json(&marker);
             case.refresh();
             assert_eq!(snapshot["run_id"], case.fixture.run.run_id);
@@ -1717,7 +1774,7 @@ mod tests {
             let marker = case.fixture._dir.path().join("before-append.json");
             let release = case.fixture._dir.path().join("before-append-release");
             let result = case.fixture._dir.path().join("before-append-unused.json");
-            let mut task = Task::spawn(&case, "unsynced", &marker, &release, &result);
+            let mut task = Task::spawn(&case, ChildMode::Unsynced, &marker, &release, &result);
             let snapshot = task.await_json(&marker);
             assert_eq!(snapshot["spool_bytes"], 0);
             assert!(events(&case).is_empty());
@@ -1741,12 +1798,12 @@ mod tests {
             let release = case.fixture._dir.path().join("takeover-release");
             let first_result = case.fixture._dir.path().join("first-result.json");
             let second_result = case.fixture._dir.path().join("second-result.json");
-            let mut first = Task::spawn(&case, "hold", &marker, &release, &first_result);
+            let mut first = Task::spawn(&case, ChildMode::Hold, &marker, &release, &first_result);
             let gate = Release(release.clone());
             first.await_json(&marker);
             let mut second = Task::spawn(
                 &case,
-                "recover",
+                ChildMode::Recover,
                 &case.fixture._dir.path().join("second-marker.json"),
                 &case.fixture._dir.path().join("second-release"),
                 &second_result,
@@ -1799,14 +1856,12 @@ mod tests {
             let marker = case.fixture._dir.path().join("transaction-open.json");
             let release = case.fixture._dir.path().join("transaction-release");
             let result = case.fixture._dir.path().join("transaction-result.json");
-            let mut task = Task::spawn(&case, "transaction", &marker, &release, &result);
+            let mut task = Task::spawn(&case, ChildMode::Transaction, &marker, &release, &result);
             let pending = task.await_json(&marker);
-            eprintln!("exceptional parent commit marker: {pending}");
-            assert_eq!(pending["journal_mode"], "wal");
-            assert_eq!(pending["event_rows"], 2);
-            assert_eq!(pending["run_rows"], 1);
-            assert_eq!(pending["interaction_rows"], 1);
-            let read_started = Instant::now();
+            assert_eq!(pending["journal_mode"], "wal", "{pending}");
+            assert_eq!(pending["event_rows"], 2, "{pending}");
+            assert_eq!(pending["run_rows"], 1, "{pending}");
+            assert_eq!(pending["interaction_rows"], 1, "{pending}");
             let read = with_database_deadline(
                 &mut case.fixture.conn,
                 task.deadline - Duration::from_millis(500),
@@ -1817,12 +1872,13 @@ mod tests {
                     .map_err(crate::error::CafleetError::from)
                 },
             );
-            eprintln!(
-                "exceptional parent read elapsed={:?}, result={read:?}, child_log={}",
-                read_started.elapsed(),
-                std::fs::read_to_string(&task.log).unwrap()
-            );
-            assert_eq!(read.unwrap(), 1);
+            let read = read.unwrap_or_else(|cause| {
+                panic!(
+                    "{cause}; child log: {}",
+                    std::fs::read_to_string(&task.log).unwrap()
+                )
+            });
+            assert_eq!(read, 1);
             assert_eq!(
                 rows(&case.fixture.conn),
                 before,
@@ -1877,13 +1933,17 @@ mod tests {
                 .join("exceptional-before-commit.json");
             let release = case.fixture._dir.path().join("exceptional-release");
             let first_result = case.fixture._dir.path().join("exceptional-first.json");
-            let mut first =
-                Task::spawn(&case, "exceptional_first", &marker, &release, &first_result);
+            let mut first = Task::spawn(
+                &case,
+                ChildMode::ExceptionalFirst,
+                &marker,
+                &release,
+                &first_result,
+            );
             let gate = Release(release.clone());
             let pending = first.await_json(&marker);
-            eprintln!("exceptional first commit marker: {pending}");
-            assert_eq!(pending["journal_mode"], "wal");
-            assert_eq!(pending["event_rows"], 2);
+            assert_eq!(pending["journal_mode"], "wal", "{pending}");
+            assert_eq!(pending["event_rows"], 2, "{pending}");
             let second_marker = case
                 .fixture
                 ._dir
@@ -1892,28 +1952,17 @@ mod tests {
             let second_result = case.fixture._dir.path().join("exceptional-second.json");
             let mut second = Task::spawn(
                 &case,
-                "exceptional_stale",
+                ChildMode::ExceptionalStale,
                 &second_marker,
                 &case.fixture._dir.path().join("unused-exceptional-release"),
                 &second_result,
             );
-            let second_read_started = Instant::now();
             let captured = second.await_json(&second_marker);
-            eprintln!(
-                "exceptional second snapshot wait={:?}, snapshot={captured}, first_log={}, second_log={}",
-                second_read_started.elapsed(),
-                std::fs::read_to_string(&first.log).unwrap(),
-                std::fs::read_to_string(&second.log).unwrap()
-            );
-            assert_eq!(captured["epoch"], old_epoch);
-            assert_eq!(captured["journal_mode"], "wal");
+            assert_eq!(captured["epoch"], old_epoch, "{captured}");
+            assert_eq!(captured["journal_mode"], "wal", "{captured}");
             gate.release();
             let accepted = first.await_json(&first_result);
             first.finish();
-            eprintln!(
-                "exceptional first completion: {}",
-                std::fs::read_to_string(&first.log).unwrap()
-            );
             let rejected = second.await_json(&second_result);
             second.finish();
             assert_eq!(accepted["report"]["replayed_count"], 0);
@@ -1988,7 +2037,7 @@ mod tests {
                 &std::fs::read(std::env::var("CAFLEET_TEST_RECOVERY_CONFIG").unwrap()).unwrap(),
             )
             .unwrap();
-            let mode = config["mode"].as_str().unwrap();
+            let mode = ChildMode::parse(config["mode"].as_str().unwrap());
             let database_url = config["database_url"].as_str().unwrap();
             let run_id = config["run_id"].as_i64().unwrap();
             let member_id = config["member_id"].as_i64().unwrap();
@@ -2001,11 +2050,7 @@ mod tests {
             let journal_mode: String = conn
                 .query_row("PRAGMA journal_mode", [], |row| row.get(0))
                 .unwrap();
-            eprintln!(
-                "owned recovery helper mode={mode}, journal_mode={journal_mode}, elapsed={:?}",
-                started.elapsed()
-            );
-            if matches!(mode, "writer" | "unsynced") {
+            if matches!(mode, ChildMode::Writer | ChildMode::Unsynced) {
                 let original = storage::get_run(&conn, run_id).unwrap();
                 let lock = Arc::new(RunLock::acquire(&conn, &original.owner()).unwrap().unwrap());
                 let owner = lock
@@ -2030,7 +2075,7 @@ mod tests {
                     marker,
                     release,
                     written: AtomicBool::new(false),
-                    boundary: if mode == "writer" {
+                    boundary: if mode == ChildMode::Writer {
                         WriterBoundary::Persist
                     } else {
                         WriterBoundary::Append
@@ -2056,11 +2101,11 @@ mod tests {
             let claim;
             let attestation = if matches!(
                 mode,
-                "transaction" | "exceptional_first" | "exceptional_stale"
+                ChildMode::Transaction | ChildMode::ExceptionalFirst | ChildMode::ExceptionalStale
             ) {
                 let marker = marker.clone();
                 let release = release.clone();
-                if mode != "exceptional_stale" {
+                if mode != ChildMode::ExceptionalStale {
                     let changed = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::<
                         String,
                         std::collections::BTreeSet<i64>,
@@ -2077,19 +2122,15 @@ mod tests {
                         },
                     ))
                     .unwrap();
-                    let scenario = mode.to_owned();
                     let hook_journal_mode = journal_mode.clone();
                     conn.commit_hook(Some(move || {
             let trace=changed.lock().expect("owned transaction commit trace");
             let count=|table:&str|trace.get(table).map_or(0,std::collections::BTreeSet::len);
             let state=json!({"transaction":"before-exceptional-commit","event_rows":count("member_runtime_events"),"run_rows":count("member_runs"),"interaction_rows":count("member_interactions"),"journal_mode":hook_journal_mode,"helper_elapsed_ms":started.elapsed().as_millis(),"remaining_ms":deadline.saturating_duration_since(Instant::now()).as_millis()});
             drop(trace);
-            eprintln!("owned recovery commit hook mode={scenario}, entry={state}");
             write_json(&marker,&state);
             while Instant::now()<deadline && !release.exists(){std::thread::sleep(Duration::from_millis(1));}
-            let released=release.exists();
-            eprintln!("owned recovery commit hook mode={scenario}, released={released}, expired={}, elapsed={:?}", Instant::now()>=deadline, started.elapsed());
-            !released
+            !release.exists()
         })).unwrap();
                 }
                 claim = OwnerTerminationAttestation {
@@ -2100,10 +2141,10 @@ mod tests {
                 host.process = Evidence::Unknown;
                 Some(&claim)
             } else {
-                assert!(matches!(mode, "hold" | "recover"));
+                assert!(matches!(mode, ChildMode::Hold | ChildMode::Recover));
                 None
             };
-            if mode == "hold" {
+            if mode == ChildMode::Hold {
                 host.action = Some(Box::new(move |boundary, run, until| {
                     if boundary == "after_takeover" {
                         write_json(&marker, &json!({"epoch":run.owner_epoch}));
@@ -2116,7 +2157,7 @@ mod tests {
                     }
                     Ok(())
                 }));
-            } else if mode == "exceptional_stale" {
+            } else if mode == ChildMode::ExceptionalStale {
                 let mut written = false;
                 host.action = Some(Box::new(move |boundary, run, _| {
                     if boundary == "after_snapshot" && !written {
@@ -2137,7 +2178,7 @@ mod tests {
                 deadline,
                 &mut host,
             );
-            if mode == "exceptional_stale" {
+            if mode == ChildMode::ExceptionalStale {
                 let error = match recovery {
                     Ok(_) => {
                         panic!(
@@ -2156,27 +2197,28 @@ mod tests {
             let report = recovery.unwrap();
             let run = storage::get_run(&conn, run_id).unwrap();
             let actual = ProcessIdentity::current().unwrap();
-            let spool_state = if matches!(mode, "transaction" | "exceptional_first") {
-                "database_only"
-            } else if run.owner_pid == actual.pid
-                && run.owner_start_identity == actual.start_identity
-            {
-                let held = RunLock::acquire_released(&conn, &run.owner())
-                    .unwrap()
-                    .unwrap();
-                held.validate(&conn, &run.owner()).unwrap();
-                let paths = validate_run_paths(&conn, &run).unwrap();
-                match std::fs::read(paths.outbox) {
-                    Ok(bytes) => {
-                        assert!(bytes.is_empty());
-                        "cleared"
+            let spool_state =
+                if matches!(mode, ChildMode::Transaction | ChildMode::ExceptionalFirst) {
+                    "database_only"
+                } else if run.owner_pid == actual.pid
+                    && run.owner_start_identity == actual.start_identity
+                {
+                    let held = RunLock::acquire_released(&conn, &run.owner())
+                        .unwrap()
+                        .unwrap();
+                    held.validate(&conn, &run.owner()).unwrap();
+                    let paths = validate_run_paths(&conn, &run).unwrap();
+                    match std::fs::read(paths.outbox) {
+                        Ok(bytes) => {
+                            assert!(bytes.is_empty());
+                            "cleared"
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "cleared",
+                        Err(error) => panic!("owned final spool read failed: {error}"),
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => "cleared",
-                    Err(error) => panic!("owned final spool read failed: {error}"),
-                }
-            } else {
-                "not_owner"
-            };
+                } else {
+                    "not_owner"
+                };
             write_json(
                 &result,
                 &json!({"report":crate::presentation::runtime_recovery(&report),"spool_state":spool_state}),
@@ -2298,18 +2340,7 @@ mod tests {
                 .unwrap();
             case.release();
             let mut host = new_host();
-            let completion = recover_member_with_held_pane_lock(
-                &mut case.fixture.conn,
-                &case.settings,
-                expected.member_id,
-                &expected,
-                &case.placement,
-                None,
-                host.deadline,
-                &held,
-                &mut host,
-            )
-            .unwrap();
+            let completion = case.recover_held(&expected, &held, &mut host).unwrap();
             assert_eq!(counts(&completion.report), (1, 3, 0));
             assert_eq!(completion.run.owner_epoch, expected.owner_epoch + 1);
             assert_eq!(
@@ -2344,20 +2375,7 @@ mod tests {
             let before = rows(&case.fixture.conn);
             let bytes = case.spool_bytes().unwrap();
             let mut host = new_host();
-            assert!(
-                recover_member_with_held_pane_lock(
-                    &mut case.fixture.conn,
-                    &case.settings,
-                    expected.member_id,
-                    &expected,
-                    &case.placement,
-                    None,
-                    host.deadline,
-                    &held,
-                    &mut host
-                )
-                .is_err()
-            );
+            assert!(case.recover_held(&expected, &held, &mut host).is_err());
             assert_eq!(rows(&case.fixture.conn), before);
             assert_eq!(case.spool_bytes().unwrap(), bytes);
             assert!(
@@ -2387,36 +2405,12 @@ mod tests {
                 .unwrap();
             let before = rows(&case.fixture.conn);
             let mut host = new_host();
-            assert!(
-                recover_member_with_held_pane_lock(
-                    &mut case.fixture.conn,
-                    &case.settings,
-                    expected.member_id,
-                    &expected,
-                    &case.placement,
-                    None,
-                    host.deadline,
-                    &held,
-                    &mut host
-                )
-                .is_err()
-            );
+            assert!(case.recover_held(&expected, &held, &mut host).is_err());
             assert_eq!(rows(&case.fixture.conn), before);
             case.refresh();
             let matching = case.fixture.run.clone();
             let mut host = new_host();
-            let completion = recover_member_with_held_pane_lock(
-                &mut case.fixture.conn,
-                &case.settings,
-                matching.member_id,
-                &matching,
-                &case.placement,
-                None,
-                host.deadline,
-                &held,
-                &mut host,
-            )
-            .unwrap();
+            let completion = case.recover_held(&matching, &held, &mut host).unwrap();
             assert_eq!(counts(&completion.report), (0, 0, 0));
             assert_eq!(completion.run, matching);
             assert_eq!(rows(&case.fixture.conn), before);
@@ -2519,18 +2513,7 @@ mod tests {
                 .event_seq_reserved_through;
             case.release();
             let mut host = new_host();
-            let completion = recover_member_with_held_pane_lock(
-                &mut case.fixture.conn,
-                &case.settings,
-                expected.member_id,
-                &expected,
-                &case.placement,
-                None,
-                host.deadline,
-                &held,
-                &mut host,
-            )
-            .unwrap();
+            let completion = case.recover_held(&expected, &held, &mut host).unwrap();
             assert_eq!(counts(&completion.report), (1, 3, 0));
             assert!(
                 events(&case)[1..]
@@ -2639,13 +2622,12 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_review_r2_standalone_cleanup_uses_original_entry_clock_after_wait_and_replay()
-         {
+        fn runner_recovery_standalone_cleanup_uses_original_entry_clock_after_wait_and_replay() {
             clock_case(false, Duration::from_secs(7), Duration::from_millis(150));
         }
 
         #[test]
-        fn runner_recovery_review_r2_borrowed_cleanup_keeps_entry_clock_and_original_outer_cap() {
+        fn runner_recovery_borrowed_cleanup_keeps_entry_clock_and_original_outer_cap() {
             clock_case(
                 true,
                 Duration::from_millis(3300),
@@ -2654,7 +2636,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_review_r2_short_outer_cap_clips_every_actual_cleanup_boundary() {
+        fn runner_recovery_short_outer_cap_clips_every_actual_cleanup_boundary() {
             for borrowed in [false, true] {
                 clock_case(
                     borrowed,
@@ -2698,21 +2680,6 @@ mod tests {
                 std::fs::remove_file(&case.artifacts.paths.owner_lock).unwrap();
             }
             (case, claim)
-        }
-
-        fn invoke(
-            case: &mut Case,
-            host: &mut Host,
-            claim: Option<&OwnerTerminationAttestation>,
-        ) -> TestResult<RecoveryReport> {
-            recover_member_with_host(
-                &mut case.fixture.conn,
-                &case.settings,
-                case.fixture.run.member_id,
-                claim,
-                host.deadline,
-                host,
-            )
         }
 
         fn assert_completed(
@@ -2781,7 +2748,7 @@ mod tests {
                     }
                     Ok(())
                 }));
-                let result = invoke(&mut case, &mut host, claim.as_ref());
+                let result = case.recover_with(&mut host, claim.as_ref());
                 if foreign_owner {
                     assert!(
                         result.is_err(),
@@ -2798,20 +2765,17 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_review_r1_same_owner_completion_before_ordinary_takeover_has_zero_effects()
-         {
+        fn runner_recovery_same_owner_completion_before_ordinary_takeover_has_zero_effects() {
             immediate_completion(false, false);
         }
 
         #[test]
-        fn runner_recovery_review_r1_same_owner_completion_before_exceptional_takeover_has_zero_effects()
-         {
+        fn runner_recovery_same_owner_completion_before_exceptional_takeover_has_zero_effects() {
             immediate_completion(true, false);
         }
 
         #[test]
-        fn runner_recovery_review_r1_completed_foreign_owner_still_rejects_fixed_snapshot_and_attestation()
-         {
+        fn runner_recovery_completed_foreign_owner_still_rejects_fixed_snapshot_and_attestation() {
             immediate_completion(false, true);
             immediate_completion(true, true);
         }
@@ -2881,7 +2845,7 @@ mod tests {
                             .unwrap();
                         conn.execute_batch("COMMIT").unwrap();
                     });
-                    let result = invoke(&mut case, &mut host, claim.as_ref());
+                    let result = case.recover_with(&mut host, claim.as_ref());
                     writer.join().unwrap();
                     result
                 });
@@ -2898,14 +2862,12 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_review_r1_ordinary_completion_is_rechecked_after_actual_write_lock_wait()
-        {
+        fn runner_recovery_ordinary_completion_is_rechecked_after_actual_write_lock_wait() {
             completion_behind_write_lock(false);
         }
 
         #[test]
-        fn runner_recovery_review_r1_exceptional_completion_is_rechecked_after_actual_write_lock_wait()
-         {
+        fn runner_recovery_exceptional_completion_is_rechecked_after_actual_write_lock_wait() {
             completion_behind_write_lock(true);
         }
     }
@@ -2966,7 +2928,7 @@ mod tests {
                 let mut host = new_host();
                 host.process = Evidence::Unknown;
                 assert!(
-                    recover_claim(&mut case, &mut host, &attestation).is_err(),
+                    case.recover_with(&mut host, Some(&attestation)).is_err(),
                     "{invalid}"
                 );
                 assert_eq!(rows(&case.fixture.conn), before, "{invalid}");
@@ -3053,23 +3015,19 @@ mod tests {
     mod relationships {
         use super::super::test_support::relationships::*;
         #[test]
-        fn runner_recovery_review_r5_ordinary_takeover_refuses_actual_member_fleet_change_atomically()
-         {
+        fn runner_recovery_ordinary_takeover_refuses_actual_member_fleet_change_atomically() {
             refusal(Stage::OrdinaryTakeover, Relationship::MemberFleet);
         }
         #[test]
-        fn runner_recovery_review_r5_ordinary_takeover_refuses_actual_director_fleet_change_atomically()
-         {
+        fn runner_recovery_ordinary_takeover_refuses_actual_director_fleet_change_atomically() {
             refusal(Stage::OrdinaryTakeover, Relationship::DirectorFleet);
         }
         #[test]
-        fn runner_recovery_review_r5_ordinary_takeover_refuses_actual_fleet_director_change_atomically()
-         {
+        fn runner_recovery_ordinary_takeover_refuses_actual_fleet_director_change_atomically() {
             refusal(Stage::OrdinaryTakeover, Relationship::FleetDirector);
         }
         #[test]
-        fn runner_recovery_review_r5_valid_historical_ordinary_takeover_keeps_truth_and_existing_inbox()
-         {
+        fn runner_recovery_valid_historical_ordinary_takeover_keeps_truth_and_existing_inbox() {
             historical_control(Stage::OrdinaryTakeover);
         }
     }

@@ -923,13 +923,21 @@ pub(in crate::runtime::runner) fn encode_input_reply(
 mod tests {
     use super::*;
     use crate::runtime::runner::test_support::Fixture;
-    use serde::de::{IgnoredAny, MapAccess, Visitor};
     use serde_json::{Value, json};
-    use std::fmt;
 
     struct Case {
         fixture: Fixture,
     }
+
+    const OPERATIONS: [(&str, Option<&str>); 7] = [
+        ("submit_prompt", None),
+        ("submit_exec", None),
+        ("permission_inspect", None),
+        ("permission_respond", None),
+        ("receipt", Some("query")),
+        ("receipt", Some("retire")),
+        ("receipt", Some("reconcile")),
+    ];
 
     #[test]
     fn missing_evidence_wire_values_follow_declaration_order() {
@@ -1104,17 +1112,9 @@ mod tests {
     }
 
     #[test]
-    fn step5_wire_q1_valid_flat_operations_and_legacy_routing_have_positive_baselines() {
+    fn request_valid_flat_operations_and_lifecycle_routing_have_positive_baselines() {
         let case = Case::new();
-        for (kind, action) in [
-            ("submit_prompt", None),
-            ("submit_exec", None),
-            ("permission_inspect", None),
-            ("permission_respond", None),
-            ("receipt", Some("query")),
-            ("receipt", Some("retire")),
-            ("receipt", Some("reconcile")),
-        ] {
+        for (kind, action) in OPERATIONS {
             let value = case.request(kind, action);
             let request = decoded(&value);
             assert_eq!(
@@ -1185,7 +1185,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_wire_q2_new_then_legacy_duplicate_kind_cannot_escape_strict_routing() {
+    fn request_input_then_lifecycle_duplicate_kind_cannot_escape_strict_routing() {
         let case = Case::new();
         let good = case.request("submit_prompt", None);
         decoded(&good);
@@ -1194,43 +1194,25 @@ mod tests {
         assert!(decode_service_request(&prefix(&legacy, r#""kind":"submit_prompt","#)).is_err());
     }
     #[test]
-    fn step5_wire_q3_legacy_then_new_duplicate_kind_cannot_escape_strict_routing() {
+    fn request_lifecycle_then_input_duplicate_kind_cannot_escape_strict_routing() {
         let good = Case::new().request("submit_prompt", None);
         decoded(&good);
         assert!(decode_service_request(&prefix(&good, r#""kind":"health","#)).is_err());
     }
     #[test]
-    fn step5_wire_q4_identical_and_escaped_equivalent_field_names_are_duplicates() {
-        let good = Case::new().request("submit_prompt", None);
-        for raw in [
-            duplicate(&good, "kind"),
-            prefix(&good, r#""kind":"submit_prompt","#),
-            prefix(&good, r#""operation_key":"fixture:prompt","#),
-        ] {
-            rejection(&good, &raw);
-            assert!(decode_service_request(&raw).is_err());
-        }
-    }
-    #[test]
-    fn step5_wire_q5_every_envelope_and_operation_field_rejects_raw_duplication() {
+    fn request_every_envelope_and_operation_field_rejects_raw_duplication() {
         let case = Case::new();
-        for (kind, action) in [
-            ("submit_prompt", None),
-            ("submit_exec", None),
-            ("permission_inspect", None),
-            ("permission_respond", None),
-            ("receipt", Some("query")),
-            ("receipt", Some("retire")),
-            ("receipt", Some("reconcile")),
-        ] {
+        for (kind, action) in OPERATIONS {
             let good = case.request(kind, action);
             for field in good.as_object().unwrap().keys() {
-                rejection(&good, &duplicate(&good, field));
+                let raw = duplicate(&good, field);
+                rejection(&good, &raw);
+                assert!(decode_service_request(&raw).is_err(), "{kind} {field}");
             }
         }
     }
     #[test]
-    fn step5_wire_q6_identity_and_database_identity_reject_nested_raw_duplicates() {
+    fn request_identity_and_database_identity_reject_nested_raw_duplicates() {
         let good = Case::new().request("submit_prompt", None);
         for pointer in ["/identity", "/identity/database_identity_json"] {
             for field in good.pointer(pointer).unwrap().as_object().unwrap().keys() {
@@ -1239,17 +1221,9 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_q7_required_fields_distinguish_absence_from_explicit_null() {
+    fn request_required_fields_distinguish_absence_from_explicit_null() {
         let case = Case::new();
-        for (kind, action) in [
-            ("submit_prompt", None),
-            ("submit_exec", None),
-            ("permission_inspect", None),
-            ("permission_respond", None),
-            ("receipt", Some("query")),
-            ("receipt", Some("retire")),
-            ("receipt", Some("reconcile")),
-        ] {
+        for (kind, action) in OPERATIONS {
             let good = case.request(kind, action);
             for field in good.as_object().unwrap().keys() {
                 let mut bad = good.clone();
@@ -1264,17 +1238,9 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_q8_unknown_fields_and_other_receipt_action_fields_reject() {
+    fn request_unknown_fields_and_other_receipt_action_fields_reject() {
         let case = Case::new();
-        for (kind, action) in [
-            ("submit_prompt", None),
-            ("submit_exec", None),
-            ("permission_inspect", None),
-            ("permission_respond", None),
-            ("receipt", Some("query")),
-            ("receipt", Some("retire")),
-            ("receipt", Some("reconcile")),
-        ] {
+        for (kind, action) in OPERATIONS {
             let good = case.request(kind, action);
             for pointer in ["", "/identity"] {
                 let mut bad = good.clone();
@@ -1299,7 +1265,7 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_q9_numeric_type_version_expiry_and_enum_domains_are_strict() {
+    fn request_numeric_type_version_expiry_and_enum_domains_are_strict() {
         let case = Case::new();
         let good = case.request("permission_respond", None);
         for pointer in [
@@ -1368,7 +1334,7 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_q10_kind_payload_permission_binding_and_reference_validation() {
+    fn request_kind_payload_permission_binding_and_reference_validation() {
         let case = Case::new();
         let mut literal_key = case.request("submit_prompt", None);
         literal_key["operation_key"] = json!("\nfixture:literal-key\u{7f}");
@@ -1448,17 +1414,9 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_q11_encoding_is_flat_with_required_nulls_and_exact_utf8_frame_cap() {
+    fn request_encoding_is_flat_with_required_nulls_and_exact_utf8_frame_cap() {
         let case = Case::new();
-        for (kind, action) in [
-            ("submit_prompt", None),
-            ("submit_exec", None),
-            ("permission_inspect", None),
-            ("permission_respond", None),
-            ("receipt", Some("query")),
-            ("receipt", Some("retire")),
-            ("receipt", Some("reconcile")),
-        ] {
+        for (kind, action) in OPERATIONS {
             let good = case.request(kind, action);
             assert_frame(&encode_input_request(&decoded(&good)).unwrap(), &good);
         }
@@ -1478,7 +1436,7 @@ mod tests {
         assert!(encode_input_request(&invalid).is_err());
     }
     #[test]
-    fn step5_wire_q12_invalid_request_diagnostics_keep_payload_canaries_private() {
+    fn invalid_request_diagnostics_keep_payload_canaries_private() {
         let mut good = Case::new().request("permission_respond", None);
         let canaries = [
             "PRIVATE_KEY_7d69".into(),
@@ -1516,7 +1474,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_wire_p1_structured_submission_states_decode_with_exact_scalar_values() {
+    fn reply_structured_submission_states_decode_with_exact_scalar_values() {
         let request = Case::new().request("submit_prompt", None);
         for (status, stage, id) in [
             ("accepted", "submitted", Some(13)),
@@ -1535,7 +1493,7 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_p2_inspection_supported_and_unknown_preserve_complete_public_object() {
+    fn reply_inspection_supported_and_unknown_preserve_complete_public_object() {
         let case = Case::new();
         let request = case.request("permission_inspect", None);
         for supported in [false, true] {
@@ -1604,7 +1562,7 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_p3_permission_response_flattens_submission_into_public_shape() {
+    fn reply_permission_response_flattens_submission_into_public_shape() {
         let case = Case::new();
         let request = case.request("permission_respond", None);
         let payload = case.response();
@@ -1630,7 +1588,7 @@ mod tests {
         reject_reply(&good, &bytes(&nested), &request);
     }
     #[test]
-    fn step5_wire_p4_receipt_variants_require_exact_ids_and_nulls() {
+    fn reply_receipt_variants_require_exact_ids_and_nulls() {
         let case = Case::new();
         for (action, status, id, payload) in [
             ("query", "missing", None, Value::Null),
@@ -1671,7 +1629,7 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_p5_reply_envelope_requires_version_exact_fields_and_result_xor_text_error() {
+    fn reply_envelope_requires_version_exact_fields_and_result_xor_text_error() {
         let request = Case::new().request("submit_prompt", None);
         let good = reply(
             "submission",
@@ -1709,7 +1667,7 @@ mod tests {
         reject_reply(&good, &duplicate(&good, "result"), &request);
     }
     #[test]
-    fn step5_wire_p6_reply_original_objects_reject_nested_duplicates() {
+    fn reply_original_objects_reject_nested_duplicates() {
         let case = Case::new();
         for (request, good, paths) in [
             (
@@ -1744,7 +1702,7 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_p7_reply_missing_null_extra_and_domain_validation_is_recursive() {
+    fn reply_missing_null_extra_and_domain_validation_is_recursive() {
         let case = Case::new();
         for (request, good, paths) in [
             (
@@ -1841,7 +1799,7 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_p8_well_formed_other_operation_result_kind_rejects() {
+    fn reply_well_formed_other_operation_result_kind_rejects() {
         let case = Case::new();
         let pairs = [
             (
@@ -1878,7 +1836,7 @@ mod tests {
         }
     }
     #[test]
-    fn step5_wire_p9_operation_specific_identities_and_receipt_ids_match_request() {
+    fn reply_operation_specific_identities_and_receipt_ids_match_request() {
         let case = Case::new();
         for (request, good, payload, fields) in [
             (
@@ -1944,44 +1902,19 @@ mod tests {
         }
     }
 
-    struct OrderedKeys(Vec<String>);
-    impl<'de> Deserialize<'de> for OrderedKeys {
-        fn deserialize<D: serde::Deserializer<'de>>(
-            deserializer: D,
-        ) -> std::result::Result<Self, D::Error> {
-            struct KeysVisitor;
-            impl<'de> Visitor<'de> for KeysVisitor {
-                type Value = OrderedKeys;
-                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    formatter.write_str("an ordered object")
-                }
-                fn visit_map<A: MapAccess<'de>>(
-                    self,
-                    mut map: A,
-                ) -> std::result::Result<Self::Value, A::Error> {
-                    let mut keys = Vec::new();
-                    while let Some(key) = map.next_key::<String>()? {
-                        keys.push(key);
-                        map.next_value::<IgnoredAny>()?;
-                    }
-                    Ok(OrderedKeys(keys))
-                }
-            }
-            deserializer.deserialize_map(KeysVisitor)
-        }
-    }
-    #[derive(Deserialize)]
-    struct OrderedEnvelope {
-        result: OrderedResult,
-    }
-    #[derive(Deserialize)]
-    struct OrderedResult {
-        request: Option<OrderedKeys>,
-        response: Option<OrderedKeys>,
+    /// The keys of `result[field]` in wire order; `serde_json`'s `preserve_order` keeps them.
+    fn result_keys(encoded: &[u8], field: &str) -> Vec<String> {
+        let value: Value = serde_json::from_slice(body(encoded)).unwrap();
+        value["result"][field]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
     }
 
     #[test]
-    fn step5_wire_p10_encoding_matches_independent_shapes_public_order_and_body_cap() {
+    fn reply_encoding_matches_independent_shapes_public_order_and_body_cap() {
         let case = Case::new();
         for (request, expected) in [
             (
@@ -2013,12 +1946,10 @@ mod tests {
             let encoded = encode_input_reply(Ok(&actual)).unwrap();
             assert_frame(&encoded, &expected);
             if request["kind"] == "permission_inspect" {
-                let ordered: OrderedEnvelope = serde_json::from_slice(body(&encoded)).unwrap();
-                assert_eq!(ordered.result.request.unwrap().0,"event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,profile_version,answer_profile_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence".split(',').collect::<Vec<_>>());
+                assert_eq!(result_keys(&encoded, "request"),"event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,profile_version,answer_profile_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence".split(',').collect::<Vec<_>>());
             }
             if request["kind"] == "permission_respond" {
-                let ordered: OrderedEnvelope = serde_json::from_slice(body(&encoded)).unwrap();
-                assert_eq!(ordered.result.response.unwrap().0,"status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,decision_source,stage,output_seq,reason".split(',').collect::<Vec<_>>());
+                assert_eq!(result_keys(&encoded, "response"),"status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,decision_source,stage,output_seq,reason".split(',').collect::<Vec<_>>());
             }
         }
         let expected = json!({"protocol_version":1,"error":"fixture failure"});
@@ -2153,7 +2084,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_r1_genuine_and_owning_domain_controls_preserve_literal_identity() {
+        fn identity_genuine_and_owning_domain_controls_preserve_literal_identity() {
             let case = Case::new();
             let good = control(&case);
             let mut uppercase = good.clone();
@@ -2203,7 +2134,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_r1_decode_requires_each_owning_database_identity_field() {
+        fn identity_decode_requires_each_owning_database_identity_field() {
             let case = Case::new();
             let good = control(&case);
             for field in ["canonical_path", "instance_id", "device", "inode"] {
@@ -2218,7 +2149,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_r1_decode_requires_an_absolute_string_database_path() {
+        fn identity_decode_requires_an_absolute_string_database_path() {
             let case = Case::new();
             let good = control(&case);
             for (index, value) in bad_paths().into_iter().enumerate() {
@@ -2229,7 +2160,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_r1_decode_requires_a_32_character_ascii_hex_instance_id() {
+        fn identity_decode_requires_a_32_character_ascii_hex_instance_id() {
             let case = Case::new();
             let good = control(&case);
             for (index, value) in bad_hex(32).into_iter().enumerate() {
@@ -2250,17 +2181,17 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_r1_decode_requires_an_unsigned_64_bit_device() {
+        fn identity_decode_requires_an_unsigned_64_bit_device() {
             reject_numeric_field("device");
         }
 
         #[test]
-        fn step5_wire_r1_decode_requires_an_unsigned_64_bit_inode() {
+        fn identity_decode_requires_an_unsigned_64_bit_inode() {
             reject_numeric_field("inode");
         }
 
         #[test]
-        fn step5_wire_r1_decode_requires_a_64_character_ascii_hex_launch_nonce() {
+        fn identity_decode_requires_a_64_character_ascii_hex_launch_nonce() {
             let case = Case::new();
             let good = control(&case);
             for (index, value) in bad_hex(64).into_iter().enumerate() {
@@ -2268,17 +2199,10 @@ mod tests {
                 bad["identity"]["launch_nonce"] = value;
                 reject_decode(&good, &bad, &format!("launch_nonce {index}"));
             }
-            let mut missing = good.clone();
-            missing["identity"]
-                .as_object_mut()
-                .unwrap()
-                .remove("launch_nonce")
-                .unwrap();
-            reject_decode(&good, &missing, "missing launch_nonce");
         }
 
         #[test]
-        fn step5_wire_r1_encoder_requires_each_owning_database_identity_field() {
+        fn identity_encoder_requires_each_owning_database_identity_field() {
             let case = Case::new();
             let good = control(&case);
             for field in ["canonical_path", "instance_id", "device", "inode"] {
@@ -2289,7 +2213,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_r1_encoder_validates_constructed_database_path_and_instance_id() {
+        fn identity_encoder_validates_constructed_database_path_and_instance_id() {
             let case = Case::new();
             let good = control(&case);
             for (field, values) in [
@@ -2310,7 +2234,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_r1_encoder_validates_constructed_unsigned_device_and_inode() {
+        fn identity_encoder_validates_constructed_unsigned_device_and_inode() {
             let case = Case::new();
             let good = control(&case);
             for field in ["device", "inode"] {
@@ -2328,7 +2252,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_r1_encoder_validates_a_constructed_launch_nonce() {
+        fn identity_encoder_validates_a_constructed_launch_nonce() {
             let case = Case::new();
             let good = control(&case);
             for value in bad_hex(64) {

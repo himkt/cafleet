@@ -922,14 +922,6 @@ mod tests {
                     preview_stamp(&fixture.fixture.conn, first.message_id),
                     Some(stamp)
                 );
-                eprintln!(
-                    "later_candidate={later_candidate}; first_input_id={}; first_message_id={}; first_state={:?}; second_state={:?}; calls={:?}; delivery={outcome:?}",
-                    committed.input_id,
-                    first.message_id,
-                    committed.state,
-                    uncommitted.as_ref().map(|row| row.state),
-                    host.calls
-                );
                 let outcome =
                     outcome.expect("later failure preserves the actual committed sent prefix");
                 assert_eq!(outcome.sent, vec![first.message_id]);

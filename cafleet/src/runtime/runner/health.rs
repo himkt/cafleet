@@ -239,7 +239,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_validates_legacy_identity_without_granting_composer_proof() {
+        fn health_decode_without_observation_validates_identity_without_granting_composer_proof() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             let mut value = wire(&fixture.run);
@@ -249,7 +249,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_accepts_bounded_hold_and_checked_empty_composer_states() {
+        fn health_decode_accepts_bounded_hold_and_checked_empty_composer_states() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             for visibility in ["visible", "obscured", "not_visible", "unknown"] {
@@ -269,8 +269,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_rejects_unknown_wire_fields_enums_unbounded_and_private_diagnostics()
-         {
+        fn health_decode_rejects_unknown_wire_fields_enums_unbounded_and_private_diagnostics() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             for field in [
@@ -309,7 +308,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_requires_hold_for_visibility_pressure_and_degradation() {
+        fn health_decode_requires_hold_for_visibility_pressure_and_degradation() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             for field in [
@@ -336,7 +335,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_preserves_process_generation_and_control_identity_checks() {
+        fn health_decode_preserves_process_generation_and_control_identity_checks() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             for field in ["epoch", "nonce", "runner", "child"] {

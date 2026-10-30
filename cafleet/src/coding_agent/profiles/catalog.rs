@@ -1475,10 +1475,6 @@ pub(crate) mod test_support {
             .unwrap_or_else(|| panic!("{id} is a bundled fixture"))
     }
 
-    pub(crate) fn bundled_screen(id: &str) -> &'static str {
-        std::str::from_utf8(bundled_fixture(id).1).expect("bundled fixtures are UTF-8 JSON")
-    }
-
     pub(crate) fn bundled_embedded() -> Vec<(&'static str, &'static [u8])> {
         BUNDLED_FIXTURES.to_vec()
     }
@@ -2896,7 +2892,7 @@ mod tests {
     mod composer_submission {
         use super::*;
         #[test]
-        fn step5_composer_e8_submit_byte_limits_are_inclusive_before_plan_construction() {
+        fn composer_submit_byte_limits_are_inclusive_before_plan_construction() {
             for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
                 for length in [1, 32] {
                     let hex = "7a".repeat(length);
@@ -2920,7 +2916,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_composer_e9_prefix_shape_hex_and_operation_identity_are_validated() {
+        fn composer_prefix_shape_hex_and_operation_identity_are_validated() {
             let good = definition(Some("7e"), Some("6b6c"));
             for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
                 let values = match operation {
@@ -2957,7 +2953,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_composer_e10_submit_hex_requires_nonempty_even_lowercase_hex_and_string_type() {
+        fn composer_submit_hex_requires_nonempty_even_lowercase_hex_and_string_type() {
             let good = definition(Some("7e"), Some("6b6c"));
             for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
                 for invalid in [
@@ -2982,8 +2978,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_composer_e11_optional_submission_and_operation_objects_have_exact_complete_fields()
-        {
+        fn composer_optional_submission_and_operation_objects_have_exact_complete_fields() {
             let good = definition(Some("7e"), Some("6b6c"));
             for field in ["rule_ids", "fixture_ids"] {
                 let mut bad = good.clone();
@@ -3061,7 +3056,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_composer_e12_each_operation_requires_its_own_valid_fixture_reference_set() {
+        fn composer_each_operation_requires_its_own_valid_fixture_reference_set() {
             let good = definition(Some("7e"), Some("6b6c"));
             for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
                 let own = match operation {
@@ -3109,7 +3104,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_composer_e13_operation_provenance_covers_every_declared_exact_native_version() {
+        fn composer_operation_provenance_covers_every_declared_exact_native_version() {
             let mut good = definition(Some("7e"), Some("6b6c"));
             good["profiles"][0]["native_versions"] = json!([VERSION, VERSION_TWO]);
             let originals = good["fixtures"].as_array().unwrap().clone();
@@ -3149,8 +3144,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_composer_e14_composer_rule_references_keep_component_identity_and_declared_order()
-        {
+        fn composer_rule_references_keep_component_identity_and_declared_order() {
             let mut good = definition(Some("7e"), Some("6b6c"));
             good["profiles"][0]["rules"]
                 .as_array_mut()
@@ -3190,8 +3184,6 @@ mod tests {
 
         const CLAUDE_VERSION: &str = "2.1.302";
         const NATIVE_FIXTURE: &str = "claude-2.1.302-default-permission-1";
-        const PERMISSION_RULE: &str = "claude-bash-permission";
-        const IDLE_RULE: &str = "claude-idle-composer";
         const PROFILE_VERSION: &str = "claude-2.1.302-auto-1";
         const ALLOW_FIXTURE: &str = "claude-2.1.302-allow-pre-stage-1";
         const DENY_FIXTURE: &str = "claude-2.1.302-deny-pre-stage-1";
@@ -3219,120 +3211,6 @@ mod tests {
             bundled_fixture(id).1
         }
 
-        fn bundled_observation(bytes: &[u8]) -> ScreenObservation {
-            let catalog = ProfileCatalog::bundled().unwrap();
-            let screen =
-                replay_native_fixture(std::str::from_utf8(bytes).unwrap(), |_| {}, true, None);
-            Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
-                .observe(&screen)
-                .unwrap()
-        }
-
-        #[test]
-        fn bundled_claude_2_1_302_declares_detection_idle_composer_and_both_answers_only() {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            let claude = bundled.capabilities(CodingAgent::Claude, Some(CLAUDE_VERSION));
-            assert_eq!(claude.backend, CodingAgent::Claude);
-            assert_eq!(claude.native_version.as_deref(), Some(CLAUDE_VERSION));
-            assert_eq!(claude.profile_version.as_deref(), Some(PROFILE_VERSION));
-            assert_eq!(claude.detection, Coverage::Tested);
-            assert_eq!(claude.composer, Coverage::Tested);
-            assert_eq!(claude.prompt_submission, Coverage::Unknown);
-            assert_eq!(claude.native_exec_submission, Coverage::Unknown);
-            assert!(
-                claude.answer_decisions.iter().all(|decision| matches!(
-                    decision,
-                    PermissionDecision::Allow | PermissionDecision::Deny
-                )),
-                "{:?}",
-                claude.answer_decisions
-            );
-            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                assert!(claude.answer_decisions.contains(&decision), "{decision:?}");
-            }
-            assert_eq!(claude.profile_match, Some(ProfileMatch::Exact));
-            let unknown = bundled.capabilities(CodingAgent::Claude, None);
-            assert_eq!(unknown.detection, Coverage::Unknown);
-            assert!(unknown.answer_decisions.is_empty());
-            assert!(unknown.capability_reason.is_some());
-            for &backend in CodingAgent::all()
-                .iter()
-                .filter(|&&backend| backend != CodingAgent::Claude)
-            {
-                let other = bundled.capabilities(backend, Some(CLAUDE_VERSION));
-                assert_ne!(
-                    other.profile_version.as_deref(),
-                    Some(PROFILE_VERSION),
-                    "{backend:?}"
-                );
-                assert_eq!(
-                    other.profile_match,
-                    Some(ProfileMatch::Fallback),
-                    "{backend:?}"
-                );
-            }
-        }
-
-        #[test]
-        fn bundled_claude_answer_plans_are_the_measured_single_digit_stages() {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            for (decision, byte, choice, answer_rule, provenance) in [
-                (
-                    PermissionDecision::Allow,
-                    b'1',
-                    "allow-once",
-                    "claude-bash-allow-digit",
-                    [ALLOW_FIXTURE, WRAPPED_ALLOW_FIXTURE],
-                ),
-                (
-                    PermissionDecision::Deny,
-                    b'4',
-                    "deny-once",
-                    "claude-bash-deny-digit",
-                    [DENY_FIXTURE, WRAPPED_DENY_FIXTURE],
-                ),
-            ] {
-                let plan = bundled
-                    .answer_plan(
-                        CodingAgent::Claude,
-                        CLAUDE_VERSION,
-                        PERMISSION_RULE,
-                        decision,
-                    )
-                    .expect("measured bundled answer plan");
-                assert_eq!(plan.choice_id(), choice);
-                assert_eq!(plan.focus_matcher_id(), "focus");
-                assert_eq!(plan.stages().len(), 1, "{decision:?} is one measured stage");
-                let stage = &plan.stages()[0];
-                assert_eq!(stage.bytes(), &[byte]);
-                assert_eq!(stage.required_rule_id(), PERMISSION_RULE);
-                assert_eq!(stage.required_choice_id(), choice);
-                let capability = plan.capability();
-                assert_eq!(capability.backend(), CodingAgent::Claude);
-                assert_eq!(capability.native_version(), CLAUDE_VERSION);
-                assert_eq!(capability.profile_version(), PROFILE_VERSION);
-                assert_eq!(capability.request_rule_id(), PERMISSION_RULE);
-                assert_eq!(capability.answer_rule_id(), answer_rule);
-                assert_eq!(capability.decision(), decision);
-                assert_eq!(
-                    capability.fixture_ids(),
-                    provenance.map(str::to_owned).as_slice(),
-                    "{decision:?} rests on the unwrapped and wrapped pre-stage captures"
-                );
-                for (backend, version) in [
-                    (CodingAgent::Codex, CLAUDE_VERSION),
-                    (CodingAgent::Opencode, CLAUDE_VERSION),
-                ] {
-                    assert!(
-                        bundled
-                            .answer_plan(backend, version, PERMISSION_RULE, decision)
-                            .is_none(),
-                        "{backend:?} {version}"
-                    );
-                }
-            }
-        }
-
         #[test]
         fn bundled_guard_rejects_a_restored_masked_status_row_of_the_idle_composer() {
             assert!(guarded_fixture(IDLE_FIXTURE, |_| {}, |_| {}).is_ok());
@@ -3344,59 +3222,6 @@ mod tests {
                 )
                 .is_err(),
                 "a restored masked status row is rejected"
-            );
-        }
-
-        #[test]
-        fn bundled_claude_episode_closes_not_visible_once_the_idle_composer_holds_250_ms() {
-            let permission = bundled_observation(bytes(NATIVE_FIXTURE));
-            let idle = bundled_observation(bytes(IDLE_FIXTURE));
-            assert_eq!(idle.rule_id, IDLE_RULE);
-            assert!(idle.verified_noninteraction);
-            let at = |observation: &ScreenObservation, output_seq: u64| {
-                let mut replayed = observation.clone();
-                replayed.output_seq = output_seq;
-                replayed.raw_evidence["screen_seq"] = json!(output_seq);
-                replayed
-            };
-            let origin = Instant::now();
-            let mut tracker = tracker();
-            open(&mut tracker, &at(&permission, 1), origin);
-            let closed = |update: &EpisodeUpdate| {
-                update
-                    .transitions
-                    .iter()
-                    .filter(|t| t.kind == RuntimeEventKind::InteractionClosed)
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
-            let flash = tracker
-                .observe(&at(&idle, 2), origin + Duration::from_millis(200), NOW)
-                .unwrap();
-            assert!(closed(&flash).is_empty(), "idle shown for 0 ms stays open");
-            let back = tracker
-                .observe(
-                    &at(&permission, 3),
-                    origin + Duration::from_millis(300),
-                    NOW,
-                )
-                .unwrap();
-            assert!(
-                closed(&back).is_empty(),
-                "an idle flash under 250 ms keeps the episode"
-            );
-            let first = tracker
-                .observe(&at(&idle, 4), origin + Duration::from_millis(400), NOW)
-                .unwrap();
-            assert!(closed(&first).is_empty());
-            let held = tracker
-                .observe(&at(&idle, 5), origin + Duration::from_millis(650), NOW)
-                .unwrap();
-            let closes = closed(&held);
-            assert_eq!(closes.len(), 1, "{:?}", held.transitions);
-            assert_eq!(
-                closes[0].close_reason,
-                Some(InteractionCloseReason::NotVisible)
             );
         }
 
@@ -3509,7 +3334,7 @@ mod tests {
 
     mod bundled_claude_auto {
         use super::*;
-        use crate::broker::runtime::{AutomaticReview, EffectivePolicyObservation};
+        use crate::broker::runtime::AutomaticReview;
         use std::collections::BTreeSet;
 
         const CLAUDE_VERSION: &str = "2.1.302";
@@ -3798,103 +3623,8 @@ mod tests {
             .unwrap()
         }
 
-        fn frame(id: &str, sequence: u64) -> ScreenObservation {
-            let mut value = observe(id);
-            value.output_seq = sequence;
-            value.raw_evidence["screen_seq"] = json!(sequence);
-            for block in &mut value.annotations {
-                block.raw_evidence["screen_seq"] = json!(sequence);
-            }
-            value
-        }
-
-        fn is_annotation_event(transition: &TransitionDraft) -> bool {
-            matches!(
-                transition.kind,
-                RuntimeEventKind::AutomaticRefusalObserved
-                    | RuntimeEventKind::AutomaticReviewUnavailable
-            )
-        }
-
-        type PolicyChange = (AutomaticReview, Option<String>, String, String);
-
-        fn policy_change(observation: &EffectivePolicyObservation) -> PolicyChange {
-            (
-                observation.automatic_review,
-                observation.observed_mode.clone(),
-                observation.rule_id.clone(),
-                observation.observed_at.clone(),
-            )
-        }
-
-        #[derive(Default)]
-        struct Held {
-            events: Vec<TransitionDraft>,
-            policy: Vec<PolicyChange>,
-        }
-
-        struct Run {
-            tracker: EpisodeTracker,
-            origin: Instant,
-            sequence: u64,
-        }
-
-        impl Run {
-            fn new(policy: EvidencePolicy) -> Self {
-                Self {
-                    tracker: EpisodeTracker::new(1, 1, policy).unwrap(),
-                    origin: Instant::now(),
-                    sequence: 0,
-                }
-            }
-
-            fn metadata() -> Self {
-                Self::new(EvidencePolicy::metadata())
-            }
-
-            fn observe(&mut self, value: &ScreenObservation, millis: u64) -> EpisodeUpdate {
-                self.tracker
-                    .observe(value, self.origin + Duration::from_millis(millis), NOW)
-                    .unwrap()
-            }
-
-            fn at(&mut self, id: &str, millis: u64) -> EpisodeUpdate {
-                self.sequence += 1;
-                let value = frame(id, self.sequence);
-                self.observe(&value, millis)
-            }
-
-            fn hold(&mut self, id: &str, from: u64, until: u64) -> Held {
-                let mut held = Held::default();
-                let mut millis = from;
-                while millis <= until {
-                    let update = self.at(id, millis);
-                    held.policy
-                        .extend(update.effective_policy.as_ref().map(policy_change));
-                    held.events
-                        .extend(update.transitions.into_iter().filter(is_annotation_event));
-                    millis += 50;
-                }
-                held
-            }
-
-            fn episode(&mut self, id: &str, from: u64, until: u64) -> Vec<TransitionDraft> {
-                let mut transitions = Vec::new();
-                let mut millis = from;
-                while millis <= until {
-                    transitions.extend(self.at(id, millis).transitions.into_iter().filter(
-                        |transition| {
-                            matches!(
-                                transition.kind,
-                                RuntimeEventKind::InteractionOpened
-                                    | RuntimeEventKind::InteractionClosed
-                            )
-                        },
-                    ));
-                    millis += 50;
-                }
-                transitions
-            }
+        fn replay_run(policy: EvidencePolicy) -> Run {
+            Run::new(policy, observe)
         }
 
         fn assert_annotation_event(event: &TransitionDraft, kind: RuntimeEventKind, rule: &str) {
@@ -4235,7 +3965,7 @@ mod tests {
         #[test]
         fn tracker_holds_one_question_episode_across_the_startup_dialog_until_the_composer_returns()
         {
-            let mut run = Run::metadata();
+            let mut run = replay_run(EvidencePolicy::metadata());
             let offer = run.episode(STARTUP_OFFER, 0, 300);
             assert_eq!(offer.len(), 1, "{offer:?}");
             assert_eq!(offer[0].kind, RuntimeEventKind::InteractionOpened);
@@ -4259,7 +3989,7 @@ mod tests {
         #[test]
         fn tracker_opens_one_permission_episode_for_the_tip_form_and_closes_it_once_the_command_runs()
          {
-            let mut run = Run::metadata();
+            let mut run = replay_run(EvidencePolicy::metadata());
             let form = run.episode(TIP_FORM, 0, 300);
             assert_eq!(form.len(), 1, "{form:?}");
             assert_eq!(form[0].kind, RuntimeEventKind::InteractionOpened);
@@ -4282,7 +4012,7 @@ mod tests {
         #[test]
         fn tracker_emits_a_refusal_notice_after_two_compatible_frames_and_only_once_while_present()
         {
-            let mut run = Run::metadata();
+            let mut run = replay_run(EvidencePolicy::metadata());
             let early = run.hold(NOTICE_IDLE, 0, 50);
             assert!(early.events.is_empty(), "{:?}", early.events);
             let stable = run.hold(NOTICE_IDLE, 100, 100);
@@ -4306,7 +4036,7 @@ mod tests {
 
         #[test]
         fn tracker_emits_two_events_for_two_different_refusals_visible_together() {
-            let mut run = Run::new(redacted());
+            let mut run = replay_run(redacted());
             let held = run.hold(TWO_REFUSALS, 0, 400);
             assert_eq!(held.events.len(), 2, "{:?}", held.events);
             let mut operations = Vec::new();
@@ -4338,14 +4068,14 @@ mod tests {
 
         #[test]
         fn tracker_resets_a_refusal_only_after_250_ms_of_absence_on_verified_frames() {
-            let mut short = Run::metadata();
+            let mut short = replay_run(EvidencePolicy::metadata());
             assert_eq!(short.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
             assert!(short.hold(NOTICE_EXPIRED, 150, 350).events.is_empty());
             assert!(
                 short.hold(NOTICE_IDLE, 400, 700).events.is_empty(),
                 "200 ms of absence does not reset"
             );
-            let mut long = Run::metadata();
+            let mut long = replay_run(EvidencePolicy::metadata());
             assert_eq!(long.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
             assert!(long.hold(NOTICE_EXPIRED, 150, 450).events.is_empty());
             let again = long.hold(NOTICE_IDLE, 500, 700);
@@ -4355,7 +4085,7 @@ mod tests {
                 "300 ms of verified absence resets: {:?}",
                 again.events
             );
-            let mut working = Run::metadata();
+            let mut working = replay_run(EvidencePolicy::metadata());
             assert_eq!(working.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
             assert!(observe(RUNNING).verified_noninteraction);
             assert!(working.hold(RUNNING, 150, 450).events.is_empty());
@@ -4369,16 +4099,16 @@ mod tests {
         #[test]
         fn tracker_keeps_a_refusal_hidden_by_a_form_or_overlay_and_emits_nothing_when_it_returns() {
             for hiding in [HIDDEN_BY_FORM, VERBOSE_VIEWER] {
-                let mut run = Run::metadata();
+                let mut run = replay_run(EvidencePolicy::metadata());
                 assert_eq!(run.hold(RESTORED, 0, 100).events.len(), 1, "{hiding}");
                 assert!(run.hold(hiding, 150, 1500).events.is_empty(), "{hiding}");
                 assert!(run.hold(RESTORED, 1550, 1900).events.is_empty(), "{hiding}");
             }
-            let mut notice = Run::metadata();
+            let mut notice = replay_run(EvidencePolicy::metadata());
             assert_eq!(notice.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
             assert!(notice.hold(FORM_HIDING_NOTICE, 150, 1500).events.is_empty());
             assert!(notice.hold(NOTICE_IDLE, 1550, 1900).events.is_empty());
-            let mut interrupted = Run::metadata();
+            let mut interrupted = replay_run(EvidencePolicy::metadata());
             assert_eq!(interrupted.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
             assert!(interrupted.hold(NOTICE_EXPIRED, 150, 300).events.is_empty());
             assert!(
@@ -4413,7 +4143,7 @@ mod tests {
                 shown(&block(&rewrapped).raw_evidence["operation"]).as_deref(),
                 Some(NINE)
             );
-            let mut run = Run::new(redacted());
+            let mut run = replay_run(redacted());
             assert_eq!(run.hold(RESTORED, 0, 100).events.len(), 1);
             assert!(run.hold(REWRAPPED_FORM, 150, 400).events.is_empty());
             assert!(run.hold(REWRAPPED, 450, 1000).events.is_empty());
@@ -4428,7 +4158,7 @@ mod tests {
                 VERBOSE_VIEWER,
                 "claude-2.1.302-auto-fresh-first-launch-notice-1",
             ] {
-                let mut run = Run::metadata();
+                let mut run = replay_run(EvidencePolicy::metadata());
                 assert!(run.hold(id, 0, 500).events.is_empty(), "{id}");
             }
             let primary = detector(&ProfileCatalog::bundled().unwrap())
@@ -4438,7 +4168,7 @@ mod tests {
                 primary.annotations.is_empty(),
                 "scrollback and primary-screen copies"
             );
-            let mut quoted = Run::new(redacted());
+            let mut quoted = replay_run(redacted());
             let held = quoted.hold(VERBOSE_QUOTE, 0, 300);
             let mut operations = held
                 .events
@@ -4458,7 +4188,7 @@ mod tests {
 
         #[test]
         fn tracker_emits_unavailable_once_until_automatic_review_is_observed_available() {
-            let mut run = Run::metadata();
+            let mut run = replay_run(EvidencePolicy::metadata());
             let first = run.hold(UNAVAILABLE_NOTICE, 0, 100);
             assert_eq!(first.events.len(), 1, "{:?}", first.events);
             assert_annotation_event(
@@ -4512,7 +4242,7 @@ mod tests {
                 (EvidencePolicy::metadata(), None),
                 (redacted(), Some("auto mode".to_owned())),
             ] {
-                let mut run = Run::new(policy);
+                let mut run = replay_run(policy);
                 let held = run.hold(IDLE, 0, 1000);
                 assert!(held.events.is_empty());
                 assert_eq!(
@@ -4546,7 +4276,7 @@ mod tests {
                 INDICATOR_RULE.to_owned(),
                 NOW.to_owned(),
             );
-            let mut run = Run::metadata();
+            let mut run = replay_run(EvidencePolicy::metadata());
             assert_eq!(
                 run.hold(IDLE, 0, 300).policy,
                 std::slice::from_ref(&available)
@@ -4572,13 +4302,12 @@ mod tests {
                 (ASK_FORM, 1450, 1700),
                 (IDLE, 1750, 2100),
             ];
-            let mut annotated = Run::metadata();
-            let mut plain = Run::metadata();
+            let mut annotated = replay_run(EvidencePolicy::metadata());
+            let mut plain = replay_run(EvidencePolicy::metadata());
             for (id, from, until) in sequence {
                 let mut millis = from;
                 while millis <= until {
-                    annotated.sequence += 1;
-                    let value = frame(id, annotated.sequence);
+                    let value = annotated.next_frame(id);
                     let mut stripped = value.clone();
                     stripped.annotations.clear();
                     let with = annotated.observe(&value, millis);
@@ -4783,73 +4512,8 @@ mod tests {
             .unwrap()
         }
 
-        fn frame(id: &str, sequence: u64) -> ScreenObservation {
-            let mut value = observe(id);
-            value.output_seq = sequence;
-            value.raw_evidence["screen_seq"] = json!(sequence);
-            for block in &mut value.annotations {
-                block.raw_evidence["screen_seq"] = json!(sequence);
-            }
-            value
-        }
-
-        type PolicyChange = (AutomaticReview, Option<String>, String);
-
-        #[derive(Default)]
-        struct Held {
-            events: Vec<TransitionDraft>,
-            policy: Vec<PolicyChange>,
-        }
-
-        struct Run {
-            tracker: EpisodeTracker,
-            origin: Instant,
-            sequence: u64,
-        }
-
-        impl Run {
-            fn new(policy: EvidencePolicy) -> Self {
-                Self {
-                    tracker: EpisodeTracker::new(1, 1, policy).unwrap(),
-                    origin: Instant::now(),
-                    sequence: 0,
-                }
-            }
-
-            fn metadata() -> Self {
-                Self::new(EvidencePolicy::metadata())
-            }
-
-            fn hold(&mut self, id: &str, from: u64, until: u64) -> Held {
-                let mut held = Held::default();
-                let mut millis = from;
-                while millis <= until {
-                    self.sequence += 1;
-                    let update = self
-                        .tracker
-                        .observe(
-                            &frame(id, self.sequence),
-                            self.origin + Duration::from_millis(millis),
-                            NOW,
-                        )
-                        .unwrap();
-                    held.policy
-                        .extend(update.effective_policy.as_ref().map(|change| {
-                            (
-                                change.automatic_review,
-                                change.observed_mode.clone(),
-                                change.rule_id.clone(),
-                            )
-                        }));
-                    held.events.extend(
-                        update.transitions.into_iter().filter(|draft| {
-                            draft.kind == RuntimeEventKind::AutomaticRefusalObserved
-                        }),
-                    );
-                    millis += 50;
-                }
-                held
-            }
+        fn replay_run(policy: EvidencePolicy) -> Run {
+            Run::new(policy, observe)
         }
 
         fn operations(held: &Held) -> Vec<String> {
@@ -5005,7 +4669,7 @@ mod tests {
 
         #[test]
         fn codex_tracker_emits_one_refusal_after_two_frames_and_none_while_present() {
-            let mut run = Run::metadata();
+            let mut run = replay_run(EvidencePolicy::metadata());
             assert!(run.hold(REFUSAL_WORKING, 0, 50).events.is_empty());
             let stable = run.hold(REFUSAL_WORKING, 100, 100);
             assert_eq!(stable.events.len(), 1);
@@ -5020,12 +4684,12 @@ mod tests {
 
         #[test]
         fn codex_tracker_emits_one_event_per_distinct_visible_refusal() {
-            let mut two = Run::new(redacted());
+            let mut two = replay_run(redacted());
             assert_eq!(
                 operations(&two.hold(TWO_REFUSALS, 0, 300)),
                 sorted(&[TWO, THREE])
             );
-            let mut three = Run::new(redacted());
+            let mut three = replay_run(redacted());
             assert_eq!(
                 operations(&three.hold(DENIAL_LIMIT, 0, 300)),
                 sorted(&[FOUR, FIVE, SIX])
@@ -5034,7 +4698,7 @@ mod tests {
 
         #[test]
         fn codex_tracker_does_not_re_emit_after_a_resize_rewrap() {
-            let mut run = Run::new(redacted());
+            let mut run = replay_run(redacted());
             assert_eq!(run.hold(TWO_REFUSALS, 0, 100).events.len(), 2);
             assert!(run.hold(RESIZED, 150, 600).events.is_empty());
             assert!(run.hold(RESTORED, 650, 900).events.is_empty());
@@ -5042,11 +4706,11 @@ mod tests {
 
         #[test]
         fn codex_tracker_resets_only_after_250_ms_of_verified_absence() {
-            let mut short = Run::metadata();
+            let mut short = replay_run(EvidencePolicy::metadata());
             assert_eq!(short.hold(REFUSAL_IDLE, 0, 100).events.len(), 1);
             assert!(short.hold(IDLE, 150, 350).events.is_empty());
             assert!(short.hold(REFUSAL_IDLE, 400, 700).events.is_empty());
-            let mut long = Run::metadata();
+            let mut long = replay_run(EvidencePolicy::metadata());
             assert_eq!(long.hold(REFUSAL_IDLE, 0, 100).events.len(), 1);
             assert!(long.hold(APPROVED, 150, 450).events.is_empty());
             assert_eq!(long.hold(REFUSAL_IDLE, 500, 700).events.len(), 1);
@@ -5054,7 +4718,7 @@ mod tests {
 
         #[test]
         fn codex_tracker_keeps_a_refusal_hidden_by_the_warnings_overlay() {
-            let mut run = Run::metadata();
+            let mut run = replay_run(EvidencePolicy::metadata());
             assert_eq!(run.hold(REFUSAL_IDLE, 0, 100).events.len(), 1);
             assert!(observe(OVERLAY).annotations.is_empty());
             assert!(run.hold(OVERLAY, 150, 1500).events.is_empty());
@@ -5063,7 +4727,7 @@ mod tests {
 
         #[test]
         fn codex_tracker_ignores_quoted_refusal_text() {
-            let mut run = Run::new(redacted());
+            let mut run = replay_run(redacted());
             assert_eq!(operations(&run.hold(QUOTE, 0, 300)), sorted(&[THREE]));
         }
 
@@ -5073,12 +4737,17 @@ mod tests {
                 (EvidencePolicy::metadata(), None),
                 (redacted(), Some(MODE.to_owned())),
             ] {
-                let mut run = Run::new(policy);
+                let mut run = replay_run(policy);
                 let held = run.hold(STATUS, 0, 600);
                 assert!(held.events.is_empty());
                 assert_eq!(
                     held.policy,
-                    [(AutomaticReview::Available, mode, INDICATOR_RULE.to_owned())]
+                    [(
+                        AutomaticReview::Available,
+                        mode,
+                        INDICATOR_RULE.to_owned(),
+                        NOW.to_owned()
+                    )]
                 );
             }
         }
@@ -5087,10 +4756,6 @@ mod tests {
     mod bundled_codex {
         use super::*;
 
-        const CODEX_VERSION: &str = "0.163.0";
-        const PROFILE_VERSION: &str = "codex-0.163.0-approve-for-me-1";
-        const PERMISSION_RULE: &str = "codex-exec-approval";
-        const IDLE_RULE: &str = "codex-idle-composer";
         const PERMISSION_FIXTURE: &str = "codex-0.163.0-on-request-permission-1";
         const ALLOW_FIXTURE: &str = "codex-0.163.0-allow-pre-stage-1";
         const DENY_FIXTURE: &str = "codex-0.163.0-deny-pre-stage-1";
@@ -5103,109 +4768,6 @@ mod tests {
             DENY_FIXTURE,
             IDLE_FIXTURE,
         ];
-
-        fn bytes(id: &str) -> &'static [u8] {
-            bundled_fixture(id).1
-        }
-
-        fn bundled_observation(bytes: &[u8]) -> ScreenObservation {
-            let catalog = ProfileCatalog::bundled().unwrap();
-            let screen =
-                replay_native_fixture(std::str::from_utf8(bytes).unwrap(), |_| {}, true, None);
-            Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
-                .observe(&screen)
-                .unwrap()
-        }
-
-        #[test]
-        fn bundled_codex_0_163_0_declares_detection_idle_composer_and_both_answers_only() {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            let codex = bundled.capabilities(CodingAgent::Codex, Some(CODEX_VERSION));
-            assert_eq!(codex.backend, CodingAgent::Codex);
-            assert_eq!(codex.native_version.as_deref(), Some(CODEX_VERSION));
-            assert_eq!(codex.profile_version.as_deref(), Some(PROFILE_VERSION));
-            assert_eq!(codex.detection, Coverage::Tested);
-            assert_eq!(codex.composer, Coverage::Tested);
-            assert_eq!(codex.prompt_submission, Coverage::Unknown);
-            assert_eq!(codex.native_exec_submission, Coverage::Unknown);
-            assert_eq!(codex.answer_decisions.len(), 2);
-            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                assert!(codex.answer_decisions.contains(&decision), "{decision:?}");
-            }
-            assert_eq!(codex.profile_match, Some(ProfileMatch::Exact));
-            let unknown = bundled.capabilities(CodingAgent::Codex, None);
-            assert_eq!(unknown.detection, Coverage::Unknown);
-            assert_eq!(unknown.composer, Coverage::Unknown);
-            assert!(unknown.answer_decisions.is_empty());
-            assert!(unknown.capability_reason.is_some());
-            for &backend in CodingAgent::all()
-                .iter()
-                .filter(|&&backend| backend != CodingAgent::Codex)
-            {
-                let other = bundled.capabilities(backend, Some(CODEX_VERSION));
-                assert_ne!(
-                    other.profile_version.as_deref(),
-                    Some(PROFILE_VERSION),
-                    "{backend:?}"
-                );
-                assert_eq!(
-                    other.profile_match,
-                    Some(ProfileMatch::Fallback),
-                    "{backend:?}"
-                );
-            }
-        }
-
-        #[test]
-        fn bundled_codex_answer_plans_are_the_measured_single_byte_stages() {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            for (decision, byte, choice, answer_rule, provenance) in [
-                (
-                    PermissionDecision::Allow,
-                    0x79,
-                    "allow-once",
-                    "codex-exec-allow-y",
-                    ALLOW_FIXTURE,
-                ),
-                (
-                    PermissionDecision::Deny,
-                    0x33,
-                    "deny-once",
-                    "codex-exec-deny-digit",
-                    DENY_FIXTURE,
-                ),
-            ] {
-                let plan = bundled
-                    .answer_plan(CodingAgent::Codex, CODEX_VERSION, PERMISSION_RULE, decision)
-                    .expect("measured bundled answer plan");
-                assert_eq!(plan.choice_id(), choice);
-                assert_eq!(plan.focus_matcher_id(), "focus");
-                assert_eq!(plan.stages().len(), 1, "{decision:?} is one measured stage");
-                let stage = &plan.stages()[0];
-                assert_eq!(stage.bytes(), &[byte]);
-                assert_eq!(stage.required_rule_id(), PERMISSION_RULE);
-                assert_eq!(stage.required_choice_id(), choice);
-                let capability = plan.capability();
-                assert_eq!(capability.backend(), CodingAgent::Codex);
-                assert_eq!(capability.native_version(), CODEX_VERSION);
-                assert_eq!(capability.profile_version(), PROFILE_VERSION);
-                assert_eq!(capability.request_rule_id(), PERMISSION_RULE);
-                assert_eq!(capability.answer_rule_id(), answer_rule);
-                assert_eq!(capability.decision(), decision);
-                assert_eq!(capability.fixture_ids(), &[provenance.to_owned()]);
-                for (backend, version) in [
-                    (CodingAgent::Claude, CODEX_VERSION),
-                    (CodingAgent::Opencode, CODEX_VERSION),
-                ] {
-                    assert!(
-                        bundled
-                            .answer_plan(backend, version, PERMISSION_RULE, decision)
-                            .is_none(),
-                        "{backend:?} {version}"
-                    );
-                }
-            }
-        }
 
         #[test]
         fn bundled_guard_accepts_a_pending_wrap_cursor_at_cols_and_rejects_one_past_it() {
@@ -5236,58 +4798,270 @@ mod tests {
                 );
             }
         }
+    }
+
+    mod bundled_backends {
+        use super::*;
+
+        struct BundledProfile {
+            backend: CodingAgent,
+            version: &'static str,
+            profile_version: &'static str,
+        }
+
+        const CLAUDE: BundledProfile = BundledProfile {
+            backend: CodingAgent::Claude,
+            version: "2.1.302",
+            profile_version: "claude-2.1.302-auto-1",
+        };
+        const CODEX: BundledProfile = BundledProfile {
+            backend: CodingAgent::Codex,
+            version: "0.163.0",
+            profile_version: "codex-0.163.0-approve-for-me-1",
+        };
+        const OPENCODE: BundledProfile = BundledProfile {
+            backend: CodingAgent::Opencode,
+            version: "2.1.4",
+            profile_version: "opencode-2.1.4-cafleet-ask-1",
+        };
+
+        struct MeasuredAnswer {
+            decision: PermissionDecision,
+            byte: u8,
+            choice: &'static str,
+            answer_rule: &'static str,
+            fixtures: &'static [&'static str],
+        }
+
+        struct SingleByteAnswers {
+            profile: BundledProfile,
+            rule: &'static str,
+            answers: [MeasuredAnswer; 2],
+        }
+
+        const SINGLE_BYTE_ANSWERS: [SingleByteAnswers; 2] = [
+            SingleByteAnswers {
+                profile: CLAUDE,
+                rule: "claude-bash-permission",
+                answers: [
+                    MeasuredAnswer {
+                        decision: PermissionDecision::Allow,
+                        byte: b'1',
+                        choice: "allow-once",
+                        answer_rule: "claude-bash-allow-digit",
+                        fixtures: &[
+                            "claude-2.1.302-allow-pre-stage-1",
+                            "claude-2.1.302-wrapped-allow-pre-stage-1",
+                        ],
+                    },
+                    MeasuredAnswer {
+                        decision: PermissionDecision::Deny,
+                        byte: b'4',
+                        choice: "deny-once",
+                        answer_rule: "claude-bash-deny-digit",
+                        fixtures: &[
+                            "claude-2.1.302-deny-pre-stage-1",
+                            "claude-2.1.302-wrapped-deny-pre-stage-1",
+                        ],
+                    },
+                ],
+            },
+            SingleByteAnswers {
+                profile: CODEX,
+                rule: "codex-exec-approval",
+                answers: [
+                    MeasuredAnswer {
+                        decision: PermissionDecision::Allow,
+                        byte: b'y',
+                        choice: "allow-once",
+                        answer_rule: "codex-exec-allow-y",
+                        fixtures: &["codex-0.163.0-allow-pre-stage-1"],
+                    },
+                    MeasuredAnswer {
+                        decision: PermissionDecision::Deny,
+                        byte: b'3',
+                        choice: "deny-once",
+                        answer_rule: "codex-exec-deny-digit",
+                        fixtures: &["codex-0.163.0-deny-pre-stage-1"],
+                    },
+                ],
+            },
+        ];
 
         #[test]
-        fn bundled_codex_episode_closes_not_visible_once_the_idle_composer_holds_250_ms() {
-            let permission = bundled_observation(bytes(PERMISSION_FIXTURE));
-            let idle = bundled_observation(bytes(IDLE_FIXTURE));
-            assert_eq!(idle.rule_id, IDLE_RULE);
-            assert!(idle.verified_noninteraction);
-            let at = |observation: &ScreenObservation, output_seq: u64| {
-                let mut replayed = observation.clone();
-                replayed.output_seq = output_seq;
-                replayed.raw_evidence["screen_seq"] = json!(output_seq);
-                replayed
-            };
-            let origin = Instant::now();
-            let mut tracker = tracker();
-            open(&mut tracker, &at(&permission, 1), origin);
-            let closed = |update: &EpisodeUpdate| {
-                update
-                    .transitions
-                    .iter()
-                    .filter(|t| t.kind == RuntimeEventKind::InteractionClosed)
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
-            let flash = tracker
-                .observe(&at(&idle, 2), origin + Duration::from_millis(200), NOW)
-                .unwrap();
-            assert!(closed(&flash).is_empty(), "idle shown for 0 ms stays open");
-            let back = tracker
-                .observe(
-                    &at(&permission, 3),
-                    origin + Duration::from_millis(300),
-                    NOW,
-                )
-                .unwrap();
-            assert!(
-                closed(&back).is_empty(),
-                "an idle flash under 250 ms keeps the episode"
-            );
-            let first = tracker
-                .observe(&at(&idle, 4), origin + Duration::from_millis(400), NOW)
-                .unwrap();
-            assert!(closed(&first).is_empty());
-            let held = tracker
-                .observe(&at(&idle, 5), origin + Duration::from_millis(650), NOW)
-                .unwrap();
-            let closes = closed(&held);
-            assert_eq!(closes.len(), 1, "{:?}", held.transitions);
-            assert_eq!(
-                closes[0].close_reason,
-                Some(InteractionCloseReason::NotVisible)
-            );
+        fn each_bundled_profile_declares_detection_idle_composer_and_both_answers_only() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            for profile in [CLAUDE, CODEX, OPENCODE] {
+                let backend = profile.backend;
+                let declared = bundled.capabilities(backend, Some(profile.version));
+                assert_eq!(declared.backend, backend);
+                assert_eq!(declared.native_version.as_deref(), Some(profile.version));
+                assert_eq!(
+                    declared.profile_version.as_deref(),
+                    Some(profile.profile_version)
+                );
+                assert_eq!(declared.detection, Coverage::Tested, "{backend:?}");
+                assert_eq!(declared.composer, Coverage::Tested, "{backend:?}");
+                assert_eq!(declared.prompt_submission, Coverage::Unknown, "{backend:?}");
+                assert_eq!(
+                    declared.native_exec_submission,
+                    Coverage::Unknown,
+                    "{backend:?}"
+                );
+                assert_eq!(declared.answer_decisions.len(), 2, "{backend:?}");
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    assert!(
+                        declared.answer_decisions.contains(&decision),
+                        "{backend:?} {decision:?}"
+                    );
+                }
+                assert_eq!(declared.capability_reason, None, "{backend:?}");
+                assert_eq!(
+                    declared.profile_match,
+                    Some(ProfileMatch::Exact),
+                    "{backend:?}"
+                );
+                let unknown = bundled.capabilities(backend, None);
+                assert_eq!(unknown.detection, Coverage::Unknown, "{backend:?}");
+                assert_eq!(unknown.composer, Coverage::Unknown, "{backend:?}");
+                assert_eq!(unknown.profile_version, None, "{backend:?}");
+                assert_eq!(unknown.profile_match, None, "{backend:?}");
+                assert!(unknown.answer_decisions.is_empty(), "{backend:?}");
+                assert!(unknown.capability_reason.is_some(), "{backend:?}");
+                for &other in CodingAgent::all().iter().filter(|&&other| other != backend) {
+                    let fallback = bundled.capabilities(other, Some(profile.version));
+                    assert_ne!(
+                        fallback.profile_version.as_deref(),
+                        Some(profile.profile_version),
+                        "{other:?} at {backend:?} {}",
+                        profile.version
+                    );
+                    assert_eq!(
+                        fallback.profile_match,
+                        Some(ProfileMatch::Fallback),
+                        "{other:?} at {backend:?} {}",
+                        profile.version
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn single_byte_answer_plans_are_the_measured_stages() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            for SingleByteAnswers {
+                profile,
+                rule,
+                answers,
+            } in SINGLE_BYTE_ANSWERS
+            {
+                let backend = profile.backend;
+                for answer in answers {
+                    let decision = answer.decision;
+                    let plan = bundled
+                        .answer_plan(backend, profile.version, rule, decision)
+                        .expect("measured bundled answer plan");
+                    assert_eq!(plan.choice_id(), answer.choice);
+                    assert_eq!(plan.focus_matcher_id(), "focus");
+                    assert_eq!(
+                        plan.stages().len(),
+                        1,
+                        "{backend:?} {decision:?} is one measured stage"
+                    );
+                    let stage = &plan.stages()[0];
+                    assert_eq!(stage.bytes(), &[answer.byte], "{backend:?} {decision:?}");
+                    assert_eq!(stage.required_rule_id(), rule);
+                    assert_eq!(stage.required_choice_id(), answer.choice);
+                    let capability = plan.capability();
+                    assert_eq!(capability.backend(), backend);
+                    assert_eq!(capability.native_version(), profile.version);
+                    assert_eq!(capability.profile_version(), profile.profile_version);
+                    assert_eq!(capability.request_rule_id(), rule);
+                    assert_eq!(capability.answer_rule_id(), answer.answer_rule);
+                    assert_eq!(capability.decision(), decision);
+                    assert_eq!(
+                        capability.fixture_ids(),
+                        answer
+                            .fixtures
+                            .iter()
+                            .map(|&id| id.to_owned())
+                            .collect::<Vec<_>>()
+                            .as_slice(),
+                        "{backend:?} {decision:?} rests on its pre-stage captures"
+                    );
+                    for &other in CodingAgent::all().iter().filter(|&&other| other != backend) {
+                        assert!(
+                            bundled
+                                .answer_plan(other, profile.version, rule, decision)
+                                .is_none(),
+                            "{other:?} {}",
+                            profile.version
+                        );
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn episodes_close_not_visible_once_the_idle_composer_holds_250_ms() {
+            for (profile, permission, idle, idle_rule) in [
+                (
+                    CLAUDE,
+                    "claude-2.1.302-default-permission-1",
+                    "claude-2.1.302-idle-composer-1",
+                    "claude-idle-composer",
+                ),
+                (
+                    CODEX,
+                    "codex-0.163.0-on-request-permission-1",
+                    "codex-0.163.0-idle-composer-1",
+                    "codex-idle-composer",
+                ),
+            ] {
+                let observe = |id| bundled_observe(profile.backend, profile.version, id);
+                let permission = observe(permission);
+                let idle = observe(idle);
+                assert_eq!(idle.rule_id, idle_rule);
+                assert!(idle.verified_noninteraction, "{idle_rule}");
+                let at = |observation: &ScreenObservation, output_seq: u64| {
+                    let mut replayed = observation.clone();
+                    replayed.output_seq = output_seq;
+                    replayed.raw_evidence["screen_seq"] = json!(output_seq);
+                    replayed
+                };
+                let origin = Instant::now();
+                let mut tracker = tracker();
+                open(&mut tracker, &at(&permission, 1), origin);
+                let mut closed_at = |observation: &ScreenObservation, output_seq, millis| {
+                    let update = tracker
+                        .observe(
+                            &at(observation, output_seq),
+                            origin + Duration::from_millis(millis),
+                            NOW,
+                        )
+                        .unwrap();
+                    update
+                        .transitions
+                        .into_iter()
+                        .filter(|t| t.kind == RuntimeEventKind::InteractionClosed)
+                        .collect::<Vec<_>>()
+                };
+                assert!(
+                    closed_at(&idle, 2, 200).is_empty(),
+                    "{idle_rule}: idle shown for 0 ms stays open"
+                );
+                assert!(
+                    closed_at(&permission, 3, 300).is_empty(),
+                    "{idle_rule}: an idle flash under 250 ms keeps the episode"
+                );
+                assert!(closed_at(&idle, 4, 400).is_empty(), "{idle_rule}");
+                let closes = closed_at(&idle, 5, 650);
+                assert_eq!(closes.len(), 1, "{idle_rule}: {closes:?}");
+                assert_eq!(
+                    closes[0].close_reason,
+                    Some(InteractionCloseReason::NotVisible)
+                );
+            }
         }
     }
 
@@ -5453,45 +5227,7 @@ mod tests {
         }
 
         #[test]
-        fn bundled_opencode_2_1_4_declares_detection_idle_composer_and_both_answers_only() {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            let opencode = bundled.capabilities(CodingAgent::Opencode, Some(OPENCODE_VERSION));
-            assert_eq!(opencode.backend, CodingAgent::Opencode);
-            assert_eq!(opencode.native_version.as_deref(), Some(OPENCODE_VERSION));
-            assert_eq!(opencode.profile_version.as_deref(), Some(PROFILE_VERSION));
-            assert_eq!(opencode.detection, Coverage::Tested);
-            assert_eq!(opencode.composer, Coverage::Tested);
-            assert_eq!(opencode.prompt_submission, Coverage::Unknown);
-            assert_eq!(opencode.native_exec_submission, Coverage::Unknown);
-            assert_eq!(opencode.answer_decisions.len(), 2);
-            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                assert!(
-                    opencode.answer_decisions.contains(&decision),
-                    "{decision:?}"
-                );
-            }
-            assert_eq!(opencode.capability_reason, None);
-            assert_eq!(opencode.profile_match, Some(ProfileMatch::Exact));
-            let unknown = bundled.capabilities(CodingAgent::Opencode, None);
-            assert_eq!(unknown.detection, Coverage::Unknown);
-            assert_eq!(unknown.composer, Coverage::Unknown);
-            assert_eq!(unknown.profile_version, None);
-            assert_eq!(unknown.profile_match, None);
-            assert!(unknown.answer_decisions.is_empty());
-            assert!(unknown.capability_reason.is_some());
-            for backend in [CodingAgent::Claude, CodingAgent::Codex] {
-                let other = bundled.capabilities(backend, Some(OPENCODE_VERSION));
-                assert_ne!(
-                    other.profile_version.as_deref(),
-                    Some(PROFILE_VERSION),
-                    "{backend:?}"
-                );
-                assert_eq!(
-                    other.profile_match,
-                    Some(ProfileMatch::Fallback),
-                    "{backend:?}"
-                );
-            }
+        fn bundled_opencode_definitions_declare_the_form_reason_dialog_and_idle_rules() {
             let definitions = definitions();
             let capabilities = &profile(&definitions)["capabilities"];
             assert_eq!(

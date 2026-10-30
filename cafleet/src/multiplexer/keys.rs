@@ -143,7 +143,7 @@ mod tests {
         assert_eq!(failure.exit_code(), 2);
     }
     #[test]
-    fn step5_press_keys_validate_the_complete_common_grammar_and_byte_count_bounds() {
+    fn press_keys_validate_the_complete_common_grammar_and_byte_count_bounds() {
         let keys = parse(&[
             "A",
             "a",

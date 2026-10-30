@@ -2286,11 +2286,18 @@ pub(crate) mod native_capture {
                 limits: NativeCaptureLimits,
                 masks: &[CaptureMask],
             ) -> (NativeCapturePort, NativeCaptureReceiver) {
-                let policy =
-                    NativeCapturePolicy::from_launch(&self.spec, masks, &catalog()).unwrap();
+                self.channel_with(limits, masks, &catalog())
+            }
+            pub(crate) fn channel_with(
+                &self,
+                limits: NativeCaptureLimits,
+                masks: &[CaptureMask],
+                catalog: &crate::coding_agent::ProfileCatalog,
+            ) -> (NativeCapturePort, NativeCaptureReceiver) {
+                let policy = NativeCapturePolicy::from_launch(&self.spec, masks, catalog).unwrap();
                 native_capture_channel(&self.fixture.run, policy, limits).unwrap()
             }
-            pub(crate) fn prepare(&mut self, port: &mut NativeCapturePort) {
+            pub(crate) fn mark_prepared(&mut self) {
                 self.fixture
                     .conn
                     .execute(
@@ -2300,11 +2307,14 @@ pub(crate) mod native_capture {
                     .unwrap();
                 self.fixture.run =
                     storage::get_run(&self.fixture.conn, self.fixture.run.run_id).unwrap();
-                let producer = read_native_capture_producer(
-                    &self.producer_path,
-                    &NativeCaptureLimits::default(),
-                )
-                .unwrap();
+            }
+            pub(crate) fn producer(&self) -> NativeCaptureProducer {
+                read_native_capture_producer(&self.producer_path, &NativeCaptureLimits::default())
+                    .unwrap()
+            }
+            pub(crate) fn prepare(&mut self, port: &mut NativeCapturePort) {
+                self.mark_prepared();
+                let producer = self.producer();
                 port.bind_prepared(
                     &self.fixture.run,
                     &self.placement,
@@ -2419,14 +2429,7 @@ pub(crate) mod native_capture {
             assert_eq!(actual, keys.iter().copied().collect());
         }
         pub(crate) fn arm(identity: &ControlIdentity) -> NativeCaptureArm {
-            NativeCaptureArm {
-                schema_version: 1,
-                capture_id: "review-pair".into(),
-                run_id: identity.run_id,
-                owner_epoch: identity.owner_epoch,
-                minimum_interval_ms: 100,
-                timeout_ms: 1000,
-            }
+            NativeCaptureArm::for_identity("review-pair", identity, 1000)
         }
         pub(crate) fn config(fixture: &CaptureFixture) -> NativeCaptureConfig {
             let policy = fixture.fixture._dir.path().join("capture-policy.json");
@@ -2464,8 +2467,7 @@ pub(crate) mod native_capture {
             use std::time::Duration;
 
             #[test]
-            fn runner_batch2_capture_seed_prepared_and_finalized_boundaries_enable_exactly_one_request()
-             {
+            fn capture_seed_prepared_and_finalized_boundaries_enable_exactly_one_request() {
                 let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                 let (mut port, receiver) = fixture.channel(NativeCaptureLimits::default(), &[]);
                 assert!(receiver.finalized_identity().is_none());
@@ -2516,8 +2518,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_source_rejects_running_seed_and_mismatched_child_or_placement()
-            {
+            fn capture_source_rejects_running_seed_and_mismatched_child_or_placement() {
                 let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                 let (mut port, receiver) = fixture.channel(NativeCaptureLimits::default(), &[]);
                 fixture.prepare(&mut port);
@@ -2548,7 +2549,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_invalid_request_leaves_the_finalized_channel_unused() {
+            fn capture_invalid_request_leaves_the_finalized_channel_unused() {
                 for field in [
                     "blank",
                     "path",
@@ -2590,8 +2591,8 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_slow_consumer_holds_one_immutable_pair_while_observation_keeps_progressing()
-             {
+            fn capture_slow_consumer_holds_one_immutable_pair_while_observation_keeps_progressing()
+            {
                 let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                 let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
                 let lease = fixture.pair(&mut port, &receiver, b"first");
@@ -2614,8 +2615,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_pair_uses_atomic_snapshots_and_second_selection_after_first_end()
-             {
+            fn capture_pair_uses_atomic_snapshots_and_second_selection_after_first_end() {
                 let mut fixture = CaptureFixture::new(redacted());
                 let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
                 let mut terminal = TerminalState::new(fixture.spec.size).unwrap();
@@ -2714,8 +2714,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_metadata_projects_no_grid_title_secret_or_private_source_arguments()
-             {
+            fn capture_metadata_projects_no_grid_title_secret_or_private_source_arguments() {
                 let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                 let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
                 let lease = fixture.pair(
@@ -2755,8 +2754,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_patterns_mask_whole_logical_fields_across_softwraps_and_cells()
-            {
+            fn capture_patterns_mask_whole_logical_fields_across_softwraps_and_cells() {
                 let mut fixture = CaptureFixture::new(redacted());
                 let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
                 let mut bytes = vec![b'x'; 75];
@@ -2808,8 +2806,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_missing_in_range_parser_cell_fails_at_the_projection_boundary()
-            {
+            fn capture_missing_in_range_parser_cell_fails_at_the_projection_boundary() {
                 let mut fixture = CaptureFixture::new(redacted());
                 let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
                 receiver.request(fixture.request("missing-cell")).unwrap();
@@ -2822,24 +2819,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_pattern_configuration_is_bounded_before_observer_callbacks() {
-                for patterns in [
-                    vec!["absent".to_owned(); 65],
-                    vec!["x".repeat(4097)],
-                    vec!["x".repeat(2048); 33],
-                ] {
-                    let mut policy = redacted();
-                    policy["config"]["patterns"] = json!(patterns);
-                    let fixture = CaptureFixture::new(policy);
-                    assert!(
-                        NativeCapturePolicy::from_launch(&fixture.spec, &[], &catalog()).is_err()
-                    );
-                }
-            }
-
-            #[test]
-            fn runner_batch2_capture_coordinate_mask_includes_wide_partner_and_preserves_empty_cells()
-             {
+            fn capture_coordinate_mask_includes_wide_partner_and_preserves_empty_cells() {
                 let mut fixture = CaptureFixture::new(redacted());
                 let (mut port, receiver) =
                     fixture.ready(NativeCaptureLimits::default(), &[mask(0, 2, 1, 3)]);
@@ -2866,8 +2846,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_layout_mismatch_masks_whole_content_instead_of_clipping_coordinates()
-             {
+            fn capture_layout_mismatch_masks_whole_content_instead_of_clipping_coordinates() {
                 let mut fixture = CaptureFixture::new(redacted());
                 let (mut port, receiver) =
                     fixture.ready(NativeCaptureLimits::default(), &[mask(0, 0, 1, 1)]);
@@ -2894,7 +2873,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_invalid_mask_geometry_fails_before_collection() {
+            fn capture_invalid_mask_geometry_fails_before_collection() {
                 let fixture = CaptureFixture::new(redacted());
                 for invalid in [
                     mask(0, 0, 0, 1),
@@ -2910,7 +2889,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_sensitive_rule_narrows_redacted_launch_to_metadata() {
+            fn capture_sensitive_rule_narrows_redacted_launch_to_metadata() {
                 let mut policy = redacted();
                 policy["config"]["sensitive_rules"] = json!(["synthetic-permission"]);
                 let mut fixture = CaptureFixture::new(policy);
@@ -2928,8 +2907,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_lowered_budgets_report_capacity_without_a_padded_complete_pair()
-             {
+            fn capture_lowered_budgets_report_capacity_without_a_padded_complete_pair() {
                 for limits in [
                     NativeCaptureLimits {
                         max_cells: 10,
@@ -2988,7 +2966,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_limits_reject_zero_and_expansion_but_allow_lowered_budgets() {
+            fn capture_limits_reject_zero_and_expansion_but_allow_lowered_budgets() {
                 assert!(NativeCaptureLimits::default().validate().is_ok());
                 assert!(
                     NativeCaptureLimits {
@@ -3045,8 +3023,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_deadline_owner_exit_and_cancellation_preserve_actual_incomplete_status()
-             {
+            fn capture_deadline_owner_exit_and_cancellation_preserve_actual_incomplete_status() {
                 for status in [
                     NativeCaptureStatus::Deadline,
                     NativeCaptureStatus::OwnerExit,
@@ -3077,13 +3054,25 @@ pub(crate) mod native_capture {
             }
         }
 
-        mod review_policy {
+        mod capture_policy {
             use super::*;
             use std::sync::Mutex;
 
             #[derive(Default)]
             struct Compiler {
                 calls: Mutex<Vec<(String, usize)>>,
+            }
+
+            /// A launch spec carrying only `policy`: `NativeCapturePolicy::from_launch` reads
+            /// nothing else, so these tests need no database, run lock or native executable.
+            fn policy_spec(policy: Value) -> SpawnSpec {
+                SpawnSpec {
+                    argv: vec!["/bin/cat".into()],
+                    cwd: std::path::PathBuf::from("/"),
+                    environment: Vec::new(),
+                    evidence_policy: policy,
+                    size: TerminalSize { rows: 24, cols: 80 },
+                }
             }
             impl NativeCapturePatternCompiler for Compiler {
                 fn compile(
@@ -3100,8 +3089,8 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_f2_whole_raw_policy_is_validated_before_the_first_compiler_invocation()
-             {
+            fn runner_collector_whole_raw_policy_is_validated_before_the_first_compiler_invocation()
+            {
                 let limits = NativeCaptureLimits::default();
                 for invalid in [
                     "schema",
@@ -3146,11 +3135,10 @@ pub(crate) mod native_capture {
                         }
                         _ => unreachable!(),
                     }
-                    let fixture = CaptureFixture::new(policy);
                     let compiler = Compiler::default();
                     assert!(
                         NativeCapturePolicy::from_launch_with_compiler(
-                            &fixture.spec,
+                            &policy_spec(policy),
                             &[],
                             &catalog(),
                             &compiler
@@ -3163,17 +3151,16 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_f2_valid_patterns_compile_once_in_source_order_with_the_approved_cap()
-             {
+            fn runner_collector_valid_patterns_compile_once_in_source_order_with_the_approved_cap()
+            {
                 let patterns = ["PRIVATE-[A-Z]+", "[0-9]+", "(?i)secret"];
                 let mut policy = redacted();
                 policy["config"]["patterns"] = json!(patterns);
                 policy["config"]["sensitive_rules"] = json!(["synthetic-permission"]);
-                let fixture = CaptureFixture::new(policy);
                 let compiler = Compiler::default();
                 assert!(
                     NativeCapturePolicy::from_launch_with_compiler(
-                        &fixture.spec,
+                        &policy_spec(policy),
                         &[],
                         &catalog(),
                         &compiler
@@ -3193,15 +3180,13 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_f2_compact_pattern_expansion_stops_at_the_first_bounded_compilation()
-             {
+            fn runner_collector_compact_pattern_expansion_stops_at_the_first_bounded_compilation() {
                 let mut policy = redacted();
                 policy["config"]["patterns"] = json!(["[a-z]{100000}"]);
-                let fixture = CaptureFixture::new(policy);
                 let compiler = Compiler::default();
                 assert!(
                     NativeCapturePolicy::from_launch_with_compiler(
-                        &fixture.spec,
+                        &policy_spec(policy),
                         &[],
                         &catalog(),
                         &compiler
@@ -3218,12 +3203,11 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_f2_metadata_policy_uses_no_regex_compiler() {
-                let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
+            fn runner_collector_metadata_policy_uses_no_regex_compiler() {
                 let compiler = Compiler::default();
                 assert!(
                     NativeCapturePolicy::from_launch_with_compiler(
-                        &fixture.spec,
+                        &policy_spec(json!({"mode":"metadata"})),
                         &[],
                         &catalog(),
                         &compiler
@@ -3234,7 +3218,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_f2_channel_selected_compiled_cap_remains_bounded_after_valid_construction()
+            fn runner_collector_channel_selected_compiled_cap_remains_bounded_after_valid_construction()
              {
                 let mut policy = redacted();
                 policy["config"]["patterns"] = json!(["[a-z]{100}"]);
@@ -3259,7 +3243,7 @@ pub(crate) mod native_capture {
         mod binding {
             use super::*;
             #[test]
-            fn runner_batch2_capture_bind_checks_actual_native_digest_before_any_observation() {
+            fn capture_bind_checks_actual_native_digest_before_any_observation() {
                 let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                 let (mut port, receiver) = fixture.channel(NativeCaptureLimits::default(), &[]);
                 let mut producer = fixture.producer_json.clone();
@@ -3268,16 +3252,7 @@ pub(crate) mod native_capture {
                 private_write(&path, &serde_json::to_vec(&producer).unwrap());
                 let producer =
                     read_native_capture_producer(&path, &NativeCaptureLimits::default()).unwrap();
-                fixture
-                    .fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET status='prepared' WHERE run_id=?1",
-                        [fixture.fixture.run.run_id],
-                    )
-                    .unwrap();
-                fixture.fixture.run =
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                fixture.mark_prepared();
                 assert!(
                     port.bind_prepared(
                         &fixture.fixture.run,
@@ -3293,40 +3268,10 @@ pub(crate) mod native_capture {
             }
         }
 
-        mod review_existing {
+        mod recorded_policy {
             use super::*;
             use crate::coding_agent::ProfileCatalog;
 
-            fn prepared(fixture: &mut CaptureFixture) {
-                fixture
-                    .fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET status='prepared' WHERE run_id=?1",
-                        [fixture.fixture.run.run_id],
-                    )
-                    .unwrap();
-                fixture.fixture.run =
-                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            }
-            fn producer(fixture: &CaptureFixture) -> NativeCaptureProducer {
-                read_native_capture_producer(
-                    &fixture.producer_path,
-                    &NativeCaptureLimits::default(),
-                )
-                .unwrap()
-            }
-            fn channel(
-                fixture: &CaptureFixture,
-                catalog: &ProfileCatalog,
-            ) -> (NativeCapturePort, NativeCaptureReceiver) {
-                native_capture_channel(
-                    &fixture.fixture.run,
-                    NativeCapturePolicy::from_launch(&fixture.spec, &[], catalog).unwrap(),
-                    NativeCaptureLimits::default(),
-                )
-                .unwrap()
-            }
             fn select_catalog(fixture: &mut CaptureFixture, bundled: bool) -> ProfileCatalog {
                 if bundled {
                     let selected = ProfileCatalog::bundled().unwrap().capabilities(
@@ -3356,7 +3301,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_f1_actual_permission_options_match_the_recorded_emitted_policy_before_binding()
+            fn runner_collector_actual_permission_options_match_the_recorded_emitted_policy_before_binding()
              {
                 for mutation in [
                     "approval",
@@ -3366,7 +3311,8 @@ pub(crate) mod native_capture {
                     "trailing_sandbox",
                 ] {
                     let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                    let (mut port, receiver) = channel(&fixture, &catalog());
+                    let (mut port, receiver) =
+                        fixture.channel_with(NativeCaptureLimits::default(), &[], &catalog());
                     match mutation {
                         "approval" => fixture.spec.argv[1] = "--full-auto".into(),
                         "missing_approval" => {
@@ -3384,13 +3330,13 @@ pub(crate) mod native_capture {
                             .extend(["--sandbox".into(), "danger-full-access".into()]),
                         _ => unreachable!(),
                     }
-                    prepared(&mut fixture);
+                    fixture.mark_prepared();
                     assert!(
                         port.bind_prepared(
                             &fixture.fixture.run,
                             &fixture.placement,
                             &fixture.spec,
-                            producer(&fixture),
+                            fixture.producer(),
                             &fixture.clock
                         )
                         .is_err(),
@@ -3405,12 +3351,13 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_f1_flag_like_prompt_is_opaque_and_preserves_truthful_permission_source()
+            fn runner_collector_flag_like_prompt_is_opaque_and_preserves_truthful_permission_source()
              {
                 let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                 *fixture.spec.argv.last_mut().unwrap() =
                     "explain --ask-for-approval on-request and --sandbox read-only".into();
-                let (mut port, receiver) = channel(&fixture, &catalog());
+                let (mut port, receiver) =
+                    fixture.channel_with(NativeCaptureLimits::default(), &[], &catalog());
                 fixture.prepare(&mut port);
                 fixture.finalize(&mut port);
                 let lease = fixture.pair(&mut port, &receiver, b"safe source control");
@@ -3428,13 +3375,14 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_f1_producer_origin_matches_the_selected_catalog_constructor_after_clone()
+            fn runner_collector_producer_origin_matches_the_selected_catalog_constructor_after_clone()
              {
                 for bundled in [false, true] {
                     let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                     let actual = select_catalog(&mut fixture, bundled);
                     let selected = actual.clone();
-                    let (mut port, receiver) = channel(&fixture, &selected);
+                    let (mut port, receiver) =
+                        fixture.channel_with(NativeCaptureLimits::default(), &[], &selected);
                     fixture.producer_json["catalog_origin"] = json!(if bundled {
                         "synthetic"
                     } else {
@@ -3445,13 +3393,13 @@ pub(crate) mod native_capture {
                         serde_json::to_vec(&fixture.producer_json).unwrap(),
                     )
                     .unwrap();
-                    prepared(&mut fixture);
+                    fixture.mark_prepared();
                     assert!(
                         port.bind_prepared(
                             &fixture.fixture.run,
                             &fixture.placement,
                             &fixture.spec,
-                            producer(&fixture),
+                            fixture.producer(),
                             &fixture.clock
                         )
                         .is_err(),
@@ -3464,7 +3412,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_f1_matching_synthetic_and_bundled_origins_publish_only_their_actual_provenance()
+            fn runner_collector_matching_synthetic_and_bundled_origins_publish_only_their_actual_provenance()
              {
                 for bundled in [false, true] {
                     let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
@@ -3480,7 +3428,8 @@ pub(crate) mod native_capture {
                         serde_json::to_vec(&fixture.producer_json).unwrap(),
                     )
                     .unwrap();
-                    let (mut port, receiver) = channel(&fixture, &selected.clone());
+                    let (mut port, receiver) =
+                        fixture.channel_with(NativeCaptureLimits::default(), &[], &selected);
                     fixture.prepare(&mut port);
                     fixture.finalize(&mut port);
                     let lease = fixture.pair(&mut port, &receiver, b"safe matching origin");
@@ -3504,18 +3453,11 @@ pub(crate) mod native_capture {
                 capture, private_write, wait_until,
             };
             #[test]
-            fn runner_batch2_service_private_capture_publishes_manifest_last_and_keeps_native_work_running()
-             {
+            fn service_private_capture_publishes_manifest_last_and_keeps_native_work_running() {
                 let mut fixture = ServiceFixture::configured(false, capture);
                 let started = fixture.start_running();
-                let request = NativeCaptureArm {
-                    schema_version: 1,
-                    capture_id: "service-pair".into(),
-                    run_id: started.identity.run_id,
-                    owner_epoch: started.identity.owner_epoch,
-                    minimum_interval_ms: 100,
-                    timeout_ms: 2000,
-                };
+                let request =
+                    NativeCaptureArm::for_identity("service-pair", &started.identity, 2000);
                 let arm_at = chrono::Utc::now();
                 private_write(
                     &fixture.fixture._dir.path().join("capture-arm.json"),
@@ -4069,27 +4011,20 @@ pub(crate) mod native_capture {
             }
 
             fn wait_path(path: &Path, until: Instant) {
-                while !path.exists() {
-                    assert!(
-                        Instant::now() < until,
-                        "owned exporter condition missed its deadline: {}",
-                        path.display()
-                    );
-                    std::thread::sleep(Duration::from_millis(5));
-                }
+                crate::runtime::runner::writer::test_support::wait_until_within(
+                    until.saturating_duration_since(Instant::now()),
+                    || path.exists(),
+                );
             }
 
             fn arm_capture(fixture: &ServiceFixture, started: &Started) {
                 private_write(
                     &fixture.fixture._dir.path().join("capture-arm.json"),
-                    &serde_json::to_vec(&NativeCaptureArm {
-                        schema_version: 1,
-                        capture_id: "export-pair".into(),
-                        run_id: started.identity.run_id,
-                        owner_epoch: started.identity.owner_epoch,
-                        minimum_interval_ms: 100,
-                        timeout_ms: 30000,
-                    })
+                    &serde_json::to_vec(&NativeCaptureArm::for_identity(
+                        "export-pair",
+                        &started.identity,
+                        30000,
+                    ))
                     .unwrap(),
                 );
             }
@@ -4286,7 +4221,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_t1_encode_and_prepermit_manifest_stalls_return_unfinished_and_revoke_late_publication()
+            fn runner_collector_encode_and_prepermit_manifest_stalls_return_unfinished_and_revoke_late_publication()
              {
                 for (selected, boundary) in [("encode", "Encode"), ("manifest", "ManifestPublish")]
                 {
@@ -4356,7 +4291,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_t1_confirmed_pair_remains_accepted_while_native_work_continues_and_after_exit()
+            fn runner_collector_confirmed_pair_remains_accepted_while_native_work_continues_and_after_exit()
              {
                 let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
                     configure(fixture, spec, None, false)
@@ -4400,7 +4335,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_t1_cancelled_manifest_worker_preserves_foreign_identities_and_cleans_its_matching_temporaries()
+            fn runner_collector_cancelled_manifest_worker_preserves_foreign_identities_and_cleans_its_matching_temporaries()
              {
                 let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
                     configure(fixture, spec, Some("manifest"), false)
@@ -4521,7 +4456,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_t1_startup_failure_has_no_export_wait_or_publication() {
+            fn runner_collector_startup_failure_has_no_export_wait_or_publication() {
                 let fixture = ServiceFixture::startup_refusal(|fixture, spec| {
                     configure(fixture, spec, None, true);
                     let path = fixture._dir.path().join("capture-producer.json");
@@ -4558,7 +4493,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_collector_t1_exhausted_service_storage_budget_adds_no_fresh_exporter_wait() {
+            fn runner_collector_exhausted_service_storage_budget_adds_no_fresh_exporter_wait() {
                 let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
                     configure(fixture, spec, Some("encode"), false)
                 });
@@ -4861,6 +4796,21 @@ pub(crate) mod native_capture {
             pub(crate) timeout_ms: u64,
         }
         impl NativeCaptureArm {
+            /// A schema-1 arm for `identity` with the standard 100 ms minimum interval.
+            pub(crate) fn for_identity(
+                capture_id: &str,
+                identity: &ControlIdentity,
+                timeout_ms: u64,
+            ) -> Self {
+                Self {
+                    schema_version: 1,
+                    capture_id: capture_id.into(),
+                    run_id: identity.run_id,
+                    owner_epoch: identity.owner_epoch,
+                    minimum_interval_ms: 100,
+                    timeout_ms,
+                }
+            }
             pub(crate) fn to_request(
                 &self,
                 identity: &ControlIdentity,
@@ -5196,7 +5146,7 @@ pub(crate) mod native_capture {
             use std::os::unix::fs::{PermissionsExt, symlink};
             use std::time::{Duration, Instant};
             #[test]
-            fn runner_batch2_capture_arm_validates_schema_identity_duration_and_safe_capture_id() {
+            fn capture_arm_validates_schema_identity_duration_and_safe_capture_id() {
                 let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                 let identity = ControlIdentity::from_run(&fixture.fixture.run);
                 let now = Instant::now();
@@ -5245,8 +5195,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_arm_reader_consumes_once_and_detects_replacement_after_claim()
-            {
+            fn capture_arm_reader_consumes_once_and_detects_replacement_after_claim() {
                 let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                 let identity = ControlIdentity::from_run(&fixture.fixture.run);
                 let path = fixture.fixture._dir.path().join("one-shot-arm.json");
@@ -5268,8 +5217,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_arm_reader_claims_malformed_or_oversized_input_without_accepting_repair()
-             {
+            fn capture_arm_reader_claims_malformed_or_oversized_input_without_accepting_repair() {
                 for bytes in [b"{\"schema_version\":".to_vec(), vec![b'x'; 16385]] {
                     let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                     let identity = ControlIdentity::from_run(&fixture.fixture.run);
@@ -5291,8 +5239,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_arm_reader_rejects_symlinks_public_modes_and_replaced_parent()
-            {
+            fn capture_arm_reader_rejects_symlinks_public_modes_and_replaced_parent() {
                 for field in ["symlink", "mode", "parent"] {
                     let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                     let parent = fixture.fixture._dir.path().join("arm-parent");
@@ -5338,8 +5285,9 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_config_requires_private_bounded_exact_files_and_existing_evidence()
-             {
+            fn capture_config_requires_private_bounded_exact_files_and_existing_evidence() {
+                let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
+                let config = config(&fixture);
                 for field in [
                     "valid",
                     "unknown",
@@ -5351,10 +5299,12 @@ pub(crate) mod native_capture {
                     "symlink",
                     "oversized",
                 ] {
-                    let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
-                    let config = config(&fixture);
-                    let path = fixture.fixture._dir.path().join("config.json");
-                    let mut value = serde_json::to_value(config).unwrap();
+                    let path = fixture
+                        .fixture
+                        ._dir
+                        .path()
+                        .join(format!("config-{field}.json"));
+                    let mut value = serde_json::to_value(&config).unwrap();
                     match field {
                         "unknown" => value["raw_screen"] = json!("private"),
                         "run" => value["expected_run_id"] = json!(0),
@@ -5390,8 +5340,8 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_producer_binds_actual_libtest_and_rejects_fabricated_build_evidence()
-             {
+            fn capture_producer_binds_actual_libtest_and_rejects_fabricated_build_evidence() {
+                let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                 for field in [
                     "valid",
                     "unknown",
@@ -5403,7 +5353,6 @@ pub(crate) mod native_capture {
                     "reference",
                     "oversized",
                 ] {
-                    let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                     let mut value = fixture.producer_json.clone();
                     match field {
                         "unknown" => value["private_argv"] = json!([]),
@@ -5417,7 +5366,11 @@ pub(crate) mod native_capture {
                         "reference" => value["environment_evidence_ref"] = json!("\n"),
                         _ => {}
                     }
-                    let path = fixture.fixture._dir.path().join("producer-case.json");
+                    let path = fixture
+                        .fixture
+                        ._dir
+                        .path()
+                        .join(format!("producer-{field}.json"));
                     private_write(
                         &path,
                         &if field == "oversized" {
@@ -5435,8 +5388,8 @@ pub(crate) mod native_capture {
                 }
             }
             #[test]
-            fn runner_batch2_capture_publication_accepts_only_the_final_manifest_and_matching_complete_artifact()
-             {
+            fn capture_publication_accepts_only_the_final_manifest_and_matching_complete_artifact()
+            {
                 let mut fixture = CaptureFixture::new(redacted());
                 let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
                 let lease = fixture.pair(&mut port, &receiver, b"safe fixture");
@@ -5498,8 +5451,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_publication_collision_and_expiry_preserve_existing_output_without_success()
-             {
+            fn capture_publication_collision_and_expiry_preserve_existing_output_without_success() {
                 for collision in ["artifact", "manifest", "expired"] {
                     let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                     let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
@@ -5537,8 +5489,7 @@ pub(crate) mod native_capture {
             }
 
             #[test]
-            fn runner_batch2_capture_incomplete_publication_keeps_terminal_reason_and_incomplete_filename()
-             {
+            fn capture_incomplete_publication_keeps_terminal_reason_and_incomplete_filename() {
                 let mut fixture = CaptureFixture::new(redacted());
                 let (mut port, receiver) = fixture.ready(NativeCaptureLimits::default(), &[]);
                 receiver.request(fixture.request("cancelled-pair")).unwrap();
@@ -5667,25 +5618,24 @@ pub(crate) mod native_capture {
                 }
 
                 #[test]
-                fn runner_collector_f4_top_level_identical_duplicate_fields_fail_before_normalization()
-                 {
+                fn runner_collector_top_level_identical_duplicate_fields_fail_before_normalization()
+                {
                     assert_duplicate_fields_rejected(false, false);
                 }
                 #[test]
-                fn runner_collector_f4_nested_identical_duplicate_fields_fail_before_normalization()
-                {
+                fn runner_collector_nested_identical_duplicate_fields_fail_before_normalization() {
                     assert_duplicate_fields_rejected(true, false);
                 }
                 #[test]
-                fn runner_collector_f4_top_level_conflicting_duplicates_reject_both_field_orders() {
+                fn runner_collector_top_level_conflicting_duplicates_reject_both_field_orders() {
                     assert_duplicate_fields_rejected(false, true);
                 }
                 #[test]
-                fn runner_collector_f4_nested_conflicting_duplicates_reject_both_field_orders() {
+                fn runner_collector_nested_conflicting_duplicates_reject_both_field_orders() {
                     assert_duplicate_fields_rejected(true, true);
                 }
                 #[test]
-                fn runner_collector_f4_nullable_native_version_requires_presence_and_accepts_explicit_null()
+                fn runner_collector_nullable_native_version_requires_presence_and_accepts_explicit_null()
                  {
                     let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
                     fixture.producer_json["native_executable"]["version"] = Value::Null;
@@ -7334,19 +7284,13 @@ pub(crate) mod native_capture {
         pub(super) mod tests {
             use std::time::Duration;
 
-            use nix::sys::signal::{Signal, kill};
-            use nix::unistd::Pid;
             use serde_json::Value;
 
             use super::*;
             use crate::runtime::runner::service::test_support::*;
             #[test]
-            fn runner_batch2_capture_ignored_entry_requires_explicit_configuration_before_launching()
-             {
-                let directory = tempfile::Builder::new()
-                    .prefix(".p194-entry-")
-                    .tempdir_in("/tmp")
-                    .unwrap();
+            fn capture_ignored_entry_requires_explicit_configuration_before_launching() {
+                let directory = tempfile::tempdir().unwrap();
                 let output_path = directory.path().join("entry-output");
                 let output = std::fs::OpenOptions::new()
                     .write(true)
@@ -7390,7 +7334,7 @@ pub(crate) mod native_capture {
                 capture, health, private_write, wait_until,
             };
             #[test]
-            fn runner_collector_f3_common_service_arms_on_actual_resize_and_preserves_trigger_geometry_and_sequence()
+            fn runner_collector_common_service_arms_on_actual_resize_and_preserves_trigger_geometry_and_sequence()
              {
                 let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
                     capture(fixture, spec);
@@ -7401,22 +7345,8 @@ pub(crate) mod native_capture {
                 });
                 let started = fixture.start_running();
                 let before = health(&mut fixture)["output_seq"].as_u64().unwrap();
-                rustix::termios::tcsetwinsize(
-                    &fixture.master,
-                    rustix::termios::Winsize {
-                        ws_row: 25,
-                        ws_col: 90,
-                        ws_xpixel: 0,
-                        ws_ypixel: 0,
-                    },
-                )
-                .unwrap();
                 assert!(fixture.process.as_ref().unwrap().matches().unwrap());
-                kill(
-                    Pid::from_raw(i32::try_from(fixture.child.id()).unwrap()),
-                    Signal::SIGWINCH,
-                )
-                .unwrap();
+                fixture.resize(25, 90);
                 let pair_path = fixture
                     .fixture
                     ._dir
@@ -7656,9 +7586,6 @@ mod tests {
     use std::io::Write;
     use std::time::{Duration, Instant};
 
-    use nix::sys::signal::{Signal, kill};
-    use nix::unistd::Pid;
-
     use crate::broker::runtime as storage;
     use crate::runtime::runner::service::test_support::*;
 
@@ -7669,8 +7596,7 @@ mod tests {
             count, health, wait_until,
         };
         #[test]
-        fn runner_batch2_service_quiet_timer_persists_one_opening_without_changing_output_sequence()
-        {
+        fn service_quiet_timer_persists_one_opening_without_changing_output_sequence() {
             let mut fixture = ServiceFixture::configured(false, synthetic);
             fixture.start_running();
             fixture.master.write_all(b"form-one\r").unwrap();
@@ -7688,7 +7614,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_service_transient_form_and_clear_in_one_native_write_produce_no_episode() {
+        fn service_transient_form_and_clear_in_one_native_write_produce_no_episode() {
             let mut fixture = ServiceFixture::configured(false, synthetic);
             fixture.start_running();
             fixture.master.write_all(b"transient\r").unwrap();
@@ -7716,25 +7642,17 @@ mod tests {
             fixture.finish();
         }
         #[test]
-        fn runner_batch2_service_shutdown_uses_the_active_controller_to_close_before_truthful_exit()
-        {
+        fn service_shutdown_uses_the_active_controller_to_close_before_truthful_exit() {
             let mut fixture = ServiceFixture::configured(false, synthetic);
             fixture.start_running();
             fixture.master.write_all(b"form-shutdown\r").unwrap();
             fixture.read_until("Operation: write form-shutdown.txt");
             wait_until(|| count(&fixture, "interaction_opened") == 1);
             fixture.finish();
-            let kinds: Vec<String> = fixture
-                .fixture
-                .conn
-                .prepare(
-                    "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
-                )
-                .unwrap()
-                .query_map([fixture.fixture.run.run_id], |row| row.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
+            let kinds = crate::runtime::runner::service::test_support::observation_services::kinds(
+                &fixture.fixture.conn,
+                fixture.fixture.run.run_id,
+            );
             assert_eq!(
                 kinds,
                 ["interaction_opened", "interaction_closed", "runner_exited"]
@@ -7751,24 +7669,7 @@ mod tests {
             assert_eq!(reason, "process_exited");
         }
         #[test]
-        fn runner_batch2_service_unknown_coverage_emits_once_while_manual_work_continues() {
-            let mut fixture = ServiceFixture::new(false);
-            fixture.start_running();
-            for _ in 0..3 {
-                fixture.health();
-                fixture.assert_manual_io();
-            }
-            fixture.finish();
-            let count:i64=fixture.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='coverage_unknown'",[fixture.fixture.run.run_id],|row|row.get(0)).unwrap();
-            assert_eq!(count, 1);
-            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert_eq!(run.resolved_mode, "approve-for-me");
-            assert!(run.effective_policy_json.is_none());
-        }
-
-        #[test]
-        fn runner_batch2_service_fallback_profile_emits_no_coverage_unknown_while_no_profile_still_does()
-         {
+        fn service_fallback_profile_emits_no_coverage_unknown_while_no_profile_still_does() {
             let fallback = crate::coding_agent::ProfileCatalog::bundled()
                 .unwrap()
                 .capabilities(crate::coding_agent::CodingAgent::Codex, Some("0.164.0"));
@@ -7802,34 +7703,22 @@ mod tests {
                     profile,
                     "{profile:?}"
                 );
+                if profile.is_none() {
+                    assert_eq!(run.resolved_mode, "approve-for-me");
+                    assert!(run.effective_policy_json.is_none());
+                }
             }
         }
     }
 
-    mod review_failures {
+    mod injected_failures {
         use super::*;
+        use crate::runtime::runner::service::test_support::injected_failures::*;
         use crate::runtime::runner::service::test_support::observation_services::{
             count, health, wait_until,
         };
-        use crate::runtime::runner::service::test_support::review_failures::*;
         #[test]
-        fn runner_review_r3_quiet_timer_detector_failure_keeps_real_service_health_and_manual_io() {
-            let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
-                configure(fixture, spec, "quiet_timer", "detector")
-            });
-            fixture.start_running();
-            arm(&fixture);
-            fixture.master.write_all(b"form-quiet-failure\r").unwrap();
-            fixture.read_until("Operation: write form-quiet-failure.txt");
-            assert_fired(&fixture, "QuietTimer/Detector");
-            assert_live_after_fault(&mut fixture, "detector_unavailable");
-            fixture.finish();
-            assert_private_cause_stays_local(&fixture);
-        }
-
-        #[test]
-        fn runner_review_r3_resize_detector_failure_keeps_actual_resized_service_and_native_child()
-        {
+        fn runner_resize_detector_failure_keeps_actual_resized_service_and_native_child() {
             let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
                 configure(fixture, spec, "resize", "detector")
             });
@@ -7839,22 +7728,8 @@ mod tests {
             wait_until(|| count(&fixture, "interaction_opened") == 1);
             let sequence = health(&mut fixture)["output_seq"].as_u64().unwrap();
             arm(&fixture);
-            rustix::termios::tcsetwinsize(
-                &fixture.master,
-                rustix::termios::Winsize {
-                    ws_row: 25,
-                    ws_col: 90,
-                    ws_xpixel: 0,
-                    ws_ypixel: 0,
-                },
-            )
-            .unwrap();
             assert!(fixture.process.as_ref().unwrap().matches().unwrap());
-            kill(
-                Pid::from_raw(i32::try_from(fixture.child.id()).unwrap()),
-                Signal::SIGWINCH,
-            )
-            .unwrap();
+            fixture.resize(25, 90);
             assert_fired(&fixture, "Resize/Detector");
             let status = fixture.health();
             assert_eq!(status.child, Some(started.child));
@@ -7864,19 +7739,40 @@ mod tests {
             assert_private_cause_stays_local(&fixture);
         }
         #[test]
-        fn runner_review_r3_child_output_parser_and_detector_failures_keep_transport_and_typed_metadata()
-         {
-            for (operation, fired, diagnostic) in [
-                ("parser", "ChildOutput/Parser", "parser_unavailable"),
-                ("detector", "ChildOutput/Detector", "detector_unavailable"),
+        fn runner_child_output_parser_and_detector_failures_keep_transport_and_typed_metadata() {
+            for (point, operation, form, fired, diagnostic) in [
+                (
+                    "child_output",
+                    "parser",
+                    "form-output-failure",
+                    "ChildOutput/Parser",
+                    "parser_unavailable",
+                ),
+                (
+                    "child_output",
+                    "detector",
+                    "form-output-failure",
+                    "ChildOutput/Detector",
+                    "detector_unavailable",
+                ),
+                (
+                    "quiet_timer",
+                    "detector",
+                    "form-quiet-failure",
+                    "QuietTimer/Detector",
+                    "detector_unavailable",
+                ),
             ] {
                 let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
-                    configure(fixture, spec, "child_output", operation)
+                    configure(fixture, spec, point, operation)
                 });
                 fixture.start_running();
                 arm(&fixture);
-                fixture.master.write_all(b"form-output-failure\r").unwrap();
-                fixture.read_until("Operation: write form-output-failure.txt");
+                fixture
+                    .master
+                    .write_all(format!("{form}\r").as_bytes())
+                    .unwrap();
+                fixture.read_until(&format!("Operation: write {form}.txt"));
                 assert_fired(&fixture, fired);
                 assert_live_after_fault(&mut fixture, diagnostic);
                 fixture.finish();
@@ -7895,18 +7791,8 @@ mod tests {
             };
             use crate::runtime::system::test_support::TestChild;
             use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-            use std::process::{Command, Stdio};
             use std::sync::Arc;
 
-            struct Native {
-                child: TestChild,
-                until: Instant,
-            }
-            impl Drop for Native {
-                fn drop(&mut self) {
-                    self.child.terminate_until(self.until);
-                }
-            }
             let until = Instant::now() + Duration::from_secs(5);
             let mut fixture = Fixture::new();
             let artifacts = fixture.artifacts();
@@ -7942,20 +7828,8 @@ mod tests {
             )
             .unwrap();
             writer.set_deadline(until);
-            let mut native = Native {
-                child: TestChild::new(
-                    Command::new("/bin/cat")
-                        .stdin(Stdio::piped())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .unwrap(),
-                ),
-                until,
-            };
-            let identity = ProcessIdentity::read(i64::from(native.child.id()))
-                .unwrap()
-                .expect("owned live synthetic child");
+            let mut child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+            let identity = child.identity();
             assert!(identity.matches().unwrap());
             fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::now_stamp(),fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
@@ -8070,9 +7944,9 @@ mod tests {
             let cleanup = catch_unwind(AssertUnwindSafe(|| {
                 let counts = writer.finish(until);
                 let status = writer.status();
-                native.child.terminate_until(until);
+                child.terminate_until(until);
                 assert!(
-                    native.child.try_wait().unwrap().is_some(),
+                    child.try_wait().unwrap().is_some(),
                     "owned synthetic child reap confirmed"
                 );
                 assert_eq!(counts, (0, 0), "{status:?}");
@@ -8107,6 +7981,25 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{Duration, Instant};
+
+        /// A controller started for a running `/bin/cat` native child on a 24×80 terminal.
+        fn started_controller(
+            fixture: &mut WriterFixture,
+            writer: &EventWriter,
+            clock: &dyn ObservationClock,
+            catalog: &ProfileCatalog,
+            policy: storage::evidence::EvidencePolicy,
+        ) -> (ObservationController, TestChild, TerminalState) {
+            let mut controller =
+                ObservationController::new(&fixture.fixture.run, catalog, policy, 1..=256).unwrap();
+            let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+            running(fixture, &child.identity());
+            let terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+            controller
+                .started(&fixture.fixture.run, &terminal.snapshot(), writer, clock)
+                .unwrap();
+            (controller, child, terminal)
+        }
 
         mod bounded_updates {
             use super::*;
@@ -8200,7 +8093,7 @@ mod tests {
             }
         }
 
-        mod review {
+        mod failure_handling {
             use super::*;
 
             mod observation_failures {
@@ -8233,7 +8126,7 @@ mod tests {
                         if site == self.site && operation == ObservationOperation::Detector {
                             self.calls.fetch_add(1, Ordering::AcqRel);
                             if self.armed.swap(false, Ordering::AcqRel) {
-                                return Err(error("private detector failure review-canary-194"));
+                                return Err(error("private detector failure canary"));
                             }
                         }
                         Ok(())
@@ -8241,8 +8134,7 @@ mod tests {
                 }
 
                 #[test]
-                fn runner_review_r3_observation_hooks_install_once_before_the_matching_native_start()
-                 {
+                fn runner_observation_hooks_install_once_before_the_matching_native_start() {
                     let mut fixture = WriterFixture::new();
                     configure(&mut fixture);
                     let mut controller = ObservationController::new(
@@ -8273,7 +8165,7 @@ mod tests {
                 }
 
                 #[test]
-                fn runner_review_r3_quiet_detector_failure_returns_typed_held_status_and_preserves_the_episode()
+                fn runner_quiet_detector_failure_returns_typed_held_status_and_preserves_the_episode()
                  {
                     let fault = Arc::new(Fault::new(ObservationPhase::QuietTimer));
                     let mut case = LiveCase::with_observation_hooks(Some(fault.clone()));
@@ -8314,8 +8206,7 @@ mod tests {
                 }
 
                 #[test]
-                fn runner_review_r3_ordered_adapter_preserves_detector_attribution_and_bounded_metadata()
-                 {
+                fn runner_ordered_adapter_preserves_detector_attribution_and_bounded_metadata() {
                     let fault = Arc::new(Fault::new(ObservationPhase::ChildOutput));
                     let mut case = LiveCase::with_observation_hooks(Some(fault.clone()));
                     fault.arm();
@@ -8351,7 +8242,7 @@ mod tests {
                 }
 
                 #[test]
-                fn runner_review_r3_clock_and_output_sequence_invariants_propagate_outside_recoverable_failures()
+                fn runner_clock_and_output_sequence_invariants_propagate_outside_recoverable_failures()
                  {
                     for invariant in ["clock", "sequence"] {
                         let fault = Arc::new(Fault::new(ObservationPhase::ChildOutput));
@@ -8585,14 +8476,13 @@ mod tests {
                         .writer
                         .finish(Instant::now() + Duration::from_millis(250));
                     if unfinished != (0, 0) {
-                        eprintln!("owned review fixture retained writer work: {unfinished:?}");
+                        eprintln!("live case fixture retained writer work: {unfinished:?}");
                     }
                 }
             }
 
             #[test]
-            fn runner_review_r1_degraded_exit_records_gap_before_original_closure_and_terminal_fence()
-             {
+            fn runner_degraded_exit_records_gap_before_original_closure_and_terminal_fence() {
                 let mut case = LiveCase::refreshable();
                 let release = case.fail_refresh();
                 let exit_sequence = case.exit(300);
@@ -8657,7 +8547,7 @@ mod tests {
             }
 
             #[test]
-            fn runner_review_r1_expired_storage_budget_reports_unsaved_gap_and_pending_exit_work() {
+            fn runner_expired_storage_budget_reports_unsaved_gap_and_pending_exit_work() {
                 let mut case = LiveCase::refreshable();
                 let _release = case.fail_refresh();
                 let until = Instant::now() + Duration::from_millis(120);
@@ -8681,8 +8571,7 @@ mod tests {
             }
 
             #[test]
-            fn runner_review_r1_failure_after_terminal_enqueue_never_appends_a_live_post_terminal_gap()
-             {
+            fn runner_failure_after_terminal_enqueue_never_appends_a_live_post_terminal_gap() {
                 let mut case = LiveCase::new();
                 case.hooks.pause(WriterBoundary::Persist);
                 let release = Release(case.hooks.clone());
@@ -8779,7 +8668,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_controller_accepts_only_the_exact_fresh_initial_committed_grant() {
+        fn controller_accepts_only_the_exact_fresh_initial_committed_grant() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
             let catalog = catalog();
@@ -8836,26 +8725,19 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_controller_quiet_poll_opens_one_episode_with_the_unchanged_parser_sequence()
-         {
+        fn controller_quiet_poll_opens_one_episode_with_the_unchanged_parser_sequence() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
             let clock = Clock::new();
-            let mut controller = ObservationController::new(
-                &fixture.fixture.run,
+            let (mut controller, _child, mut terminal) = started_controller(
+                &mut fixture,
+                &writer,
+                &clock,
                 &catalog(),
                 storage::evidence::EvidencePolicy::metadata(),
-                1..=256,
-            )
-            .unwrap();
-            let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
-            running(&mut fixture, &child.identity());
-            let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            controller
-                .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
-                .unwrap();
+            );
             terminal
                 .feed_observed(
                     &form("write disposable.txt"),
@@ -8893,26 +8775,19 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_controller_actual_adapter_observes_transient_form_before_clear_without_opening()
-         {
+        fn controller_actual_adapter_observes_transient_form_before_clear_without_opening() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
             let clock = Clock::new();
-            let mut controller = ObservationController::new(
-                &fixture.fixture.run,
+            let (mut controller, _child, mut terminal) = started_controller(
+                &mut fixture,
+                &writer,
+                &clock,
                 &catalog(),
                 storage::evidence::EvidencePolicy::metadata(),
-                1..=256,
-            )
-            .unwrap();
-            let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
-            running(&mut fixture, &child.identity());
-            controller
-                .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
-                .unwrap();
+            );
             let mut bytes = form("write disposable.txt");
             bytes.extend_from_slice(b"\x1b[2J\x1b[Hworking");
             terminal
@@ -8930,7 +8805,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_controller_typed_failures_keep_metadata_only_diagnostics_and_hold_input() {
+        fn controller_typed_failures_keep_metadata_only_diagnostics_and_hold_input() {
             for (reason, code) in [
                 (ObservationFailure::Parser, "parser_unavailable"),
                 (ObservationFailure::Detector, "detector_unavailable"),
@@ -8955,7 +8830,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_controller_started_validates_current_identity_and_is_single_use() {
+        fn controller_started_validates_current_identity_and_is_single_use() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
             let hooks = Arc::new(Hooks::default());
@@ -8997,26 +8872,19 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_controller_exit_closes_the_open_episode_before_recording_the_real_native_signal()
-         {
+        fn controller_exit_closes_the_open_episode_before_recording_the_real_native_signal() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
             let clock = Clock::new();
-            let mut controller = ObservationController::new(
-                &fixture.fixture.run,
+            let (mut controller, mut child, mut terminal) = started_controller(
+                &mut fixture,
+                &writer,
+                &clock,
                 &catalog(),
                 storage::evidence::EvidencePolicy::metadata(),
-                1..=256,
-            )
-            .unwrap();
-            let mut child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
-            running(&mut fixture, &child.identity());
-            let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            controller
-                .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
-                .unwrap();
+            );
             terminal
                 .feed_observed(
                     &form("write disposable.txt"),
@@ -9048,17 +8916,10 @@ mod tests {
                 .child_exited(ChildExit::Signal(15), &terminal.snapshot(), &writer, &clock)
                 .unwrap();
             wait_until(|| committed(&fixture) == 3);
-            let kinds: Vec<String> = fixture
-                .fixture
-                .conn
-                .prepare(
-                    "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
-                )
-                .unwrap()
-                .query_map([fixture.fixture.run.run_id], |row| row.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
+            let kinds = crate::runtime::runner::service::test_support::observation_services::kinds(
+                &fixture.fixture.conn,
+                fixture.fixture.run.run_id,
+            );
             assert_eq!(
                 kinds,
                 ["interaction_opened", "interaction_closed", "runner_exited"]
@@ -9070,26 +8931,19 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_controller_refills_shared_lifecycle_sequences_only_from_committed_worker_grants()
-         {
+        fn controller_refills_shared_lifecycle_sequences_only_from_committed_worker_grants() {
             let until = Instant::now() + Duration::from_secs(15);
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
             let mut writer = start(&fixture, Arc::new(Hooks::default()));
             let clock = Clock::new();
-            let mut controller = ObservationController::new(
-                &fixture.fixture.run,
+            let (mut controller, _child, mut terminal) = started_controller(
+                &mut fixture,
+                &writer,
+                &clock,
                 &catalog(),
                 storage::evidence::EvidencePolicy::metadata(),
-                1..=256,
-            )
-            .unwrap();
-            let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
-            running(&mut fixture, &child.identity());
-            let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            controller
-                .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
-                .unwrap();
+            );
             let mut millis = 0u64;
             let mut original_sequences = Vec::new();
             for index in 0..130 {
@@ -9217,8 +9071,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_submit_hits_pressure()
-         {
+        fn controller_retains_both_superseded_originals_when_the_first_submit_hits_pressure() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
             let mut definitions = definitions();
@@ -9240,19 +9093,13 @@ mod tests {
             let release = Release(hooks.clone());
             hooks.wait(WriterBoundary::Receive, 1);
             let clock = Clock::new();
-            let mut controller = ObservationController::new(
-                &fixture.fixture.run,
+            let (mut controller, _child, mut terminal) = started_controller(
+                &mut fixture,
+                &writer,
+                &clock,
                 &catalog,
                 storage::evidence::EvidencePolicy::metadata(),
-                1..=256,
-            )
-            .unwrap();
-            let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
-            running(&mut fixture, &child.identity());
-            let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            controller
-                .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
-                .unwrap();
+            );
             let mut last_opening_sequence = 0;
             for index in 0..32 {
                 clock.set(index * 200);
@@ -9364,8 +9211,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_holds_until_drain()
-         {
+        fn controller_actual_adapter_retains_foreign_episode_refresh_and_holds_until_drain() {
             let mut fixture = WriterFixture::new();
             configure_redacted(&mut fixture);
             let hooks = Arc::new(Hooks::default());
@@ -9374,19 +9220,8 @@ mod tests {
             let release = Release(hooks.clone());
             hooks.wait(WriterBoundary::Receive, 1);
             let clock = Clock::new();
-            let mut controller = ObservationController::new(
-                &fixture.fixture.run,
-                &catalog(),
-                redacted_policy(),
-                1..=256,
-            )
-            .unwrap();
-            let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
-            running(&mut fixture, &child.identity());
-            let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            controller
-                .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
-                .unwrap();
+            let (mut controller, _child, mut terminal) =
+                started_controller(&mut fixture, &writer, &clock, &catalog(), redacted_policy());
             let mut opening_sequences = Vec::new();
             let mut first_refresh_sequence = 0;
             for index in 0..2 {

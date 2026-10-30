@@ -92,6 +92,7 @@ mod tests {
 
     mod history {
         use super::*;
+        use crate::runtime::runner::recovery::test_support::relationships::retained_history;
         use std::os::unix::fs::MetadataExt;
         use std::path::PathBuf;
 
@@ -121,20 +122,6 @@ mod tests {
                 case.artifacts.paths.outbox.clone()
             };
             ArtifactWitness { path, identity }
-        }
-        fn history(case: &Case) -> Vec<TableSnapshot> {
-            rows(&case.fixture.conn)
-                .into_iter()
-                .filter(|table| {
-                    matches!(
-                        table.name.as_str(),
-                        "messages"
-                            | "member_runtime_events"
-                            | "member_interactions"
-                            | "member_input_operations"
-                    ) || table.name.starts_with("member_permission_")
-                })
-                .collect()
         }
         fn original_terminal(status: RunStatus) -> Case {
             let mut case = Case::new();
@@ -199,16 +186,6 @@ mod tests {
             operator: bool,
         ) {
             let current = storage::get_run(&case.fixture.conn, before.run_id).unwrap();
-            eprintln!(
-                "exceptional terminal history: expected={status:?}, actual={:?}, counts={:?}, epoch={} -> {}, gap={} -> {}, events={}",
-                report.status,
-                counts(report),
-                before.owner_epoch,
-                current.owner_epoch,
-                before.observation_gap_count,
-                current.observation_gap_count,
-                events(case).len()
-            );
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(report.status, status);
             assert_eq!(current.status, status);
@@ -233,7 +210,7 @@ mod tests {
                 current.recovery_origin_status,
                 before.recovery_origin_status.or(Some(before.status))
             );
-            assert_eq!(history(case), prior);
+            assert_eq!(retained_history(&case.fixture.conn), prior);
             assert_eq!(
                 metadata(&artifact.path),
                 artifact.identity,
@@ -256,7 +233,7 @@ mod tests {
                 for directory in [false, true] {
                     let mut case = original_terminal(status);
                     let before = case.fixture.run.clone();
-                    let prior = history(&case);
+                    let prior = retained_history(&case.fixture.conn);
                     let artifact = lose_artifacts(&mut case, directory);
                     let report = recover_missing(&mut case, operator).unwrap();
                     assert_terminal_bookkeeping(
@@ -274,13 +251,11 @@ mod tests {
             }
         }
         #[test]
-        fn runner_recovery_review_r3_machine_missing_paths_preserve_original_exited_and_failed_history()
-         {
+        fn runner_recovery_machine_missing_paths_preserve_original_exited_and_failed_history() {
             original_history_cases(false);
         }
         #[test]
-        fn runner_recovery_review_r3_operator_missing_paths_preserve_original_exited_and_failed_history()
-         {
+        fn runner_recovery_operator_missing_paths_preserve_original_exited_and_failed_history() {
             original_history_cases(true);
         }
 
@@ -288,24 +263,9 @@ mod tests {
             for (code, signal) in [(Some(7), None), (None, Some(15))] {
                 for directory in [false, true] {
                     let mut case = Case::new();
-                    let transition = exited(&case.fixture.run, 1, code, signal);
-                    storage::persist_event(
-                        &mut case.fixture.conn,
-                        &case.fixture.run.owner(),
-                        &transition,
-                        PersistenceMode::Live,
-                    )
-                    .unwrap();
-                    case.fixture
-                        .conn
-                        .execute(
-                            "UPDATE member_runs SET cleanup_state='incomplete' WHERE run_id=?1",
-                            [case.fixture.run.run_id],
-                        )
-                        .unwrap();
-                    case.refresh();
+                    case.exited_pending_cleanup(code, signal);
                     let before = case.fixture.run.clone();
-                    let prior = history(&case);
+                    let prior = retained_history(&case.fixture.conn);
                     let artifact = lose_artifacts(&mut case, directory);
                     let report = recover_missing(&mut case, operator).unwrap();
                     assert_terminal_bookkeeping(
@@ -322,12 +282,12 @@ mod tests {
             }
         }
         #[test]
-        fn runner_recovery_review_r3_machine_missing_paths_keep_committed_native_exit_code_signal_and_message()
+        fn runner_recovery_machine_missing_paths_keep_committed_native_exit_code_signal_and_message()
          {
             committed_exit_cases(false);
         }
         #[test]
-        fn runner_recovery_review_r3_operator_missing_paths_keep_committed_native_exit_code_signal_and_message()
+        fn runner_recovery_operator_missing_paths_keep_committed_native_exit_code_signal_and_message()
          {
             committed_exit_cases(true);
         }
@@ -362,7 +322,7 @@ mod tests {
                 case.refresh();
                 assert_eq!(case.fixture.run.cleanup_state, CleanupState::Incomplete);
                 let before = case.fixture.run.clone();
-                let prior = history(&case);
+                let prior = retained_history(&case.fixture.conn);
                 let artifact = lose_artifacts(&mut case, directory);
                 let report = recover_missing(&mut case, operator).unwrap();
                 assert_terminal_bookkeeping(
@@ -381,23 +341,23 @@ mod tests {
             }
         }
         #[test]
-        fn runner_recovery_review_r3_machine_artifact_loss_after_committed_runner_lost_creates_no_duplicate()
-         {
+        fn runner_recovery_machine_artifact_loss_after_committed_runner_lost_creates_no_duplicate()
+        {
             interrupted_loss_cases(false);
         }
         #[test]
-        fn runner_recovery_review_r3_operator_artifact_loss_after_committed_runner_lost_creates_no_duplicate()
-         {
+        fn runner_recovery_operator_artifact_loss_after_committed_runner_lost_creates_no_duplicate()
+        {
             interrupted_loss_cases(true);
         }
 
         #[test]
-        fn runner_recovery_review_r3_terminal_bookkeeping_faults_rollback_atomically_then_retry_without_events()
+        fn runner_recovery_terminal_bookkeeping_faults_rollback_atomically_then_retry_without_events()
          {
             for fault in ["owner", "diagnostic", "gap", "finish", "commit"] {
                 let mut case = original_terminal(RunStatus::Failed);
                 let before_run = case.fixture.run.clone();
-                let prior = history(&case);
+                let prior = retained_history(&case.fixture.conn);
                 let artifact = lose_artifacts(&mut case, false);
                 let trigger = match fault {
                     "owner" => Some(
@@ -475,35 +435,13 @@ mod tests {
         #[test]
         fn runner_recovery_missing_path_uses_current_lifecycle_for_atomic_archived_closure_and_loss()
          {
-            for (lifecycle, reason) in [
-                ("member", "member_inactive"),
-                ("director", "director_inactive"),
-                ("fleet", "fleet_deleted"),
-            ] {
+            use crate::runtime::runner::recovery::test_support::relationships::{
+                LIFECYCLES, end_lifecycle,
+            };
+            for lifecycle in LIFECYCLES {
                 let mut case = Case::new();
                 let opening = persist_opening(&mut case);
-                match lifecycle {
-                    "member" => {
-                        crate::broker::deregister_member(
-                            &mut case.fixture.conn,
-                            case.fixture.run.member_id,
-                        )
-                        .unwrap();
-                    }
-                    "director" => {
-                        case.fixture.conn.execute("UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",rusqlite::params![NOW,case.fixture.run.director_member_id]).unwrap();
-                    }
-                    "fleet" => {
-                        case.fixture
-                            .conn
-                            .execute(
-                                "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
-                                rusqlite::params![NOW, case.fixture.run.fleet_id],
-                            )
-                            .unwrap();
-                    }
-                    _ => unreachable!(),
-                }
+                end_lifecycle(&mut case, lifecycle);
                 missing_lock(&mut case);
                 let report = case.recover(&mut new_host()).unwrap();
                 assert_eq!(counts(&report), (0, 0, 2));
@@ -513,7 +451,7 @@ mod tests {
                 assert!(committed[1..].iter().all(|row| row.event.notification_state
                     == NotificationState::Archived
                     && row.event.message_id.is_none()
-                    && row.event.archive_reason.unwrap().as_str() == reason));
+                    && row.event.archive_reason == Some(lifecycle.archive_reason())));
             }
         }
 
@@ -575,7 +513,7 @@ mod tests {
             let earliest = chrono::Utc::now();
             let mut host = new_host();
             host.process = Evidence::Unknown;
-            let report = recover_claim(&mut case, &mut host, &original_claim).unwrap();
+            let report = case.recover_with(&mut host, Some(&original_claim)).unwrap();
             let latest = chrono::Utc::now();
             assert_loss(&case, &report, &original);
             let current = storage::get_run(&case.fixture.conn, original.run_id).unwrap();
@@ -619,12 +557,15 @@ mod tests {
             let committed = rows(&case.fixture.conn);
             let mut retry = new_host();
             retry.process = Evidence::Alive;
-            assert!(recover_claim(&mut case, &mut retry, &original_claim).is_err());
+            assert!(
+                case.recover_with(&mut retry, Some(&original_claim))
+                    .is_err()
+            );
             assert_eq!(rows(&case.fixture.conn), committed);
             let matching = claim(&current);
             let mut retry = new_host();
             retry.process = Evidence::Alive;
-            let no_work = recover_claim(&mut case, &mut retry, &matching).unwrap();
+            let no_work = case.recover_with(&mut retry, Some(&matching)).unwrap();
             assert_eq!(counts(&no_work), (0, 0, 0));
             assert_eq!(rows(&case.fixture.conn), committed);
             case.fixture
@@ -635,14 +576,14 @@ mod tests {
                 )
                 .unwrap();
             let changed = rows(&case.fixture.conn);
-            assert!(recover_claim(&mut case, &mut new_host(), &matching).is_err());
+            assert!(case.recover_with(&mut new_host(), Some(&matching)).is_err());
             assert_eq!(rows(&case.fixture.conn), changed);
             case.refresh();
             let latest_claim = claim(&case.fixture.run);
             let mut retry = new_host();
             retry.process = Evidence::Alive;
             assert_eq!(
-                counts(&recover_claim(&mut case, &mut retry, &latest_claim).unwrap()),
+                counts(&case.recover_with(&mut retry, Some(&latest_claim)).unwrap()),
                 (0, 0, 0)
             );
             assert_eq!(rows(&case.fixture.conn), changed);
@@ -700,7 +641,7 @@ mod tests {
                 let mut host = new_host();
                 host.process = Evidence::Unknown;
                 let attestation = claim(&case.fixture.run);
-                let result = recover_claim(&mut case, &mut host, &attestation);
+                let result = case.recover_with(&mut host, Some(&attestation));
                 case.fixture.conn.commit_hook(None::<fn() -> bool>).unwrap();
                 assert!(result.is_err(), "{fault}");
                 assert_eq!(rows(&case.fixture.conn), before, "{fault}");
@@ -749,7 +690,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(80));
                     writer.execute_batch("COMMIT").unwrap();
                 });
-                let result = recover_claim(&mut case, &mut host, &attestation);
+                let result = case.recover_with(&mut host, Some(&attestation));
                 writer.join().unwrap();
                 assert!(result.is_err());
             });
@@ -768,23 +709,22 @@ mod tests {
     mod relationships {
         use crate::runtime::runner::recovery::test_support::relationships::*;
         #[test]
-        fn runner_recovery_review_r5_exceptional_zero_event_takeover_refuses_actual_member_fleet_change_atomically()
+        fn runner_recovery_exceptional_zero_event_takeover_refuses_actual_member_fleet_change_atomically()
          {
             refusal(Stage::ExceptionalTakeover, Relationship::MemberFleet);
         }
         #[test]
-        fn runner_recovery_review_r5_exceptional_zero_event_takeover_refuses_actual_director_fleet_change_atomically()
+        fn runner_recovery_exceptional_zero_event_takeover_refuses_actual_director_fleet_change_atomically()
          {
             refusal(Stage::ExceptionalTakeover, Relationship::DirectorFleet);
         }
         #[test]
-        fn runner_recovery_review_r5_exceptional_zero_event_takeover_refuses_actual_fleet_director_change_atomically()
+        fn runner_recovery_exceptional_zero_event_takeover_refuses_actual_fleet_director_change_atomically()
          {
             refusal(Stage::ExceptionalTakeover, Relationship::FleetDirector);
         }
         #[test]
-        fn runner_recovery_review_r5_valid_historical_exceptional_zero_event_bookkeeping_keeps_history()
-         {
+        fn runner_recovery_valid_historical_exceptional_zero_event_bookkeeping_keeps_history() {
             historical_control(Stage::ExceptionalTakeover);
         }
     }

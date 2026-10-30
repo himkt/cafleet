@@ -245,49 +245,27 @@ mod tests {
 
     mod history {
         use super::*;
+        use crate::runtime::runner::recovery::test_support::relationships::{
+            LIFECYCLES, end_lifecycle,
+        };
 
         #[test]
         fn runner_recovery_archives_each_original_and_synthesized_event_by_current_lifecycle() {
-            for (lifecycle, reason) in [
-                ("member", "member_inactive"),
-                ("director", "director_inactive"),
-                ("fleet", "fleet_deleted"),
-            ] {
+            for lifecycle in LIFECYCLES {
                 let mut case = Case::new();
                 case.seed(&[
                     opening(&case.fixture.run, 1, 1),
                     obscured(&case.fixture.run, 2, 1),
                 ]);
-                match lifecycle {
-                    "member" => {
-                        crate::broker::deregister_member(
-                            &mut case.fixture.conn,
-                            case.fixture.run.member_id,
-                        )
-                        .unwrap();
-                    }
-                    "director" => {
-                        case.fixture.conn.execute("UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",rusqlite::params![NOW,case.fixture.run.director_member_id]).unwrap();
-                    }
-                    "fleet" => {
-                        case.fixture
-                            .conn
-                            .execute(
-                                "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
-                                rusqlite::params![NOW, case.fixture.run.fleet_id],
-                            )
-                            .unwrap();
-                    }
-                    _ => unreachable!(),
-                }
+                end_lifecycle(&mut case, lifecycle);
                 let report = case.recover(&mut new_host()).unwrap();
-                assert_eq!(counts(&report), (2, 0, 4), "{lifecycle}");
+                assert_eq!(counts(&report), (2, 0, 4), "{lifecycle:?}");
                 let events = events(&case);
                 assert_eq!(events.len(), 4);
                 assert!(events.iter().all(|row| row.event.notification_state
                     == NotificationState::Archived
                     && row.event.message_id.is_none()
-                    && row.event.archive_reason.unwrap().as_str() == reason));
+                    && row.event.archive_reason == Some(lifecycle.archive_reason())));
                 assert_eq!(
             case.fixture
                 .conn
@@ -915,6 +893,7 @@ mod tests {
                 let mut case = Case::new();
                 case.seed(&[opening(&case.fixture.run, 1, 1)]);
                 let original = case.fixture.run.status;
+                let original_bytes = case.spool_bytes().unwrap();
                 let mut host = new_host();
                 let mut fired = false;
                 host.action = Some(Box::new(move |boundary, _, _| {
@@ -924,13 +903,34 @@ mod tests {
                     }
                     Ok(())
                 }));
-                let _interrupted = case.recover(&mut host);
+                let interrupted = case.recover(&mut host);
                 assert!(host.calls.iter().any(|name| name == stop), "{stop}");
                 let prior = events(&case);
+                if stop == "before_compact" {
+                    assert!(
+                        interrupted.is_err()
+                            || interrupted.is_ok_and(|report| matches!(
+                                report.outcome,
+                                RecoveryOutcome::Recovering
+                            ))
+                    );
+                    assert!(
+                        case.spool_bytes().unwrap().starts_with(&original_bytes),
+                        "an interrupted compaction retains the original frames"
+                    );
+                    assert!(!prior.is_empty());
+                }
                 let result = case.recover(&mut new_host()).unwrap();
                 assert_eq!(result.status, RunStatus::Lost, "{stop}");
                 let final_rows = events(&case);
                 assert_eq!(final_rows.len(), 3, "{stop}");
+                if stop == "before_compact" {
+                    assert_eq!(
+                        final_rows.iter().map(|row| &row.event).collect::<Vec<_>>(),
+                        prior.iter().map(|row| &row.event).collect::<Vec<_>>(),
+                        "the committed delivery is complete before compaction"
+                    );
+                }
                 for earlier in prior {
                     assert!(final_rows.iter().any(|row| row.event == earlier.event));
                 }
@@ -944,43 +944,6 @@ mod tests {
                     1
                 );
             }
-        }
-
-        #[test]
-        fn runner_recovery_interruption_before_compaction_retains_originals_and_committed_delivery()
-        {
-            let mut case = Case::new();
-            case.seed(&[opening(&case.fixture.run, 1, 1)]);
-            let original = case.spool_bytes().unwrap();
-            let mut host = new_host();
-            host.action = Some(Box::new(|boundary, _, _| {
-                if boundary == "before_compact" {
-                    Err(CafleetError::App("injected compaction refusal".into()))
-                } else {
-                    Ok(())
-                }
-            }));
-            let result = case.recover(&mut host);
-            assert!(
-                result.is_err()
-                    || result
-                        .is_ok_and(|report| matches!(report.outcome, RecoveryOutcome::Recovering))
-            );
-            let retained = case.spool_bytes().unwrap();
-            assert!(retained.starts_with(&original));
-            let committed = events(&case);
-            assert!(!committed.is_empty());
-            case.recover(&mut new_host()).unwrap();
-            assert_eq!(
-                events(&case)
-                    .into_iter()
-                    .map(|row| row.event)
-                    .collect::<Vec<_>>(),
-                committed
-                    .into_iter()
-                    .map(|row| row.event)
-                    .collect::<Vec<_>>()
-            );
         }
 
         #[test]
@@ -1128,25 +1091,10 @@ mod tests {
          {
             for (code, signal) in [(Some(7), None), (None, Some(15))] {
                 let mut case = Case::new();
-                let original = exited(&case.fixture.run, 1, code, signal);
-                let event = storage::persist_event(
-                    &mut case.fixture.conn,
-                    &case.fixture.run.owner(),
-                    &original,
-                    PersistenceMode::Live,
-                )
-                .unwrap();
+                let (original, event) = case.exited_pending_cleanup(code, signal);
                 let message =
                     crate::broker::get_message(&case.fixture.conn, event.message_id.unwrap())
                         .unwrap();
-                case.fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET cleanup_state='incomplete' WHERE run_id=?1",
-                        [case.fixture.run.run_id],
-                    )
-                    .unwrap();
-                case.refresh();
                 let mut bytes = frame(&original);
                 bytes.extend(frame(&original));
                 bytes.extend([0, 0, 0, 40, 1, 2, 3]);
@@ -1182,22 +1130,7 @@ mod tests {
         fn runner_recovery_terminal_complete_corruption_before_tail_preserves_every_byte_and_commit()
          {
             let mut case = Case::new();
-            let original = exited(&case.fixture.run, 1, Some(7), None);
-            let event = storage::persist_event(
-                &mut case.fixture.conn,
-                &case.fixture.run.owner(),
-                &original,
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            case.fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET cleanup_state='incomplete' WHERE run_id=?1",
-                    [case.fixture.run.run_id],
-                )
-                .unwrap();
-            case.refresh();
+            let (original, event) = case.exited_pending_cleanup(Some(7), None);
             let mut bytes = frame(&original);
             let mut damaged = frame(&original);
             damaged[4] ^= 1;
@@ -1221,7 +1154,7 @@ mod tests {
             atomic::{AtomicBool, Ordering},
         };
         #[test]
-        fn runner_recovery_review_r4_verified_creator_recovery_removes_its_private_descriptor() {
+        fn runner_recovery_verified_creator_recovery_removes_its_private_descriptor() {
             let mut case = described_creator();
             let report = case.recover(&mut new_host()).unwrap();
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
@@ -1235,7 +1168,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_review_r4_historical_descriptor_survives_reconciler_retries_until_verified_removal()
+        fn runner_recovery_historical_descriptor_survives_reconciler_retries_until_verified_removal()
          {
             let mut case = described_creator();
             let bytes = owned_bytes(&case);
@@ -1272,7 +1205,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_review_r4_absent_descriptor_and_completed_retry_are_idempotent() {
+        fn runner_recovery_absent_descriptor_and_completed_retry_are_idempotent() {
             let mut case = Case::creator();
             let report = case.recover(&mut new_host()).unwrap();
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
@@ -1394,35 +1327,33 @@ mod tests {
             }
         }
         #[test]
-        fn runner_recovery_review_r4_replaced_descriptor_after_pin_is_preserved_with_incomplete_cleanup()
-         {
+        fn runner_recovery_replaced_descriptor_after_pin_is_preserved_with_incomplete_cleanup() {
             changed_after_pin(Mutation::Replacement);
         }
         #[test]
-        fn runner_recovery_review_r4_symlink_after_pin_preserves_link_and_target_with_incomplete_cleanup()
-         {
+        fn runner_recovery_symlink_after_pin_preserves_link_and_target_with_incomplete_cleanup() {
             changed_after_pin(Mutation::Symlink);
         }
         #[test]
-        fn runner_recovery_review_r4_in_place_descriptor_change_after_pin_is_preserved() {
+        fn runner_recovery_in_place_descriptor_change_after_pin_is_preserved() {
             changed_after_pin(Mutation::Content);
         }
         #[test]
-        fn runner_recovery_review_r4_descriptor_appearing_after_absence_pin_is_preserved() {
+        fn runner_recovery_descriptor_appearing_after_absence_pin_is_preserved() {
             changed_after_pin(Mutation::Appeared);
         }
         #[test]
-        fn runner_recovery_review_r4_descriptor_disappearing_after_pin_is_safe_absence() {
+        fn runner_recovery_descriptor_disappearing_after_pin_is_safe_absence() {
             changed_after_pin(Mutation::Disappeared);
         }
         #[test]
-        fn runner_recovery_review_r4_foreign_epoch_before_unlink_preserves_descriptor() {
+        fn runner_recovery_foreign_epoch_before_unlink_preserves_descriptor() {
             changed_after_pin(Mutation::ForeignOwner);
         }
 
         #[test]
-        fn runner_recovery_review_r4_invalid_descriptor_identity_epoch_shape_or_permissions_fails_privately()
-         {
+        fn runner_recovery_invalid_descriptor_identity_epoch_shape_or_permissions_fails_privately()
+        {
             for damage in [
                 "schema",
                 "database",
@@ -1494,8 +1425,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_review_r4_original_deadline_after_before_finish_keeps_descriptor_retryable()
-         {
+        fn runner_recovery_original_deadline_after_before_finish_keeps_descriptor_retryable() {
             let mut case = described_creator();
             let bytes = owned_bytes(&case);
             let mut host = Host::new(Instant::now() + Duration::from_millis(500));
@@ -1519,8 +1449,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_review_r4_exceptional_database_only_reconciliation_preserves_suspect_descriptor()
-         {
+        fn runner_recovery_exceptional_database_only_reconciliation_preserves_suspect_descriptor() {
             let mut case = described_creator();
             let before = identity(&case.artifacts.paths.descriptor);
             case.release();
@@ -1534,16 +1463,15 @@ mod tests {
 
     mod descriptor_cleanup {
         use super::*;
-        use crate::runtime::runner::recovery::test_support::descriptor::recover;
         use crate::runtime::runner::recovery::test_support::descriptor::*;
         #[test]
-        fn runner_recovery_review_r4_coordinator_propagates_actual_unlink_failure_and_retries_historical_epoch()
+        fn runner_recovery_coordinator_propagates_actual_unlink_failure_and_retries_historical_epoch()
          {
             let mut case = described_creator();
             let bytes = owned_bytes(&case);
             let mut failed =
                 Host::with_unlink(&case, Instant::now() + Duration::from_secs(2), true);
-            let result = recover(&mut case, &mut failed);
+            let result = case.recover(&mut failed);
             assert_eq!(
                 failed.unlink.as_ref().unwrap().calls,
                 1,
@@ -1564,7 +1492,7 @@ mod tests {
                 .owner_epoch;
             let mut retry =
                 Host::with_unlink(&case, Instant::now() + Duration::from_secs(2), false);
-            let report = recover(&mut case, &mut retry).unwrap();
+            let report = case.recover(&mut retry).unwrap();
             assert_eq!(retry.unlink.as_ref().unwrap().calls, 1);
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
             assert_eq!(counts(&report), (0, 0, 0));
@@ -1585,7 +1513,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_review_r4_expired_original_budget_prevents_actual_unlink_dispatch() {
+        fn runner_recovery_expired_original_budget_prevents_actual_unlink_dispatch() {
             let mut case = described_creator();
             let bytes = owned_bytes(&case);
             let mut host =
@@ -1596,7 +1524,7 @@ mod tests {
                 }
                 Ok(())
             }));
-            let result = recover(&mut case, &mut host);
+            let result = case.recover(&mut host);
             assert!(host.calls.iter().any(|name| name == "before_finish"));
             assert!(Instant::now() >= host.deadline);
             assert_eq!(
@@ -1616,33 +1544,28 @@ mod tests {
         use super::*;
         use crate::runtime::runner::recovery::test_support::relationships::*;
         #[test]
-        fn runner_recovery_review_r5_finalization_after_replay_refuses_actual_member_fleet_change_atomically()
-         {
+        fn runner_recovery_finalization_after_replay_refuses_actual_member_fleet_change_atomically()
+        {
             refusal(Stage::Finalization, Relationship::MemberFleet);
         }
         #[test]
-        fn runner_recovery_review_r5_finalization_after_replay_refuses_actual_director_fleet_change_atomically()
+        fn runner_recovery_finalization_after_replay_refuses_actual_director_fleet_change_atomically()
          {
             refusal(Stage::Finalization, Relationship::DirectorFleet);
         }
         #[test]
-        fn runner_recovery_review_r5_finalization_after_replay_refuses_actual_fleet_director_change_atomically()
+        fn runner_recovery_finalization_after_replay_refuses_actual_fleet_director_change_atomically()
          {
             refusal(Stage::Finalization, Relationship::FleetDirector);
         }
         #[test]
-        fn runner_recovery_review_r5_valid_historical_lifecycle_change_after_replay_allows_finalization()
-         {
+        fn runner_recovery_valid_historical_lifecycle_change_after_replay_allows_finalization() {
             historical_control(Stage::Finalization);
         }
 
         #[test]
-        fn runner_recovery_review_r5_valid_historical_replay_selects_current_archive_disposition() {
-            for lifecycle in [
-                Lifecycle::MemberInactive,
-                Lifecycle::DirectorInactive,
-                Lifecycle::FleetDeleted,
-            ] {
+        fn runner_recovery_valid_historical_replay_selects_current_archive_disposition() {
+            for lifecycle in LIFECYCLES {
                 let mut case = prepare(Stage::Finalization);
                 let mutation = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
                 let mut changed = false;

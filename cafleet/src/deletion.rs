@@ -1524,10 +1524,8 @@ mod tests {
         impl Drop for EmergencyInterrupt {
             fn drop(&mut self) {
                 drop(self.cancellation.take());
-                if let Some(worker) = self.worker.take()
-                    && worker.join().is_err()
-                {
-                    eprintln!("owned emergency SQL interruption worker panicked");
+                if let Some(worker) = self.worker.take() {
+                    drop(worker.join());
                 }
             }
         }
@@ -1590,9 +1588,10 @@ mod tests {
                     conn.query_row(LONG_SQL, [], |row| row.get::<_, i64>(0))
                         .map_err(crate::error::CafleetError::from)
                 });
-                let emergency_fired = emergency.finish();
-                eprintln!("recovery nested SQL {exit}: emergency_fired={emergency_fired}");
-                assert!(!emergency_fired, "the original outer deadline cancels SQL");
+                assert!(
+                    !emergency.finish(),
+                    "{exit}: the original outer deadline cancels SQL"
+                );
                 assert!(result.is_err());
                 assert!(
                     Instant::now() >= outer,
@@ -1662,12 +1661,12 @@ mod tests {
                 .update_hook(None::<fn(rusqlite::hooks::Action, &str, &str, i64)>)
                 .unwrap();
             let entered = *entered.lock().expect("owned replay SQL entry observation");
-            eprintln!(
-                "recovery replay SQL: entered={:?}, returned={:?}, emergency_fired={emergency_fired}",
+            assert!(
+                !emergency_fired,
+                "the original replay deadline cancels SQL: entered={:?}, returned={:?}",
                 entered.map(|at| at.duration_since(start)),
                 returned.duration_since(start)
             );
-            assert!(!emergency_fired, "the original replay deadline cancels SQL");
             let entered =
                 entered.expect("the actual replay trigger entered before SQL cancellation");
             assert!(entered >= start && entered < deadline.instant());

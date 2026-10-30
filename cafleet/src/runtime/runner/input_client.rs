@@ -1337,6 +1337,23 @@ pub(crate) mod test_support {
         pub(crate) _lock: Arc<RunLock>,
     }
     impl Case {
+        pub(crate) fn command(&self) -> PermissionRespondInput {
+            let metadata = &self.request.metadata;
+            PermissionRespondInput {
+                interaction_id: metadata.interaction_id,
+                event_id: metadata.event_id,
+                director_member_id: metadata.director_member_id,
+                expected_run_id: self.owner.run_id,
+                expected_owner_epoch: metadata.expected_owner_epoch,
+                request_token: metadata.request_token.clone(),
+                decision: metadata.decision,
+                decision_source: metadata.decision_source,
+                director_mode: metadata.director_mode,
+                mode_evidence_ref: metadata.mode_evidence_ref.clone(),
+                decision_evidence_ref: metadata.decision_evidence_ref.clone(),
+                operation_key: self.request.operation_key.clone(),
+            }
+        }
         pub(crate) fn new(state: Retained) -> Self {
             Self::decision(
                 state,
@@ -1541,6 +1558,56 @@ mod tests {
     use std::net::Shutdown;
     use std::time::Duration;
 
+    /// The `(event_id, interaction_id, message_id)` of the run's opened interaction, polled
+    /// until it is committed or `until` passes.
+    fn opened_interaction(fixture: &mut ServiceFixture, until: Instant) -> (i64, i64, i64) {
+        let run_id = fixture.fixture.run.run_id;
+        loop {
+            let row = with_database_budget(&mut fixture.fixture.conn, Deadline::until(until), |conn| {
+                conn.query_row(
+                    "SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
+                    [run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .map_err(crate::error::CafleetError::from)
+            })
+            .unwrap();
+            if let Some(row) = row {
+                return row;
+            }
+            assert!(
+                Instant::now() < until,
+                "the opened interaction commits before the original deadline"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Row counts of the input, permission-response and claim tables, in that order.
+    fn permission_counts(conn: &Connection) -> [i64; 3] {
+        [
+            "member_input_operations",
+            "member_permission_responses",
+            "member_permission_response_claims",
+        ]
+        .map(|table| {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        })
+    }
+
+    fn notified_at(conn: &Connection, message_id: i64) -> Option<String> {
+        conn.query_row(
+            "SELECT notified_at FROM messages WHERE message_id=?1",
+            [message_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
     fn inspection_barrier(fixture: &mut ServiceFixture, start: usize, barrier: &str) {
         native_answers_through_barrier(fixture, start, barrier, &[]);
     }
@@ -1605,38 +1672,13 @@ mod tests {
         fixture.master.write_all(b"form-inspection\r").unwrap();
         fixture.read_until("Operation: write form-inspection.txt");
         let output_start = fixture.output.len();
-        let (event_id, interaction_id, message_id) = loop {
-            let row = with_database_budget(&mut fixture.fixture.conn, Deadline::until(until), |conn| {
-                conn.query_row(
-                    "SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
-                    [fixture.fixture.run.run_id], |row| Ok((row.get::<_, i64>(0)?,row.get::<_, i64>(1)?,row.get::<_, i64>(2)?)),
-                ).optional().map_err(crate::error::CafleetError::from)
-            }).unwrap();
-            if let Some(row) = row {
-                break row;
-            }
-            assert!(Instant::now() < until, "original stable-request deadline");
-            std::thread::sleep(Duration::from_millis(2));
-        };
+        let (event_id, interaction_id, message_id) = opened_interaction(&mut fixture, until);
         let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
         let settings = Settings::for_database(
             std::path::Path::new(fixture.fixture.conn.path().unwrap()),
             Some("tmux"),
         );
-        let counts = |conn: &Connection| {
-            [
-                "member_input_operations",
-                "member_permission_responses",
-                "member_permission_response_claims",
-            ]
-            .map(|table| {
-                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap()
-            })
-        };
-        let before = counts(&fixture.fixture.conn);
+        let before = permission_counts(&fixture.fixture.conn);
         let inspected = inspect_permission(
             &mut fixture.fixture.conn,
             &settings,
@@ -1682,17 +1724,8 @@ mod tests {
                 "choice_scope"
             ]
         );
-        assert_eq!(counts(&fixture.fixture.conn), before);
-        let notified: Option<String> = fixture
-            .fixture
-            .conn
-            .query_row(
-                "SELECT notified_at FROM messages WHERE message_id=?1",
-                [message_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(notified.is_none());
+        assert_eq!(permission_counts(&fixture.fixture.conn), before);
+        assert!(notified_at(&fixture.fixture.conn, message_id).is_none());
         inspection_barrier(&mut fixture, output_start, "inspection-barrier");
         fixture.finish();
     }
@@ -1704,20 +1737,7 @@ mod tests {
 
         let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
             synthetic(fixture, spec);
-            let path = fixture._dir.path().join("observation-services.json");
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(path)
-                .unwrap();
-            file.write_all(
-                &serde_json::to_vec(
-                    &serde_json::json!({"catalog":inspection_fixture_definition()}),
-                )
-                .unwrap(),
-            )
-            .unwrap();
-            file.sync_all().unwrap();
+            overwrite_observation_catalog(fixture, inspection_fixture_definition());
         });
         fixture.start_running();
         let outer = Instant::now() + Duration::from_secs(2);
@@ -1727,19 +1747,7 @@ mod tests {
             .unwrap();
         fixture.read_until("Operation: write form-executable-inspection.txt");
         let output_start = fixture.output.len();
-        let (event_id, interaction_id, message_id) = loop {
-            let ids = with_database_budget(&mut fixture.fixture.conn,Deadline::until(outer),|conn| {
-                conn.query_row("SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?))).optional().map_err(crate::error::CafleetError::from)
-            }).unwrap();
-            if let Some(ids) = ids {
-                break ids;
-            }
-            assert!(
-                Instant::now() < outer,
-                "original request stabilization deadline"
-            );
-            std::thread::sleep(Duration::from_millis(2));
-        };
+        let (event_id, interaction_id, message_id) = opened_interaction(&mut fixture, outer);
         let (settings, run, placement) = service_target(&fixture);
         let request = PermissionInspectInput {
             event_id,
@@ -1869,28 +1877,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(actual_sender, replacement_sender);
-        for table in [
-            "member_input_operations",
-            "member_permission_responses",
-            "member_permission_response_claims",
-        ] {
-            let count: i64 = fixture
-                .fixture
-                .conn
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(count, 0);
-        }
-        let notified: Option<String> = fixture
-            .fixture
-            .conn
-            .query_row(
-                "SELECT notified_at FROM messages WHERE message_id=?1",
-                [message_id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(notified.is_none());
+        assert_eq!(permission_counts(&fixture.fixture.conn), [0, 0, 0]);
+        assert!(notified_at(&fixture.fixture.conn, message_id).is_none());
         inspection_barrier(&mut fixture, output_start, "inspection-client-barrier");
         fixture.finish();
     }
@@ -1904,21 +1892,7 @@ mod tests {
 
         let mut case = Case::new(Retained::Accepted);
         let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-        let metadata = &receipt.response.metadata;
-        let input = PermissionRespondInput {
-            interaction_id: metadata.interaction_id,
-            event_id: metadata.event_id,
-            director_member_id: metadata.director_member_id,
-            expected_run_id: receipt.input.run_id,
-            expected_owner_epoch: metadata.expected_owner_epoch,
-            request_token: metadata.request_token.clone(),
-            decision: metadata.decision,
-            decision_source: metadata.decision_source,
-            director_mode: metadata.director_mode,
-            mode_evidence_ref: metadata.mode_evidence_ref.clone(),
-            decision_evidence_ref: metadata.decision_evidence_ref.clone(),
-            operation_key: receipt.input.operation_key.clone(),
-        };
+        let input = case.command();
         let run = storage::get_run(&case.fixture.conn, input.expected_run_id).unwrap();
         let records = health_records(&case.fixture.conn);
         let changes = case.fixture.conn.total_changes();
@@ -2029,6 +2003,10 @@ mod tests {
         catalog["profiles"][0]["capabilities"]["answers"][0]["stages"] = serde_json::json!([{
             "bytes_hex":"790d","required_rule_id":"synthetic-permission","required_choice_id":"allow-once"
         }]);
+        overwrite_observation_catalog(fixture, catalog);
+    }
+    /// Replaces the catalog in the observation-services file that `synthetic` already wrote.
+    fn overwrite_observation_catalog(fixture: &Fixture, catalog: serde_json::Value) {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .truncate(true)
@@ -2212,21 +2190,8 @@ mod tests {
         let process = ProcessIdentity::read(run.owner_pid).unwrap().unwrap();
         assert_eq!(process.start_identity, run.owner_start_identity);
         assert!(process.matches().unwrap(), "generation-bound owned runner");
-        rustix::termios::tcsetwinsize(
-            &fixture.master,
-            rustix::termios::Winsize {
-                ws_row: 24,
-                ws_col: 81,
-                ws_xpixel: 0,
-                ws_ypixel: 0,
-            },
-        )
-        .unwrap();
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
-            nix::sys::signal::Signal::SIGWINCH,
-        )
-        .unwrap();
+        assert_eq!(i64::from(fixture.child.id()), process.pid);
+        fixture.resize(24, 81);
         let resized = loop {
             let current = inspect_permission(
                 &mut fixture.fixture.conn,
@@ -4658,7 +4623,7 @@ mod tests {
             }
         }
         #[test]
-        fn step5_b0_clock_prepared_submission_captures_one_paired_sample() {
+        fn clock_prepared_submission_captures_one_paired_sample() {
             let t = anchor();
             let request = request();
             let mut clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 30)));
@@ -4667,7 +4632,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_b0_clock_prepared_submission_source_failure_preserves_unused_later_sample() {
+        fn clock_prepared_submission_source_failure_preserves_unused_later_sample() {
             let t = anchor();
             let request = request();
             let mut clock =
@@ -4680,7 +4645,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_b0_clock_prepared_submission_expiry_rejects_without_resampling_new_budget() {
+        fn clock_prepared_submission_expiry_rejects_without_resampling_new_budget() {
             let t = anchor();
             let request = request();
             let mut clock = ScriptClock::new(vec![
@@ -4933,23 +4898,6 @@ mod tests {
                     Err(self.failure("exchange", run))
                 }
             }
-            fn command(case: &Case) -> PermissionRespondInput {
-                let metadata = &case.request.metadata;
-                PermissionRespondInput {
-                    interaction_id: metadata.interaction_id,
-                    event_id: metadata.event_id,
-                    director_member_id: metadata.director_member_id,
-                    expected_run_id: case.owner.run_id,
-                    expected_owner_epoch: metadata.expected_owner_epoch,
-                    request_token: metadata.request_token.clone(),
-                    decision: metadata.decision,
-                    decision_source: metadata.decision_source,
-                    director_mode: metadata.director_mode,
-                    mode_evidence_ref: metadata.mode_evidence_ref.clone(),
-                    decision_evidence_ref: metadata.decision_evidence_ref.clone(),
-                    operation_key: case.request.operation_key.clone(),
-                }
-            }
             fn invoke(
                 conn: &mut Connection,
                 settings: &Settings,
@@ -5051,7 +4999,7 @@ mod tests {
                 let before = Snapshot::take(&case.fixture.conn);
                 let receipt =
                     storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-                let request = command(&case);
+                let request = case.command();
                 let result = success(attempt(&mut case, &request));
                 assert_projection(&case, &result, state);
                 before.unchanged(&case.fixture.conn);
@@ -5061,32 +5009,21 @@ mod tests {
                 );
             }
             #[test]
-            fn step5_a1_retained_accepted_preserves_original_binding_without_live_calls() {
-                projection(Retained::Accepted);
-            }
-            #[test]
-            fn step5_a1_retained_inprogress_preserves_unknown_stage_and_claim_without_live_calls() {
-                projection(Retained::InProgress);
-            }
-            #[test]
-            fn step5_a1_retained_uncertain_preserves_unknown_stage_and_claim_without_live_calls() {
-                projection(Retained::Uncertain);
-            }
-            #[test]
-            fn step5_a1_settled_submitted_remains_accepted_without_live_calls() {
-                projection(Retained::Submitted);
-            }
-            #[test]
-            fn step5_a1_consumed_not_submitted_rejects_this_retry_without_changing_claim() {
-                projection(Retained::NotSubmitted);
-            }
-            #[test]
-            fn step5_a1_consumed_abandoned_uncertain_preserves_possible_transmission_claim() {
-                projection(Retained::Abandoned);
+            fn retained_and_consumed_history_projects_each_state_without_live_calls() {
+                for state in [
+                    Retained::Accepted,
+                    Retained::InProgress,
+                    Retained::Uncertain,
+                    Retained::Submitted,
+                    Retained::NotSubmitted,
+                    Retained::Abandoned,
+                ] {
+                    projection(state);
+                }
             }
 
             #[test]
-            fn step5_a1_history_preserves_both_decisions_and_every_valid_attributed_source_mode() {
+            fn history_preserves_both_decisions_and_every_valid_attributed_source_mode() {
                 for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                     for (mode, source) in [
                         (DirectorMode::Auto, DecisionSource::DirectorAuto),
@@ -5096,7 +5033,7 @@ mod tests {
                     ] {
                         let mut case = Case::decision(Retained::Accepted, decision, mode, source);
                         let before = Snapshot::take(&case.fixture.conn);
-                        let request = command(&case);
+                        let request = case.command();
                         let result = success(attempt(&mut case, &request));
                         assert_projection(&case, &result, Retained::Accepted);
                         before.unchanged(&case.fixture.conn);
@@ -5144,7 +5081,7 @@ mod tests {
                     rusqlite::params![NOW,run.run_id]).unwrap(),1);
                     }
                 }
-                let request = command(&case);
+                let request = case.command();
                 let before = Snapshot::take(&case.fixture.conn);
                 let result = success(attempt(&mut case, &request));
                 assert_projection(&case, &result, Retained::Accepted);
@@ -5159,28 +5096,20 @@ mod tests {
                 }
             }
             #[test]
-            fn step5_a1_history_survives_closed_interaction_without_request_reinspection() {
-                changed_history(HistoryChange::Closed);
-            }
-            #[test]
-            fn step5_a1_history_survives_member_deactivation_without_active_preflight() {
-                changed_history(HistoryChange::MemberInactive);
-            }
-            #[test]
-            fn step5_a1_history_survives_director_deactivation_without_active_preflight() {
-                changed_history(HistoryChange::DirectorInactive);
-            }
-            #[test]
-            fn step5_a1_history_survives_deleted_fleet_without_live_preflight() {
-                changed_history(HistoryChange::FleetDeleted);
-            }
-            #[test]
-            fn step5_a1_history_reports_audit_epoch_after_terminal_owner_fencing() {
-                changed_history(HistoryChange::OwnerFenced);
+            fn history_survives_each_later_lifecycle_change_without_live_preflight() {
+                for change in [
+                    HistoryChange::Closed,
+                    HistoryChange::MemberInactive,
+                    HistoryChange::DirectorInactive,
+                    HistoryChange::FleetDeleted,
+                    HistoryChange::OwnerFenced,
+                ] {
+                    changed_history(change);
+                }
             }
 
             #[test]
-            fn step5_a1_retained_result_precedes_the_actual_held_pane_lock() {
+            fn retained_result_precedes_the_actual_held_pane_lock() {
                 let mut case = Case::new(Retained::Accepted);
                 let guard = PaneLock::acquire_within(
                     &case.settings.database_url,
@@ -5189,7 +5118,7 @@ mod tests {
                 )
                 .unwrap()
                 .unwrap();
-                let request = command(&case);
+                let request = case.command();
                 let before = Snapshot::take(&case.fixture.conn);
                 let result = success(attempt(&mut case, &request));
                 assert_projection(&case, &result, Retained::Accepted);
@@ -5206,9 +5135,9 @@ mod tests {
                 drop(guard);
             }
             #[test]
-            fn step5_a1_reopened_connection_retries_settled_history_without_mutation() {
+            fn reopened_connection_retries_settled_history_without_mutation() {
                 let mut case = Case::new(Retained::Submitted);
-                let request = command(&case);
+                let request = case.command();
                 let before = Snapshot::take(&case.fixture.conn);
                 success(attempt(&mut case, &request));
                 before.unchanged(&case.fixture.conn);
@@ -5224,13 +5153,12 @@ mod tests {
                 second.unchanged(&reopened);
             }
             #[test]
-            fn step5_a1_retained_lookup_reads_while_another_connection_holds_sqlite_write_ownership()
-             {
+            fn retained_lookup_reads_while_another_connection_holds_sqlite_write_ownership() {
                 let mut case = Case::new(Retained::Accepted);
                 let writer = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
                 writer.execute_batch("BEGIN IMMEDIATE").unwrap();
                 let before = Snapshot::take(&case.fixture.conn);
-                let request = command(&case);
+                let request = case.command();
                 let result = invoke(
                     &mut case.fixture.conn,
                     &case.settings,
@@ -5244,21 +5172,21 @@ mod tests {
                 before.unchanged(&case.fixture.conn);
             }
             #[test]
-            fn step5_a1_retained_lookup_precedes_actual_unresolved_capacity_refusal() {
+            fn retained_lookup_precedes_actual_unresolved_capacity_refusal() {
                 let mut case = Case::new(Retained::Accepted);
                 assert_eq!(case.fixture.conn.execute(
                 "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<4095) INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) SELECT ?1,'fixture:capacity:'||x,'prompt',?2,'in_progress',?3,?3 FROM n",
                 rusqlite::params![case.owner.run_id,"b".repeat(64),NOW]).unwrap(),4095);
                 assert_eq!(case.fixture.conn.query_row("SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain')",[case.owner.run_id],|row|row.get::<_,i64>(0)).unwrap(),4096);
                 let before = Snapshot::take(&case.fixture.conn);
-                let request = command(&case);
+                let request = case.command();
                 let result = success(attempt(&mut case, &request));
                 assert_projection(&case, &result, Retained::Accepted);
                 before.unchanged(&case.fixture.conn);
             }
 
             #[test]
-            fn step5_a1_each_conflicting_caller_binding_fails_before_live_calls_with_exact_rows() {
+            fn each_conflicting_caller_binding_fails_before_live_calls_with_exact_rows() {
                 for field in [
                     "interaction",
                     "event",
@@ -5278,7 +5206,7 @@ mod tests {
                         DirectorMode::Auto,
                         DecisionSource::User,
                     );
-                    let mut request = command(&case);
+                    let mut request = case.command();
                     match field {
                         "interaction" => request.interaction_id += 1,
                         "event" => request.event_id += 1,
@@ -5301,7 +5229,7 @@ mod tests {
                 }
             }
             #[test]
-            fn step5_a1_retained_ordinary_input_kind_cannot_impersonate_a_permission_response() {
+            fn retained_ordinary_input_kind_cannot_impersonate_a_permission_response() {
                 let mut case = Case::new(Retained::Accepted);
                 storage::reserve_input(
                     &mut case.fixture.conn,
@@ -5314,15 +5242,14 @@ mod tests {
                     },
                 )
                 .unwrap();
-                let mut request = command(&case);
+                let mut request = case.command();
                 request.operation_key = "fixture:ordinary-input".into();
                 let before = Snapshot::take(&case.fixture.conn);
                 assert!(attempt(&mut case, &request).is_err());
                 before.unchanged(&case.fixture.conn);
             }
             #[test]
-            fn step5_a1_historical_message_association_is_checked_despite_matching_canonical_digest()
-             {
+            fn historical_message_association_is_checked_despite_matching_canonical_digest() {
                 let mut case = Case::new(Retained::Accepted);
                 assert_eq!(
                     storage::permission_response_digest(case.owner.run_id, &case.request.metadata)
@@ -5344,7 +5271,7 @@ mod tests {
                         .unwrap(),
                     1
                 );
-                let request = command(&case);
+                let request = case.command();
                 let source = stored_corruption(&case);
                 let before = Snapshot::take(&case.fixture.conn);
                 let result = attempt(&mut case, &request);
@@ -5386,8 +5313,7 @@ mod tests {
                 assert_eq!(failure.source.message(), source.message());
             }
             #[test]
-            fn step5_a1_history_rejects_missing_audit_or_possibly_transmitted_claim_without_live_fallback()
-             {
+            fn history_rejects_missing_audit_or_possibly_transmitted_claim_without_live_fallback() {
                 for remove_audit in [false, true] {
                     let mut case = Case::new(Retained::Accepted);
                     assert_eq!(
@@ -5412,7 +5338,7 @@ mod tests {
                             1
                         );
                     }
-                    let request = command(&case);
+                    let request = case.command();
                     let source = stored_corruption(&case);
                     let before = Snapshot::take(&case.fixture.conn);
                     let result = attempt(&mut case, &request);
@@ -5421,7 +5347,7 @@ mod tests {
                 }
             }
             #[test]
-            fn step5_a1_history_validates_actual_member_fleet_and_director_relationships() {
+            fn history_validates_actual_member_fleet_and_director_relationships() {
                 for changed in ["member", "director", "fleet"] {
                     let mut case = Case::new(Retained::Accepted);
                     if changed == "fleet" {
@@ -5463,14 +5389,14 @@ mod tests {
                             1
                         );
                     }
-                    let request = command(&case);
+                    let request = case.command();
                     let before = Snapshot::take(&case.fixture.conn);
                     assert!(attempt(&mut case, &request).is_err(), "{changed}");
                     before.unchanged(&case.fixture.conn);
                 }
             }
             #[test]
-            fn step5_a1_copied_database_cannot_reuse_the_original_retained_identity() {
+            fn copied_database_cannot_reuse_the_original_retained_identity() {
                 let case = Case::new(Retained::Accepted);
                 let copied = case.fixture._dir.path().join("copied-history.db");
                 std::fs::copy(case.fixture.conn.path().unwrap(), &copied).unwrap();
@@ -5481,7 +5407,7 @@ mod tests {
                     invoke(
                         &mut conn,
                         &settings,
-                        &command(&case),
+                        &case.command(),
                         Deadline::until(Instant::now() + Duration::from_secs(1))
                     )
                     .is_err()
@@ -5489,11 +5415,11 @@ mod tests {
                 before.unchanged(&conn);
             }
             #[test]
-            fn step5_a1_semantic_source_mode_preflight_preserves_usage_category_before_history_or_live_effects()
+            fn semantic_source_mode_preflight_preserves_usage_category_before_history_or_live_effects()
              {
                 for mode in [DirectorMode::Manual, DirectorMode::Unknown] {
                     let mut case = Case::new(Retained::Accepted);
-                    let mut request = command(&case);
+                    let mut request = case.command();
                     request.director_mode = mode;
                     let before = Snapshot::take(&case.fixture.conn);
                     let failure = match attempt(&mut case, &request) {
@@ -5523,7 +5449,7 @@ mod tests {
                 ]
             }
             #[test]
-            fn step5_a1_input_failure_without_context_preserves_the_complete_source_category() {
+            fn input_failure_without_context_preserves_the_complete_source_category() {
                 for cause in causes() {
                     let failure = InputFailure {
                         source: cause.clone(),
@@ -5542,7 +5468,7 @@ mod tests {
                 }
             }
             #[test]
-            fn step5_a1_input_failure_context_preserves_cause_and_escapes_ordered_key_metadata() {
+            fn input_failure_context_preserves_cause_and_escapes_ordered_key_metadata() {
                 let key = "fixture:key\nwith\"quotes\"\\tail";
                 for original in causes() {
                     let failure = InputFailure {
@@ -5572,7 +5498,7 @@ mod tests {
                 }
             }
             #[test]
-            fn step5_a1_input_failure_context_omits_unknown_optional_identities() {
+            fn input_failure_context_omits_unknown_optional_identities() {
                 let failure = InputFailure {
                     source: CafleetError::DeadlineExceeded,
                     run_id: None,
@@ -5592,7 +5518,7 @@ mod tests {
                 }
             }
 
-            mod review {
+            mod claim_and_association_history {
                 use super::*;
                 use rusqlite::hooks::{
                     AuthAction, AuthContext, Authorization, TransactionOperation,
@@ -5600,7 +5526,7 @@ mod tests {
                 use std::sync::Mutex;
 
                 #[test]
-                fn step5_a1_h1_released_not_submitted_claim_remains_valid_consumed_history() {
+                fn released_not_submitted_claim_remains_valid_consumed_history() {
                     let mut case = Case::new(Retained::NotSubmitted);
                     assert_eq!(
                         case.fixture
@@ -5622,7 +5548,7 @@ mod tests {
                         Some(InputDisposition::NotSubmitted)
                     );
                     assert_eq!(receipt.response.metadata, case.request.metadata);
-                    let request = command(&case);
+                    let request = case.command();
                     let before = Snapshot::take(&case.fixture.conn);
                     let result = success(attempt(&mut case, &request));
                     assert_projection(&case, &result, Retained::NotSubmitted);
@@ -5704,7 +5630,7 @@ mod tests {
                 }
 
                 #[test]
-                fn step5_a1_h3_existing_foreign_run_rejects_association_before_live_boundary() {
+                fn existing_foreign_run_rejects_association_before_live_boundary() {
                     let mut original = Case::new(Retained::Accepted);
                     let foreign = related(&original);
                     assert_ne!(original.owner.run_id, foreign.owner.run_id);
@@ -5716,7 +5642,7 @@ mod tests {
                         storage::get_run(&original.fixture.conn, foreign.owner.run_id).unwrap(),
                         storage::get_run(&foreign.fixture.conn, foreign.owner.run_id).unwrap()
                     );
-                    let mut request = command(&original);
+                    let mut request = original.command();
                     request.expected_run_id = foreign.owner.run_id;
                     request.expected_owner_epoch = foreign.owner.owner_epoch;
                     request.operation_key = "fixture:absent-on-foreign-run".into();
@@ -5756,7 +5682,7 @@ mod tests {
                 }
 
                 #[test]
-                fn step5_a1_h3_second_run_matching_history_is_independently_valid() {
+                fn second_run_matching_history_is_independently_valid() {
                     let original = Case::new(Retained::Accepted);
                     let mut foreign = related(&original);
                     let receipt =
@@ -5767,7 +5693,7 @@ mod tests {
                         receipt.response.metadata.interaction_id,
                         original.request.metadata.interaction_id
                     );
-                    let request = command(&foreign);
+                    let request = foreign.command();
                     let before = Snapshot::take(&foreign.fixture.conn);
                     let result = success(attempt(&mut foreign, &request));
                     assert_projection(&foreign, &result, Retained::Accepted);
@@ -5784,7 +5710,7 @@ mod tests {
                 }
 
                 #[test]
-                fn step5_a1_h2_supplied_deferred_snapshot_survives_committed_association_change() {
+                fn supplied_deferred_snapshot_survives_committed_association_change() {
                     let mut case = Case::new(Retained::Accepted);
                     let mode: String = case
                         .fixture
@@ -5844,7 +5770,7 @@ mod tests {
                         Authorization::Allow
                     }))
                     .unwrap();
-                    let request = command(&case);
+                    let request = case.command();
                     let result = attempt(&mut case, &request);
                     case.fixture
                         .conn
@@ -5963,7 +5889,7 @@ mod tests {
                 #[test]
                 fn permission_ready_history_reaches_live_lock_with_exact_old_metadata_and_claim() {
                     let mut case = ready();
-                    let request = command(&case);
+                    let request = case.command();
                     let receipt =
                         storage::get_permission_response(&case.fixture.conn, case.input_id)
                             .unwrap();
@@ -5992,7 +5918,7 @@ mod tests {
                 fn permission_ready_conflict_precedes_live_lock_and_preserves_binding() {
                     for field in ["epoch", "token", "decision", "mode_ref", "decision_ref"] {
                         let mut case = ready();
-                        let mut request = command(&case);
+                        let mut request = case.command();
                         match field {
                             "epoch" => request.expected_owner_epoch += 1,
                             "token" => request.request_token = "b".repeat(64),

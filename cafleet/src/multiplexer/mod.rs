@@ -873,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_press_adapters_request_only_the_ordered_keys_and_qualify_stdout_acknowledgment() {
+    fn press_adapters_request_only_the_ordered_keys_and_qualify_stdout_acknowledgment() {
         let keys = parse(&[
             "A",
             "a",
@@ -984,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_press_target_validation_rejects_a_wrong_tmux_tuple_and_ambiguous_herdr_target() {
+    fn press_target_validation_rejects_a_wrong_tmux_tuple_and_ambiguous_herdr_target() {
         let tmux = FakeRunner::with_binary("tmux");
         tmux.respond(Ok("main|@1|%0\n".into()));
         tmux.respond(Ok("%2|@9|main\n".into()));
@@ -1051,7 +1051,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_press_deadline_runner_clips_the_actual_absolute_call_and_refuses_expiry() {
+    fn press_deadline_runner_clips_the_actual_absolute_call_and_refuses_expiry() {
         let recorder = Rc::new(AbsoluteRecorder(RefCell::default()));
         let original = Instant::now() + Duration::from_secs(2);
         let bounded = DeadlineRunner::wrap(recorder.clone(), Deadline::until(original));

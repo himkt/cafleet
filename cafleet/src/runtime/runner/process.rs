@@ -975,84 +975,6 @@ mod tests {
             );
         }
 
-        fn report_fixture_process(stage: &str, pid: i64) {
-            let identity = ProcessIdentity::read(pid);
-            let pid32 = match i32::try_from(pid) {
-                Ok(pid) => pid,
-                Err(error) => {
-                    eprintln!(
-                        "shutdown fixture stage={stage}; pid={pid}; identity={identity:?}; PID conversion={error}"
-                    );
-                    return;
-                }
-            };
-            let group = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(pid32)));
-            eprintln!(
-                "shutdown fixture stage={stage}; pid={pid}; identity={identity:?}; group={group:?}"
-            );
-            #[cfg(target_os = "macos")]
-            {
-                use libproc::libproc::{bsd_info::BSDInfo, proc_pid::pidinfo};
-                let status = pidinfo::<BSDInfo>(pid32, 0).map(|info| {
-                    (
-                        info.pbi_ppid,
-                        info.pbi_pgid,
-                        info.pbi_status,
-                        info.pbi_start_tvsec,
-                        info.pbi_start_tvusec,
-                    )
-                });
-                eprintln!(
-                    "shutdown fixture stage={stage}; pid={pid}; BSD parent/group/status/start_sec/start_usec={status:?}"
-                );
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                use std::io::Read;
-                let status = File::open(format!("/proc/{pid}/stat")).and_then(|file| {
-                    let mut text = String::new();
-                    file.take(4096).read_to_string(&mut text)?;
-                    Ok(text)
-                });
-                eprintln!(
-                    "shutdown fixture stage={stage}; pid={pid}; bounded process stat={status:?}"
-                );
-            }
-        }
-
-        fn report_fixture_group(stage: &str, native: &ProcessIdentity, descendant: i32) {
-            eprintln!(
-                "shutdown fixture stage={stage}; original native={native:?}; announced descendant={descendant}"
-            );
-            report_fixture_process(stage, native.pid);
-            report_fixture_process(stage, i64::from(descendant));
-            #[cfg(target_os = "macos")]
-            {
-                nix::errno::Errno::clear();
-                let members = libproc::processes::pids_by_type(
-                    libproc::processes::ProcFilter::ByProgramGroup {
-                        pgrpid: u32::try_from(native.pid).expect("spawned native PID is positive"),
-                    },
-                );
-                match members {
-                    Ok(members) => {
-                        eprintln!(
-                            "shutdown fixture stage={stage}; observed original group members={}; diagnostic record limit=16",
-                            members.len()
-                        );
-                        for pid in members.into_iter().take(16) {
-                            report_fixture_process(stage, i64::from(pid));
-                        }
-                    }
-                    Err(error) => {
-                        eprintln!(
-                            "shutdown fixture stage={stage}; original group enumeration={error}"
-                        )
-                    }
-                }
-            }
-        }
-
         #[test]
         fn runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_native_zero_exit()
          {
@@ -1063,7 +985,6 @@ mod tests {
             spec.argv=vec!["/bin/sh".into(),"-c".into(),r#"/bin/sh -c 'trap "" TERM HUP; printf ready > "$1"; exec /bin/sleep 600' descendant "$1" & descendant=$!; while [ ! -f "$1" ]; do sleep 0.01; done; printf 'descendant=%s\n' "$descendant"; exit 0"#.into(),"parent".into(),ready.to_str().unwrap().into()];
             let mut owned = OwnedPty::prepare(spec.size);
             let native = owned.session.spawn(&spec).unwrap();
-            eprintln!("shutdown fixture spawned native={native:?}");
             let output = read_until(&mut owned.session, "\n");
             let pid = output
                 .lines()
@@ -1072,29 +993,28 @@ mod tests {
                 .trim()
                 .parse::<i32>()
                 .unwrap();
-            report_fixture_group("descendant announced before exit polling", &native, pid);
             let wait_deadline = Instant::now() + Duration::from_secs(5);
             loop {
                 let waited = owned.session.try_wait();
-                if waited.is_err() {
-                    eprintln!("shutdown fixture native wait error={waited:?}");
-                    report_fixture_group("native wait error", &native, pid);
-                }
-                if let Some(exit) = waited.unwrap() {
-                    eprintln!("shutdown fixture observed native exit={exit:?}");
-                    report_fixture_group("native exit observed", &native, pid);
-                    assert_eq!(exit, ChildExit::Code(0));
+                if let Some(exit) = waited.unwrap_or_else(|cause| {
+                    panic!("native {native:?} with descendant {pid} wait failed: {cause}")
+                }) {
+                    assert_eq!(exit, ChildExit::Code(0), "native {native:?}");
                     break;
                 }
-                assert!(Instant::now() < wait_deadline);
+                assert!(
+                    Instant::now() < wait_deadline,
+                    "native {native:?} with descendant {pid} did not exit"
+                );
                 std::thread::sleep(Duration::from_millis(5));
             }
             let start = Instant::now();
             let outcome = owned.stop();
             let elapsed = start.elapsed();
-            eprintln!("shutdown fixture cleanup elapsed={elapsed:?}; outcome={outcome:?}");
-            report_fixture_group("cleanup returned", &native, pid);
-            assert!(elapsed < Duration::from_millis(4750));
+            assert!(
+                elapsed < Duration::from_millis(4750),
+                "cleanup took {elapsed:?}: {outcome:?}"
+            );
             assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
             assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
             let observation = std::process::Command::new("/bin/ps")
@@ -1252,7 +1172,17 @@ mod tests {
             assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
         }
 
-        fn baseline() {
+        fn false_fold(recheck: Step) -> Script {
+            Script::new(
+                [members(&[A])]
+                    .into_iter()
+                    .chain(active(identity(A)))
+                    .chain([absent(A), recheck]),
+            )
+        }
+
+        #[test]
+        fn refresh_matching_anchor_adopts_only_original_active_generations() {
             let mut session = inert(&[identity(A)]);
             let clock = boundaries(&session);
             let mut script = Script::new(
@@ -1268,22 +1198,8 @@ mod tests {
             assert_state(&session, &expected, false, clock);
         }
 
-        fn false_fold(recheck: Step) -> Script {
-            Script::new(
-                [members(&[A])]
-                    .into_iter()
-                    .chain(active(identity(A)))
-                    .chain([absent(A), recheck]),
-            )
-        }
-
         #[test]
-        fn step5_refresh_matching_anchor_adopts_only_original_active_generations() {
-            baseline();
-        }
-
-        #[test]
-        fn step5_refresh_initial_empty_closes_with_one_query_and_retains_map_and_clock() {
+        fn refresh_initial_empty_closes_with_one_query_and_retains_map_and_clock() {
             let mut session = inert(&[identity(A)]);
             let pinned = session.owned.clone();
             let clock = boundaries(&session);
@@ -1294,8 +1210,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_refresh_stale_active_then_fresh_empty_closes_without_adoption_or_more_reads() {
-            baseline();
+        fn refresh_stale_active_then_fresh_empty_closes_without_adoption_or_more_reads() {
             let mut session = inert(&[identity(A)]);
             let pinned = session.owned.clone();
             let clock = boundaries(&session);
@@ -1312,9 +1227,8 @@ mod tests {
         }
 
         #[test]
-        fn step5_refresh_fresh_remaining_members_preserve_exact_refusal_without_adoption() {
+        fn refresh_fresh_remaining_members_preserve_exact_refusal_without_adoption() {
             for fresh in [vec![B], vec![A], vec![B, C]] {
-                baseline();
                 let mut session = inert(&[identity(A)]);
                 let pinned = session.owned.clone();
                 let clock = boundaries(&session);
@@ -1329,8 +1243,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_refresh_same_pid_replacement_cannot_supply_an_anchor_or_be_adopted() {
-            baseline();
+        fn refresh_same_pid_replacement_cannot_supply_an_anchor_or_be_adopted() {
             let mut session = inert(&[identity(A)]);
             let pinned = session.owned.clone();
             let clock = boundaries(&session);
@@ -1349,7 +1262,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_refresh_original_observation_errors_stop_at_the_actual_first_failure() {
+        fn refresh_original_observation_errors_stop_at_the_actual_first_failure() {
             let failure = CafleetError::DatabaseBusy("synthetic-original-observation".into());
             for prefix in [
                 vec![Step::Members(GROUP, Err(failure.clone()))],
@@ -1366,7 +1279,6 @@ mod tests {
                     Step::Identity(A, Err(failure.clone())),
                 ],
             ] {
-                baseline();
                 let mut session = inert(&[identity(A)]);
                 let pinned = session.owned.clone();
                 let clock = boundaries(&session);
@@ -1378,8 +1290,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_refresh_anchor_fold_still_reads_later_pins_after_a_match_and_propagates_error() {
-            baseline();
+        fn refresh_anchor_fold_still_reads_later_pins_after_a_match_and_propagates_error() {
             let failure = CafleetError::Value("synthetic-later-anchor-read".into());
             let mut session = inert(&[identity(A), identity(C)]);
             let pinned = session.owned.clone();
@@ -1399,8 +1310,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_refresh_fresh_query_error_propagates_without_closure_or_followup_reads() {
-            baseline();
+        fn refresh_fresh_query_error_propagates_without_closure_or_followup_reads() {
             let failure = CafleetError::DatabaseBusy("synthetic-fresh-enumeration".into());
             let mut session = inert(&[identity(A)]);
             let pinned = session.owned.clone();
@@ -1412,8 +1322,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_refresh_anchored_pid_mismatch_retains_fence_without_fresh_query_fallback() {
-            baseline();
+        fn refresh_anchored_pid_mismatch_retains_fence_without_fresh_query_fallback() {
             let mut session = inert(&[identity(A), identity(C)]);
             let pinned = session.owned.clone();
             let clock = boundaries(&session);
@@ -1508,7 +1417,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_refresh_absent_and_stopped_members_close_before_any_anchor_fold() {
+        fn refresh_absent_and_stopped_members_close_before_any_anchor_fold() {
             let mut session = inert(&[identity(A)]);
             let pinned = session.owned.clone();
             let clock = boundaries(&session);

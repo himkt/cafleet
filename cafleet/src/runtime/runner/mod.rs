@@ -138,6 +138,7 @@ impl SpawnSpec {
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    pub(crate) use super::artifacts::test_support::short_tempdir;
     use rusqlite::Connection;
     use serde_json::json;
     use tempfile::TempDir;
@@ -215,10 +216,7 @@ pub(crate) mod test_support {
 
     impl Fixture {
         pub(crate) fn new() -> Self {
-            let dir = tempfile::Builder::new()
-                .prefix(".p194-")
-                .tempdir_in("/tmp")
-                .unwrap();
+            let dir = short_tempdir();
             let mut conn = migrated_conn(&dir);
             let (fleet, director) = create_fleet_fixture(&mut conn, "runner-contract");
             let mut placement = placement(Some("%2"));

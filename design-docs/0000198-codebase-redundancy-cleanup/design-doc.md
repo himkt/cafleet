@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 51/56 tasks complete
+**Progress**: 54/56 tasks complete
 **Last Updated**: 2026-10-30
 
 ## Overview
@@ -633,9 +633,9 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 12: Test de-duplication and hygiene
 
-- [ ] Apply the § Test de-duplication catalog rows for native capture, runtime services, observation and input <!-- completed: -->
-- [ ] Apply the rows for coding agent, broker and storage, CLI, multiplexer and delivery <!-- completed: -->
-- [ ] Apply the provenance renames, temp-prefix changes and `eprintln!` removal <!-- completed: -->
+- [x] Apply the § Test de-duplication catalog rows for native capture, runtime services, observation and input <!-- completed: 2026-10-30T03:11 -->
+- [x] Apply the rows for coding agent, broker and storage, CLI, multiplexer and delivery <!-- completed: 2026-10-30T02:03 -->
+- [x] Apply the provenance renames, temp-prefix changes and `eprintln!` removal <!-- completed: 2026-10-30T02:55 -->
 
 ### Step 13: Verification
 

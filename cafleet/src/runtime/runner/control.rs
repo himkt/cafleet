@@ -387,11 +387,7 @@ mod tests {
             listener
         }
 
-        fn pause_until(deadline: Instant) {
-            std::thread::sleep(
-                Duration::from_millis(2).min(deadline.saturating_duration_since(Instant::now())),
-            );
-        }
+        use crate::runtime::runner::nap_until as pause_until;
 
         fn accept_before(
             listener: &UnixListener,
@@ -704,10 +700,9 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use std::os::unix::net::UnixListener;
         use std::sync::{
-            Arc, Mutex,
+            Arc,
             atomic::{AtomicBool, Ordering},
         };
-        use std::thread::JoinHandle;
 
         type PeerResult<T> = std::result::Result<T, String>;
         use crate::runtime::runner::codec::test_support::independent_frame as frame;
@@ -835,102 +830,40 @@ mod tests {
             extra_connections: usize,
             extra_request_bytes: usize,
         }
-        static UNCONFIRMED_PEERS: Mutex<Vec<JoinHandle<PeerResult<Observed>>>> =
-            Mutex::new(Vec::new());
-        struct Peer {
-            stop: Arc<AtomicBool>,
-            handle: Option<JoinHandle<PeerResult<Observed>>>,
-        }
-        impl Peer {
-            fn spawn(
-                work: impl FnOnce(Arc<AtomicBool>, Instant) -> PeerResult<Observed> + Send + 'static,
-            ) -> Self {
-                let stop = Arc::new(AtomicBool::new(false));
-                let control = stop.clone();
-                let until = Instant::now() + Duration::from_secs(2);
-                let handle = std::thread::spawn(move || work(control, until));
-                Self {
-                    stop,
-                    handle: Some(handle),
-                }
-            }
-            fn finish(&mut self) -> PeerResult<Observed> {
-                self.finish_until(Instant::now() + Duration::from_secs(2))
-            }
-            fn finish_until(&mut self, until: Instant) -> PeerResult<Observed> {
-                self.stop.store(true, Ordering::Release);
-                while !self
-                    .handle
-                    .as_ref()
-                    .expect("owned peer finishes once")
-                    .is_finished()
-                {
-                    if Instant::now() >= until {
-                        return Err(
-                            "owned peer cleanup unconfirmed: deadline expired; handle retained"
-                                .into(),
-                        );
-                    }
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                self.handle
-                    .take()
-                    .expect("completed peer remains owned until join")
-                    .join()
-                    .map_err(|_| "owned peer terminated with a panic; join failed".to_owned())?
+        fn describe(result: &Result<InputControlReply>) -> String {
+            match result {
+                Err(error) => format!("Err({error:?})"),
+                Ok(InputControlReply::Submission(value)) => format!(
+                    "Ok(Submission status={:?}, input_id={:?}, stage={:?}, output_seq={:?}, reason={:?})",
+                    value.status, value.input_id, value.stage, value.output_seq, value.reason
+                ),
+                Ok(InputControlReply::Inspection(_)) => "Ok(Inspection)".into(),
+                Ok(InputControlReply::PermissionResponse(_)) => "Ok(PermissionResponse)".into(),
+                Ok(InputControlReply::Receipt(_)) => "Ok(Receipt)".into(),
             }
         }
-        impl Drop for Peer {
-            fn drop(&mut self) {
-                if self.handle.is_some()
-                    && let Err(error) = self.finish()
-                {
-                    if let Some(handle) = self.handle.take() {
-                        let mut retained = match UNCONFIRMED_PEERS.lock() {
-                            Ok(retained) => retained,
-                            Err(poisoned) => {
-                                eprintln!(
-                                    "recovering poisoned unconfirmed-peer ownership registry"
-                                );
-                                poisoned.into_inner()
-                            }
-                        };
-                        retained.push(handle);
-                        eprintln!(
-                            "unconfirmed peer handle retained until process exit; thread termination remains unconfirmed"
-                        );
-                    }
-                    if std::thread::panicking() {
-                        eprintln!("owned peer cleanup: {error}");
-                    } else {
-                        panic!("owned peer cleanup: {error}");
-                    }
-                }
-            }
-        }
-        fn finish_exchange(peer: &mut Peer, result: &Result<InputControlReply>) -> Observed {
-            match peer.finish() {
-                Ok(observed) => observed,
-                Err(cleanup) => {
-                    let primary = match result {
-                        Err(error) => format!("Err({error:?})"),
-                        Ok(InputControlReply::Submission(value)) => format!(
-                            "Ok(Submission status={:?}, input_id={:?}, stage={:?}, output_seq={:?}, reason={:?})",
-                            value.status,
-                            value.input_id,
-                            value.stage,
-                            value.output_seq,
-                            value.reason
-                        ),
-                        Ok(InputControlReply::Inspection(_)) => "Ok(Inspection)".into(),
-                        Ok(InputControlReply::PermissionResponse(_)) => {
-                            "Ok(PermissionResponse)".into()
-                        }
-                        Ok(InputControlReply::Receipt(_)) => "Ok(Receipt)".into(),
-                    };
-                    panic!("primary exchange result: {primary}; owned peer cleanup: {cleanup}");
-                }
-            }
+        /// Runs `work` as a scoped peer while `exchange` runs here, then stops and joins the peer.
+        fn exchange_with_peer(
+            work: impl FnOnce(&AtomicBool, Instant) -> PeerResult<Observed> + Send,
+            exchange: impl FnOnce() -> Result<InputControlReply>,
+        ) -> (Result<InputControlReply>, Observed) {
+            let stop = AtomicBool::new(false);
+            let until = Instant::now() + Duration::from_secs(2);
+            std::thread::scope(|scope| {
+                let peer = scope.spawn(|| work(&stop, until));
+                let result = exchange();
+                stop.store(true, Ordering::Release);
+                let observed =
+                    peer.join()
+                        .expect("owned peer panicked")
+                        .unwrap_or_else(|cleanup| {
+                            panic!(
+                                "primary exchange result: {}; owned peer: {cleanup}",
+                                describe(&result)
+                            )
+                        });
+                (result, observed)
+            })
         }
         fn accepted(result: Result<InputControlReply>) {
             match result.unwrap() {
@@ -953,43 +886,40 @@ mod tests {
             let actual = read_request(&mut peer, &stop, until).unwrap();
             (result, actual)
         }
-        fn baseline(fixture: &Fixture) {
-            let (result, actual) = preloaded(fixture, &reply("accepted", "submitted"));
+        #[test]
+        fn typed_exchange_sends_an_independent_flat_request_with_the_original_expiry() {
+            let fixture = Fixture::new();
+            let (result, actual) = preloaded(&fixture, &reply("accepted", "submitted"));
             accepted(result);
-            assert_eq!(actual, expected(fixture));
-        }
-
-        #[test]
-        fn step5_wire_x1_actual_typed_exchange_sends_independent_flat_request_and_original_expiry()
-        {
-            let fixture = Fixture::new();
-            baseline(&fixture);
+            assert_eq!(actual, expected(&fixture));
         }
         #[test]
-        fn step5_wire_x2_fragmented_reply_and_raw_duplicate_or_wrong_kind_validation() {
+        fn exchange_validates_fragmented_duplicate_and_wrong_kind_replies() {
             let fixture = Fixture::new();
-            baseline(&fixture);
             let (mut client, mut stream) = pair();
             let response = reply("accepted", "submitted");
-            let mut peer = Peer::spawn(move |stop, until| {
-                let request = read_request(&mut stream, &stop, until)?;
-                let at = Instant::now();
-                for chunk in response.chunks(3) {
-                    write_peer(&mut stream, chunk, &stop, until)?;
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                Ok(Observed {
-                    request,
-                    at,
-                    fragments_at: None,
-                    drained_after_return_at: None,
-                    extra_connections: 0,
-                    extra_request_bytes: 0,
-                })
-            });
-            let result =
-                client.exchange_input(&request(&fixture), Instant::now() + Duration::from_secs(1));
-            let observed = finish_exchange(&mut peer, &result);
+            let (result, observed) = exchange_with_peer(
+                move |stop, until| {
+                    let request = read_request(&mut stream, stop, until)?;
+                    let at = Instant::now();
+                    for chunk in response.chunks(3) {
+                        write_peer(&mut stream, chunk, stop, until)?;
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Ok(Observed {
+                        request,
+                        at,
+                        fragments_at: None,
+                        drained_after_return_at: None,
+                        extra_connections: 0,
+                        extra_request_bytes: 0,
+                    })
+                },
+                || {
+                    client
+                        .exchange_input(&request(&fixture), Instant::now() + Duration::from_secs(1))
+                },
+            );
             accepted(result);
             assert_eq!(observed.request, expected(&fixture));
             let duplicate=frame(br#"{"protocol_version":1,"result":{"kind":"submission","submission":{"status":"accepted","input_id":13,"input_id":13,"stage":"submitted","output_seq":null,"reason":null}}}"#);
@@ -1001,9 +931,8 @@ mod tests {
             }
         }
         #[test]
-        fn step5_wire_x3_extra_reply_trailing_partial_and_premature_eof_reject() {
+        fn exchange_rejects_extra_reply_trailing_partial_and_premature_eof() {
             let fixture = Fixture::new();
-            baseline(&fixture);
             let good = reply("accepted", "submitted");
             let mut extra = good.clone();
             extra.extend_from_slice(&good);
@@ -1025,9 +954,8 @@ mod tests {
             assert_eq!(actual, expected(&fixture));
         }
         #[test]
-        fn step5_wire_x4_expired_and_stalled_actual_exchange_keep_original_deadline() {
+        fn expired_and_stalled_exchanges_keep_the_original_deadline() {
             let fixture = Fixture::new();
-            baseline(&fixture);
             let (mut client, mut peer) = pair();
             let expired = Instant::now()
                 .checked_sub(Duration::from_millis(1))
@@ -1051,41 +979,40 @@ mod tests {
             let return_tolerance = Duration::from_millis(100);
             let started = Instant::now();
             let deadline = started + budget;
-            let mut peer = Peer::spawn(move |stop, until| {
-                let request = read_request(&mut stream, &stop, until)?;
-                let at = Instant::now();
-                write_peer(&mut stream, &[0, 0], &stop, until)?;
-                let first_fragment_at = Instant::now();
-                let next_fragment_at = first_fragment_at + fragment_delay;
-                while Instant::now() < next_fragment_at {
-                    active(&stop, until)?;
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                write_peer(&mut stream, &[0, 20], &stop, until)?;
-                let later_fragment_at = Instant::now();
-                while !stop.load(Ordering::Acquire) && Instant::now() < until {
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                Ok(Observed {
-                    request,
-                    at,
-                    fragments_at: Some((first_fragment_at, later_fragment_at)),
-                    drained_after_return_at: None,
-                    extra_connections: 0,
-                    extra_request_bytes: 0,
-                })
-            });
-            let result = client.exchange_input(&request(&fixture), deadline);
-            let returned = Instant::now();
-            let observed = finish_exchange(&mut peer, &result);
-            let (first_fragment_at, later_fragment_at) = observed.fragments_at.unwrap();
-            eprintln!(
-                "X4 original budget={budget:?}; request={:?}; first fragment={:?}; later fragment={:?}; return={:?}; declared tolerance={return_tolerance:?}",
-                observed.at.duration_since(started),
-                first_fragment_at.duration_since(started),
-                later_fragment_at.duration_since(started),
-                returned.duration_since(started)
+            let mut returned = None;
+            let (result, observed) = exchange_with_peer(
+                move |stop, until| {
+                    let request = read_request(&mut stream, stop, until)?;
+                    let at = Instant::now();
+                    write_peer(&mut stream, &[0, 0], stop, until)?;
+                    let first_fragment_at = Instant::now();
+                    let next_fragment_at = first_fragment_at + fragment_delay;
+                    while Instant::now() < next_fragment_at {
+                        active(stop, until)?;
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    write_peer(&mut stream, &[0, 20], stop, until)?;
+                    let later_fragment_at = Instant::now();
+                    while !stop.load(Ordering::Acquire) && Instant::now() < until {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Ok(Observed {
+                        request,
+                        at,
+                        fragments_at: Some((first_fragment_at, later_fragment_at)),
+                        drained_after_return_at: None,
+                        extra_connections: 0,
+                        extra_request_bytes: 0,
+                    })
+                },
+                || {
+                    let result = client.exchange_input(&request(&fixture), deadline);
+                    returned = Some(Instant::now());
+                    result
+                },
             );
+            let returned = returned.expect("the exchange records its return");
+            let (first_fragment_at, later_fragment_at) = observed.fragments_at.unwrap();
             assert!(result.is_err());
             assert_eq!(observed.request, expected(&fixture));
             assert!(
@@ -1106,178 +1033,114 @@ mod tests {
             assert!(returned < later_fragment_at + budget);
         }
         #[test]
-        fn step5_wire_x5_disconnect_after_real_request_has_no_reconnect_or_second_request() {
+        fn disconnect_after_the_request_has_no_reconnect_or_second_request() {
             let fixture = Fixture::new();
-            baseline(&fixture);
-            let directory = tempfile::Builder::new()
-                .prefix(".pwire-")
-                .tempdir_in("/tmp")
-                .unwrap();
+            let directory = crate::runtime::runner::test_support::short_tempdir();
             let path = directory.path().join("control.sock");
             let listener = UnixListener::bind(&path).unwrap();
             listener.set_nonblocking(true).unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
             let exchange_returned = Arc::new(AtomicBool::new(false));
             let returned_signal = exchange_returned.clone();
-            let mut peer = Peer::spawn(move |stop, until| {
-                let (mut stream, _) = loop {
-                    active(&stop, until)?;
-                    match listener.accept() {
-                        Ok(value) => break value,
-                        Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                            std::thread::yield_now()
-                        }
-                        Err(error) => return Err(error.to_string()),
-                    }
-                };
-                stream
-                    .set_nonblocking(true)
-                    .map_err(|error| error.to_string())?;
-                let request = read_request(&mut stream, &stop, until)?;
-                let at = Instant::now();
-                let mut trailing = [0; 4096];
-                let mut extra_request_bytes = 0;
-                stream
-                    .shutdown(Shutdown::Write)
-                    .map_err(|error| error.to_string())?;
-                let mut extra_connections = 0;
-                let drained_after_return_at = loop {
-                    if Instant::now() >= until {
-                        return Err("disconnect observer expired before final drain".into());
-                    }
-                    let after_return = exchange_returned.load(Ordering::Acquire);
-                    loop {
-                        if Instant::now() >= until {
-                            return Err("disconnect request drain exceeded its bound".into());
-                        }
-                        match stream.read(&mut trailing) {
-                            Ok(0) => break,
-                            Ok(count) => extra_request_bytes += count,
-                            Err(error) if error.kind() == ErrorKind::WouldBlock => break,
-                            Err(error) if error.kind() == ErrorKind::Interrupted => {}
-                            Err(error) => return Err(error.to_string()),
-                        }
-                    }
-                    loop {
-                        if Instant::now() >= until {
-                            return Err("disconnect listener drain exceeded its bound".into());
-                        }
-                        match listener.accept() {
-                            Ok((extra, _)) => {
-                                extra_connections += 1;
-                                drop(extra);
-                            }
-                            Err(error) if error.kind() == ErrorKind::WouldBlock => break,
-                            Err(error) if error.kind() == ErrorKind::Interrupted => {}
-                            Err(error) => return Err(error.to_string()),
-                        }
-                    }
-                    if after_return {
-                        break Instant::now();
-                    }
-                    if stop.load(Ordering::Acquire) && !exchange_returned.load(Ordering::Acquire) {
-                        return Err(
-                            "disconnect observer cancelled before actual exchange return".into(),
-                        );
-                    }
-                    std::thread::yield_now();
-                };
-                Ok(Observed {
-                    request,
-                    at,
-                    fragments_at: None,
-                    drained_after_return_at: Some(drained_after_return_at),
-                    extra_connections,
-                    extra_request_bytes,
-                })
-            });
             let deadline = Instant::now() + Duration::from_secs(1);
-            let mut client = ControlClient::connect(&path, deadline).unwrap();
-            let result = client.exchange_input(&request(&fixture), deadline);
-            let returned_at = Instant::now();
-            returned_signal.store(true, Ordering::Release);
-            let observed = finish_exchange(&mut peer, &result);
+            let mut returned_at = None;
+            let (result, observed) = exchange_with_peer(
+                move |stop, until| {
+                    let (mut stream, _) = loop {
+                        active(stop, until)?;
+                        match listener.accept() {
+                            Ok(value) => break value,
+                            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                                std::thread::yield_now()
+                            }
+                            Err(error) => return Err(error.to_string()),
+                        }
+                    };
+                    stream
+                        .set_nonblocking(true)
+                        .map_err(|error| error.to_string())?;
+                    let request = read_request(&mut stream, stop, until)?;
+                    let at = Instant::now();
+                    let mut trailing = [0; 4096];
+                    let mut extra_request_bytes = 0;
+                    stream
+                        .shutdown(Shutdown::Write)
+                        .map_err(|error| error.to_string())?;
+                    let mut extra_connections = 0;
+                    let drained_after_return_at = loop {
+                        if Instant::now() >= until {
+                            return Err("disconnect observer expired before final drain".into());
+                        }
+                        let after_return = exchange_returned.load(Ordering::Acquire);
+                        loop {
+                            if Instant::now() >= until {
+                                return Err("disconnect request drain exceeded its bound".into());
+                            }
+                            match stream.read(&mut trailing) {
+                                Ok(0) => break,
+                                Ok(count) => extra_request_bytes += count,
+                                Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                                Err(error) => return Err(error.to_string()),
+                            }
+                        }
+                        loop {
+                            if Instant::now() >= until {
+                                return Err("disconnect listener drain exceeded its bound".into());
+                            }
+                            match listener.accept() {
+                                Ok((extra, _)) => {
+                                    extra_connections += 1;
+                                    drop(extra);
+                                }
+                                Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                                Err(error) => return Err(error.to_string()),
+                            }
+                        }
+                        if after_return {
+                            break Instant::now();
+                        }
+                        if stop.load(Ordering::Acquire)
+                            && !exchange_returned.load(Ordering::Acquire)
+                        {
+                            return Err(
+                                "disconnect observer cancelled before actual exchange return"
+                                    .into(),
+                            );
+                        }
+                        std::thread::yield_now();
+                    };
+                    Ok(Observed {
+                        request,
+                        at,
+                        fragments_at: None,
+                        drained_after_return_at: Some(drained_after_return_at),
+                        extra_connections,
+                        extra_request_bytes,
+                    })
+                },
+                || {
+                    let mut client = ControlClient::connect(&path, deadline).unwrap();
+                    let result = client.exchange_input(&request(&fixture), deadline);
+                    returned_at = Some(Instant::now());
+                    returned_signal.store(true, Ordering::Release);
+                    result
+                },
+            );
             assert!(result.is_err());
             assert_eq!(observed.request, expected(&fixture));
             assert_eq!(observed.extra_connections, 0);
             assert_eq!(observed.extra_request_bytes, 0);
-            assert!(observed.drained_after_return_at.unwrap() >= returned_at);
+            assert!(
+                observed.drained_after_return_at.unwrap()
+                    >= returned_at.expect("the exchange records its return")
+            );
         }
 
         #[test]
-        fn step5_wire_peer_cleanup_timeout_retains_ownership_until_release_and_confirmed_join() {
-            let released = Arc::new(AtomicBool::new(false));
-            let release = released.clone();
-            let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
-            let mut peer = Peer::spawn(move |_, until| {
-                entered_tx.send(()).map_err(|error| error.to_string())?;
-                while !released.load(Ordering::Acquire) {
-                    if Instant::now() >= until {
-                        return Err("ownership control release deadline expired".into());
-                    }
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                Ok(Observed {
-                    request: json!({"fixture":"ownership-control"}),
-                    at: Instant::now(),
-                    fragments_at: None,
-                    drained_after_return_at: None,
-                    extra_connections: 0,
-                    extra_request_bytes: 0,
-                })
-            });
-            let entered = entered_rx.recv_timeout(Duration::from_millis(500));
-            let owner_id = peer.handle.as_ref().unwrap().thread().id();
-            let timeout = peer.finish_until(Instant::now() + Duration::from_millis(20));
-            let retained_id = peer.handle.as_ref().map(|handle| handle.thread().id());
-            let remained_live = peer
-                .handle
-                .as_ref()
-                .is_some_and(|handle| !handle.is_finished());
-            release.store(true, Ordering::Release);
-            let joined = if peer.handle.is_some() {
-                Some(peer.finish())
-            } else {
-                None
-            };
-            let first_outcome = match &timeout {
-                Ok(observed) => format!("Ok(request={:?})", observed.request),
-                Err(error) => format!("Err({error:?})"),
-            };
-            assert!(
-                entered.is_ok(),
-                "worker entry was acknowledged: {entered:?}; first finish: {first_outcome}"
-            );
-            match timeout {
-                Err(error) => assert_eq!(
-                    error, "owned peer cleanup unconfirmed: deadline expired; handle retained",
-                    "timeout scenario was established; first finish: {first_outcome}"
-                ),
-                Ok(_) => panic!(
-                    "unreleased worker must exceed the first cleanup deadline; first finish: {first_outcome}"
-                ),
-            }
-            assert_eq!(retained_id, Some(owner_id), "first finish: {first_outcome}");
-            assert!(remained_live, "first finish: {first_outcome}");
-            match joined {
-                Some(Ok(observed)) => {
-                    assert_eq!(observed.request, json!({"fixture":"ownership-control"}))
-                }
-                Some(Err(error)) => panic!(
-                    "released worker cleanup must confirm join: {error}; first finish: {first_outcome}"
-                ),
-                None => {
-                    panic!(
-                        "timeout retains an owned worker for final join; first finish: {first_outcome}"
-                    )
-                }
-            }
-            assert!(peer.handle.is_none(), "released worker has been joined");
-        }
-        #[test]
-        fn step5_wire_x6_textual_error_remains_error_and_structured_uncertainty_remains_result() {
+        fn textual_error_remains_error_and_structured_uncertainty_remains_result() {
             let fixture = Fixture::new();
-            baseline(&fixture);
             let error = frame(br#"{"protocol_version":1,"error":"fixture failure"}"#);
             let (result, actual) = preloaded(&fixture, &error);
             assert_eq!(actual, expected(&fixture));

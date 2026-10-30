@@ -1,11 +1,11 @@
+#[cfg(test)]
+use super::InputDrain;
 use super::{
     ControlIdentity, DrainedInput, InputControlOperation, InputControlReply, InputControlRequest,
     InputEligibility, ObservationController, ObservedContinuation, ObservedRequest,
     ProgrammaticWrite, PtyIo, SubmissionResult, SubmissionStatus, Visibility,
     validate_operation_key,
 };
-#[cfg(test)]
-use super::{InputDrain, RealInputDeadlineClock, receive_input_expiration};
 use super::{
     InputFailure, ProcessIdentity, Result, RunLock, SubmissionStage, Transport, check_deadline,
     ensure, error, stable_run_identity, with_database_deadline,
@@ -1557,35 +1557,6 @@ impl InputCoordinator {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn handle(
-        &mut self,
-        conn: &mut Connection,
-        run: &RunRecord,
-        request: InputControlRequest,
-        observation: &ObservationController,
-        deadline: Instant,
-    ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
-        let deadline = check_deadline(Instant::now(), deadline)
-            .and_then(|()| {
-                receive_input_expiration(
-                    request.expires_at_mono_ns,
-                    Instant::now(),
-                    Some(deadline),
-                    &mut RealInputDeadlineClock,
-                )
-            })
-            .map_err(|source| {
-                let operation_key = match &request.operation {
-                    InputControlOperation::SubmitPrompt(input)
-                    | InputControlOperation::SubmitExec(input) => Some(input.operation_key.clone()),
-                    _ => None,
-                };
-                self.run_failure(source, None, None, operation_key)
-            })?;
-        self.handle_received(conn, run, request, observation, deadline)
-    }
-
     pub(super) fn handle_received(
         &mut self,
         conn: &mut Connection,
@@ -2503,26 +2474,16 @@ fn with_diagnostic(cause: CafleetError, diagnostic: &CafleetError) -> CafleetErr
 mod tests {
     mod manual_progress {
         use super::super::*;
-        use crate::broker::runtime::{self as storage, RunStatus};
+        use super::ordinary_prompt::support::RunnerFixture;
+        use crate::broker::runtime as storage;
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
-        use crate::runtime::runner::test_support::Fixture;
         use crate::runtime::runner::*;
-        use crate::runtime::system::test_support::TestChild;
         use std::collections::VecDeque;
         use std::io::{self, ErrorKind};
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-        use std::process::{Command, Stdio};
         use std::sync::Arc;
         use std::time::{Duration, Instant};
-
-        struct UnusedTokens;
-
-        impl RequestTokenSource for UnusedTokens {
-            fn fill(&mut self, _: &mut [u8; 32]) -> Result<()> {
-                panic!("manual progress obtains no request token")
-            }
-        }
 
         #[derive(Default)]
         struct Human {
@@ -2596,118 +2557,7 @@ mod tests {
             }
         }
 
-        struct NativeChild {
-            child: TestChild,
-            until: Instant,
-        }
-
-        impl NativeChild {
-            fn spawn(until: Instant) -> Self {
-                Self {
-                    child: TestChild::new(
-                        Command::new("/bin/cat")
-                            .stdin(Stdio::piped())
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .spawn()
-                            .unwrap(),
-                    ),
-                    until,
-                }
-            }
-        }
-
-        impl Drop for NativeChild {
-            fn drop(&mut self) {
-                self.child.terminate_until(self.until);
-            }
-        }
-
-        struct Harness {
-            fixture: Fixture,
-            _artifacts: RunArtifacts,
-            lock: Arc<RunLock>,
-            writer: EventWriter,
-            controller: ObservationController,
-            transport: Transport,
-            child: NativeChild,
-            until: Instant,
-        }
-
-        impl Harness {
-            fn new() -> Self {
-                let until = Instant::now() + Duration::from_secs(4);
-                let mut fixture = Fixture::new();
-                let artifacts = fixture.artifacts();
-                let lock = Arc::new(
-                    RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                        .unwrap()
-                        .expect("original run lock"),
-                );
-                lock.transfer_to_runner(
-                    &mut fixture.conn,
-                    &fixture.run.owner(),
-                    ProcessIdentity::current().unwrap(),
-                )
-                .unwrap();
-                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-                storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-                let mut controller = ObservationController::new(
-                    &fixture.run,
-                    &ProfileCatalog::bundled().unwrap(),
-                    storage::evidence::EvidencePolicy::metadata(),
-                    1..=256,
-                )
-                .unwrap();
-                let mut writer = EventWriter::start(
-                    format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                    fixture.run.clone(),
-                    lock.clone(),
-                    artifacts.paths.outbox.clone(),
-                )
-                .unwrap();
-                writer.set_deadline(until);
-                let child = NativeChild::spawn(until);
-                let identity = ProcessIdentity::read(i64::from(child.child.id()))
-                    .unwrap()
-                    .expect("owned live native child");
-                assert!(identity.matches().unwrap());
-                fixture.conn.execute(
-                    "UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",
-                    rusqlite::params![identity.pid, identity.start_identity, crate::time::now_stamp(), fixture.run.run_id],
-                ).unwrap();
-                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-                assert_eq!(fixture.run.status, RunStatus::Running);
-                let transport = Transport::new(
-                    TerminalSize { rows: 24, cols: 80 },
-                    TransportLimits {
-                        input_bytes: 64,
-                        display_bytes: 64,
-                        bytes_per_tick: 64,
-                    },
-                )
-                .unwrap();
-                controller
-                    .started(
-                        &fixture.run,
-                        &transport.snapshot(),
-                        &writer,
-                        &RealObservationClock,
-                    )
-                    .unwrap();
-                Self {
-                    fixture,
-                    _artifacts: artifacts,
-                    lock,
-                    writer,
-                    controller,
-                    transport,
-                    child,
-                    until,
-                }
-            }
-
+        impl RunnerFixture {
             fn coordinator(&mut self) -> InputCoordinator {
                 InputCoordinator::new(
                     &mut self.fixture.conn,
@@ -2715,7 +2565,9 @@ mod tests {
                     self.lock.clone(),
                     InputServices {
                         catalog: ProfileCatalog::bundled().unwrap(),
-                        token_source: Box::new(UnusedTokens),
+                        token_source: Box::new(super::ordinary_prompt::support::PanicTokens(
+                            "manual progress",
+                        )),
                         hooks: Arc::new(InertInputHooks),
                     },
                     self.until,
@@ -2757,38 +2609,30 @@ mod tests {
                     }
                 );
             }
-
-            fn finish(&mut self) {
-                let counts = self.writer.finish(self.until);
-                let status = self.writer.status();
-                self.child.child.terminate_until(self.until);
-                let reaped = self.child.child.try_wait();
-                assert_eq!(counts, (0, 0), "writer cleanup: {status:?}");
-                assert!(
-                    !status.degraded && status.diagnostic.is_none(),
-                    "writer finish confirms join or reports degradation: {status:?}"
-                );
-                assert!(reaped.unwrap().is_some(), "owned native child was reaped");
-            }
         }
 
-        fn with_harness(body: impl FnOnce(&mut Harness)) {
-            let mut harness = Harness::new();
+        fn with_harness(body: impl FnOnce(&mut RunnerFixture)) {
+            let mut harness = RunnerFixture::new(
+                &ProfileCatalog::bundled().unwrap(),
+                storage::evidence::EvidencePolicy::metadata(),
+                None,
+                TerminalSize { rows: 24, cols: 80 },
+                TransportLimits {
+                    input_bytes: 64,
+                    display_bytes: 64,
+                    bytes_per_tick: 64,
+                },
+                Instant::now() + Duration::from_secs(4),
+            );
             let primary = catch_unwind(AssertUnwindSafe(|| body(&mut harness)));
             let cleanup = catch_unwind(AssertUnwindSafe(|| harness.finish()));
-            if let Err(primary) = primary {
-                if let Err(cleanup) = &cleanup {
-                    eprintln!("manual-progress cleanup also failed: {cleanup:?}");
-                }
-                resume_unwind(primary);
-            }
-            if let Err(cleanup) = cleanup {
-                resume_unwind(cleanup);
+            if let Err(panic) = primary.and(cleanup) {
+                resume_unwind(panic);
             }
         }
 
         #[test]
-        fn step5_manual_progress_counts_only_new_reads_across_pending_zero_and_successive_steps() {
+        fn manual_progress_counts_only_new_reads_across_pending_zero_and_successive_steps() {
             with_harness(|h| {
                 h.quiet_control();
                 let mut coordinator = h.coordinator();
@@ -2861,7 +2705,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_manual_progress_accounts_real_human_read_before_returning_the_pty_failure() {
+        fn manual_progress_accounts_real_human_read_before_returning_the_pty_failure() {
             with_harness(|h| {
                 h.quiet_control();
                 let mut coordinator = h.coordinator();
@@ -2904,7 +2748,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_manual_progress_composes_only_the_constructed_accounting_error_branches() {
+        fn manual_progress_composes_only_the_constructed_accounting_error_branches() {
             let only = combine_manual_progress(
                 Ok(17),
                 Err(CafleetError::DatabaseBusy("accounting only".into())),
@@ -2959,7 +2803,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_prompt_reservation_and_each_hook_require_a_fresh_drain_before_one_real_write() {
+        fn prompt_reservation_and_each_hook_require_a_fresh_drain_before_one_real_write() {
             with_host(|h| {
                 let id = h.arm("prompt:fixture-complete");
                 assert!(h.advance().is_none());
@@ -2984,18 +2828,7 @@ mod tests {
                 );
                 assert_eq!(retained.output_seq, expected_seq);
                 let repeat = h.request("prompt:fixture-complete");
-                let replay = submitted(
-                    h.coordinator
-                        .handle(
-                            &mut h.fixture.conn,
-                            &h.fixture.run,
-                            repeat,
-                            &h.controller,
-                            h.until,
-                        )
-                        .unwrap()
-                        .expect("retained key lookup"),
-                );
+                let replay = submitted(h.handle(repeat).unwrap().expect("retained key lookup"));
                 assert!(matches!(replay.status, SubmissionStatus::Accepted));
                 assert_eq!(replay.input_id, Some(id));
                 assert_eq!(h.pty.program.len(), 1);
@@ -3006,7 +2839,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_prompt_positive_short_write_retains_partial_uncertainty_without_a_second_stage() {
+        fn prompt_positive_short_write_retains_partial_uncertainty_without_a_second_stage() {
             with_host(|h| {
                 let id = h.arm("prompt:fixture-short");
                 h.pty.short = Some(3);
@@ -3041,22 +2874,11 @@ mod tests {
         }
 
         #[test]
-        fn step5_prompt_reservation_race_returns_existing_uncertainty_without_write_authority() {
+        fn prompt_reservation_race_returns_existing_uncertainty_without_write_authority() {
             with_host(|h| {
                 let key = "prompt:interleaved-reservation";
                 let request = h.request(key);
-                assert!(
-                    h.coordinator
-                        .handle(
-                            &mut h.fixture.conn,
-                            &h.fixture.run,
-                            request,
-                            &h.controller,
-                            h.until,
-                        )
-                        .unwrap()
-                        .is_none()
-                );
+                assert!(h.handle(request).unwrap().is_none());
                 assert!(
                     storage::find_input(&h.fixture.conn, h.fixture.run.run_id, key)
                         .unwrap()
@@ -3179,8 +3001,8 @@ mod tests {
             }
 
             #[test]
-            fn step5_prompt_genuine_guard_binds_transport_turn_and_selected_bytes_and_consumes_rejection()
-             {
+            fn prompt_genuine_guard_binds_transport_turn_and_selected_bytes_and_consumes_rejection()
+            {
                 with_host(|h| {
                     with_host(|other| binding(h, Some(&mut other.transport), false, false))
                 });
@@ -3189,7 +3011,7 @@ mod tests {
             }
 
             #[test]
-            fn step5_prompt_guard_drop_distinguishes_consumed_pre_io_from_unrecorded_possible_io() {
+            fn prompt_guard_drop_distinguishes_consumed_pre_io_from_unrecorded_possible_io() {
                 for possible in [false, true] {
                     with_host(|h| {
                         let id = h.arm("prompt:guard-drop");
@@ -3279,18 +3101,7 @@ mod tests {
             }
 
             fn complete(host: &mut Host, request: InputControlRequest) -> SubmissionResult {
-                assert!(
-                    host.coordinator
-                        .handle(
-                            &mut host.fixture.conn,
-                            &host.fixture.run,
-                            request,
-                            &host.controller,
-                            host.until,
-                        )
-                        .unwrap()
-                        .is_none()
-                );
+                assert!(host.handle(request).unwrap().is_none());
                 let reply = submitted(
                     (0..3)
                         .find_map(|_| {
@@ -3305,13 +3116,7 @@ mod tests {
             }
 
             fn refuse(host: &mut Host, request: InputControlRequest) {
-                let result = host.coordinator.handle(
-                    &mut host.fixture.conn,
-                    &host.fixture.run,
-                    request,
-                    &host.controller,
-                    host.until,
-                );
+                let result = host.handle(request);
                 let result = match result {
                     Ok(None) => (0..3)
                         .find_map(|_| {
@@ -3352,7 +3157,7 @@ mod tests {
             }
 
             #[test]
-            fn step5_operations_preview_binds_the_exact_run_message_key_and_durable_recipient() {
+            fn operations_preview_binds_the_exact_run_message_key_and_durable_recipient() {
                 with_host(|host| {
                     let message = crate::broker::send_message(
                         &mut host.fixture.conn,
@@ -3425,7 +3230,7 @@ mod tests {
             }
 
             #[test]
-            fn step5_operations_exec_selects_its_native_shell_plan_and_requires_its_own_coverage() {
+            fn operations_exec_selects_its_native_shell_plan_and_requires_its_own_coverage() {
                 let mut definition = catalog_definition();
                 let mut fixture = definition["fixtures"][0].clone();
                 fixture["id"] = serde_json::json!("synthetic-exec-plan");
@@ -3535,14 +3340,7 @@ mod tests {
                         );
                         result
                     }
-                    Err(primary) => {
-                        if progress.is_err() || authorization.is_err() {
-                            eprintln!(
-                                "SQL observer cleanup also failed: progress={progress:?}; authorizer={authorization:?}"
-                            );
-                        }
-                        resume_unwind(primary)
-                    }
+                    Err(primary) => resume_unwind(primary),
                 }
             }
             fn sql_state(delay: Option<Instant>) -> Arc<SqlObservation> {
@@ -3559,7 +3357,7 @@ mod tests {
             }
 
             #[test]
-            fn step5_prompt_final_sql_is_nonwaiting_on_the_supplied_connection_and_fresh_drain_progresses()
+            fn prompt_final_sql_is_nonwaiting_on_the_supplied_connection_and_fresh_drain_progresses()
              {
                 with_host(|h| {
                     let id = h.arm("prompt:contended");
@@ -3640,7 +3438,7 @@ mod tests {
             }
 
             #[test]
-            fn step5_prompt_inherited_expiry_refuses_before_sql_and_after_uncontended_sql_on_the_actual_connection()
+            fn prompt_inherited_expiry_refuses_before_sql_and_after_uncontended_sql_on_the_actual_connection()
              {
                 for during in [false, true] {
                     with_host(|h| {
@@ -3705,8 +3503,7 @@ mod tests {
             }
 
             #[test]
-            fn step5_prompt_guard_keeps_the_earliest_inherited_expiration_after_sql_scope_restoration()
-             {
+            fn prompt_guard_keeps_the_earliest_inherited_expiration_after_sql_scope_restoration() {
                 with_host(|h| {
                     let id = h.arm("prompt:guard-sql-bound");
                     h.drain();
@@ -3824,12 +3621,16 @@ mod tests {
                         screen: SCREEN.to_vec(),
                     }
                 }
+
+                pub(crate) fn metadata() -> Self {
+                    Self::synthetic(storage::evidence::EvidencePolicy::metadata(), "metadata")
+                }
             }
 
-            struct Tokens;
-            impl RequestTokenSource for Tokens {
+            pub(in crate::runtime::runner::input) struct PanicTokens(pub(crate) &'static str);
+            impl RequestTokenSource for PanicTokens {
                 fn fill(&mut self, _: &mut [u8; 32]) -> Result<()> {
-                    panic!("ordinary Prompt creates no permission token")
+                    panic!("{} creates no request token", self.0)
                 }
             }
 
@@ -3961,7 +3762,7 @@ mod tests {
                 }
             }
 
-            struct Child {
+            pub(in crate::runtime::runner::input) struct Child {
                 native: TestChild,
                 until: Instant,
             }
@@ -3969,6 +3770,133 @@ mod tests {
                 fn drop(&mut self) {
                     self.native.terminate_until(self.until);
                 }
+            }
+
+            pub(in crate::runtime::runner::input) struct RunSelection {
+                pub(crate) backend: crate::coding_agent::CodingAgent,
+                pub(crate) native_version: &'static str,
+                pub(crate) profile_version: &'static str,
+                pub(crate) event_evidence: &'static str,
+            }
+
+            /// A run owned by this process as its runner, with a started writer, observation
+            /// controller and transport over a live `/bin/cat` native child.
+            pub(in crate::runtime::runner::input) struct RunnerFixture {
+                pub(crate) fixture: Fixture,
+                pub(crate) artifacts: RunArtifacts,
+                pub(crate) lock: Arc<RunLock>,
+                pub(crate) writer: EventWriter,
+                pub(crate) controller: ObservationController,
+                pub(crate) transport: Transport,
+                pub(crate) child: Child,
+                pub(crate) until: Instant,
+            }
+
+            impl RunnerFixture {
+                pub(in crate::runtime::runner::input) fn new(
+                    catalog: &ProfileCatalog,
+                    policy: storage::evidence::EvidencePolicy,
+                    selection: Option<RunSelection>,
+                    size: TerminalSize,
+                    limits: TransportLimits,
+                    until: Instant,
+                ) -> Self {
+                    let mut fixture = Fixture::new();
+                    let artifacts = fixture.artifacts();
+                    let lock = Arc::new(
+                        RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                            .unwrap()
+                            .expect("original run lock"),
+                    );
+                    lock.transfer_to_runner(
+                        &mut fixture.conn,
+                        &fixture.run.owner(),
+                        ProcessIdentity::current().unwrap(),
+                    )
+                    .unwrap();
+                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                    storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner())
+                        .unwrap();
+                    if let Some(selection) = selection {
+                        let selected =
+                            catalog.capabilities(selection.backend, Some(selection.native_version));
+                        let coverage = selected.detection;
+                        let profile_match = selected.profile_match.map(|value| value.as_str());
+                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,profile_match=?4,coverage=?5,event_evidence=?6 WHERE run_id=?7",rusqlite::params![selection.backend.name(),selection.native_version,selection.profile_version,profile_match,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
+                        fixture
+                            .conn
+                            .execute(
+                                "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
+                                rusqlite::params![selection.backend.name(), fixture.run.member_id],
+                            )
+                            .unwrap();
+                    }
+                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                    let mut controller =
+                        ObservationController::new(&fixture.run, catalog, policy, 1..=256).unwrap();
+                    let mut writer = EventWriter::start(
+                        format!("sqlite:///{}", fixture.conn.path().unwrap()),
+                        fixture.run.clone(),
+                        lock.clone(),
+                        artifacts.paths.outbox.clone(),
+                    )
+                    .unwrap();
+                    writer.set_deadline(until);
+                    let child = Child {
+                        native: TestChild::new(
+                            Command::new("/bin/cat")
+                                .stdin(Stdio::piped())
+                                .stdout(Stdio::null())
+                                .stderr(Stdio::null())
+                                .spawn()
+                                .unwrap(),
+                        ),
+                        until,
+                    };
+                    let identity = ProcessIdentity::read(i64::from(child.native.id()))
+                        .unwrap()
+                        .expect("owned live child");
+                    assert!(identity.matches().unwrap());
+                    fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::now_stamp(),fixture.run.run_id]).unwrap();
+                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                    assert_eq!(fixture.run.status, storage::RunStatus::Running);
+                    let transport = Transport::new(size, limits).unwrap();
+                    controller
+                        .started(
+                            &fixture.run,
+                            &transport.snapshot(),
+                            &writer,
+                            &RealObservationClock,
+                        )
+                        .unwrap();
+                    Self {
+                        fixture,
+                        artifacts,
+                        lock,
+                        writer,
+                        controller,
+                        transport,
+                        child,
+                        until,
+                    }
+                }
+
+                pub(crate) fn finish(&mut self) {
+                    finish_runner(&mut self.writer, &mut self.child, self.until);
+                }
+            }
+
+            fn finish_runner(writer: &mut EventWriter, child: &mut Child, until: Instant) {
+                let counts = writer.finish(until);
+                let status = writer.status();
+                child.native.terminate_until(until);
+                let reaped = child.native.try_wait();
+                assert_eq!(counts, (0, 0), "writer cleanup: {status:?}");
+                assert!(
+                    !status.degraded && status.diagnostic.is_none(),
+                    "writer finish confirms join or reports degradation: {status:?}"
+                );
+                assert!(reaped.unwrap().is_some(), "owned native child was reaped");
             }
 
             pub(in crate::runtime::runner::input) struct Host {
@@ -3988,16 +3916,29 @@ mod tests {
             }
 
             impl Host {
-                pub(crate) fn new() -> Self {
-                    Self::build(
-                        catalog,
-                        encoded(),
-                        HostProfile::synthetic(
-                            storage::evidence::EvidencePolicy::metadata(),
-                            "metadata",
-                        ),
-                        Instant::now() + Duration::from_secs(5),
+                pub(in crate::runtime::runner::input) fn pending_snapshot(
+                    &self,
+                ) -> (String, String, Vec<u8>, Instant, InputPhase, Option<i64>) {
+                    let pending = self
+                        .coordinator
+                        .pending
+                        .as_ref()
+                        .expect("actual pending writer");
+                    (
+                        pending.request.operation_key.clone(),
+                        pending.request.payload_digest.clone(),
+                        pending.bytes.to_vec(),
+                        pending.deadline,
+                        pending.phase,
+                        pending.input_id,
                     )
+                }
+
+                pub(crate) fn new() -> Self {
+                    Self::until(Instant::now() + Duration::from_secs(5))
+                }
+                fn until(until: Instant) -> Self {
+                    Self::build(catalog, encoded(), HostProfile::metadata(), until)
                 }
                 fn with_catalog(
                     catalog: ProfileCatalog,
@@ -4024,74 +3965,43 @@ mod tests {
                     let expires = InputExpiration::capture(until, &mut RealInputDeadlineClock)
                         .unwrap()
                         .monotonic_ns();
-                    let mut fixture = Fixture::new();
-                    let artifacts = fixture.artifacts();
-                    let lock = Arc::new(
-                        RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                            .unwrap()
-                            .unwrap(),
-                    );
-                    lock.transfer_to_runner(
-                        &mut fixture.conn,
-                        &fixture.run.owner(),
-                        ProcessIdentity::current().unwrap(),
-                    )
-                    .unwrap();
-                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-                    storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner())
-                        .unwrap();
+                    let HostProfile {
+                        policy,
+                        event_evidence,
+                        backend,
+                        native_version,
+                        profile_version,
+                        size,
+                        screen,
+                    } = profile;
                     let catalog = catalog();
-                    let selected =
-                        catalog.capabilities(profile.backend, Some(profile.native_version));
-                    let coverage = selected.detection;
-                    let profile_match = selected.profile_match.map(|value| value.as_str());
-                    fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,profile_match=?4,coverage=?5,event_evidence=?6 WHERE run_id=?7",rusqlite::params![profile.backend.name(),profile.native_version,profile.profile_version,profile_match,coverage.as_str(),profile.event_evidence,fixture.run.run_id]).unwrap();
-                    fixture
-                        .conn
-                        .execute(
-                            "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
-                            rusqlite::params![profile.backend.name(), fixture.run.member_id],
-                        )
-                        .unwrap();
-                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-                    let mut controller =
-                        ObservationController::new(&fixture.run, &catalog, profile.policy, 1..=256)
-                            .unwrap();
-                    let url = format!("sqlite:///{}", fixture.conn.path().unwrap());
-                    let mut writer = EventWriter::start(
-                        url.clone(),
-                        fixture.run.clone(),
-                        lock.clone(),
-                        artifacts.paths.outbox.clone(),
-                    )
-                    .unwrap();
-                    writer.set_deadline(until);
-                    let child = Child {
-                        native: TestChild::new(
-                            Command::new("/bin/cat")
-                                .stdin(Stdio::piped())
-                                .stdout(Stdio::null())
-                                .stderr(Stdio::null())
-                                .spawn()
-                                .unwrap(),
-                        ),
+                    let RunnerFixture {
+                        mut fixture,
+                        artifacts,
+                        lock,
+                        writer,
+                        controller,
+                        transport,
+                        child,
                         until,
-                    };
-                    let identity = ProcessIdentity::read(i64::from(child.native.id()))
-                        .unwrap()
-                        .expect("owned live child");
-                    assert!(identity.matches().unwrap());
-                    fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::now_stamp(),fixture.run.run_id]).unwrap();
-                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-                    let transport = Self::transport_sized(profile.size);
-                    controller
-                        .started(
-                            &fixture.run,
-                            &transport.snapshot(),
-                            &writer,
-                            &RealObservationClock,
-                        )
-                        .unwrap();
+                    } = RunnerFixture::new(
+                        &catalog,
+                        policy,
+                        Some(RunSelection {
+                            backend,
+                            native_version,
+                            profile_version,
+                            event_evidence,
+                        }),
+                        size,
+                        TransportLimits {
+                            input_bytes: 4096,
+                            display_bytes: 4096,
+                            bytes_per_tick: 4096,
+                        },
+                        until,
+                    );
+                    let url = format!("sqlite:///{}", fixture.conn.path().unwrap());
                     let hooks = Arc::new(Hooks {
                         points: Mutex::new(Vec::new()),
                         until,
@@ -4102,7 +4012,7 @@ mod tests {
                         lock,
                         InputServices {
                             catalog,
-                            token_source: Box::new(Tokens),
+                            token_source: Box::new(PanicTokens("ordinary Prompt")),
                             hooks: hooks.clone(),
                         },
                         until,
@@ -4110,7 +4020,7 @@ mod tests {
                     .unwrap();
                     let pty = Pty {
                         child: Reader {
-                            bytes: profile.screen.into_iter().collect(),
+                            bytes: screen.into_iter().collect(),
                             ..Reader::default()
                         },
                         offers: Vec::new(),
@@ -4143,17 +4053,6 @@ mod tests {
                     ));
                     host
                 }
-                fn transport_sized(size: TerminalSize) -> Transport {
-                    Transport::new(
-                        size,
-                        TransportLimits {
-                            input_bytes: 4096,
-                            display_bytes: 4096,
-                            bytes_per_tick: 4096,
-                        },
-                    )
-                    .unwrap()
-                }
                 pub(crate) fn request(&self, key: &str) -> InputControlRequest {
                     let run = &self.fixture.run;
                     InputControlRequest {
@@ -4174,6 +4073,10 @@ mod tests {
                             literal: LITERAL.into(),
                         }),
                     }
+                }
+                pub(crate) fn show(&mut self, bytes: Vec<u8>) {
+                    self.pty.child.bytes.extend(bytes);
+                    self.drain();
                 }
                 pub(crate) fn drain(&mut self) {
                     loop {
@@ -4209,31 +4112,94 @@ mod tests {
                     }
                 }
                 pub(crate) fn advance(&mut self) -> Option<InputControlReply> {
-                    self.coordinator
-                        .advance(
-                            &mut self.fixture.conn,
-                            &self.fixture.run,
-                            &mut self.transport,
-                            &mut self.pty,
-                            &self.controller,
-                            self.until,
-                        )
-                        .unwrap()
+                    self.try_advance().unwrap()
+                }
+                pub(crate) fn try_advance(
+                    &mut self,
+                ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+                    self.coordinator.advance(
+                        &mut self.fixture.conn,
+                        &self.fixture.run,
+                        &mut self.transport,
+                        &mut self.pty,
+                        &self.controller,
+                        self.until,
+                    )
+                }
+                pub(crate) fn handle(
+                    &mut self,
+                    request: InputControlRequest,
+                ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+                    self.handle_until(request, self.until)
+                }
+                /// Applies the request's own expiration first, as the control service does before
+                /// it hands a received request to the coordinator.
+                pub(crate) fn handle_until(
+                    &mut self,
+                    request: InputControlRequest,
+                    deadline: Instant,
+                ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+                    let deadline = check_deadline(Instant::now(), deadline)
+                        .and_then(|()| {
+                            crate::runtime::runner::receive_input_expiration(
+                                request.expires_at_mono_ns,
+                                Instant::now(),
+                                Some(deadline),
+                                &mut crate::runtime::runner::RealInputDeadlineClock,
+                            )
+                        })
+                        .map_err(|source| {
+                            let operation_key = match &request.operation {
+                                InputControlOperation::SubmitPrompt(input)
+                                | InputControlOperation::SubmitExec(input) => {
+                                    Some(input.operation_key.clone())
+                                }
+                                _ => None,
+                            };
+                            self.coordinator
+                                .run_failure(source, None, None, operation_key)
+                        })?;
+                    self.coordinator.handle_received(
+                        &mut self.fixture.conn,
+                        &self.fixture.run,
+                        request,
+                        &self.controller,
+                        deadline,
+                    )
+                }
+                pub(crate) fn receipt(
+                    &mut self,
+                    action: crate::runtime::runner::ReceiptAction,
+                ) -> std::result::Result<InputControlReply, InputFailure> {
+                    let mut request = self.request("unused-receipt-key");
+                    request.operation = InputControlOperation::Receipt(action);
+                    self.handle(request)
+                        .map(|reply| reply.expect("receipt actions reply immediately"))
+                }
+                pub(crate) fn respond(
+                    &mut self,
+                    input: &crate::runtime::runner::PermissionRespondInput,
+                ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+                    self.respond_until(input, self.until)
+                }
+                pub(crate) fn respond_until(
+                    &mut self,
+                    input: &crate::runtime::runner::PermissionRespondInput,
+                    deadline: Instant,
+                ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+                    let mut request = self.request("unused-response-key");
+                    request.operation = InputControlOperation::PermissionRespond(input.clone());
+                    self.coordinator.handle_received(
+                        &mut self.fixture.conn,
+                        &self.fixture.run,
+                        request,
+                        &self.controller,
+                        deadline,
+                    )
                 }
                 pub(crate) fn arm(&mut self, key: &str) -> i64 {
                     let request = self.request(key);
-                    assert!(
-                        self.coordinator
-                            .handle(
-                                &mut self.fixture.conn,
-                                &self.fixture.run,
-                                request,
-                                &self.controller,
-                                self.until
-                            )
-                            .unwrap()
-                            .is_none()
-                    );
+                    assert!(self.handle(request).unwrap().is_none());
                     for _ in 0..8 {
                         self.drain();
                         assert!(self.advance().is_none());
@@ -4258,16 +4224,7 @@ mod tests {
                     panic!("real reservation and BeforeWrite reach Armed within finite turns");
                 }
                 pub(crate) fn finish(&mut self) {
-                    let counts = self.writer.finish(self.until);
-                    let status = self.writer.status();
-                    self.child.native.terminate_until(self.until);
-                    let child = self.child.native.try_wait();
-                    assert_eq!(counts, (0, 0), "{status:?}");
-                    assert!(
-                        !status.degraded && status.diagnostic.is_none(),
-                        "writer join: {status:?}"
-                    );
-                    assert!(child.unwrap().is_some(), "owned child reap confirmed");
+                    finish_runner(&mut self.writer, &mut self.child, self.until);
                 }
             }
             pub(in crate::runtime::runner::input) fn with_host(body: impl FnOnce(&mut Host)) {
@@ -4277,33 +4234,14 @@ mod tests {
                 until: Instant,
                 body: impl FnOnce(&mut Host),
             ) {
-                with_owned_host(
-                    Host::build(
-                        catalog,
-                        encoded(),
-                        HostProfile::synthetic(
-                            storage::evidence::EvidencePolicy::metadata(),
-                            "metadata",
-                        ),
-                        until,
-                    ),
-                    body,
-                );
+                with_owned_host(Host::until(until), body);
             }
             pub(in crate::runtime::runner::input) fn with_catalog_host(
                 catalog: ProfileCatalog,
                 expected_program: Vec<u8>,
                 body: impl FnOnce(&mut Host),
             ) {
-                with_profile_host(
-                    catalog,
-                    expected_program,
-                    HostProfile::synthetic(
-                        storage::evidence::EvidencePolicy::metadata(),
-                        "metadata",
-                    ),
-                    body,
-                );
+                with_profile_host(catalog, expected_program, HostProfile::metadata(), body);
             }
             pub(in crate::runtime::runner::input) fn with_profile_host(
                 catalog: ProfileCatalog,
@@ -4316,14 +4254,8 @@ mod tests {
             fn with_owned_host(mut host: Host, body: impl FnOnce(&mut Host)) {
                 let primary = catch_unwind(AssertUnwindSafe(|| body(&mut host)));
                 let cleanup = catch_unwind(AssertUnwindSafe(|| host.finish()));
-                if let Err(primary) = primary {
-                    if let Err(cleanup) = &cleanup {
-                        eprintln!("ordinary Prompt cleanup also failed: {cleanup:?}");
-                    }
-                    resume_unwind(primary);
-                }
-                if let Err(cleanup) = cleanup {
-                    resume_unwind(cleanup);
+                if let Err(panic) = primary.and(cleanup) {
+                    resume_unwind(panic);
                 }
             }
         }
@@ -4337,10 +4269,9 @@ mod tests {
         use crate::coding_agent::profiles::catalog::test_support::{
             inspection_fixture_definition, inspection_fixture_form,
         };
-        use crate::coding_agent::profiles::detector::test_support::background_rewrite;
+        pub(super) use crate::coding_agent::profiles::detector::test_support::native_fixture_bytes;
         use crate::runtime::runner::{
             MissingEvidence, PermissionInspectInput, PermissionInspection, RuntimePaths,
-            TerminalSize, TerminalState,
         };
         use rusqlite::OptionalExtension;
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -4392,44 +4323,7 @@ mod tests {
             expected_program: Vec<u8>,
             body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
         ) {
-            with_definition_profile(
-                definition,
-                expected_program,
-                HostProfile::synthetic(storage::evidence::EvidencePolicy::metadata(), "metadata"),
-                body,
-            );
-        }
-
-        // The same byte stream the profile tests replay into a terminal for a committed native screen.
-        pub(super) fn native_screen_bytes(fixture: &str) -> Vec<u8> {
-            let screen: serde_json::Value = serde_json::from_str(fixture).unwrap();
-            let mut bytes = Vec::new();
-            if screen["alternate_screen"].as_bool().unwrap() {
-                bytes.extend(b"\x1b[?1049h");
-            }
-            bytes.extend(b"\x1b[2J");
-            for (row, line) in screen["lines"].as_array().unwrap().iter().enumerate() {
-                let line = line.as_str().unwrap();
-                if !line.is_empty() {
-                    bytes.extend(format!("\x1b[{};1H{line}", row + 1).into_bytes());
-                }
-            }
-            let mut written = TerminalState::new(TerminalSize {
-                rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
-                cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
-            })
-            .unwrap();
-            written.feed(&bytes).unwrap();
-            bytes.extend(background_rewrite(&screen, &written.snapshot()));
-            bytes.extend(
-                format!(
-                    "\x1b[{};{}H",
-                    screen["cursor_row"].as_u64().unwrap() + 1,
-                    screen["cursor_col"].as_u64().unwrap() + 1
-                )
-                .into_bytes(),
-            );
-            bytes
+            with_definition_profile(definition, expected_program, HostProfile::metadata(), body);
         }
 
         pub(super) fn with_claude_inspection(
@@ -4448,8 +4342,8 @@ mod tests {
                         rows: 36,
                         cols: 120,
                     },
-                    screen: native_screen_bytes(
-                        crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                    screen: native_fixture_bytes(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "claude-2.1.302-idle-composer-1",
                         ),
                     ),
@@ -4474,8 +4368,8 @@ mod tests {
                         rows: 36,
                         cols: 120,
                     },
-                    screen: native_screen_bytes(
-                        crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+                    screen: native_fixture_bytes(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-idle-composer-1",
                         ),
                     ),
@@ -4523,11 +4417,7 @@ mod tests {
         }
 
         pub(super) fn form(h: &mut Host, operation: &str, focus: &str) {
-            h.pty
-                .child
-                .bytes
-                .extend(inspection_fixture_form(operation, focus));
-            h.drain();
+            h.show(inspection_fixture_form(operation, focus));
         }
 
         fn current_ids(h: &Host) -> Option<(i64, i64, i64, i64)> {
@@ -4708,28 +4598,12 @@ mod tests {
                     .unwrap()
             })
         }
-        fn pending(h: &Host) -> (String, String, Vec<u8>, Instant, InputPhase, Option<i64>) {
-            let p = h
-                .coordinator
-                .pending
-                .as_ref()
-                .expect("genuine Armed writer");
-            (
-                p.request.operation_key.clone(),
-                p.request.payload_digest.clone(),
-                p.bytes.to_vec(),
-                p.deadline,
-                p.phase,
-                p.input_id,
-            )
-        }
-
         #[test]
         fn permission_inspection_matches_durable_current_request_and_preserves_the_armed_writer() {
             with_inspection(|h, calls, _| {
                 let input_id = h.arm("prompt:inspection-pending");
                 let ids = stable_form(h);
-                let pending = pending(h);
+                let pending = h.pending_snapshot();
                 let row = storage::get_input(&h.fixture.conn, input_id).unwrap();
                 let retained = h.coordinator.retained_checkpoint(input_id).unwrap();
                 let before = counts(h);
@@ -4808,7 +4682,7 @@ mod tests {
                 assert_eq!(no_drain.answer_capability, Coverage::Unknown);
                 assert_eq!(token(&inspect(h, ids)), first);
                 assert_eq!(calls.load(Ordering::SeqCst), 1);
-                assert!(pending == self::pending(h));
+                assert!(pending == h.pending_snapshot());
                 assert_eq!(storage::get_input(&h.fixture.conn, input_id).unwrap(), row);
                 let after = h.coordinator.retained_checkpoint(input_id).unwrap();
                 assert_eq!(
@@ -4942,8 +4816,7 @@ mod tests {
         }
 
         #[test]
-        fn permission_inspection_entropy_failure_and_manual_overflow_supply_no_fallback_authority()
-        {
+        fn permission_inspection_entropy_failure_supplies_no_fallback_authority() {
             with_inspection(|h, calls, fail| {
                 let ids = stable_form(h);
                 fail.store(true, Ordering::SeqCst);
@@ -4962,20 +4835,13 @@ mod tests {
                 fail.store(false, Ordering::SeqCst);
                 let value = inspect(h, ids);
                 assert_eq!(token(&value), "02".repeat(32));
-                h.coordinator.manual_generation = u64::MAX;
-                assert!(h.coordinator.observe_manual(1).is_err());
-                assert!(h.coordinator.manual_accounting_failed);
-                h.drain();
-                let result = inspect_request(h, request(h, ids), h.until);
-                assert!(result.is_err() || result.is_ok_and(|v| v.request_token.is_none()));
-                assert_eq!(calls.load(Ordering::SeqCst), 2);
                 assert_eq!(counts(h), [0, 0, 0]);
                 assert!(h.pty.offers.is_empty());
             });
         }
 
         #[test]
-        fn permission_inspection_owner_loss_and_shutdown_revoke_the_existing_token() {
+        fn permission_inspection_owner_loss_revokes_the_existing_token() {
             with_inspection(|h, calls, _| {
                 let ids = stable_form(h);
                 let original = token(&inspect(h, ids));
@@ -4994,11 +4860,6 @@ mod tests {
                     "actual lock inode no longer occupies its pinned path"
                 );
                 assert_ne!(token(&inspect(h, ids)), original);
-                assert_eq!(calls.load(Ordering::SeqCst), 2);
-                h.coordinator.fence(h.until).unwrap();
-                h.drain();
-                let fenced = inspect_request(h, request(h, ids), h.until);
-                assert!(fenced.is_err() || fenced.is_ok_and(|v| v.request_token.is_none()));
                 assert_eq!(calls.load(Ordering::SeqCst), 2);
                 assert!(h.pty.offers.is_empty());
             });
@@ -5103,7 +4964,7 @@ mod tests {
         use super::super::*;
         use super::ordinary_prompt::support::{Host, Pty};
         use super::permission_inspection_contracts::{
-            counts, detail_rewrite, form, inspect, inspect_request, native_screen_bytes,
+            counts, detail_rewrite, form, inspect, inspect_request, native_fixture_bytes,
             request as inspection_target, settled_ids, stable_detailed_form, stable_form,
             with_claude_inspection, with_definition, with_inspection, with_redacted_inspection,
         };
@@ -5114,6 +4975,7 @@ mod tests {
             ByteInput, PermissionInspection, PermissionRespondInput, PermissionResponseResult,
             ReceiptAction, ReceiptReply, TerminalSize,
         };
+        use std::sync::atomic::Ordering;
         use std::time::Duration;
 
         fn command(
@@ -5140,20 +5002,6 @@ mod tests {
                 decision_evidence_ref: "fixture:response-decision".into(),
                 operation_key: key.into(),
             }
-        }
-        fn handle(
-            h: &mut Host,
-            input: &PermissionRespondInput,
-        ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
-            let mut request = h.request("unused-response-key");
-            request.operation = InputControlOperation::PermissionRespond(input.clone());
-            h.coordinator.handle_received(
-                &mut h.fixture.conn,
-                &h.fixture.run,
-                request,
-                &h.controller,
-                h.until,
-            )
         }
         fn response(reply: InputControlReply) -> PermissionResponseResult {
             let InputControlReply::PermissionResponse(value) = reply else {
@@ -5250,7 +5098,7 @@ mod tests {
         }
 
         fn refused_reason(h: &mut Host, input: &PermissionRespondInput) -> String {
-            match handle(h, input) {
+            match h.respond(input) {
                 Err(failure) => failure.source.message().into_owned(),
                 Ok(_) => panic!("a blocked request refuses the response"),
             }
@@ -5270,11 +5118,12 @@ mod tests {
                     assert!(h.coordinator.manual_accounting_failed);
                 }),
             ] {
-                with_inspection(|h, _, _| {
+                with_inspection(|h, calls, _| {
                     let ids = stable_form(h);
                     let inspected = inspect(h, ids);
                     let input =
                         command(h, &inspected, "response:blocked", PermissionDecision::Allow);
+                    let minted = calls.load(Ordering::SeqCst);
                     block(h);
                     h.drain();
                     let reason = blocked_reason(h, ids);
@@ -5283,6 +5132,11 @@ mod tests {
                     assert!(
                         refused.contains(&reason),
                         "{case}: respond reports the inspect reason {reason:?}, got {refused:?}"
+                    );
+                    assert_eq!(
+                        calls.load(Ordering::SeqCst),
+                        minted,
+                        "{case}: a blocked inspection draws no request token"
                     );
                     assert_eq!(counts(h), [0, 0, 0]);
                     assert!(h.pty.program.is_empty());
@@ -5371,7 +5225,7 @@ mod tests {
                 let settled = inspect(h, ids);
                 assert_eq!(settled.request_token, inspected.request_token);
                 assert!(
-                    handle(h, &input).unwrap().is_none(),
+                    h.respond(&input).unwrap().is_none(),
                     "the settled request accepts its original token"
                 );
                 arm_stage(h, 1);
@@ -5419,8 +5273,8 @@ mod tests {
         }
 
         fn claude_blocked_form(h: &mut Host) -> (i64, i64, i64, i64) {
-            h.pty.child.bytes.extend(native_screen_bytes(
-                crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+            h.pty.child.bytes.extend(native_fixture_bytes(
+                crate::coding_agent::profiles::detector::test_support::bundled_screen(
                     "claude-2.1.302-default-permission-1",
                 ),
             ));
@@ -5428,8 +5282,8 @@ mod tests {
         }
 
         fn claude_boxed_single_row_form(h: &mut Host) -> (i64, i64, i64, i64) {
-            h.pty.child.bytes.extend(native_screen_bytes(
-                crate::coding_agent::profiles::catalog::test_support::bundled_screen(
+            h.pty.child.bytes.extend(native_fixture_bytes(
+                crate::coding_agent::profiles::detector::test_support::bundled_screen(
                     "claude-2.1.302-boxed-single-row-permission-1",
                 ),
             ));
@@ -5584,7 +5438,7 @@ mod tests {
                     PermissionDecision::Allow,
                 );
                 assert!(
-                    handle(h, &input).unwrap().is_none(),
+                    h.respond(&input).unwrap().is_none(),
                     "respond is admitted on the quiesced frame after every blink"
                 );
             });
@@ -5619,7 +5473,7 @@ mod tests {
                     PermissionDecision::Allow,
                 );
                 assert!(
-                    handle(h, &input).is_err(),
+                    h.respond(&input).is_err(),
                     "the revoked token refuses respond"
                 );
                 assert_eq!(counts(h), [0, 0, 0]);
@@ -5675,7 +5529,8 @@ mod tests {
                 );
                 neutral_output_flood(h);
                 assert!(matches!(quiesce_once(h), InputDrain::Pending));
-                let failure = handle(h, &input)
+                let failure = h
+                    .respond(&input)
                     .err()
                     .expect("a Pending admission drain refuses the response");
                 assert!(
@@ -5698,7 +5553,7 @@ mod tests {
                     "the neutral output changed no request state"
                 );
                 assert!(
-                    handle(h, &input).unwrap().is_none(),
+                    h.respond(&input).unwrap().is_none(),
                     "a Quiescent admission drain admits the same response"
                 );
             });
@@ -5715,7 +5570,7 @@ mod tests {
                     "response:retained",
                     PermissionDecision::Allow,
                 );
-                assert!(handle(h, &input).unwrap().is_none());
+                assert!(h.respond(&input).unwrap().is_none());
                 let id = arm_stage(h, 1);
                 h.drain();
                 assert!(h.advance().is_none());
@@ -5789,12 +5644,15 @@ mod tests {
                     let (input, id) = terminal_zero(h, "response:rearm-blocked");
                     let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
                     assert!(
-                        handle(h, &input).unwrap().is_none(),
+                        h.respond(&input).unwrap().is_none(),
                         "exact current Ready request enters live revalidation"
                     );
                     block(h);
                     h.drain();
-                    let failure = advance(h).err().expect("a blocked rearm refuses its stage");
+                    let failure = h
+                        .try_advance()
+                        .err()
+                        .expect("a blocked rearm refuses its stage");
                     assert!(
                         failure
                             .source
@@ -5822,7 +5680,7 @@ mod tests {
                 let stale = command(h, &inspected, "response:stale", PermissionDecision::Allow);
                 h.human.bytes.push_back(b'!');
                 h.drain();
-                let failure = match handle(h, &stale) {
+                let failure = match h.respond(&stale) {
                     Err(failure) => failure,
                     Ok(_) => panic!("revoked token refuses the fresh response"),
                 };
@@ -5962,7 +5820,7 @@ mod tests {
                 h.transport
                     .validate_observation_drain(&proof, h.until)
                     .unwrap();
-                assert!(handle(h, &before_gap).is_err());
+                assert!(h.respond(&before_gap).is_err());
                 assert_eq!(counts(h), [0, 0, 0]);
                 assert_eq!(h.pty.offers, vec![b"!".to_vec()]);
                 let fresh = inspect(h, ids);
@@ -5970,7 +5828,7 @@ mod tests {
                 assert_ne!(input.request_token, stale.request_token);
                 assert_ne!(input.request_token, before_gap.request_token);
                 assert!(
-                    handle(h, &input).unwrap().is_none(),
+                    h.respond(&input).unwrap().is_none(),
                     "fresh supported response enters the actual pending writer"
                 );
                 assert_eq!(counts(h), [0, 0, 0]);
@@ -6184,7 +6042,7 @@ mod tests {
             let ids = stable_form(h);
             let current = inspect(h, ids);
             let input = command(h, &current, key, PermissionDecision::Allow);
-            assert!(handle(h, &input).unwrap().is_none());
+            assert!(h.respond(&input).unwrap().is_none());
             let id = arm_stage(h, 1);
             audit(h, id, &input, "inspection-allow-plan");
             (ids, input, id)
@@ -6208,7 +6066,8 @@ mod tests {
             let (_, input, id) = admitted(h, key);
             h.pty.short = Some(0);
             h.drain();
-            let failure = advance(h)
+            let failure = h
+                .try_advance()
                 .err()
                 .expect("actual zero-length native write terminates its attempt");
             assert!(
@@ -6241,7 +6100,7 @@ mod tests {
                 let (input, id) = terminal_zero(h, "response:ready-rearm");
                 let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
                 assert!(
-                    handle(h, &input).unwrap().is_none(),
+                    h.respond(&input).unwrap().is_none(),
                     "exact current Ready request enters live revalidation"
                 );
                 assert_eq!(
@@ -6290,7 +6149,8 @@ mod tests {
                 let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
                 h.human.bytes.push_back(b'!');
                 h.drain();
-                let failure = handle(h, &input)
+                let failure = h
+                    .respond(&input)
                     .err()
                     .expect("actual manual generation revokes Ready authority");
                 assert_eq!(
@@ -6311,39 +6171,16 @@ mod tests {
             });
         }
 
-        fn advance(h: &mut Host) -> std::result::Result<Option<InputControlReply>, InputFailure> {
-            h.coordinator.advance(
-                &mut h.fixture.conn,
-                &h.fixture.run,
-                &mut h.transport,
-                &mut h.pty,
-                &h.controller,
-                h.until,
-            )
-        }
-
-        fn receipt(
+        fn receipt_reply(
             h: &mut Host,
             action: ReceiptAction,
         ) -> std::result::Result<ReceiptReply, InputFailure> {
-            let mut request = h.request("unused-permission-receipt-key");
-            request.operation = InputControlOperation::Receipt(action);
-            h.coordinator
-                .handle_received(
-                    &mut h.fixture.conn,
-                    &h.fixture.run,
-                    request,
-                    &h.controller,
-                    h.until,
-                )
-                .map(|reply| {
-                    let InputControlReply::Receipt(reply) =
-                        reply.expect("receipt completes without taking a pending client")
-                    else {
-                        panic!("actual permission receipt has its typed reply")
-                    };
-                    reply
-                })
+            h.receipt(action).map(|reply| {
+                let InputControlReply::Receipt(reply) = reply else {
+                    panic!("actual permission receipt has its typed reply")
+                };
+                reply
+            })
         }
 
         fn refuses_zero_proof(h: &mut Host, row: &storage::PermissionReceipt) {
@@ -6414,7 +6251,7 @@ mod tests {
                 assert_eq!(released.input, original.input);
                 assert_eq!(released.response, original.response);
                 assert!(released.claim.is_none());
-                assert!(handle(h, &input).unwrap().is_none());
+                assert!(h.respond(&input).unwrap().is_none());
                 assert_eq!(arm_stage(h, 2), id);
                 let rearmed = audit(h, id, &input, "inspection-allow-plan");
                 assert_eq!(rearmed.input.state, storage::InputState::InProgress);
@@ -6462,14 +6299,14 @@ mod tests {
                     )
                 };
                 assert_ne!(competing.input.input_id, id);
-                let outcome = handle(h, &input);
+                let outcome = h.respond(&input);
                 let refused = match outcome {
                     Err(_) => true,
                     Ok(None) => {
                         let mut refused = false;
                         for _ in 0..16 {
                             h.drain();
-                            match advance(h) {
+                            match h.try_advance() {
                                 Err(_) => {
                                     refused = true;
                                     break;
@@ -6558,7 +6395,7 @@ mod tests {
                 let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
                 assert_eq!(original.input.state, storage::InputState::InProgress);
                 refuses_zero_proof(h, &original);
-                assert!(matches!(receipt(h, ReceiptAction::Reconcile {
+                assert!(matches!(receipt_reply(h, ReceiptAction::Reconcile {
                 input_id: id, expected: storage::InputState::InProgress,
                 disposition: storage::InputDisposition::NotSubmitted,
                 evidence_ref: "fixture:attributed-possible-io".into(),
@@ -6572,14 +6409,14 @@ mod tests {
                 assert_eq!(settled.claim, original.claim);
                 refuses_zero_proof(h, &settled);
                 assert!(
-                    matches!(receipt(h, ReceiptAction::Retire { input_id: id }).unwrap(), ReceiptReply::Retired { input_id } if input_id == id)
+                    matches!(receipt_reply(h, ReceiptAction::Retire { input_id: id }).unwrap(), ReceiptReply::Retired { input_id } if input_id == id)
                 );
                 assert_eq!(
                     storage::get_permission_response(&h.fixture.conn, id).unwrap(),
                     settled
                 );
                 refuses_zero_proof(h, &settled);
-                let repeated = response(handle(h, &input).unwrap().unwrap());
+                let repeated = response(h.respond(&input).unwrap().unwrap());
                 assert_eq!(
                     (repeated.submission.status, repeated.submission.stage),
                     (SubmissionStatus::Rejected, SubmissionStage::ZeroBytes)
@@ -6597,7 +6434,7 @@ mod tests {
                 let point = h.coordinator.retained_checkpoint(id).unwrap();
                 let mut other = input.clone();
                 other.operation_key = "response:other-pending".into();
-                assert!(handle(h, &other).unwrap().is_none());
+                assert!(h.respond(&other).unwrap().is_none());
                 let pending = h.coordinator.pending.as_ref().unwrap();
                 let pending_before = (
                     pending.request.operation_key.clone(),
@@ -6608,7 +6445,7 @@ mod tests {
                 let ReceiptReply::Present {
                     input_id,
                     submission,
-                } = receipt(
+                } = receipt_reply(
                     h,
                     ReceiptAction::Query {
                         operation_key: input.operation_key.clone(),
@@ -6633,7 +6470,7 @@ mod tests {
                     disposition: storage::InputDisposition::NotSubmitted,
                     evidence_ref: "fixture:live-zero-byte".into(),
                 };
-                assert!(receipt(h, reconcile()).is_err());
+                assert!(receipt_reply(h, reconcile()).is_err());
                 let pending = h.coordinator.pending.as_ref().unwrap();
                 assert!(
                     (
@@ -6714,7 +6551,7 @@ mod tests {
                  END"
                     ))
                     .unwrap();
-                let failed = receipt(h, reconcile());
+                let failed = receipt_reply(h, reconcile());
                 let removed = h
                     .fixture
                     .conn
@@ -6749,7 +6586,7 @@ mod tests {
                     (point.stage, point.written_bytes, point.output_seq)
                 );
                 assert!(
-                    matches!(receipt(h, reconcile()).unwrap(), ReceiptReply::Settled { input_id } if input_id == id)
+                    matches!(receipt_reply(h, reconcile()).unwrap(), ReceiptReply::Settled { input_id } if input_id == id)
                 );
                 let settled = storage::get_permission_response(&h.fixture.conn, id).unwrap();
                 assert_eq!(settled.input.state, storage::InputState::Settled);
@@ -6764,13 +6601,13 @@ mod tests {
                 assert_eq!(settled.response, original.response);
                 assert_eq!(settled.claim, None);
                 assert!(
-                    matches!(receipt(h, ReceiptAction::Retire { input_id: id }).unwrap(), ReceiptReply::Retired { input_id } if input_id == id)
+                    matches!(receipt_reply(h, ReceiptAction::Retire { input_id: id }).unwrap(), ReceiptReply::Retired { input_id } if input_id == id)
                 );
                 assert!(!h.coordinator.operations.contains_key(&id));
                 let ReceiptReply::Present {
                     input_id,
                     submission,
-                } = receipt(
+                } = receipt_reply(
                     h,
                     ReceiptAction::Query {
                         operation_key: input.operation_key.clone(),
@@ -6785,7 +6622,7 @@ mod tests {
                     (submission.status, submission.stage, submission.output_seq),
                     (SubmissionStatus::Rejected, SubmissionStage::Unknown, None)
                 );
-                let repeated = response(handle(h, &input).unwrap().unwrap());
+                let repeated = response(h.respond(&input).unwrap().unwrap());
                 assert_eq!(
                     (
                         repeated.submission.status,
@@ -6806,10 +6643,10 @@ mod tests {
                     "response:deliberate-after-zero-settlement",
                     PermissionDecision::Allow,
                 );
-                assert!(handle(h, &fresh).unwrap().is_none());
+                assert!(h.respond(&fresh).unwrap().is_none());
                 for _ in 0..16 {
                     h.drain();
-                    assert!(advance(h).unwrap().is_none());
+                    assert!(h.try_advance().unwrap().is_none());
                     if h.hooks.count("reserved") == 2 {
                         break;
                     }
@@ -6862,12 +6699,6 @@ mod tests {
             let _ = <storage::ZeroByteRetirement<'static> as AmbiguousIfClone<_>>::check;
             let _ = <InputGuard<'static> as AmbiguousIfSerialize<_>>::check;
             let _ = <storage::ZeroByteRetirement<'static> as AmbiguousIfSerialize<_>>::check;
-            struct NoTokens;
-            impl RequestTokenSource for NoTokens {
-                fn fill(&mut self, _: &mut [u8; 32]) -> Result<()> {
-                    panic!("receipt-only proof creates no request token")
-                }
-            }
             with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
                 let (input, id) = terminal_zero(h, "response:cacheless-zero");
                 let ready = storage::get_permission_response(&h.fixture.conn, id).unwrap();
@@ -6879,7 +6710,9 @@ mod tests {
                     InputServices {
                         catalog: ProfileCatalog::from_definitions(&inspection_fixture_definition())
                             .unwrap(),
-                        token_source: Box::new(NoTokens),
+                        token_source: Box::new(super::ordinary_prompt::support::PanicTokens(
+                            "receipt-only proof",
+                        )),
                         hooks: h.hooks.clone(),
                     },
                     h.until,
@@ -7006,7 +6839,7 @@ mod tests {
                     "response:reservation-race",
                     PermissionDecision::Allow,
                 );
-                assert!(handle(h, &input).unwrap().is_none());
+                assert!(h.respond(&input).unwrap().is_none());
                 let plan = h
                     .coordinator
                     .services
@@ -7077,13 +6910,13 @@ mod tests {
                     "response:different-claimed-key",
                     PermissionDecision::Deny,
                 );
-                let mut outcome = handle(h, &other);
+                let mut outcome = h.respond(&other);
                 for _ in 0..16 {
                     if !matches!(outcome, Ok(None)) {
                         break;
                     }
                     h.drain();
-                    outcome = advance(h);
+                    outcome = h.try_advance();
                 }
                 match outcome {
                     Err(failure) => assert_eq!(
@@ -7142,7 +6975,8 @@ mod tests {
                 assert!(h.pty.offers.is_empty());
                 std::thread::sleep(expired.saturating_duration_since(Instant::now()));
                 assert!(Instant::now() >= expired);
-                let failure = advance(h)
+                let failure = h
+                    .try_advance()
                     .err()
                     .expect("original pending expiration returns its primary failure");
                 assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
@@ -7166,7 +7000,7 @@ mod tests {
                 assert!(h.pty.offers.is_empty());
                 h.coordinator.finish_pending_attempt();
                 assert!(h.coordinator.pending.is_none());
-                assert!(handle(h, &input).unwrap().is_none());
+                assert!(h.respond(&input).unwrap().is_none());
                 assert_eq!(h.coordinator.pending.as_ref().unwrap().input_id, Some(id));
                 h.coordinator.finish_pending_attempt();
                 assert!(h.coordinator.pending.is_none());
@@ -7177,7 +7011,7 @@ mod tests {
                 );
                 assert!(h.pty.offers.is_empty());
                 assert_eq!(h.hooks.count("reserved"), 0);
-                assert!(handle(h, &input).unwrap().is_none());
+                assert!(h.respond(&input).unwrap().is_none());
                 assert_eq!(arm_stage(h, 1), id);
                 h.drain();
                 assert!(h.advance().is_none());
@@ -7219,7 +7053,7 @@ mod tests {
                         storage::InputState::InProgress
                     );
                     let offers = h.pty.offers.len();
-                    assert!(advance(h).unwrap().is_none());
+                    assert!(h.try_advance().unwrap().is_none());
                     assert_eq!(
                         h.pty.offers.len(),
                         offers,
@@ -7267,7 +7101,7 @@ mod tests {
                 let (_, input, id) = admitted(h, "response:changed-focus");
                 first_stage(h, id);
                 form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-other");
-                let outcome = advance(h);
+                let outcome = h.try_advance();
                 match outcome {
                     Err(failure) => {
                         assert_eq!(failure.input_id, Some(id));
@@ -7329,7 +7163,7 @@ mod tests {
                     audit(h, id, &input, "inspection-allow-plan").input.state,
                     storage::InputState::Uncertain
                 );
-                assert!(advance(h).unwrap().is_none());
+                assert!(h.try_advance().unwrap().is_none());
                 assert_eq!(h.pty.offers.len(), 2);
                 let row = storage::get_permission_response(&h.fixture.conn, id).unwrap();
                 refuses_zero_proof(h, &row);
@@ -7371,9 +7205,9 @@ mod tests {
                 );
                 refuses_zero_proof(h, &row);
                 assert!(h.coordinator.pending.is_none());
-                assert!(advance(h).unwrap().is_none());
+                assert!(h.try_advance().unwrap().is_none());
                 let repeated = response(
-                    handle(h, &input)
+                    h.respond(&input)
                         .unwrap()
                         .expect("durable InProgress returns uncertainty"),
                 );
@@ -7394,7 +7228,7 @@ mod tests {
                 arm_stage(h, 2);
                 h.fixture.conn.execute_batch("CREATE TRIGGER owned_response_accept_failure BEFORE UPDATE OF state ON member_input_operations WHEN NEW.kind='permission_response' AND NEW.state='accepted' BEGIN SELECT RAISE(ABORT,'owned response accepted failure'); END;").unwrap();
                 h.drain();
-                let failure = match advance(h) {
+                let failure = match h.try_advance() {
                     Err(failure) => failure,
                     Ok(_) => panic!("real Accepted trigger failure remains an error"),
                 };
@@ -7433,7 +7267,7 @@ mod tests {
                 h.coordinator.finish_pending_attempt();
                 assert_eq!(h.pty.offers, vec![b"y".to_vec(), b"\r".to_vec()]);
                 let repeated = response(
-                    handle(h, &input)
+                    h.respond(&input)
                         .unwrap()
                         .expect("failed commit is retained uncertainty"),
                 );
@@ -7460,30 +7294,9 @@ mod tests {
                 });
             }
 
-            fn show(h: &mut Host, bytes: Vec<u8>) {
-                h.pty.child.bytes.extend(bytes);
-                h.drain();
-            }
-
             fn gated_form(h: &mut Host, focus: &str) -> (i64, i64, i64, i64) {
-                show(h, gated_fixture_form(OPERATION, focus));
+                h.show(gated_fixture_form(OPERATION, focus));
                 settled_ids(h)
-            }
-
-            fn handle_until(
-                h: &mut Host,
-                input: &PermissionRespondInput,
-                deadline: Instant,
-            ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
-                let mut request = h.request("unused-gated-response-key");
-                request.operation = InputControlOperation::PermissionRespond(input.clone());
-                h.coordinator.handle_received(
-                    &mut h.fixture.conn,
-                    &h.fixture.run,
-                    request,
-                    &h.controller,
-                    deadline,
-                )
             }
 
             fn admit(
@@ -7495,7 +7308,7 @@ mod tests {
             ) -> PermissionRespondInput {
                 let inspected = inspect(h, ids);
                 let input = command(h, &inspected, key, decision);
-                assert!(handle_until(h, &input, deadline).unwrap().is_none());
+                assert!(h.respond_until(&input, deadline).unwrap().is_none());
                 input
             }
 
@@ -7514,7 +7327,7 @@ mod tests {
             fn settle(h: &mut Host, until: Instant) -> Outcome {
                 loop {
                     h.drain();
-                    match advance(h) {
+                    match h.try_advance() {
                         Ok(None) if Instant::now() >= until => return Ok(None),
                         Ok(None) => std::thread::sleep(Duration::from_millis(2)),
                         Ok(Some(reply)) => return Ok(Some(response(reply))),
@@ -7587,7 +7400,7 @@ mod tests {
                 let ids = gated_form(h, "allow");
                 let input = admit(h, ids, key, PermissionDecision::Deny, deadline);
                 let id = write_stage(h, 1);
-                show(h, gated_fixture_form(OPERATION, "deny"));
+                h.show(gated_fixture_form(OPERATION, "deny"));
                 write_stage(h, 2);
                 assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
                 (input, id)
@@ -7641,11 +7454,11 @@ mod tests {
                         storage::get_input(&h.fixture.conn, id).unwrap().state,
                         storage::InputState::InProgress
                     );
-                    show(h, gated_fixture_form(OPERATION, "deny"));
+                    h.show(gated_fixture_form(OPERATION, "deny"));
                     write_stage(h, 2);
                     assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
                     let before = events(h);
-                    show(h, gated_reason_dialog(None));
+                    h.show(gated_reason_dialog(None));
                     assert_eq!(events(h), before, "the continuation emits no event");
                     assert!(interaction_open(h, ids.1));
                     arm_stage(h, 3);
@@ -7685,7 +7498,7 @@ mod tests {
                         "response:gated-unmet",
                         PermissionDecision::Allow,
                     );
-                    let outcome = match handle_until(h, &input, deadline) {
+                    let outcome = match h.respond_until(&input, deadline) {
                         Ok(None) => settle(h, deadline + Duration::from_millis(400)),
                         Ok(Some(reply)) => Ok(Some(response(reply))),
                         Err(refused) => Err(refused),
@@ -7769,7 +7582,7 @@ mod tests {
                             deadline,
                         );
                         let id = write_stage(h, 1);
-                        show(h, screen);
+                        h.show(screen);
                         let outcome = settle(h, deadline);
                         assert_uncertain(h, id, outcome);
                         assert_eq!(h.pty.offers, offers(&[b"h"]), "{case}");
@@ -7791,7 +7604,7 @@ mod tests {
                     );
                     let id = write_stage(h, 1);
                     h.human.bytes.push_back(b'l');
-                    show(h, gated_fixture_form(OPERATION, "deny"));
+                    h.show(gated_fixture_form(OPERATION, "deny"));
                     let outcome = settle(h, deadline);
                     assert_uncertain(h, id, outcome);
                     assert_eq!(h.pty.offers, offers(&[b"h", b"l"]));
@@ -7815,12 +7628,12 @@ mod tests {
                             .unwrap();
                     }),
                     ("the episode closing", |h| {
-                        show(h, IDLE_COMPOSER.to_vec());
+                        h.show(IDLE_COMPOSER.to_vec());
                         std::thread::sleep(Duration::from_millis(300));
                         h.drain();
                     }),
                     ("a different episode", |h| {
-                        show(h, gated_fixture_form("PRIVATE_OTHER_OPERATION", "deny"));
+                        h.show(gated_fixture_form("PRIVATE_OTHER_OPERATION", "deny"));
                         std::thread::sleep(Duration::from_millis(150));
                         h.drain();
                     }),
@@ -7831,7 +7644,7 @@ mod tests {
                         let (_, id) =
                             deny_through_stage_two(h, "response:gated-succession", deadline);
                         disturb(h);
-                        show(h, gated_reason_dialog(None));
+                        h.show(gated_reason_dialog(None));
                         let outcome = settle(h, deadline);
                         assert_uncertain(h, id, outcome);
                         assert_eq!(
@@ -7852,7 +7665,7 @@ mod tests {
                 with_gated(|h, _| {
                     let deadline = soon(1500);
                     let (_, id) = deny_through_stage_two(h, "response:gated-reason", deadline);
-                    show(h, gated_reason_dialog(Some("typed reason")));
+                    h.show(gated_reason_dialog(Some("typed reason")));
                     let outcome = settle(h, deadline + Duration::from_millis(500));
                     assert_uncertain(h, id, outcome);
                     assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
@@ -7866,7 +7679,7 @@ mod tests {
                     let token = inspect(h, ids).request_token;
                     assert!(token.is_some());
                     let before = events(h);
-                    show(h, gated_reason_dialog(None));
+                    h.show(gated_reason_dialog(None));
                     std::thread::sleep(Duration::from_millis(150));
                     h.drain();
                     let reason = blocked_reason(h, ids);
@@ -7892,7 +7705,7 @@ mod tests {
                     let second = inspect(h, ids);
                     assert!(second.request_token.is_some());
                     assert_ne!(second.request_token, first.request_token);
-                    assert!(handle(h, &stale).is_err(), "the pre-move token is revoked");
+                    assert!(h.respond(&stale).is_err(), "the pre-move token is revoked");
                     assert_eq!(opened(h), 1);
                     assert!(h.pty.offers.is_empty());
                 });
@@ -7902,20 +7715,17 @@ mod tests {
                 let mut screen: serde_json::Value = serde_json::from_str(fixture).unwrap();
                 let source: serde_json::Value = serde_json::from_str(lines_from).unwrap();
                 screen["lines"] = source["lines"].clone();
-                native_screen_bytes(&screen.to_string())
+                native_fixture_bytes(&screen.to_string())
             }
 
             #[test]
             fn opencode_allow_enters_on_the_focused_allow_once() {
                 with_opencode_inspection(|h, _, _| {
-                    show(
-                        h,
-                        native_screen_bytes(
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-allow-pre-stage-1",
-                            ),
+                    h.show(native_fixture_bytes(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-allow-pre-stage-1",
                         ),
-                    );
+                    ));
                     let ids = settled_ids(h);
                     let inspected = inspect(h, ids);
                     assert!(inspected.request_token.is_some());
@@ -7929,7 +7739,7 @@ mod tests {
                         "response:opencode-allow",
                         PermissionDecision::Allow,
                     );
-                    assert!(handle(h, &input).unwrap().is_none());
+                    assert!(h.respond(&input).unwrap().is_none());
                     arm_stage(h, 1);
                     h.drain();
                     let result = response(h.advance().expect("the allow stage completes"));
@@ -7941,14 +7751,11 @@ mod tests {
             #[test]
             fn opencode_deny_moves_the_focus_selects_reject_and_submits_the_empty_reason() {
                 with_opencode_inspection(|h, calls, _| {
-                    show(
-                        h,
-                        native_screen_bytes(
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-deny-pre-stage-1",
-                            ),
+                    h.show(native_fixture_bytes(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-deny-pre-stage-1",
                         ),
-                    );
+                    ));
                     let ids = settled_ids(h);
                     let inspected = inspect(h, ids);
                     let input = command(
@@ -7957,31 +7764,25 @@ mod tests {
                         "response:opencode-deny",
                         PermissionDecision::Deny,
                     );
-                    assert!(handle(h, &input).unwrap().is_none());
+                    assert!(h.respond(&input).unwrap().is_none());
                     let minted = calls.load(Ordering::SeqCst);
                     write_stage(h, 1);
                     assert_eq!(h.pty.offers, offers(&[b"h"]));
-                    show(
-                        h,
-                        opencode_screen(
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-deny-pre-stage-2",
-                            ),
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-deny-pre-stage-1",
-                            ),
+                    h.show(opencode_screen(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-deny-pre-stage-2",
                         ),
-                    );
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-deny-pre-stage-1",
+                        ),
+                    ));
                     write_stage(h, 2);
                     assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
-                    show(
-                        h,
-                        native_screen_bytes(
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-deny-pre-stage-3",
-                            ),
+                    h.show(native_fixture_bytes(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-deny-pre-stage-3",
                         ),
-                    );
+                    ));
                     assert!(interaction_open(h, ids.1));
                     arm_stage(h, 3);
                     h.drain();
@@ -7999,14 +7800,11 @@ mod tests {
             #[test]
             fn opencode_focus_on_always_allow_after_the_first_deny_stage_fails_uncertain() {
                 with_opencode_inspection(|h, _, _| {
-                    show(
-                        h,
-                        native_screen_bytes(
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-deny-pre-stage-1",
-                            ),
+                    h.show(native_fixture_bytes(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-deny-pre-stage-1",
                         ),
-                    );
+                    ));
                     let ids = settled_ids(h);
                     let deadline = soon(3000);
                     let input = admit(
@@ -8017,17 +7815,14 @@ mod tests {
                         deadline,
                     );
                     let id = write_stage(h, 1);
-                    show(
-                        h,
-                        opencode_screen(
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-focus-always-1",
-                            ),
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-deny-pre-stage-1",
-                            ),
+                    h.show(opencode_screen(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-focus-always-1",
                         ),
-                    );
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-deny-pre-stage-1",
+                        ),
+                    ));
                     let outcome = settle(h, deadline);
                     assert_uncertain(h, id, outcome);
                     assert_eq!(h.pty.offers, offers(&[b"h"]));
@@ -8044,24 +7839,18 @@ mod tests {
             #[test]
             fn opencode_reject_dialog_reached_by_human_input_offers_no_token() {
                 with_opencode_inspection(|h, _, _| {
-                    show(
-                        h,
-                        native_screen_bytes(
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-deny-pre-stage-1",
-                            ),
+                    h.show(native_fixture_bytes(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-deny-pre-stage-1",
                         ),
-                    );
+                    ));
                     let ids = settled_ids(h);
                     assert!(inspect(h, ids).request_token.is_some());
-                    show(
-                        h,
-                        native_screen_bytes(
-                            crate::coding_agent::profiles::catalog::test_support::bundled_screen(
-                                "opencode-2.1.4-deny-pre-stage-3",
-                            ),
+                    h.show(native_fixture_bytes(
+                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                            "opencode-2.1.4-deny-pre-stage-3",
                         ),
-                    );
+                    ));
                     std::thread::sleep(Duration::from_millis(150));
                     h.drain();
                     blocked_reason(h, ids);
@@ -8090,6 +7879,7 @@ mod tests {
                 let evidence = "owned completed coordinator input";
                 let mut first_settled = None;
                 for index in 0..4097 {
+                    let detailed = index == 0 || index == 4096;
                     assert!(
                         Instant::now() < until,
                         "original batch cap at cycle {index}"
@@ -8099,12 +7889,7 @@ mod tests {
                     assert!(h.coordinator.pending.is_none());
                     let request = h.request(&format!("prompt:capacity:{index}"));
                     assert_eq!(request.expires_at_mono_ns, first_request.expires_at_mono_ns);
-                    assert!(
-                        h.coordinator
-                            .handle(&mut h.fixture.conn, &run, request, &h.controller, until)
-                            .unwrap()
-                            .is_none()
-                    );
+                    assert!(h.handle_until(request, until).unwrap().is_none());
                     let reply = (0..8)
                         .find_map(|_| {
                             h.drain();
@@ -8119,52 +7904,57 @@ mod tests {
                     let id = accepted.input_id.expect("actual completed input ID");
                     assert_eq!(h.coordinator.operations.len(), 1);
                     assert!(h.coordinator.pending.is_none());
-                    let retained = cached(h, id);
-                    assert_eq!(retained.0.state, storage::InputState::Accepted);
-                    assert_eq!(retained.1, SubmissionStage::Submitted);
-                    assert_eq!(retained.2, u64::try_from(expected_program.len()).unwrap());
-                    assert!(!retained.4 && !retained.5);
                     assert_eq!(h.pty.offers.len(), index + 1);
                     assert_eq!(h.pty.program.len(), index + 1);
-                    assert_eq!(h.pty.program.last().unwrap(), expected_program);
-                    assert!(h.pty.manual.is_empty());
-                    for boundary in ["reserved", "before", "after", "terminal"] {
-                        assert_eq!(h.hooks.count(boundary), 1, "cycle {index}: {boundary}");
+                    if detailed {
+                        let retained = cached(h, id);
+                        assert_eq!(retained.0.state, storage::InputState::Accepted);
+                        assert_eq!(retained.1, SubmissionStage::Submitted);
+                        assert_eq!(retained.2, u64::try_from(expected_program.len()).unwrap());
+                        assert!(!retained.4 && !retained.5);
+                        assert_eq!(h.pty.program.last().unwrap(), expected_program);
+                        assert!(h.pty.manual.is_empty());
+                        for boundary in ["reserved", "before", "after", "terminal"] {
+                            assert_eq!(h.hooks.count(boundary), 1, "cycle {index}: {boundary}");
+                        }
                     }
-                    let settled_reply = receipt(
-                        h,
-                        ReceiptAction::Reconcile {
+                    let settled_reply = h
+                        .receipt(ReceiptAction::Reconcile {
                             input_id: id,
                             expected: storage::InputState::Accepted,
                             disposition: storage::InputDisposition::Submitted,
                             evidence_ref: evidence.into(),
-                        },
-                    )
-                    .unwrap();
+                        })
+                        .unwrap();
                     assert!(
                         matches!(settled_reply, InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
                     );
-                    let settled = storage::get_input(&h.fixture.conn, id).unwrap();
-                    assert_eq!(settled.run_id, run.run_id);
-                    assert_eq!(settled.operation_key, format!("prompt:capacity:{index}"));
-                    assert_eq!(settled.kind, storage::InputKind::Prompt);
-                    assert_eq!(settled.state, storage::InputState::Settled);
-                    assert_eq!(
-                        settled.disposition,
-                        Some(storage::InputDisposition::Submitted)
-                    );
-                    assert_eq!(settled.evidence_ref.as_deref(), Some(evidence));
-                    assert_eq!(cached(h, id).0, settled);
+                    let settled = detailed.then(|| {
+                        let settled = storage::get_input(&h.fixture.conn, id).unwrap();
+                        assert_eq!(settled.run_id, run.run_id);
+                        assert_eq!(settled.operation_key, format!("prompt:capacity:{index}"));
+                        assert_eq!(settled.kind, storage::InputKind::Prompt);
+                        assert_eq!(settled.state, storage::InputState::Settled);
+                        assert_eq!(
+                            settled.disposition,
+                            Some(storage::InputDisposition::Submitted)
+                        );
+                        assert_eq!(settled.evidence_ref.as_deref(), Some(evidence));
+                        assert_eq!(cached(h, id).0, settled);
+                        settled
+                    });
                     assert_retired(
-                        receipt(h, ReceiptAction::Retire { input_id: id }).unwrap(),
+                        h.receipt(ReceiptAction::Retire { input_id: id }).unwrap(),
                         id,
                     );
                     assert!(h.coordinator.operations.is_empty());
                     assert!(h.coordinator.pending.is_none());
-                    assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
                     assert_eq!(h.pty.offers.len(), index + 1);
-                    if index == 0 {
-                        first_settled = Some(settled);
+                    if let Some(settled) = settled {
+                        assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
+                        if index == 0 {
+                            first_settled = Some(settled);
+                        }
                     }
                     h.hooks.points.lock().unwrap().clear();
                 }
@@ -8177,14 +7967,7 @@ mod tests {
                     first_settled.expect("first real completed operation retained as history");
                 let changes = h.fixture.conn.total_changes();
                 let reply = h
-                    .coordinator
-                    .handle(
-                        &mut h.fixture.conn,
-                        &run,
-                        first_request,
-                        &h.controller,
-                        until,
-                    )
+                    .handle_until(first_request, until)
                     .unwrap()
                     .expect("settled key returns history immediately");
                 let InputControlReply::Submission(replayed) = reply else {
@@ -8213,39 +7996,6 @@ mod tests {
             );
         }
 
-        fn receipt(
-            h: &mut Host,
-            action: ReceiptAction,
-        ) -> std::result::Result<InputControlReply, InputFailure> {
-            let mut request = h.request("unused-receipt-key");
-            request.operation = InputControlOperation::Receipt(action);
-            h.coordinator
-                .handle(
-                    &mut h.fixture.conn,
-                    &h.fixture.run,
-                    request,
-                    &h.controller,
-                    h.until,
-                )
-                .map(|reply| reply.expect("receipt actions reply immediately"))
-        }
-
-        fn pending(h: &Host) -> (String, String, Vec<u8>, Instant, InputPhase, Option<i64>) {
-            let pending = h
-                .coordinator
-                .pending
-                .as_ref()
-                .expect("actual pending writer");
-            (
-                pending.request.operation_key.clone(),
-                pending.request.payload_digest.clone(),
-                pending.bytes.to_vec(),
-                pending.deadline,
-                pending.phase,
-                pending.input_id,
-            )
-        }
-
         #[test]
         fn live_receipt_query_preserves_the_real_zero_byte_checkpoint_and_pending_writer() {
             with_host(|h| {
@@ -8260,16 +8010,14 @@ mod tests {
                     .extend(b"\x1b[2J\x1b[HLater unclassified output");
                 h.drain();
                 assert!(h.transport.snapshot().screen_seq > point.3);
-                let writer = pending(h);
+                let writer = h.pending_snapshot();
                 let changes = h.fixture.conn.total_changes();
                 let hooks = h.hooks.points.lock().unwrap().len();
-                let reply = receipt(
-                    h,
-                    ReceiptAction::Query {
+                let reply = h
+                    .receipt(ReceiptAction::Query {
                         operation_key: key.into(),
-                    },
-                )
-                .expect("Query projects actual retained facts even while a writer is Armed");
+                    })
+                    .expect("Query projects actual retained facts even while a writer is Armed");
                 let InputControlReply::Receipt(ReceiptReply::Present {
                     input_id,
                     submission,
@@ -8283,12 +8031,9 @@ mod tests {
                 assert_eq!(submission.stage, SubmissionStage::ZeroBytes);
                 assert_eq!(submission.output_seq, Some(point.3));
                 assert!(matches!(
-                    receipt(
-                        h,
-                        ReceiptAction::Query {
-                            operation_key: "prompt:absent-receipt".into()
-                        }
-                    )
+                    h.receipt(ReceiptAction::Query {
+                        operation_key: "prompt:absent-receipt".into()
+                    })
                     .unwrap(),
                     InputControlReply::Receipt(ReceiptReply::Missing)
                 ));
@@ -8297,32 +8042,19 @@ mod tests {
                     operation_key: key.into(),
                 });
                 stale.identity.owner_epoch += 1;
+                assert!(h.handle(stale).is_err());
                 assert!(
-                    h.coordinator
-                        .handle(
-                            &mut h.fixture.conn,
-                            &h.fixture.run,
-                            stale,
-                            &h.controller,
-                            h.until
-                        )
-                        .is_err()
-                );
-                assert!(
-                    receipt(
-                        h,
-                        ReceiptAction::Reconcile {
-                            input_id: id,
-                            expected: storage::InputState::InProgress,
-                            disposition: storage::InputDisposition::NotSubmitted,
-                            evidence_ref: "fixture:active-writer-is-not-zero-proof".into(),
-                        }
-                    )
+                    h.receipt(ReceiptAction::Reconcile {
+                        input_id: id,
+                        expected: storage::InputState::InProgress,
+                        disposition: storage::InputDisposition::NotSubmitted,
+                        evidence_ref: "fixture:active-writer-is-not-zero-proof".into(),
+                    })
                     .is_err(),
                     "reconciliation preserves the actual Armed writer and its available permit"
                 );
                 assert!(
-                    pending(h) == writer,
+                    h.pending_snapshot() == writer,
                     "Query preserves exact request, bytes, phase and original deadline"
                 );
                 assert_eq!(cached(h, id), point);
@@ -8338,12 +8070,9 @@ mod tests {
                     )
                     .unwrap();
                 assert!(
-                    receipt(
-                        h,
-                        ReceiptAction::Query {
-                            operation_key: key.into()
-                        }
-                    )
+                    h.receipt(ReceiptAction::Query {
+                        operation_key: key.into()
+                    })
                     .is_err(),
                     "cached immutable identity must match its actual durable reservation"
                 );
@@ -8366,16 +8095,13 @@ mod tests {
                 );
                 let changes = h.fixture.conn.total_changes();
                 assert!(
-                    receipt(
-                        h,
-                        ReceiptAction::Query {
-                            operation_key: key.into()
-                        }
-                    )
+                    h.receipt(ReceiptAction::Query {
+                        operation_key: key.into()
+                    })
                     .is_err(),
                     "a retained attempt without its actual reservation is an invariant error"
                 );
-                assert!(pending(h) == writer);
+                assert!(h.pending_snapshot() == writer);
                 assert_eq!(cached(h, id), point);
                 assert_eq!(h.fixture.conn.total_changes(), changes);
                 assert!(h.pty.offers.is_empty());
@@ -8406,7 +8132,7 @@ mod tests {
                     disposition: storage::InputDisposition::AbandonedUncertain,
                     evidence_ref: "fixture:observed-partial".into(),
                 };
-                let Err(stale) = receipt(h, action(storage::InputState::Accepted)) else {
+                let Err(stale) = h.receipt(action(storage::InputState::Accepted)) else {
                     panic!("actual state CAS rejects stale expected state")
                 };
                 assert!(
@@ -8417,7 +8143,7 @@ mod tests {
                 assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), original);
                 assert_eq!(cached(h, id), point);
                 h.fixture.conn.execute_batch("CREATE TRIGGER receipt_settlement_failure BEFORE UPDATE OF state ON member_input_operations WHEN NEW.state='settled' BEGIN SELECT RAISE(ABORT,'owned receipt settlement failure'); END").unwrap();
-                let failed = receipt(h, action(storage::InputState::Uncertain));
+                let failed = h.receipt(action(storage::InputState::Uncertain));
                 let removed = h
                     .fixture
                     .conn
@@ -8434,7 +8160,7 @@ mod tests {
                 assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), original);
                 assert_eq!(cached(h, id), point);
                 assert!(
-                    matches!(receipt(h, action(storage::InputState::Uncertain)).unwrap(), InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
+                    matches!(h.receipt(action(storage::InputState::Uncertain)).unwrap(), InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
                 );
                 let settled = storage::get_input(&h.fixture.conn, id).unwrap();
                 assert_eq!(settled.state, storage::InputState::Settled);
@@ -8448,18 +8174,15 @@ mod tests {
                 );
                 let changes = h.fixture.conn.total_changes();
                 assert!(
-                    matches!(receipt(h, ReceiptAction::Reconcile { input_id: id, expected: storage::InputState::Settled, disposition: storage::InputDisposition::AbandonedUncertain, evidence_ref: "fixture:preserve-first-evidence".into() }).unwrap(), InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
+                    matches!(h.receipt(ReceiptAction::Reconcile { input_id: id, expected: storage::InputState::Settled, disposition: storage::InputDisposition::AbandonedUncertain, evidence_ref: "fixture:preserve-first-evidence".into() }).unwrap(), InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
                 );
                 assert!(
-                    receipt(
-                        h,
-                        ReceiptAction::Reconcile {
-                            input_id: id,
-                            expected: storage::InputState::Settled,
-                            disposition: storage::InputDisposition::Submitted,
-                            evidence_ref: "fixture:conflicting-wire-disposition".into()
-                        }
-                    )
+                    h.receipt(ReceiptAction::Reconcile {
+                        input_id: id,
+                        expected: storage::InputState::Settled,
+                        disposition: storage::InputDisposition::Submitted,
+                        evidence_ref: "fixture:conflicting-wire-disposition".into()
+                    })
                     .is_err()
                 );
                 assert_eq!(h.fixture.conn.total_changes(), changes);
@@ -8473,13 +8196,11 @@ mod tests {
                 let InputControlReply::Receipt(ReceiptReply::Present {
                     input_id,
                     submission,
-                }) = receipt(
-                    h,
-                    ReceiptAction::Query {
+                }) = h
+                    .receipt(ReceiptAction::Query {
                         operation_key: key.into(),
-                    },
-                )
-                .unwrap()
+                    })
+                    .unwrap()
                 else {
                     panic!("settled cache retains its actual prior facts")
                 };
@@ -8489,20 +8210,18 @@ mod tests {
                 assert_eq!(submission.output_seq, Some(point.3));
                 assert_eq!(h.hooks.points.lock().unwrap().len(), hooks);
                 assert_retired(
-                    receipt(h, ReceiptAction::Retire { input_id: id }).unwrap(),
+                    h.receipt(ReceiptAction::Retire { input_id: id }).unwrap(),
                     id,
                 );
                 assert!(!h.coordinator.operations.contains_key(&id));
                 let InputControlReply::Receipt(ReceiptReply::Present {
                     input_id,
                     submission,
-                }) = receipt(
-                    h,
-                    ReceiptAction::Query {
+                }) = h
+                    .receipt(ReceiptAction::Query {
                         operation_key: key.into(),
-                    },
-                )
-                .unwrap()
+                    })
+                    .unwrap()
                 else {
                     panic!("retired cache preserves durable Present history")
                 };
@@ -8512,17 +8231,7 @@ mod tests {
                 assert_eq!(submission.stage, SubmissionStage::Unknown);
                 assert_eq!(submission.output_seq, None);
                 let repeat = h.request(key);
-                let InputControlReply::Submission(repeat) = h
-                    .coordinator
-                    .handle(
-                        &mut h.fixture.conn,
-                        &h.fixture.run,
-                        repeat,
-                        &h.controller,
-                        h.until,
-                    )
-                    .unwrap()
-                    .unwrap()
+                let InputControlReply::Submission(repeat) = h.handle(repeat).unwrap().unwrap()
                 else {
                     panic!("consumed key returns its submission retry projection")
                 };
@@ -8582,12 +8291,7 @@ mod tests {
                     message_id: Some(message.message_id),
                     literal: "ordinary fixture λ".into(),
                 });
-                assert!(
-                    h.coordinator
-                        .handle(&mut h.fixture.conn, &run, request, &h.controller, h.until)
-                        .unwrap()
-                        .is_none()
-                );
+                assert!(h.handle(request).unwrap().is_none());
                 let accepted = (0..8)
                     .find_map(|_| {
                         h.drain();
@@ -8652,28 +8356,13 @@ mod tests {
                 foreign_request.operation =
                     InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
                 foreign_request.identity.member_id += 1;
-                assert!(
-                    h.coordinator
-                        .handle(
-                            &mut h.fixture.conn,
-                            &run,
-                            foreign_request,
-                            &h.controller,
-                            h.until
-                        )
-                        .is_err()
-                );
+                assert!(h.handle(foreign_request).is_err());
                 assert_eq!(cached(h, id), before);
                 assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
 
                 let unrelated_key = "prompt:retirement-active-writer";
                 let unrelated = h.request(unrelated_key);
-                assert!(
-                    h.coordinator
-                        .handle(&mut h.fixture.conn, &run, unrelated, &h.controller, h.until)
-                        .unwrap()
-                        .is_none()
-                );
+                assert!(h.handle(unrelated).unwrap().is_none());
                 for _ in 0..8 {
                     h.drain();
                     assert!(h.advance().is_none());
@@ -8727,14 +8416,7 @@ mod tests {
                 retirement.operation =
                     InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
                 let reply = h
-                    .coordinator
-                    .handle(
-                        &mut h.fixture.conn,
-                        &run,
-                        retirement,
-                        &h.controller,
-                        h.until,
-                    )
+                    .handle(retirement)
                     .unwrap()
                     .expect("typed retirement dispatch");
                 assert_retired(reply, id);

@@ -916,10 +916,7 @@ mod tests {
         }
 
         fn run_case(scenario: &str) {
-            let dir = tempfile::Builder::new()
-                .prefix(".p194-member-delete-")
-                .tempdir_in("/tmp")
-                .unwrap();
+            let dir = crate::runtime::runner::test_support::short_tempdir();
             let log = dir.path().join("child.log");
             let file = std::fs::File::create(&log).unwrap();
             let started = Instant::now();
@@ -962,10 +959,7 @@ mod tests {
                 scenario.as_str(),
                 "terminal" | "epoch" | "placement"
             ));
-            let _dir = tempfile::Builder::new()
-                .prefix(".m194-")
-                .tempdir_in("/tmp")
-                .unwrap();
+            let _dir = crate::runtime::runner::test_support::short_tempdir();
             let mut conn = migrated_conn(&_dir);
             let settings =
                 Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux"));
@@ -1819,10 +1813,7 @@ mod tests {
         use crate::db::test_support::{migrated_conn, table_snapshot};
 
         fn invalid_creation(backend: CodingAgent, extra: &[String]) -> CafleetError {
-            let dir = tempfile::Builder::new()
-                .prefix(".p194-")
-                .tempdir_in("/tmp")
-                .unwrap();
+            let dir = crate::runtime::runner::test_support::short_tempdir();
             let mut conn = migrated_conn(&dir);
             let (fleet, _) = crate::broker::fleets::test_support::create_fleet_fixture(
                 &mut conn,
@@ -2009,7 +2000,7 @@ mod tests {
         use crate::cli::{CliArgs, Command, dispatch, member};
 
         #[test]
-        fn step5_press_cli_preserves_keys_after_the_ordinary_option_separator() {
+        fn press_cli_preserves_keys_after_the_ordinary_option_separator() {
             assert!(CliArgs::try_parse_from(["cafleet", "member", "show", "42"]).is_ok());
             let result = CliArgs::try_parse_from([
                 "cafleet",
@@ -2052,7 +2043,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_press_cli_invalid_tail_is_usage_before_missing_database_validation() {
+        fn press_cli_invalid_tail_is_usage_before_missing_database_validation() {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("absent.db");
             let settings = Settings::for_database(&path, Some("tmux"));
@@ -2070,7 +2061,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_press_presentation_is_canonical_acknowledgment_without_effect_counts() {
+        fn press_presentation_is_canonical_acknowledgment_without_effect_counts() {
             let keys =
                 crate::multiplexer::PressKeys::parse(&["cTrL+A".into(), ";".into()]).unwrap();
             let value = crate::runtime::KeyAcknowledgment {
@@ -2288,10 +2279,7 @@ mod tests {
         }
 
         fn unwrapped_registry() -> (TempDir, Settings, Connection, i64) {
-            let dir = tempfile::Builder::new()
-                .prefix(".p194-entry-")
-                .tempdir_in("/tmp")
-                .unwrap();
+            let dir = crate::runtime::runner::test_support::short_tempdir();
             let mut conn = migrated_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "recovery-entry");
             let member_id = crate::broker::register_member(

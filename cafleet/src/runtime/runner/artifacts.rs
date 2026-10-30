@@ -494,6 +494,20 @@ impl RunLock {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use tempfile::TempDir;
+
+    /// A database directory under `/tmp`, because `RuntimePaths::for_run` places the control
+    /// socket beneath the database parent and refuses socket paths past the platform limit.
+    pub(crate) fn short_tempdir() -> TempDir {
+        tempfile::Builder::new()
+            .prefix(".cafleet-test-")
+            .tempdir_in("/tmp")
+            .unwrap()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 

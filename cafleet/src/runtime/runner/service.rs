@@ -1490,7 +1490,7 @@ pub(crate) mod test_support {
                 } else if capture {
                     native_capture_service_child_path()
                 } else {
-                    super::tests::control_service::runner_review_service_child_path()
+                    super::tests::control_service::service_child_path()
                 },
                 "--nocapture",
                 "--test-threads=1",
@@ -1628,6 +1628,25 @@ pub(crate) mod test_support {
             self.creator.as_mut().unwrap().exchange(&request)
         }
 
+        /// Resizes the outer terminal and signals the runner the way a terminal emulator does.
+        pub(crate) fn resize(&self, rows: u16, cols: u16) {
+            rustix::termios::tcsetwinsize(
+                &self.master,
+                rustix::termios::Winsize {
+                    ws_row: rows,
+                    ws_col: cols,
+                    ws_xpixel: 0,
+                    ws_ypixel: 0,
+                },
+            )
+            .unwrap();
+            nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(i32::try_from(self.child.id()).unwrap()),
+                nix::sys::signal::Signal::SIGWINCH,
+            )
+            .unwrap();
+        }
+
         pub(crate) fn start_running(&mut self) -> Started {
             self.prepare();
             self.publish();
@@ -1684,17 +1703,10 @@ pub(crate) mod test_support {
         }
 
         pub(crate) fn wait(&mut self) -> ExitStatus {
-            let until = Instant::now() + Duration::from_secs(5);
-            loop {
-                if let Some(status) = self.child.try_wait().unwrap() {
-                    return status;
-                }
-                assert!(
-                    Instant::now() < until,
-                    "owned runner exceeded bounded cleanup"
-                );
-                std::thread::sleep(Duration::from_millis(5));
-            }
+            self.child
+                .poll_until(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .expect("owned runner exceeded bounded cleanup")
         }
 
         pub(crate) fn finish(&mut self) {
@@ -1811,21 +1823,17 @@ pub(crate) mod test_support {
             let until = self
                 .cleanup_deadline
                 .unwrap_or_else(|| Instant::now() + Duration::from_secs(5));
-            let graceful = until - Duration::from_secs(1);
-            while Instant::now() < graceful {
-                match self.child.try_wait() {
-                    Ok(Some(_)) => {
-                        self.cleanup_recorded_native();
-                        return;
-                    }
-                    Ok(None) => {}
-                    Err(cause) => {
-                        eprintln!("owned runner collection failed: {cause}");
-                        self.cleanup_recorded_native();
-                        return;
-                    }
+            match self.child.poll_until(until - Duration::from_secs(1)) {
+                Ok(Some(_)) => {
+                    self.cleanup_recorded_native();
+                    return;
                 }
-                std::thread::sleep(Duration::from_millis(5));
+                Ok(None) => {}
+                Err(cause) => {
+                    eprintln!("owned runner collection failed: {cause}");
+                    self.cleanup_recorded_native();
+                    return;
+                }
             }
             self.cleanup_recorded_native();
             self.child.terminate_until(until);
@@ -1835,7 +1843,6 @@ pub(crate) mod test_support {
     pub(crate) mod input_service {
         use super::observation_services::private_write;
         use super::*;
-        use crate::error::CafleetError;
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
         pub(crate) fn native(path: &Path) {
             install_panic_record(path.parent().unwrap(), "native");
@@ -1921,39 +1928,14 @@ pub(crate) mod test_support {
             Ok(records)
         }
 
-        pub(crate) struct Clock;
-        impl InputDeadlineClock for Clock {
-            fn sample(&mut self) -> Result<InputClockSample, CafleetError> {
-                let before = Instant::now();
-                let value = rustix::time::clock_gettime_dynamic(
-                    rustix::time::DynamicClockId::Known(rustix::time::ClockId::Monotonic),
-                )
-                .map_err(io_error)?;
-                let after = Instant::now();
-                let seconds = u64::try_from(value.tv_sec).unwrap();
-                let nanos = u64::try_from(value.tv_nsec).unwrap();
-                assert!(nanos < 1_000_000_000);
-                Ok(InputClockSample {
-                    before,
-                    monotonic_ns: seconds
-                        .checked_mul(1_000_000_000)
-                        .unwrap()
-                        .checked_add(nanos)
-                        .unwrap(),
-                    after,
-                })
-            }
-        }
+        pub(crate) use crate::runtime::runner::RealInputDeadlineClock as Clock;
         pub(crate) fn expiration(until: Instant) -> u64 {
             InputExpiration::capture(until, &mut Clock)
                 .unwrap()
                 .monotonic_ns()
         }
         pub(crate) fn pause(until: Instant) {
-            assert!(Instant::now() < until, "original owned service deadline");
-            std::thread::sleep(
-                Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
-            );
+            crate::runtime::runner::control::pause(until).expect("original owned service deadline");
         }
 
         pub(crate) fn configure(fixture: &mut Fixture, spec: &mut SpawnSpec, until: Instant) {
@@ -1995,13 +1977,13 @@ pub(crate) mod test_support {
                 .unwrap(),
             );
             spec.argv = vec![
-        std::env::current_exe().unwrap().to_str().unwrap().into(),
-        "--exact".into(),
-        crate::runtime::runner::service::tests::control_service::runner_review_service_child_path()
-            .into(),
-        "--nocapture".into(),
-        "--test-threads=1".into(),
-    ];
+                std::env::current_exe().unwrap().to_str().unwrap().into(),
+                "--exact".into(),
+                crate::runtime::runner::service::tests::control_service::service_child_path()
+                    .into(),
+                "--nocapture".into(),
+                "--test-threads=1".into(),
+            ];
             spec.environment
                 .push((NATIVE_ENV.into(), config.to_str().unwrap().into()));
             private_write(
@@ -2024,23 +2006,11 @@ pub(crate) mod test_support {
                 }
             }
             pub(crate) fn send(&mut self, bytes: &[u8], until: Instant) {
-                let mut offset = 0;
-                while offset < bytes.len() {
-                    assert!(Instant::now() < until);
-                    match self.stream.write(&bytes[offset..]) {
-                        Ok(0) => panic!("owned control writer disconnected"),
-                        Ok(count) => offset += count,
-                        Err(cause)
-                            if matches!(
-                                cause.kind(),
-                                ErrorKind::WouldBlock | ErrorKind::Interrupted
-                            ) =>
-                        {
-                            pause(until)
-                        }
-                        Err(cause) => panic!("owned control write: {cause}"),
-                    }
-                }
+                crate::runtime::runner::test_support::write_fixture_bytes(
+                    &mut self.stream,
+                    bytes,
+                    until,
+                );
             }
             pub(crate) fn reply(&mut self, until: Instant) -> Value {
                 loop {
@@ -2441,26 +2411,30 @@ pub(crate) mod test_support {
                     directory: config.parent().unwrap().to_path_buf(),
                 }),
                 capture: None,
-                observation_hooks: super::review_failures::hooks(&value, config.parent().unwrap())?,
+                observation_hooks: super::injected_failures::hooks(
+                    &value,
+                    config.parent().unwrap(),
+                )?,
             };
             run_service(settings, descriptor, services)
         }
-        pub(crate) fn private_write(path: &Path, bytes: &[u8]) {
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(path)
-                .unwrap();
-            file.write_all(bytes).unwrap();
-            file.sync_all().unwrap();
+        pub(crate) use crate::runtime::runner::observation::native_capture::test_support::private_write;
+        pub(crate) fn wait_until(ready: impl FnMut() -> bool) {
+            crate::runtime::runner::writer::test_support::wait_until_within(
+                Duration::from_secs(3),
+                ready,
+            );
         }
-        pub(crate) fn wait_until(mut ready: impl FnMut() -> bool) {
-            let until = Instant::now() + Duration::from_secs(3);
-            while !ready() {
-                assert!(Instant::now() < until, "bounded actual service condition");
-                std::thread::sleep(Duration::from_millis(5));
-            }
+        /// Every persisted event kind of `run_id`, in event-sequence order.
+        pub(crate) fn kinds(conn: &rusqlite::Connection, run_id: i64) -> Vec<String> {
+            conn.prepare(
+                "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
+            )
+            .unwrap()
+            .query_map([run_id], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
         }
         pub(crate) fn count(fixture: &ServiceFixture, kind: &str) -> i64 {
             fixture
@@ -2551,14 +2525,14 @@ pub(crate) mod test_support {
         }
     }
 
-    pub(crate) mod review_failures {
+    pub(crate) mod injected_failures {
         use super::observation_services::{count, health, private_write, wait_until};
         use super::*;
         use crate::error::CafleetError;
         use crate::runtime::runner::observation::test_support::synthetic;
         use std::sync::{Arc, OnceLock};
 
-        pub(crate) const CANARY: &str = "private-observation-fault-canary-194";
+        pub(crate) const CANARY: &str = "private-observation-fault-canary";
 
         pub(crate) struct Hooks {
             pub(crate) site: ObservationPhase,
@@ -2814,8 +2788,6 @@ mod tests {
     use std::path::Path;
     use std::time::{Duration, Instant};
 
-    use nix::sys::signal::{Signal, kill};
-    use nix::unistd::Pid;
     use serde_json::{Value, json};
 
     use super::test_support::*;
@@ -2825,12 +2797,12 @@ mod tests {
 
     pub(super) mod control_service {
         use super::*;
-        pub(crate) fn runner_review_service_child_path() -> &'static str {
-            test_path!(runner_review_service_child)
+        pub(crate) fn service_child_path() -> &'static str {
+            test_path!(service_child)
         }
 
         #[test]
-        fn runner_review_service_child() {
+        fn service_child() {
             if let Some(config) =
                 std::env::var_os(super::super::test_support::input_service::NATIVE_ENV)
             {
@@ -2871,13 +2843,13 @@ mod tests {
             match outcome {
                 Ok(status) => std::process::exit(status),
                 Err(cause) => {
-                    eprintln!("owned review runner failed: {cause}");
+                    eprintln!("service child runner failed: {cause}");
                     std::process::exit(1);
                 }
             }
         }
         #[test]
-        fn runner_review_control_stale_start_preserves_running_child_health_and_manual_io() {
+        fn control_stale_start_preserves_running_child_health_and_manual_io() {
             for stale in ["nonce", "epoch"] {
                 let mut fixture = ServiceFixture::new(false);
                 let started = fixture.start_running();
@@ -2898,7 +2870,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_control_invalid_protocol_versions_leave_the_running_child_available() {
+        fn control_invalid_protocol_versions_leave_the_running_child_available() {
             let mut fixture = ServiceFixture::new(false);
             let started = fixture.start_running();
             for version in [None, Some(json!(2)), Some(json!("1")), Some(json!(1.0))] {
@@ -2917,7 +2889,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_control_noncreator_start_is_isolated_before_and_after_spawn() {
+        fn control_noncreator_start_is_isolated_before_and_after_spawn() {
             let mut fixture = ServiceFixture::new(false);
             fixture.prepare();
             fixture.publish();
@@ -2938,7 +2910,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_control_repeated_creator_start_preserves_child_health_and_manual_io() {
+        fn control_repeated_creator_start_preserves_child_health_and_manual_io() {
             let mut fixture = ServiceFixture::new(false);
             let started = fixture.start_running();
             assert_rejected(&fixture.start());
@@ -2948,7 +2920,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_control_disconnected_reply_preserves_health_and_manual_io() {
+        fn control_disconnected_reply_preserves_health_and_manual_io() {
             let mut fixture = ServiceFixture::new(false);
             let started = fixture.start_running();
             fixture.stop_for_disconnect();
@@ -2968,7 +2940,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_control_creator_disconnect_before_start_exits_without_spawning() {
+        fn control_creator_disconnect_before_start_exits_without_spawning() {
             let mut fixture = ServiceFixture::new(false);
             fixture.prepare();
             drop(fixture.creator.take());
@@ -2985,7 +2957,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_control_accepted_start_spawn_and_storage_failures_compensate() {
+        fn control_accepted_start_spawn_and_storage_failures_compensate() {
             for storage_failure in [false, true] {
                 let mut fixture = ServiceFixture::new(!storage_failure);
                 fixture.prepare();
@@ -3022,8 +2994,7 @@ mod tests {
         use super::super::test_support::input_service::*;
         use super::*;
         #[test]
-        fn step5_service_input_socket_submission_persists_typed_outcome_and_matching_key_never_replays()
-         {
+        fn service_input_socket_submission_persists_typed_outcome_and_matching_key_never_replays() {
             with_input_service(|fixture, until| {
                 let key = "prompt:service:single";
                 let literal = "socket prompt λ";
@@ -3067,8 +3038,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_service_input_queued_expiration_keeps_manual_progress_and_uses_fresh_output_for_exec()
-         {
+        fn service_input_queued_expiration_keeps_manual_progress_and_uses_fresh_output_for_exec() {
             with_input_service(|fixture, until| {
                 let before = input_service_composer(fixture, until).output_seq;
                 let expires = Instant::now() + Duration::from_millis(800);
@@ -3142,8 +3112,8 @@ mod tests {
         }
 
         #[test]
-        fn step5_service_input_disconnected_preview_consumer_retains_outcome_without_automatic_retyping()
-         {
+        fn service_input_disconnected_preview_consumer_retains_outcome_without_automatic_retyping()
+        {
             with_input_service(|fixture, until| {
                 let message = crate::broker::send_message(
                     &mut fixture.fixture.conn,
@@ -3219,7 +3189,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_service_input_expired_unreserved_attempt_releases_pending_work_for_a_fresh_key() {
+        fn service_input_expired_unreserved_attempt_releases_pending_work_for_a_fresh_key() {
             const EXPIRATION_TOLERANCE: Duration = Duration::from_millis(100);
 
             with_input_service(|fixture, until| {
@@ -3290,10 +3260,6 @@ mod tests {
                     until.min(Instant::now() + Duration::from_secs(3)),
                 );
                 let reply = exchange(fixture, &fresh, until);
-                eprintln!(
-                    "reservation expiry under actual {journal} writer lock: elapsed={elapsed:?}; expired_reply={failure}; fresh_reply={reply}; native_records={:?}",
-                    input_service_records(fixture)
-                );
                 let accepted = submission(reply);
                 let row =
                     storage::get_input(&fixture.fixture.conn, accepted.input_id.unwrap()).unwrap();
@@ -3321,7 +3287,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_service_input_post_write_failure_preserves_known_identity_and_original_history() {
+        fn service_input_post_write_failure_preserves_known_identity_and_original_history() {
             with_input_service(|fixture, until| {
                 let key = "prompt:service:known-input-error";
                 let literal = "SERVICE_R2_PRIVATE_LITERAL_λ";
@@ -3389,10 +3355,6 @@ mod tests {
                     storage::get_input(&fixture.fixture.conn, original.input_id).unwrap(),
                     original
                 );
-                eprintln!(
-                    "actual post-write persistence error: cause={cause:?}; input_id={}; run_id={}; key={:?}; state={:?}; child_line_count={count}",
-                    original.input_id, original.run_id, original.operation_key, original.state
-                );
                 assert!(
                     cause.contains(&format!("input_id={}", original.input_id))
                         && cause.contains(&format!("run_id={}", original.run_id))
@@ -3413,8 +3375,7 @@ mod tests {
         use super::*;
         use crate::runtime::runner::observation::test_support::synthetic;
         #[test]
-        fn runner_batch2_service_sqlite_and_writer_failures_keep_health_manual_display_and_resize_live()
-         {
+        fn service_sqlite_and_writer_failures_keep_health_manual_display_and_resize_live() {
             for boundary in ["fail-sync", "block-persist"] {
                 let mut fixture = ServiceFixture::configured(false, synthetic);
                 fixture.start_running();
@@ -3438,22 +3399,8 @@ mod tests {
                 assert!(status["observation"]["pending_count"].as_u64().unwrap() <= 130);
                 fixture.assert_manual_io();
                 let sequence = health(&mut fixture)["output_seq"].as_u64().unwrap();
-                rustix::termios::tcsetwinsize(
-                    &fixture.master,
-                    rustix::termios::Winsize {
-                        ws_row: 25,
-                        ws_col: 90,
-                        ws_xpixel: 0,
-                        ws_ypixel: 0,
-                    },
-                )
-                .unwrap();
                 assert!(fixture.process.as_ref().unwrap().matches().unwrap());
-                kill(
-                    Pid::from_raw(i32::try_from(fixture.child.id()).unwrap()),
-                    Signal::SIGWINCH,
-                )
-                .unwrap();
+                fixture.resize(25, 90);
                 wait_until(|| health(&mut fixture)["output_seq"].as_u64().unwrap() > sequence);
                 fixture.fixture.conn.execute_batch("ROLLBACK").unwrap();
                 std::fs::remove_file(hook).unwrap();
@@ -3462,8 +3409,7 @@ mod tests {
             }
         }
         #[test]
-        fn runner_batch2_service_existing_reservation_is_refused_before_native_spawn_or_new_grant()
-        {
+        fn service_existing_reservation_is_refused_before_native_spawn_or_new_grant() {
             let fixture = ServiceFixture::startup_refusal(|fixture, spec| {
                 synthetic(fixture, spec);
                 fixture
@@ -3496,8 +3442,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_service_each_durable_history_table_is_checked_before_initial_reservation()
-        {
+        fn service_each_durable_history_table_is_checked_before_initial_reservation() {
             for interaction in [false, true] {
                 let mut seeded = None;
                 let fixture = ServiceFixture::startup_refusal(|fixture, spec| {
@@ -3545,7 +3490,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_service_started_health_reports_observation_without_composer_authority() {
+        fn service_started_health_reports_observation_without_composer_authority() {
             let mut fixture = ServiceFixture::new(false);
             fixture.start_running();
             let mut client = fixture.connect("observation health");
@@ -3567,9 +3512,9 @@ mod tests {
         }
     }
 
-    mod review_failures {
+    mod injected_failures {
+        use super::super::test_support::injected_failures::*;
         use super::super::test_support::observation_services::count;
-        use super::super::test_support::review_failures::*;
         use super::*;
         use crate::runtime::runner::observation::test_support::synthetic;
         #[test]
@@ -3585,21 +3530,7 @@ mod tests {
             let before =
                 storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
             assert_eq!(before.status, RunStatus::Running);
-            rustix::termios::tcsetwinsize(
-                &fixture.master,
-                rustix::termios::Winsize {
-                    ws_row: 0,
-                    ws_col: 0,
-                    ws_xpixel: 0,
-                    ws_ypixel: 0,
-                },
-            )
-            .unwrap();
-            kill(
-                Pid::from_raw(i32::try_from(fixture.child.id()).unwrap()),
-                Signal::SIGWINCH,
-            )
-            .unwrap();
+            fixture.resize(0, 0);
             let until = Instant::now() + Duration::from_secs(5);
             let during = loop {
                 let run =
@@ -3645,7 +3576,7 @@ mod tests {
             assert!(!started.child.matches().unwrap());
         }
         #[test]
-        fn runner_review_r3_shutdown_detector_failure_records_gap_before_truthful_native_exit() {
+        fn shutdown_detector_failure_records_gap_before_truthful_native_exit() {
             let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
                 configure(fixture, spec, "shutdown_drain", "detector");
                 install_trap(
@@ -3675,8 +3606,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_r3_shutdown_parser_loss_after_terminal_fence_remains_unsaved_without_live_append()
-         {
+        fn shutdown_parser_loss_after_terminal_fence_remains_unsaved_without_live_append() {
             let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
                 configure(fixture, spec, "shutdown_drain", "parser");
                 let config_path = fixture._dir.path().join("observation-services.json");
@@ -3751,17 +3681,11 @@ mod tests {
                     .path()
                     .join("buffered-tail-parser-native.json"),
             );
-            let final_kinds: Vec<String> = fixture
-                .fixture
-                .conn
-                .prepare(
-                    "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
-                )
-                .unwrap()
-                .query_map([fixture.fixture.run.run_id], |row| row.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
+            let final_kinds =
+                crate::runtime::runner::service::test_support::observation_services::kinds(
+                    &fixture.fixture.conn,
+                    fixture.fixture.run.run_id,
+                );
             let final_run =
                 storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
             assert!(
@@ -3809,17 +3733,10 @@ mod tests {
             assert!(outcome.unsaved_observation_gap > 0);
             assert_eq!(outcome.cleanup_state, CleanupState::Incomplete);
             let _exit = fixture.wait();
-            let kinds: Vec<String> = fixture
-                .fixture
-                .conn
-                .prepare(
-                    "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
-                )
-                .unwrap()
-                .query_map([fixture.fixture.run.run_id], |row| row.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
+            let kinds = crate::runtime::runner::service::test_support::observation_services::kinds(
+                &fixture.fixture.conn,
+                fixture.fixture.run.run_id,
+            );
             assert_eq!(kinds, ["runner_exited"]);
             let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
             assert_eq!(run.status, RunStatus::Exited);
@@ -3881,24 +3798,12 @@ mod tests {
                 );
             }
         }
-
-        #[test]
-        fn pacing_keeps_the_idle_sleep_when_a_blocked_master_accepted_no_queued_input() {
-            let now = Instant::now();
-            let blocked = progress(0, 0);
-            assert_eq!(tick_sleep(&blocked, None, now), Duration::from_millis(2));
-            assert_eq!(
-                tick_sleep(&blocked, Some(now + Duration::from_micros(500)), now),
-                Duration::from_micros(500)
-            );
-        }
     }
     mod input_admission_tests {
         use super::super::*;
+        use crate::runtime::runner::InputClockSample;
         use crate::runtime::runner::codec::AdmittedControlFrame;
         use crate::runtime::runner::input_clock::receive_input_expiration;
-        use crate::runtime::runner::{InputClockSample, InputDeadlineClock};
-        use std::io::Write;
         use std::net::Shutdown;
 
         use crate::runtime::runner::codec::test_support::independent_frame as frame;
@@ -3917,24 +3822,7 @@ mod tests {
                 peer,
             )
         }
-        fn send(peer: &mut UnixStream, mut bytes: &[u8], deadline: Instant) {
-            while !bytes.is_empty() {
-                assert!(Instant::now() < deadline, "bounded peer send");
-                match peer.write(bytes) {
-                    Ok(0) => panic!("peer send progresses"),
-                    Ok(count) => bytes = &bytes[count..],
-                    Err(error)
-                        if matches!(
-                            error.kind(),
-                            ErrorKind::WouldBlock | ErrorKind::Interrupted
-                        ) =>
-                    {
-                        std::thread::yield_now()
-                    }
-                    Err(error) => panic!("peer send: {error}"),
-                }
-            }
-        }
+        use crate::runtime::runner::test_support::write_fixture_bytes as send;
         fn after(previous: Instant, deadline: Instant) {
             while Instant::now() <= previous {
                 assert!(
@@ -3977,7 +3865,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_a1_actual_poll_proves_first_byte_before_later_completion() {
+        fn client_poll_proves_first_byte_before_later_completion() {
             let (mut client, mut peer) = pair();
             let deadline = Instant::now() + Duration::from_secs(1);
             let body = br#"{"protocol_version":1,"kind":"health"}"#;
@@ -3991,7 +3879,7 @@ mod tests {
             client.decoder.finish().unwrap();
         }
         #[test]
-        fn step5_wire_a2_empty_actual_poll_does_not_supply_admission_time() {
+        fn client_empty_poll_supplies_no_admission_time() {
             let (mut client, mut peer) = pair();
             let deadline = Instant::now() + Duration::from_secs(1);
             client.decoder.finish().unwrap();
@@ -4010,30 +3898,8 @@ mod tests {
             assert_eq!(frames[0].body(), body);
             client.decoder.finish().unwrap();
         }
-        struct Clock {
-            sample: Option<std::result::Result<InputClockSample, CafleetError>>,
-            calls: usize,
-        }
-        impl Clock {
-            fn at(instant: Instant) -> Self {
-                Self {
-                    sample: Some(Ok(InputClockSample {
-                        before: instant,
-                        monotonic_ns: 1_000_000_000,
-                        after: instant,
-                    })),
-                    calls: 0,
-                }
-            }
-        }
-        impl InputDeadlineClock for Clock {
-            fn sample(&mut self) -> Result<InputClockSample> {
-                self.calls += 1;
-                self.sample.take().expect("one original paired sample")
-            }
-        }
         #[test]
-        fn step5_wire_a3_actual_frames_keep_first_time_through_coalescence_queue_and_conversion() {
+        fn client_frames_keep_first_time_through_coalescence_queue_and_conversion() {
             let (mut client, mut peer) = pair();
             let deadline = Instant::now() + Duration::from_secs(1);
             let first_body = br#"{"protocol_version":1,"kind":"health"}"#;
@@ -4058,7 +3924,13 @@ mod tests {
                 let actual = queue.pop_front().unwrap();
                 assert_eq!(actual.admitted_at(), expected);
                 let now = Instant::now();
-                let mut clock = Clock::at(now);
+                let mut clock = crate::runtime::runner::input_clock::test_support::ScriptClock::one(
+                    InputClockSample {
+                        before: now,
+                        monotonic_ns: 1_000_000_000,
+                        after: now,
+                    },
+                );
                 let converted = receive_input_expiration(
                     11_000_000_000,
                     actual.admitted_at(),
@@ -4067,28 +3939,18 @@ mod tests {
                 )
                 .unwrap();
                 assert_eq!(converted, actual.admitted_at() + Duration::from_secs(5));
-                assert_eq!(clock.calls, 1);
+                clock.consumed(1, 0);
             }
             assert!(queue.is_empty());
             client.decoder.finish().unwrap();
         }
         #[test]
-        fn step5_wire_a4_actual_client_rejects_partial_eof_and_oversized_header() {
+        fn client_rejects_partial_eof() {
             let deadline = Instant::now() + Duration::from_secs(1);
-            let (mut good, mut peer) = pair();
-            let body = br#"{"protocol_version":1,"kind":"health"}"#;
-            send(&mut peer, &frame(body), deadline);
-            assert_eq!(collect(&mut good, 1, deadline)[0].body(), body);
-            good.decoder.finish().unwrap();
             let (mut partial, mut peer) = pair();
             first(&mut partial, &mut peer, 0, deadline);
             peer.shutdown(Shutdown::Write).unwrap();
             assert!(partial.poll().is_err());
-            for size in [65537u32, u32::MAX] {
-                let (mut client, mut peer) = pair();
-                send(&mut peer, &size.to_be_bytes(), deadline);
-                assert!(client.poll().is_err());
-            }
         }
     }
 }

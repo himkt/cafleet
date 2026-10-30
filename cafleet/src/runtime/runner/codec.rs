@@ -158,7 +158,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_f1_every_split_and_single_byte_feed_retains_first_consumption_time() {
+        fn frames_every_split_and_single_byte_feed_retains_first_consumption_time() {
             let body = br#"{"protocol_version":1,"kind":"health","text":"literal \u4e16\u754c"}"#;
             let value: Value = serde_json::from_slice(body).unwrap();
             let bytes = frame(body);
@@ -197,7 +197,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_f2_empty_feeds_leave_admission_unset_and_preserve_partial_frame_time() {
+        fn frames_empty_feeds_leave_admission_unset_and_preserve_partial_frame_time() {
             let t = Instant::now();
             let body = br#"{"protocol_version":1,"kind":"health"}"#;
             let bytes = frame(body);
@@ -220,7 +220,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_f4_partial_complete_and_new_tail_keep_each_first_header_time() {
+        fn frames_partial_complete_and_new_tail_keep_each_first_header_time() {
             let bodies = [b"first".as_slice(), b"second", b"third"];
             let encoded = bodies.map(frame);
             let t = Instant::now();
@@ -251,7 +251,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_f5_inclusive_body_limit_and_header_only_oversize_rejection() {
+        fn frames_inclusive_body_limit_and_header_only_oversize_rejection() {
             let t = Instant::now();
             let body = vec![b'x'; 65536];
             let mut decoder = ControlDecoder::new();
@@ -274,7 +274,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_f6_eof_rejects_each_partial_boundary_and_empty_body_reaches_consumer() {
+        fn frames_eof_rejects_each_partial_boundary_and_empty_body_reaches_consumer() {
             let t = Instant::now();
             let body = br#"{"protocol_version":1,"kind":"health"}"#;
             let bytes = frame(body);
@@ -294,7 +294,7 @@ mod tests {
         }
 
         #[test]
-        fn step5_wire_f7_raw_bytes_preserve_whitespace_and_invalid_json_for_consumer_validation() {
+        fn frames_raw_bytes_preserve_whitespace_and_invalid_json_for_consumer_validation() {
             let t = Instant::now();
             for (body, valid) in [
             (

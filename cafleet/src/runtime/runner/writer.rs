@@ -723,13 +723,10 @@ pub(crate) mod test_support {
             self.state.lock().unwrap().paused[index(boundary)] = true;
         }
         pub(crate) fn release_for_cleanup(&self) {
-            let mut state = match self.state.lock() {
-                Ok(state) => state,
-                Err(poisoned) => {
-                    eprintln!("fixture hook cleanup recovered poisoned state");
-                    poisoned.into_inner()
-                }
-            };
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             state.paused = [false; 5];
             drop(state);
             self.changed.notify_all();
@@ -937,12 +934,16 @@ pub(crate) mod test_support {
         }
     }
 
-    pub(crate) fn frame(transition: &ObservedTransition) -> Vec<u8> {
-        let body = serde_json::to_vec(transition).unwrap();
+    /// An outbox frame (length, SHA-256 of the body, body) built without the production encoder.
+    pub(crate) fn outbox_frame(body: &[u8]) -> Vec<u8> {
         let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-        bytes.extend_from_slice(&Sha256::digest(&body));
-        bytes.extend(body);
+        bytes.extend_from_slice(&Sha256::digest(body));
+        bytes.extend_from_slice(body);
         bytes
+    }
+
+    pub(crate) fn frame(transition: &ObservedTransition) -> Vec<u8> {
+        outbox_frame(&serde_json::to_vec(transition).unwrap())
     }
 
     pub(crate) fn independent_frames(mut bytes: &[u8]) -> Vec<ObservedTransition> {
@@ -1007,7 +1008,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_waits_for_its_opening_barrier_without_an_outbox_frame() {
+        fn writer_refresh_waits_for_its_opening_barrier_without_an_outbox_frame() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Persist);
@@ -1030,7 +1031,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_newer_revision_survives_an_inflight_successful_attempt() {
+        fn writer_refresh_newer_revision_survives_an_inflight_successful_attempt() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             let mut writer = committed_open(&fixture, hooks.clone());
@@ -1048,7 +1049,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_newer_revision_survives_an_inflight_failed_attempt() {
+        fn writer_refresh_newer_revision_survives_an_inflight_failed_attempt() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             let mut writer = committed_open(&fixture, hooks.clone());
@@ -1066,7 +1067,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_rejects_regression_conflict_and_foreign_episode_without_replacing_newer_work()
+        fn writer_refresh_rejects_regression_conflict_and_foreign_episode_without_replacing_newer_work()
          {
             for field in ["regression", "conflict", "episode"] {
                 let fixture = WriterFixture::new();
@@ -1104,8 +1105,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_closure_follows_earlier_evidence_and_rejects_late_old_episode_updates()
-         {
+        fn writer_refresh_closure_follows_earlier_evidence_and_rejects_late_old_episode_updates() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             let mut writer = committed_open(&fixture, hooks.clone());
@@ -1129,7 +1129,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_newer_same_episode_revision_advances_its_semantic_barrier() {
+        fn writer_refresh_newer_same_episode_revision_advances_its_semantic_barrier() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
@@ -1153,8 +1153,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_equal_identical_requests_coalesce_and_expiry_has_no_enqueue_effect()
-         {
+        fn writer_refresh_equal_identical_requests_coalesce_and_expiry_has_no_enqueue_effect() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             let mut writer = committed_open(&fixture, hooks.clone());
@@ -1180,7 +1179,7 @@ mod tests {
     mod worker {
         use super::*;
         #[test]
-        fn runner_batch2_hook_timeout_releases_the_mutex_before_unwinding_through_cleanup() {
+        fn writer_hook_timeout_releases_the_mutex_before_unwinding_through_cleanup() {
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
             let observed = hooks.clone();
@@ -1194,8 +1193,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_hook_cleanup_releases_known_state_after_a_worker_poison_without_panicking()
-        {
+        fn writer_hook_cleanup_releases_known_state_after_a_worker_poison_without_panicking() {
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
             let observed = hooks.clone();
@@ -1217,8 +1215,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_worker_receive_stall_pins_64_channel_slots_and_returns_the_failed_original()
-         {
+        fn writer_worker_receive_stall_pins_64_channel_slots_and_returns_the_failed_original() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
@@ -1247,7 +1244,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_worker_sync_precedes_sqlite_and_pending_delivery_is_not_an_inbox_commit() {
+        fn writer_worker_sync_precedes_sqlite_and_pending_delivery_is_not_an_inbox_commit() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Persist);
@@ -1271,7 +1268,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_worker_ambiguous_sync_failure_rescans_and_reuses_the_complete_original() {
+        fn writer_worker_ambiguous_sync_failure_rescans_and_reuses_the_complete_original() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.fail_once(WriterBoundary::Sync);
@@ -1293,8 +1290,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_worker_append_and_database_failures_retain_the_same_transition_for_retry()
-        {
+        fn writer_worker_append_and_database_failures_retain_the_same_transition_for_retry() {
             for boundary in [WriterBoundary::Append, WriterBoundary::Persist] {
                 let fixture = WriterFixture::new();
                 let hooks = Arc::new(Hooks::default());
@@ -1317,7 +1313,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_worker_pending_capacity_counts_channel_and_worker_queue_without_growth() {
+        fn writer_worker_pending_capacity_counts_channel_and_worker_queue_without_growth() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Persist);
@@ -1345,7 +1341,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_worker_refill_is_nonblocking_coalesced_and_published_only_after_commit() {
+        fn writer_worker_refill_is_nonblocking_coalesced_and_published_only_after_commit() {
             let fixture = WriterFixture::new();
             let blocking = crate::db::connect(&format!(
                 "sqlite:///{}",
@@ -1385,8 +1381,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_worker_shutdown_retains_synced_uncommitted_frames_and_the_original_budget()
-        {
+        fn writer_worker_shutdown_retains_synced_uncommitted_frames_and_the_original_budget() {
             let fixture = WriterFixture::new();
             let blocking = crate::db::connect(&format!(
                 "sqlite:///{}",
@@ -1429,7 +1424,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_worker_final_compaction_slower_than_one_work_slice_commits_before_the_shutdown_deadline()
+        fn writer_worker_final_compaction_slower_than_one_work_slice_commits_before_the_shutdown_deadline()
          {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(SlowCompaction {
@@ -1644,7 +1639,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_writer_starts_with_the_exact_private_recorded_outbox() {
+    fn writer_starts_with_the_exact_private_recorded_outbox() {
         let fixture = WriterFixture::new();
         let mut writer = fixture
             .start(fixture.artifacts.paths.outbox.clone())
@@ -1656,7 +1651,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_writer_foreign_outbox_path_fails_before_worker_start() {
+    fn writer_foreign_outbox_path_fails_before_worker_start() {
         let fixture = WriterFixture::new();
         let foreign = fixture.fixture._dir.path().join("foreign-outbox");
         std::fs::write(&foreign, []).unwrap();
@@ -1665,7 +1660,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_writer_missing_or_symlinked_outbox_fails_before_worker_start() {
+    fn writer_missing_or_symlinked_outbox_fails_before_worker_start() {
         for symlink in [false, true] {
             let fixture = WriterFixture::new();
             let path = &fixture.artifacts.paths.outbox;
@@ -1681,14 +1676,14 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_writer_stale_owner_is_rejected_before_worker_start() {
+    fn writer_stale_owner_is_rejected_before_worker_start() {
         let mut fixture = WriterFixture::new();
         fixture.fixture.run.owner_epoch += 1;
         assert_start_rejected(&fixture, fixture.artifacts.paths.outbox.clone());
     }
 
     #[test]
-    fn runner_batch2_writer_spool_sync_is_pending_until_the_actual_sqlite_commit() {
+    fn writer_spool_sync_is_pending_until_the_actual_sqlite_commit() {
         let fixture = WriterFixture::new();
         let blocking = crate::db::connect(&format!(
             "sqlite:///{}",

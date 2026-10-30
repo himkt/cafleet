@@ -438,7 +438,7 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
-    mod review {
+    mod supplied_connection_compaction {
         use super::*;
 
         fn ordinary_connection_work(conn: &rusqlite::Connection, timeout: i64) {
@@ -448,10 +448,9 @@ mod tests {
                 timeout
             );
             assert_eq!(
-                conn.query_row(
-                    "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10000) SELECT sum(x) FROM counter",
-                    [],
-                    |row| row.get::<_, i64>(0),
+                crate::runtime::runner::lifecycle::test_support::sum(
+                    conn,
+                    crate::runtime::runner::lifecycle::test_support::FAST_SUM,
                 )
                 .unwrap(),
                 50005000
@@ -459,8 +458,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_r2_compaction_cancels_supplied_connection_sql_preserves_bytes_and_retries()
-        {
+        fn compaction_cancels_supplied_connection_sql_preserves_bytes_and_retries() {
             let mut fixture = WriterFixture::new();
             let original = transition(&fixture, 1);
             storage::persist_event(
@@ -478,9 +476,14 @@ mod tests {
                 .conn
                 .busy_timeout(Duration::from_millis(137))
                 .unwrap();
-            fixture.fixture.conn.execute_batch(
-                "CREATE TEMP VIEW member_runtime_events AS SELECT original.* FROM main.member_runtime_events original WHERE (WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter)>0",
-            ).unwrap();
+            fixture
+                .fixture
+                .conn
+                .execute_batch(&format!(
+                    "CREATE TEMP VIEW member_runtime_events AS SELECT original.* FROM main.member_runtime_events original WHERE ({})>0",
+                    crate::runtime::runner::lifecycle::test_support::SLOW_SUM
+                ))
+                .unwrap();
             let interrupt = fixture.fixture.conn.get_interrupt_handle();
             let emergency = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let fired = emergency.clone();
@@ -548,8 +551,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_r2_compaction_restores_supplied_connection_after_success_error_and_unwind()
-        {
+        fn compaction_restores_supplied_connection_after_success_error_and_unwind() {
             for outcome in ["success", "error", "unwind"] {
                 let mut fixture = WriterFixture::new();
                 let original = transition(&fixture, 1);
@@ -877,15 +879,11 @@ mod tests {
     mod effective_policy_frames {
         use super::*;
         use crate::runtime::runner::writer::test_support::{
-            frame_bodies, observation, unavailable,
+            frame_bodies, observation, outbox_frame, unavailable,
         };
 
         fn framed(body: &Value) -> Vec<u8> {
-            let body = serde_json::to_vec(body).unwrap();
-            let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-            bytes.extend_from_slice(&Sha256::digest(&body));
-            bytes.extend(body);
-            bytes
+            outbox_frame(&serde_json::to_vec(body).unwrap())
         }
 
         #[test]
@@ -975,7 +973,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_frames_pin_big_endian_length_checksum_and_original_identity() {
+    fn outbox_frames_pin_big_endian_length_checksum_and_original_identity() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         let mut outbox = open(&fixture, io.clone());
@@ -994,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_matching_duplicates_reconcile_but_conflicting_sequence_bytes_fail() {
+    fn outbox_matching_duplicates_reconcile_but_conflicting_sequence_bytes_fail() {
         let fixture = WriterFixture::new();
         let original = transition(&fixture, 1);
         let mut duplicate = frame(&original);
@@ -1020,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_total_capacity_includes_frame_overhead_and_rejects_before_append() {
+    fn outbox_total_capacity_includes_frame_overhead_and_rejects_before_append() {
         let mut fixture = WriterFixture::new();
         fixture
             .fixture
@@ -1072,7 +1070,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_short_writes_preserve_the_complete_frame() {
+    fn outbox_short_writes_preserve_the_complete_frame() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         io.0.lock().unwrap().short_write = Some(1);
@@ -1083,7 +1081,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_reopen_recovers_complete_original_frames_in_order() {
+    fn outbox_reopen_recovers_complete_original_frames_in_order() {
         let fixture = WriterFixture::new();
         let values = [
             transition(&fixture, 1),
@@ -1107,7 +1105,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_each_incomplete_final_component_retains_the_valid_prefix() {
+    fn outbox_each_incomplete_final_component_retains_the_valid_prefix() {
         let fixture = WriterFixture::new();
         let first = frame(&transition(&fixture, 1));
         let second = frame(&transition(&fixture, 2));
@@ -1125,7 +1123,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_append_diagnoses_and_truncates_only_an_incomplete_tail() {
+    fn outbox_append_diagnoses_and_truncates_only_an_incomplete_tail() {
         let fixture = WriterFixture::new();
         let first = frame(&transition(&fixture, 1));
         let mut initial = first.clone();
@@ -1149,7 +1147,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_completed_corruption_preserves_all_original_bytes() {
+    fn outbox_completed_corruption_preserves_all_original_bytes() {
         let fixture = WriterFixture::new();
         let valid = frame(&transition(&fixture, 1));
         for corrupt in ["checksum", "json", "run", "sequence"] {
@@ -1188,7 +1186,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_oversized_declared_length_fails_before_large_reads() {
+    fn outbox_oversized_declared_length_fails_before_large_reads() {
         let fixture = WriterFixture::new();
         let io = FaultIo::from_bytes(u32::MAX.to_be_bytes().to_vec());
         let result = Outbox::initialize(
@@ -1205,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_sync_failure_leaves_a_complete_recoverable_pending_frame() {
+    fn outbox_sync_failure_leaves_a_complete_recoverable_pending_frame() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         let mut outbox = open(&fixture, io.clone());
@@ -1235,7 +1233,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_partial_write_failure_is_an_explicit_tail_without_a_commit() {
+    fn outbox_partial_write_failure_is_an_explicit_tail_without_a_commit() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         let mut outbox = open(&fixture, io.clone());
@@ -1252,7 +1250,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_compaction_retains_committed_prefix_until_every_frame_is_durable() {
+    fn outbox_compaction_retains_committed_prefix_until_every_frame_is_durable() {
         let mut fixture = WriterFixture::new();
         let values = [transition(&fixture, 1), transition(&fixture, 2)];
         let io = FaultIo::from_bytes(values.iter().flat_map(frame).collect());
@@ -1292,38 +1290,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_compaction_checks_event_message_association_before_removal() {
-        let mut fixture = WriterFixture::new();
-        let value = transition(&fixture, 1);
-        storage::persist_event(
-            &mut fixture.fixture.conn,
-            &fixture.fixture.run.owner(),
-            &value,
-            PersistenceMode::Live,
-        )
-        .unwrap();
-        let io = FaultIo::from_bytes(frame(&value));
-        let mut outbox = open(&fixture, io.clone());
-        fixture
-            .fixture
-            .conn
-            .execute("UPDATE messages SET text='corrupt durable association'", [])
-            .unwrap();
-        let before = io.snapshot_bytes();
-        assert!(
-            outbox
-                .compact_committed(
-                    &mut fixture.fixture.conn,
-                    &fixture.fixture.run.owner(),
-                    deadline()
-                )
-                .is_err()
-        );
-        assert_eq!(io.snapshot_bytes(), before);
-    }
-
-    #[test]
-    fn runner_batch2_outbox_truncate_failure_preserves_committed_originals_for_retry() {
+    fn outbox_truncate_failure_preserves_committed_originals_for_retry() {
         let mut fixture = WriterFixture::new();
         let value = transition(&fixture, 1);
         storage::persist_event(
@@ -1359,7 +1326,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_expired_deadline_and_stale_epoch_have_zero_content_effect() {
+    fn outbox_expired_deadline_and_stale_epoch_have_zero_content_effect() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         let mut outbox = open(&fixture, io.clone());
@@ -1389,7 +1356,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_holds_the_original_lock_for_its_entire_content_lifetime() {
+    fn outbox_holds_the_original_lock_for_its_entire_content_lifetime() {
         let WriterFixture {
             fixture,
             artifacts: _artifacts,
