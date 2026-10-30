@@ -6249,7 +6249,7 @@ mod tests {
                         .unwrap_or_else(|| panic!("{run} {operation:?} plan"));
                     assert_eq!(plan.native_version(), run);
                     assert_eq!(plan.profile_version(), name);
-                    assert_eq!(plan.fixture_ids(), &[fixture.clone()]);
+                    assert_eq!(plan.fixture_ids(), std::slice::from_ref(&fixture));
                 }
                 let capability = catalog
                     .answer_plan(CodingAgent::Codex, run, RULE, PermissionDecision::Allow)

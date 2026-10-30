@@ -1022,29 +1022,22 @@ mod tests {
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
         let catalog = ProfileCatalog::bundled().unwrap();
-        for version in ["2.1.308"] {
-            let reused = Detector::new(&catalog, CodingAgent::Claude, Some(version))
-                .observe(&screen)
-                .unwrap();
-            assert_eq!(reused.kind, observation.kind, "{version}");
-            assert_eq!(reused.rule_id, observation.rule_id, "{version}");
-            assert_eq!(
-                reused.profile_version, observation.profile_version,
-                "{version}"
-            );
-            assert_eq!(
-                reused.raw_evidence["operation"], observation.raw_evidence["operation"],
-                "{version}"
-            );
-            assert_eq!(reused.raw_evidence["native_version"], version);
-        }
-        for version in ["2.1.301"] {
-            let below = Detector::new(&catalog, CodingAgent::Claude, Some(version))
-                .observe(&screen)
-                .unwrap();
-            assert_eq!(below.kind, ObservationKind::Unknown, "{version}");
-            assert_eq!(below.profile_version, None, "{version}");
-        }
+        let reused = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.308"))
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(reused.kind, observation.kind);
+        assert_eq!(reused.rule_id, observation.rule_id);
+        assert_eq!(reused.profile_version, observation.profile_version);
+        assert_eq!(
+            reused.raw_evidence["operation"],
+            observation.raw_evidence["operation"]
+        );
+        assert_eq!(reused.raw_evidence["native_version"], "2.1.308");
+        let below = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.301"))
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(below.kind, ObservationKind::Unknown);
+        assert_eq!(below.profile_version, None);
         let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
             .observe(&screen)
             .unwrap();
@@ -1674,18 +1667,13 @@ mod tests {
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
         let catalog = ProfileCatalog::bundled().unwrap();
-        for version in ["0.164.0"] {
-            let reused = Detector::new(&catalog, CodingAgent::Codex, Some(version))
-                .observe(&screen)
-                .unwrap();
-            assert_eq!(reused.kind, observation.kind, "{version}");
-            assert_eq!(reused.rule_id, observation.rule_id, "{version}");
-            assert_eq!(
-                reused.profile_version, observation.profile_version,
-                "{version}"
-            );
-            assert_eq!(reused.raw_evidence["native_version"], version);
-        }
+        let reused = Detector::new(&catalog, CodingAgent::Codex, Some("0.164.0"))
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(reused.kind, observation.kind);
+        assert_eq!(reused.rule_id, observation.rule_id);
+        assert_eq!(reused.profile_version, observation.profile_version);
+        assert_eq!(reused.raw_evidence["native_version"], "0.164.0");
         let below = Detector::new(&catalog, CodingAgent::Codex, Some("0.162.0"))
             .observe(&screen)
             .unwrap();
