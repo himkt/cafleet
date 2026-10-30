@@ -31,6 +31,7 @@ pub(crate) trait RequestTokenSource: Send {
 
 const RECEIPT_CACHE_CAPACITY: usize = 4096;
 const STAGE_SETTLE: Duration = Duration::from_millis(500);
+const STAGE_WRITE_MARGIN: Duration = Duration::from_millis(250);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
 const COMPOSER_BUSY_BOUND: Duration = Duration::from_secs(180);
@@ -99,12 +100,12 @@ struct PendingFinalization {
     reason: &'static str,
 }
 
+/// A transient storage obstacle that a later tick may clear; every other failure propagates.
 fn storage_failure(cause: &CafleetError) -> bool {
-    match cause {
-        CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded => true,
-        CafleetError::App(message) => message.starts_with("database error:"),
-        _ => false,
-    }
+    matches!(
+        cause,
+        CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded
+    )
 }
 
 /// Runner-owned ordinary input accepted with a durable ready receipt; its literal stays in
@@ -2337,6 +2338,17 @@ impl InputCoordinator {
                 .obstacle = "pane_input_busy";
             return Ok(());
         };
+        let settles =
+            u32::try_from(selection.2.len() - 1).expect("a plan has a bounded stage count");
+        if attempt_deadline.saturating_duration_since(now)
+            <= STAGE_SETTLE * settles + STAGE_WRITE_MARGIN
+        {
+            self.queue
+                .front_mut()
+                .expect("queued head remains")
+                .obstacle = "delivery_budget_exhausted";
+            return Ok(());
+        }
         let (method, reason, stages) = selection;
         let operation = match with_database_deadline(conn, attempt_deadline, |conn| {
             storage::begin_deferred_attempt(conn, &self.run.owner(), input_id, method, reason)
@@ -5419,16 +5431,70 @@ mod tests {
             fn queue_head_terminal_commit_survives_a_temporary_storage_failure_and_publishes_once()
             {
                 with_permission_host(Duration::from_secs(60), |host| {
-                    form(host);
-                    let id = queued(host, host.request("prompt:storage"), "interaction_open");
-                    host.fixture
-                        .conn
-                        .execute(
-                            "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
-                            [host.fixture.run.member_id],
-                        )
-                        .unwrap();
-                    close(host);
+                    let id = queued_for_a_moved_target(host);
+                    let writer =
+                        rusqlite::Connection::open(host.fixture.conn.path().unwrap()).unwrap();
+                    let advance_while_busy = |host: &mut Host| {
+                        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+                        host.advance();
+                        writer.execute_batch("ROLLBACK").unwrap();
+                    };
+                    while host.coordinator.finalization.is_none() {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the busy terminal transaction becomes a pending finalization"
+                        );
+                        host.drain();
+                        advance_while_busy(host);
+                    }
+                    let pending = host.coordinator.finalization.as_ref().unwrap();
+                    assert_eq!(pending.input_id, id);
+                    assert_eq!(pending.reason, "target_changed");
+                    advance_while_busy(host);
+                    assert!(
+                        host.coordinator.finalization.is_some(),
+                        "a retry while storage is still busy keeps the finalization pending"
+                    );
+                    assert_eq!(
+                        row(host, id).state,
+                        storage::InputState::Ready,
+                        "the failed terminal transaction keeps the head's receipt"
+                    );
+                    assert_eq!(result_events(host, id), 0);
+                    turns_until(host, |host| settled(host, id));
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.disposition,
+                        Some(storage::InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(input.delivery_reason.as_deref(), Some("target_changed"));
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    turns_until(host, |host| result_events(host, id) > 0);
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                });
+            }
+
+            /// Queues a head whose target placement then moves, so its next turn settles it
+            /// `target_changed` through the terminal zero-byte transaction.
+            fn queued_for_a_moved_target(host: &mut Host) -> i64 {
+                form(host);
+                let id = queued(host, host.request("prompt:storage"), "interaction_open");
+                host.fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
+                        [host.fixture.run.member_id],
+                    )
+                    .unwrap();
+                close(host);
+                id
+            }
+
+            #[test]
+            fn queue_head_permanent_settle_failure_surfaces_instead_of_retrying() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    let id = queued_for_a_moved_target(host);
                     host.fixture
                         .conn
                         .authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
@@ -5445,29 +5511,25 @@ mod tests {
                             }
                         }))
                         .unwrap();
-                    while host.coordinator.finalization.is_none() {
+                    let failure = loop {
                         assert!(
                             Instant::now() < host.until,
-                            "the blocked terminal transaction becomes a pending finalization"
+                            "the permanent failure surfaces"
+                        );
+                        assert!(
+                            host.coordinator.finalization.is_none(),
+                            "a permanent failure never becomes a retried finalization"
                         );
                         host.drain();
-                        host.advance();
+                        if let Err(failure) = host.try_advance() {
+                            break failure;
+                        }
                         std::thread::sleep(Duration::from_millis(5));
-                    }
-                    let pending = host.coordinator.finalization.as_ref().unwrap();
-                    assert_eq!(pending.input_id, id);
-                    assert_eq!(pending.reason, "target_changed");
-                    host.advance();
+                    };
                     assert!(
-                        host.coordinator.finalization.is_some(),
-                        "a retry while storage still fails keeps the finalization pending"
+                        failure.source.message().contains("not authorized"),
+                        "{failure:?}"
                     );
-                    assert_eq!(
-                        row(host, id).state,
-                        storage::InputState::Ready,
-                        "the failed terminal transaction keeps the head's receipt"
-                    );
-                    assert_eq!(result_events(host, id), 0);
                     host.fixture
                         .conn
                         .authorizer(
@@ -5479,17 +5541,45 @@ mod tests {
                             >,
                         )
                         .unwrap();
-                    turns_until(host, |host| settled(host, id));
-                    let input = row(host, id);
-                    assert_eq!(
-                        input.disposition,
-                        Some(storage::InputDisposition::NotSubmitted)
-                    );
-                    assert_eq!(input.delivery_reason.as_deref(), Some("target_changed"));
+                    assert_eq!(row(host, id).state, storage::InputState::Ready);
                     assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
-                    turns_until(host, |host| result_events(host, id) > 0);
-                    super::composer_busy::hold_turns(host);
-                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                });
+            }
+
+            #[test]
+            fn queue_head_acquiring_the_pane_lock_too_late_for_its_settles_writes_zero_bytes() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:late-lock"), "interaction_open");
+                    let placement = host.coordinator.placement.clone();
+                    let busy = PaneLock::try_acquire(&host.coordinator.database_url, &placement)
+                        .unwrap()
+                        .expect("another writer holds the pane lock");
+                    close(host);
+                    while host
+                        .coordinator
+                        .queue
+                        .front()
+                        .is_none_or(|head| head.attempt_deadline.is_none())
+                    {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the head starts its attempt budget"
+                        );
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    host.coordinator.queue.front_mut().unwrap().attempt_deadline =
+                        Some(Instant::now() + Duration::from_millis(300));
+                    drop(busy);
+                    turns_until(host, |host| settled(host, id));
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "a lock acquired with less than one settle left writes nothing: {:?}",
+                        host.pty.offers
+                    );
+                    assert_not_submitted(host, id, "delivery_budget_exhausted");
                 });
             }
 

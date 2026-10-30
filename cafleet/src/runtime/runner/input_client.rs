@@ -549,11 +549,17 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         let recorded = find_submission(conn, &identity, attempt.request, deadline)
             .map_err(CafleetError::from)?;
         context.input_id = recorded.as_ref().map(|input| input.input_id);
-        if !held.reacquire_within(Deadline::until(
+        let runner_owned = matches!(
+            reply.status,
+            SubmissionStatus::Accepted | SubmissionStatus::Queued
+        );
+        let bookkeeping = Deadline::until(
             deadline
                 .instant()
                 .max(Instant::now() + std::time::Duration::from_secs(1)),
-        ))? {
+        );
+        let reacquired = held.reacquire_within(bookkeeping)?;
+        if !reacquired && !runner_owned {
             return Err(error(match context.input_id {
                 Some(input_id) => format!(
                     "pane input lock remained busy after the runner reported {}; inspect the result with cafleet input show {input_id} --json",
@@ -565,10 +571,15 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
                 ),
             }));
         }
-        with_database_budget(conn, deadline, |conn| {
+        let validate = |conn: &mut Connection| {
             held.validate_binding(&settings.database_url, expected_placement)?;
             validate_submission_target(conn, settings, expected_run, expected_placement)
-        })?;
+        };
+        if runner_owned {
+            crate::input::complete_database_budget(conn, deadline, validate)?;
+        } else {
+            with_database_budget(conn, deadline, validate)?;
+        }
         validate_reply_against_durable(
             &reply,
             recorded.as_ref(),
@@ -579,7 +590,9 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
                 "submission reply has no matching durable input",
             ],
         )?;
-        deadline.remaining()?;
+        if !runner_owned {
+            deadline.remaining()?;
+        }
         Ok(reply)
     })();
     result.map_err(|source| context.failure(source))
@@ -4322,10 +4335,10 @@ mod tests {
     }
 
     #[test]
-    fn external_input_lock_reacquire_failure_after_the_runner_reply_reports_the_known_input_id() {
+    fn external_input_accepted_reply_succeeds_when_another_writer_takes_the_released_lock() {
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
-            let request = ordinary(&run, "reacquire-failure");
+            let request = ordinary(&run, "lock-taken-after-reply");
             let until = outer.min(Instant::now() + Duration::from_secs(4));
             let attempt =
                 PreparedSubmission::new(&request, until, &mut super::super::RealInputDeadlineClock)
@@ -4336,7 +4349,7 @@ mod tests {
             let mut inner = SocketHost::new(&settings, &placement, until);
             inner.expiration = Some(attempt.expiration.monotonic_ns());
             let mut host = LockTakingHost { inner, taken: None };
-            let failure = match submit_wrapped_input_under_pane_lock_with_host(
+            let result = submit_wrapped_input_under_pane_lock_with_host(
                 &mut fixture.fixture.conn,
                 &settings,
                 &run,
@@ -4345,26 +4358,14 @@ mod tests {
                 &attempt,
                 Deadline::until(until),
                 &mut host,
-            ) {
-                Err(failure) => failure,
-                Ok(result) => panic!(
-                    "a lock that cannot be reacquired fails: {:?}",
-                    result.input_id
-                ),
-            };
+            )
+            .expect("a submission the runner accepted succeeds without the reacquired lock");
             let row =
                 storage::find_input(&fixture.fixture.conn, run.run_id, &request.operation_key)
                     .unwrap()
                     .expect("the runner committed the submission receipt");
-            assert_eq!(
-                failure.input_id,
-                Some(row.input_id),
-                "the failure names the input the runner already submitted"
-            );
-            assert_eq!(
-                failure.operation_key.as_deref(),
-                Some(request.operation_key.as_str())
-            );
+            assert_eq!(result.status, SubmissionStatus::Accepted);
+            assert_eq!(result.input_id, Some(row.input_id));
             drop(host.taken.take());
             drop(held);
             wait_input_service_record(fixture, &request.literal, outer);

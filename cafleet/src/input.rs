@@ -75,8 +75,15 @@ struct DatabaseWaits {
 }
 
 impl DatabaseWaits {
+    /// The tightest deadline from the innermost completion scope inward, so mandatory finalization
+    /// after an irreversible effect is not bounded by an enclosing, already expired budget.
     fn innermost_deadline(&self) -> Option<Deadline> {
-        self.frames
+        let start = self
+            .frames
+            .iter()
+            .rposition(|frame| frame.completion)
+            .unwrap_or(0);
+        self.frames[start..]
             .iter()
             .map(|frame| frame.deadline)
             .min_by_key(|deadline| deadline.0)

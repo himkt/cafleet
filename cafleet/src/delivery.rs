@@ -426,7 +426,7 @@ fn deliver_wrapped_pending(
             if let Some(input_id) = accepted {
                 let held = guard.as_ref().expect("wrapped delivery owns its pane lock");
                 known_input_id = Some(input_id);
-                let settled = with_database_budget(conn, deadline, |conn| {
+                let settled = complete_database_budget(conn, deadline, |conn| {
                     validate_submission_target(conn, settings, &run, placement)?;
                     storage::settle_preview(conn, &run.owner(), input_id)
                 })
@@ -664,6 +664,8 @@ mod tests {
         expire_retirement: bool,
         after_retirement: Option<Box<dyn FnMut()>>,
         runner_held: Option<&'static str>,
+        take_lock_after_reply: bool,
+        taken: Option<PaneLock>,
     }
     impl DeliveryHost {
         fn new(
@@ -682,6 +684,8 @@ mod tests {
                 expire_retirement: false,
                 after_retirement: None,
                 runner_held: None,
+                take_lock_after_reply: false,
+                taken: None,
             }
         }
         fn held(&self) {
@@ -798,8 +802,55 @@ mod tests {
                     crate::runtime::runner::SubmissionResult::held(reason),
                 ));
             }
-            self.inner.exchange(run, request, deadline)
+            let reply = self.inner.exchange(run, request, deadline)?;
+            if self.take_lock_after_reply {
+                self.taken =
+                    PaneLock::try_acquire(&self.settings.database_url, &self.placement).unwrap();
+                assert!(
+                    self.taken.is_some(),
+                    "another writer takes the released lock"
+                );
+            }
+            Ok(reply)
         }
+    }
+
+    #[test]
+    fn wrapped_send_is_submitted_and_stamped_when_another_writer_takes_the_released_lock() {
+        crate::runtime::runner::service::test_support::input_service::with_input_service(
+            |fixture, outer| {
+                let run = fixture.fixture.run.clone();
+                let settings = settings_for(&fixture.fixture.conn);
+                let placement = placement_of(&fixture.fixture.conn, run.member_id, run.fleet_id);
+                let message = broker::send_message(
+                    &mut fixture.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    "submitted before the lock is taken",
+                )
+                .unwrap();
+                let until = outer.min(Instant::now() + Duration::from_secs(5));
+                let mut host = DeliveryHost::new(&settings, &placement, until);
+                host.take_lock_after_reply = true;
+                let outcome = deliver_pending_with(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    run.member_id,
+                    Some(run.fleet_id),
+                    Deadline::until(until),
+                    &BTreeSet::new(),
+                    || panic!("wrapped delivery uses its runner, not a multiplexer"),
+                    &mut host,
+                )
+                .expect("a submission the runner accepted is a delivered send");
+                assert_eq!(outcome.sent, vec![message.message_id]);
+                assert!(
+                    preview_stamp(&fixture.fixture.conn, message.message_id).is_some(),
+                    "the submitted preview is stamped"
+                );
+                drop(host.taken.take());
+            },
+        );
     }
 
     #[test]
