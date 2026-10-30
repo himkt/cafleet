@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "fixture_id": "opencode-2.1.4-prompt-typed-literal-1",
+  "provenance": "native",
+  "backend": "opencode",
+  "native_version": "2.1.4",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": false,
+  "screen_seq": 3,
+  "cursor_row": 3,
+  "cursor_col": 48,
+  "lines": [
+    "",
+    "",
+    "",
+    "┃ What is 41 plus 1? Reply with only the number.",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "masked_rows": [
+    {
+      "row": 1,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 5,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

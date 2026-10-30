@@ -257,6 +257,186 @@
       "cols": 120,
       "source_ref": "native/opencode-2.1.4-idle-composer-1.json",
       "sha256": "452104eb3591416d73d5cdab317c78df7de3980c062be2695c52be5ebe2b9be5"
+    },
+    {
+      "id": "claude-2.1.308-prompt-empty-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.308-prompt-empty-composer-1.json",
+      "sha256": "3a5c747a982623279c3b60464b7354a83d01a8daeba373c0f0ae3cc887f2f954"
+    },
+    {
+      "id": "claude-2.1.308-prompt-typed-literal-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.308-prompt-typed-literal-1.json",
+      "sha256": "1c255fdd9d2a1a5276d5f53ffd7776473b3e0335a97fb4ecc1d61357bb0890dd"
+    },
+    {
+      "id": "claude-2.1.308-prompt-post-submit-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.308-prompt-post-submit-1.json",
+      "sha256": "abc4e973dfcaaee80bd124d3b423dfa5c702c3e845fe0cc6b09feacc4c186bf1"
+    },
+    {
+      "id": "claude-2.1.308-exec-empty-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.308-exec-empty-composer-1.json",
+      "sha256": "10e07c1b5b24cb7225197957e2d06ff25959e146f4ed55676d2199aca3add856"
+    },
+    {
+      "id": "claude-2.1.308-exec-typed-literal-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.308-exec-typed-literal-1.json",
+      "sha256": "ecdb3a8d09c2e0f04958e9e3969fdb9d9aec1f523639fe1ea8711cfa7a067973"
+    },
+    {
+      "id": "claude-2.1.308-exec-post-submit-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.308-exec-post-submit-1.json",
+      "sha256": "4fdcf7d7dd0b436280ff56f06c51bb6a1100d77be1d53d4f9896a549c45159da"
+    },
+    {
+      "id": "codex-0.163.0-prompt-empty-composer-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-prompt-empty-composer-1.json",
+      "sha256": "e580661c0993024ee5cdbb95541479ccc6e5121402c3bc8e9b2876da453bfb3d"
+    },
+    {
+      "id": "codex-0.163.0-prompt-typed-literal-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-prompt-typed-literal-1.json",
+      "sha256": "162a68edb3f7fca6b0544b348263323476efafb0d059268610b4cdfafad6b63a"
+    },
+    {
+      "id": "codex-0.163.0-prompt-post-submit-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-prompt-post-submit-1.json",
+      "sha256": "d69bbac86d1785b442ecb54047bbb8b502c9603f82871204d6aebef3d8a65f28"
+    },
+    {
+      "id": "codex-0.163.0-exec-empty-composer-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-exec-empty-composer-1.json",
+      "sha256": "87bbd41dfac0b7e01fb7cbed5b5512dde461c3ce9f924264f84dd67b95f907bf"
+    },
+    {
+      "id": "codex-0.163.0-exec-typed-literal-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-exec-typed-literal-1.json",
+      "sha256": "0750e18169afc24d66b3f5757d451f20ffaad9ca78f9559d10cc205f9ed29ced"
+    },
+    {
+      "id": "codex-0.163.0-exec-post-submit-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-exec-post-submit-1.json",
+      "sha256": "6b9ae5b682e1edab7b9df295186200e5edeea2682734c073c0a904f8c39e2872"
+    },
+    {
+      "id": "opencode-2.1.4-prompt-empty-composer-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-prompt-empty-composer-1.json",
+      "sha256": "241a6a08ad40e247cb1202137cbb9da1535e2c7e449e9e5e6bfb24be497517d3"
+    },
+    {
+      "id": "opencode-2.1.4-prompt-typed-literal-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-prompt-typed-literal-1.json",
+      "sha256": "9f1dccef0b4eb57c9d1b259c77028d47a41a448f47ad1147765d378a08984e04"
+    },
+    {
+      "id": "opencode-2.1.4-prompt-post-submit-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-prompt-post-submit-1.json",
+      "sha256": "789261b779295c17373d6f259c44d1f0c8ca874c30c69bde3896b5b334f1dcd4"
+    },
+    {
+      "id": "opencode-2.1.4-exec-empty-composer-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-exec-empty-composer-1.json",
+      "sha256": "c6c743a4b7ffe92ada7dcccdd1163d664dcebdc6abb8d3a70c01fb84c9ea4b34"
+    },
+    {
+      "id": "opencode-2.1.4-exec-typed-literal-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-exec-typed-literal-1.json",
+      "sha256": "cb2f7eaa5a5a10144fde46ca9005f514f14abf096c04c1f972a8aa67674a5e66"
+    },
+    {
+      "id": "opencode-2.1.4-exec-post-submit-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-exec-post-submit-1.json",
+      "sha256": "6c9d577c6faa488da3ba88f94c0c6690154dcc549d3563e4abffa161ffeaefec"
     }
   ],
   "profiles": [
@@ -554,7 +734,27 @@
             "claude-2.1.302-idle-composer-1",
             "claude-2.1.302-auto-idle-composer-1",
             "claude-2.1.302-default-manual-idle-1"
-          ]
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "claude-2.1.308-prompt-empty-composer-1",
+                "claude-2.1.308-prompt-typed-literal-1",
+                "claude-2.1.308-prompt-post-submit-1"
+              ]
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "claude-2.1.308-exec-empty-composer-1",
+                "claude-2.1.308-exec-typed-literal-1",
+                "claude-2.1.308-exec-post-submit-1"
+              ]
+            }
+          }
         },
         "answers": [
           {
@@ -761,7 +961,27 @@
             "codex-0.163.0-idle-composer-1",
             "codex-0.163.0-auto-idle-composer-1",
             "codex-0.163.0-auto-fresh-idle-1"
-          ]
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "codex-0.163.0-prompt-empty-composer-1",
+                "codex-0.163.0-prompt-typed-literal-1",
+                "codex-0.163.0-prompt-post-submit-1"
+              ]
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "codex-0.163.0-exec-empty-composer-1",
+                "codex-0.163.0-exec-typed-literal-1",
+                "codex-0.163.0-exec-post-submit-1"
+              ]
+            }
+          }
         },
         "answers": [
           {
@@ -882,7 +1102,27 @@
         },
         "composer": {
           "rule_ids": ["opencode-idle-composer"],
-          "fixture_ids": ["opencode-2.1.4-idle-composer-1"]
+          "fixture_ids": ["opencode-2.1.4-idle-composer-1"],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "opencode-2.1.4-prompt-empty-composer-1",
+                "opencode-2.1.4-prompt-typed-literal-1",
+                "opencode-2.1.4-prompt-post-submit-1"
+              ]
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "opencode-2.1.4-exec-empty-composer-1",
+                "opencode-2.1.4-exec-typed-literal-1",
+                "opencode-2.1.4-exec-post-submit-1"
+              ]
+            }
+          }
         },
         "answers": [
           {

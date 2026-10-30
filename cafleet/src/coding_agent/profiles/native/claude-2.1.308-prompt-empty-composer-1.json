@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.308-prompt-empty-composer-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.308",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 5,
+  "cursor_row": 31,
+  "cursor_col": 2,
+  "lines": [
+    "",
+    " ▐▛███▛█   Claude Code v2.1.308",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "❯ Try \"write a test for <filepath>\"",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "",
+    "",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent"
+  ],
+  "masked_rows": [
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 3,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 29,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 33,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 34,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}
