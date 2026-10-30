@@ -1915,6 +1915,9 @@ impl InputCoordinator {
             let digest =
                 storage::versioned_payload_digest(payload_digest_version, self.run.run_id, &input)?;
             request.identity.validate(&self.run)?;
+            let unresolved_deferred = with_database_deadline(conn, deadline, |conn| {
+                storage::has_unresolved_deferred_attempt(conn, self.run.run_id)
+            })?;
             let status = observation.status();
             let defer_reason = match ordinary_blocker(&status) {
                 Some(OrdinaryBlocker::ObserverUnavailable) => {
@@ -1931,7 +1934,8 @@ impl InputCoordinator {
                 ),
                 None if self.pending.is_some()
                     || !self.queue.is_empty()
-                    || self.finalization.is_some() =>
+                    || self.finalization.is_some()
+                    || unresolved_deferred =>
                 {
                     Some("earlier_input")
                 }
@@ -5304,6 +5308,64 @@ mod tests {
                         assert_eq!(result_events(host, first), 1, "{case}");
                     });
                 }
+            }
+
+            #[test]
+            fn preview_after_an_uncertain_head_with_an_empty_queue_waits_for_reconciliation() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let head = queued(
+                        host,
+                        host.request("prompt:uncertain-head"),
+                        "interaction_open",
+                    );
+                    close(host);
+                    until_head_literal(host);
+                    host.pty.failure = Some(io::ErrorKind::BrokenPipe);
+                    while row(host, head).state != storage::InputState::Uncertain {
+                        assert!(Instant::now() < host.until, "the head becomes uncertain");
+                        host.drain();
+                        if let Err(failure) = host.try_advance() {
+                            assert!(
+                                failure
+                                    .source
+                                    .message()
+                                    .contains("injected PTY write failure"),
+                                "{failure:?}"
+                            );
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    host.pty.failure = None;
+                    let offers = host.pty.offers.len();
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "preview behind an uncertain head",
+                    )
+                    .unwrap();
+                    let canonical = canonical_preview(&message);
+                    let preview = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "earlier_input",
+                    );
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        host.pty.offers.len(),
+                        offers,
+                        "the preview receives zero bytes before reconciliation: {:?}",
+                        &host.pty.offers[offers..]
+                    );
+                    assert_eq!(row(host, preview).state, storage::InputState::Ready);
+                    reconcile(host, head);
+                    turns_until(host, |host| settled(host, preview));
+                    assert_eq!(
+                        host.pty.offers[offers..],
+                        [canonical.into_bytes(), b"~".to_vec()]
+                    );
+                });
             }
 
             /// Applies the runner's orderly shutdown order: settle and publish the fenced results.
