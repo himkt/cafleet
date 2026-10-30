@@ -1,7 +1,7 @@
 use super::{CodingAgent, ProfileCatalog};
-use crate::broker::runtime::{Coverage, ProfileMatch};
+use crate::broker::runtime::Coverage;
 use crate::error::CafleetError;
-use regex::Regex;
+use std::cmp::Ordering;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -9,12 +9,22 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const OUTPUT_BYTES: u64 = 4096;
-const VERSION_TOKEN: &str = r"^v?[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeVersion(semver::Version);
+
+impl NativeVersion {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        semver::Version::parse(text).ok().map(Self)
+    }
+    pub(crate) fn precedence(&self, other: &Self) -> Ordering {
+        self.0.cmp_precedence(&other.0)
+    }
+}
 
 pub(crate) struct NativeLaunchIdentity {
     pub(crate) native_version: Option<String>,
     pub(crate) profile_version: Option<String>,
-    pub(crate) profile_match: Option<ProfileMatch>,
     pub(crate) coverage: Coverage,
     pub(crate) warning: Option<String>,
 }
@@ -23,36 +33,33 @@ pub(crate) fn native_launch_identity(
     backend: CodingAgent,
     probe: Result<String, CafleetError>,
     catalog: &ProfileCatalog,
-) -> NativeLaunchIdentity {
+) -> Result<NativeLaunchIdentity, CafleetError> {
     match probe {
         Ok(version) => {
-            let capabilities = catalog.capabilities(backend, Some(&version));
-            let warning = match (capabilities.profile_match, &capabilities.profile_version) {
-                (Some(ProfileMatch::Fallback), Some(profile)) => Some(format!(
-                    "Warning: no bundled profile for {} {version}; using {profile} (profile_match=fallback).",
+            if let Some(minimum) = catalog.unsupported_minimum(backend, &version) {
+                return Err(CafleetError::App(format!(
+                    "unsupported native version for {}: {version}; minimum supported version is {minimum}",
                     backend.name()
-                )),
-                _ => None,
-            };
-            NativeLaunchIdentity {
+                )));
+            }
+            let capabilities = catalog.capabilities(backend, Some(&version));
+            Ok(NativeLaunchIdentity {
                 native_version: Some(version),
                 profile_version: capabilities.profile_version,
-                profile_match: capabilities.profile_match,
                 coverage: capabilities.detection,
-                warning,
-            }
+                warning: None,
+            })
         }
-        Err(cause) => NativeLaunchIdentity {
+        Err(cause) => Ok(NativeLaunchIdentity {
             native_version: None,
             profile_version: None,
-            profile_match: None,
             coverage: Coverage::Unknown,
             warning: Some(format!(
                 "Warning: native version unavailable for {}: {}; coverage unknown.",
                 backend.name(),
                 cause.message()
             )),
-        },
+        }),
     }
 }
 
@@ -137,13 +144,13 @@ impl CodingAgent {
 }
 
 pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {
-    let pattern = Regex::new(VERSION_TOKEN).expect("valid version token pattern");
     let tokens = line
         .split_whitespace()
-        .filter(|token| pattern.is_match(token))
+        .map(|token| token.strip_prefix('v').unwrap_or(token))
+        .filter(|token| NativeVersion::parse(token).is_some())
         .collect::<Vec<_>>();
     match tokens.as_slice() {
-        [version] => Ok(version.strip_prefix('v').unwrap_or(version)),
+        [version] => Ok(version),
         [] => Err("printed no version token"),
         _ => Err("printed several version tokens"),
     }

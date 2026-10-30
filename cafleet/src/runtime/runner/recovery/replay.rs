@@ -393,7 +393,7 @@ mod tests {
             case.fixture
         .conn
         .execute(
-            "UPDATE member_runs SET native_version='0.162.0',coverage='tested',profile_version='fixture-v1',profile_match='exact' WHERE run_id=?1",
+            "UPDATE member_runs SET native_version='0.162.0',coverage='tested',profile_version='fixture-v1' WHERE run_id=?1",
             [case.fixture.run.run_id],
         )
         .unwrap();

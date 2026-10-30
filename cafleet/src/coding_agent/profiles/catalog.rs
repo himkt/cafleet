@@ -1,7 +1,8 @@
 use super::composer::{ComposerOperation, ComposerSubmission};
 use super::detector::ObservationKind;
 use super::{AnswerCapability, CodingAgent, PermissionDecision};
-use crate::broker::runtime::{Coverage, ProfileMatch};
+use crate::broker::runtime::Coverage;
+use crate::coding_agent::NativeVersion;
 use crate::error::CafleetError;
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -67,6 +68,9 @@ fn expression(value: &Value) -> Result<Regex> {
 fn unique(ids: &mut BTreeSet<String>, id: &str) -> Result<()> {
     require(ids.insert(id.into()), "duplicate profile identity")
 }
+fn semver(value: &Value) -> Result<NativeVersion> {
+    NativeVersion::parse(&text(value)?).ok_or_else(|| invalid("canonical SemVer version required"))
+}
 fn lower_hex(value: &str) -> bool {
     value
         .bytes()
@@ -77,7 +81,7 @@ pub(super) struct Fixture {
     pub(crate) id: String,
     pub(crate) native: bool,
     pub(crate) backend: CodingAgent,
-    pub(crate) version: String,
+    pub(crate) version: NativeVersion,
 }
 #[derive(Clone)]
 pub(super) struct Capture {
@@ -235,7 +239,8 @@ impl AnswerPlan {
 #[derive(Clone)]
 pub(super) struct Profile {
     pub(crate) backend: CodingAgent,
-    pub(crate) versions: Vec<String>,
+    pub(crate) min_version: NativeVersion,
+    pub(crate) min_version_text: String,
     pub(crate) version: String,
     pub(crate) rules: Vec<Rule>,
     pub(crate) detection: Option<Capability>,
@@ -244,60 +249,19 @@ pub(super) struct Profile {
     pub(crate) submissions: [Option<ComposerSubmission>; 2],
     pub(crate) answers: Vec<Answer>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum VersionComponent {
-    Number(u64),
-    Text(String),
+struct Interval<'a> {
+    min: &'a NativeVersion,
+    next: Option<&'a NativeVersion>,
 }
-#[derive(Debug, Clone)]
-struct DottedVersion(Vec<VersionComponent>);
-impl PartialEq for DottedVersion {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other).is_eq()
-    }
-}
-impl Eq for DottedVersion {}
-impl DottedVersion {
-    fn parse(version: &str) -> Self {
-        Self(
-            version
-                .split('.')
-                .map(|part| {
-                    part.parse().map_or_else(
-                        |_| VersionComponent::Text(part.into()),
-                        VersionComponent::Number,
-                    )
-                })
-                .collect(),
-        )
-    }
-}
-impl Ord for DottedVersion {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let missing = VersionComponent::Number(0);
-        (0..self.0.len().max(other.0.len()))
-            .map(|index| {
-                let left = self.0.get(index).unwrap_or(&missing);
-                let right = other.0.get(index).unwrap_or(&missing);
-                left.cmp(right)
-            })
-            .find(|ordering| ordering.is_ne())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    }
-}
-impl PartialOrd for DottedVersion {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+impl Interval<'_> {
+    fn contains(&self, version: &NativeVersion) -> bool {
+        version.precedence(self.min).is_ge()
+            && self
+                .next
+                .is_none_or(|next| version.precedence(next).is_lt())
     }
 }
 impl Profile {
-    fn newest_version(&self) -> DottedVersion {
-        self.versions
-            .iter()
-            .map(|version| DottedVersion::parse(version))
-            .max()
-            .expect("catalog validation requires every profile to declare a native version")
-    }
     pub(super) fn answer_plan(
         &self,
         version: &str,
@@ -336,7 +300,6 @@ pub(crate) struct NativeCapabilities {
     #[cfg(test)]
     pub(crate) native_version: Option<String>,
     pub(crate) profile_version: Option<String>,
-    pub(crate) profile_match: Option<ProfileMatch>,
     pub(crate) detection: Coverage,
     #[cfg(test)]
     pub(crate) composer: Coverage,
@@ -698,7 +661,7 @@ fn validate_continuation(
     rule: &Rule,
     rules: &[Rule],
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<()> {
     let Some(continuation) = &rule.continuation else {
@@ -722,7 +685,7 @@ fn validate_continuation(
             .any(|choice| choice.id == continuation.choice_id),
         "continuation names an unknown continued choice",
     )?;
-    provenance(&continuation.fixtures, backend, versions, fixtures)?;
+    provenance(&continuation.fixtures, backend, interval, fixtures)?;
     require(
         continuation.fixtures.iter().all(|id| {
             fixtures
@@ -735,26 +698,21 @@ fn validate_continuation(
 fn provenance(
     ids: &[String],
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<()> {
     require(!ids.is_empty(), "capability provenance required")?;
-    let mut covered = BTreeSet::new();
     for id in ids {
         let f = fixtures
             .iter()
             .find(|f| &f.id == id)
             .ok_or_else(|| invalid("unknown fixture"))?;
         require(
-            f.backend == backend && versions.contains(&f.version),
-            "fixture backend/version mismatch",
+            f.backend == backend && interval.contains(&f.version),
+            "fixture backend or capture version outside the profile interval",
         )?;
-        covered.insert(f.version.as_str());
     }
-    require(
-        versions.iter().all(|v| covered.contains(v.as_str())),
-        "every exact version needs compatible provenance",
-    )
+    Ok(())
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
@@ -781,7 +739,7 @@ fn capability(
     group: Group,
     rules: &[Rule],
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<Option<Capability>> {
     if value.is_null() {
@@ -805,7 +763,7 @@ fn capability(
             "capability rule component mismatch",
         )?;
     }
-    provenance(&texts(&m["fixture_ids"])?, backend, versions, fixtures)?;
+    provenance(&texts(&m["fixture_ids"])?, backend, interval, fixtures)?;
     Ok(Some(Capability { rules: ids }))
 }
 
@@ -823,7 +781,7 @@ fn composer_submission(
     value: &Value,
     operation: ComposerOperation,
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<Option<ComposerSubmission>> {
     if value.is_null() {
@@ -845,7 +803,7 @@ fn composer_submission(
         "composer submit requires 1–32 lowercase hexadecimal bytes",
     )?;
     let fixture_ids = texts(&m["fixture_ids"])?;
-    provenance(&fixture_ids, backend, versions, fixtures)?;
+    provenance(&fixture_ids, backend, interval, fixtures)?;
     Ok(Some(ComposerSubmission {
         prefix: decoded_hex(prefix),
         submit: decoded_hex(submit),
@@ -856,7 +814,7 @@ fn composer_submission(
 fn composer_submissions(
     value: &Value,
     backend: CodingAgent,
-    versions: &[String],
+    interval: &Interval,
     fixtures: &[Fixture],
 ) -> Result<[Option<ComposerSubmission>; 2]> {
     let Some(submission) = value.get("submission") else {
@@ -868,14 +826,14 @@ fn composer_submissions(
             &m["prompt"],
             ComposerOperation::Prompt,
             backend,
-            versions,
+            interval,
             fixtures,
         )?,
         composer_submission(
             &m["exec"],
             ComposerOperation::Exec,
             backend,
-            versions,
+            interval,
             fixtures,
         )?,
     ])
@@ -1174,28 +1132,44 @@ impl ProfileCatalog {
                 id,
                 native,
                 backend: backend(&m["backend"])?,
-                version: text(&m["native_version"])?,
+                version: semver(&m["native_version"])?,
             });
         }
-        let mut profiles = Vec::new();
-        let mut selections = BTreeSet::new();
+        let mut headers = Vec::new();
         for v in array(&root["profiles"])? {
             let m = object(
                 v,
                 &[
                     "backend",
-                    "native_versions",
+                    "min_version",
                     "profile_version",
                     "rules",
                     "capabilities",
                 ],
             )?;
-            let backend = backend(&m["backend"])?;
-            let versions = texts(&m["native_versions"])?;
-            require(!versions.is_empty(), "exact native versions required")?;
-            for version in &versions {
-                unique(&mut selections, &format!("{}:{version}", backend.name()))?;
-            }
+            headers.push((m, backend(&m["backend"])?, semver(&m["min_version"])?));
+        }
+        for (index, (_, backend, min)) in headers.iter().enumerate() {
+            require(
+                headers[..index]
+                    .iter()
+                    .all(|(_, other, earlier)| other != backend || earlier.precedence(min).is_ne()),
+                "equal-precedence profile thresholds for one backend",
+            )?;
+        }
+        let mut profiles = Vec::new();
+        for (m, backend, min_version) in &headers {
+            let (m, backend) = (*m, *backend);
+            let interval = Interval {
+                min: min_version,
+                next: headers
+                    .iter()
+                    .filter(|(_, other, threshold)| {
+                        *other == backend && threshold.precedence(min_version).is_gt()
+                    })
+                    .map(|(_, _, threshold)| threshold)
+                    .min_by(|a, b| a.precedence(b)),
+            };
             let version = text(&m["profile_version"])?;
             let rules = array(&m["rules"])?
                 .iter()
@@ -1206,7 +1180,7 @@ impl ProfileCatalog {
                 unique(&mut rule_ids, &rule.id)?;
             }
             for rule in &rules {
-                validate_continuation(rule, &rules, backend, &versions, &fixtures)?;
+                validate_continuation(rule, &rules, backend, &interval, &fixtures)?;
             }
             let c = object(
                 &m["capabilities"],
@@ -1217,7 +1191,7 @@ impl ProfileCatalog {
                 Group::Detection,
                 &rules,
                 backend,
-                &versions,
+                &interval,
                 &fixtures,
             )?;
             let composer = capability(
@@ -1225,7 +1199,7 @@ impl ProfileCatalog {
                 Group::Composer,
                 &rules,
                 backend,
-                &versions,
+                &interval,
                 &fixtures,
             )?;
             let annotations = capability(
@@ -1233,7 +1207,7 @@ impl ProfileCatalog {
                 Group::Annotations,
                 &rules,
                 backend,
-                &versions,
+                &interval,
                 &fixtures,
             )?;
             require(
@@ -1247,7 +1221,7 @@ impl ProfileCatalog {
                     }),
                 "every annotation rule belongs to the annotations group",
             )?;
-            let submissions = composer_submissions(&c["composer"], backend, &versions, &fixtures)?;
+            let submissions = composer_submissions(&c["composer"], backend, &interval, &fixtures)?;
             let mut answers = Vec::new();
             let mut decisions = BTreeSet::new();
             for v in array(&c["answers"])? {
@@ -1327,7 +1301,7 @@ impl ProfileCatalog {
                 }
                 validate_gates(&compiled_stages, rule, &rules, &choice_id, &focus)?;
                 let fixture_ids = texts(&a["fixture_ids"])?;
-                provenance(&fixture_ids, backend, &versions, &fixtures)?;
+                provenance(&fixture_ids, backend, &interval, &fixtures)?;
                 answers.push(Answer {
                     decision,
                     request,
@@ -1340,7 +1314,8 @@ impl ProfileCatalog {
             }
             profiles.push(Profile {
                 backend,
-                versions,
+                min_version: min_version.clone(),
+                min_version_text: text(&m["min_version"])?,
                 version,
                 rules,
                 detection,
@@ -1357,21 +1332,23 @@ impl ProfileCatalog {
         })
     }
     pub(super) fn matching(&self, backend: CodingAgent, version: Option<&str>) -> Option<&Profile> {
-        self.selection(backend, version).map(|(profile, _)| profile)
+        let version = NativeVersion::parse(version?)?;
+        self.profiles
+            .iter()
+            .filter(|p| p.backend == backend && p.min_version.precedence(&version).is_le())
+            .max_by(|a, b| a.min_version.precedence(&b.min_version))
     }
-    fn selection(
-        &self,
-        backend: CodingAgent,
-        version: Option<&str>,
-    ) -> Option<(&Profile, ProfileMatch)> {
-        let version = version?;
-        let candidates = || self.profiles.iter().filter(|p| p.backend == backend);
-        if let Some(exact) = candidates().find(|p| p.versions.iter().any(|s| s == version)) {
-            return Some((exact, ProfileMatch::Exact));
-        }
-        candidates()
-            .max_by(|a, b| a.newest_version().cmp(&b.newest_version()))
-            .map(|newest| (newest, ProfileMatch::Fallback))
+    pub(crate) fn unsupported_minimum(&self, backend: CodingAgent, version: &str) -> Option<&str> {
+        let version = NativeVersion::parse(version)?;
+        let lowest = self
+            .profiles
+            .iter()
+            .filter(|p| p.backend == backend)
+            .min_by(|a, b| a.min_version.precedence(&b.min_version))?;
+        version
+            .precedence(&lowest.min_version)
+            .is_lt()
+            .then_some(lowest.min_version_text.as_str())
     }
     pub(crate) fn rule_ids(&self) -> Vec<String> {
         self.profiles
@@ -1386,15 +1363,13 @@ impl ProfileCatalog {
         backend: CodingAgent,
         version: Option<&str>,
     ) -> NativeCapabilities {
-        let selection = self.selection(backend, version);
-        let profile = selection.map(|(profile, _)| profile);
+        let profile = self.matching(backend, version);
         NativeCapabilities {
             #[cfg(test)]
             backend,
             #[cfg(test)]
             native_version: version.map(str::to_owned),
             profile_version: profile.map(|p| p.version.clone()),
-            profile_match: selection.map(|(_, profile_match)| profile_match),
             detection: if profile.is_some_and(|p| p.detection.is_some()) {
                 Coverage::Tested
             } else {

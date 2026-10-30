@@ -1391,7 +1391,7 @@ pub(crate) mod test_support {
                 )
                 .unwrap();
             assert_eq!(fixture.conn.execute(
-                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',profile_version='fixture-detector-v1',profile_match='exact',started_at=?1 WHERE run_id=?2",
+                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',profile_version='fixture-detector-v1',started_at=?1 WHERE run_id=?2",
                 rusqlite::params![NOW, fixture.run.run_id],
             ).unwrap(), 1);
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
@@ -3121,12 +3121,24 @@ mod tests {
                 "an explicit attempt uses only its declared exchanges"
             );
             assert_eq!(deadline, self.until);
-            assert!(
+            let client_holds_lock =
                 PaneLock::try_acquire(&self.settings.database_url, &self.placement)
                     .unwrap()
-                    .is_none(),
-                "the actual guard spans every exchange"
-            );
+                    .is_none();
+            if matches!(
+                request.operation,
+                InputControlOperation::SubmitPrompt(_) | InputControlOperation::SubmitExec(_)
+            ) {
+                assert!(
+                    !client_holds_lock,
+                    "a wrapped client awaits the runner's submission reply without the pane lock"
+                );
+            } else {
+                assert!(
+                    client_holds_lock,
+                    "the actual guard spans every receipt exchange"
+                );
+            }
             assert_eq!(
                 serde_json::to_value(&request.identity).unwrap(),
                 serde_json::to_value(ControlIdentity::from_run(run)).unwrap()
@@ -5608,7 +5620,6 @@ mod tests {
                             event_evidence: original.event_evidence,
                             native_version: original.native_version.clone(),
                             profile_version: None,
-                            profile_match: None,
                             coverage: Coverage::Unknown,
                             owner_pid: process.pid,
                             owner_start_identity: process.start_identity,

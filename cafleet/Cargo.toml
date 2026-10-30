@@ -18,7 +18,8 @@ signal-hook = "0.4"
 refinery = { version = "0.10", features = ["rusqlite"] }
 regex = "1"
 rusqlite = { version = "0.39", features = ["bundled", "hooks"] }
-serde = { version = "1", features = ["derive"] }
+semver = "1"
+serde ={ version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.11"
 

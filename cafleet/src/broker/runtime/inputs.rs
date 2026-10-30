@@ -355,12 +355,12 @@ fn stamp_preview(
     Ok(())
 }
 
-pub(crate) const UNRESOLVED_INPUT_STATES: &str = "('in_progress','accepted','uncertain')";
+pub(crate) const UNRESOLVED_INPUT: &str = "(state IN ('in_progress','accepted','uncertain') OR (state='ready' AND deferred_at IS NOT NULL))";
 
 pub(super) fn require_capacity(conn: &Connection, run_id: i64) -> Result<(), CafleetError> {
     let unresolved: i64 = conn.query_row(
         &format!(
-            "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN {UNRESOLVED_INPUT_STATES}"
+            "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND {UNRESOLVED_INPUT}"
         ),
         [run_id],
         |row| row.get(0),

@@ -1062,7 +1062,14 @@ mod tests {
             .into_bytes()
     }
     fn submission(status: &str, stage: &str, id: Option<i64>) -> Value {
-        json!({"status":status,"input_id":id,"stage":stage,"output_seq":null,"reason":if status=="accepted" {Value::Null} else {json!("fixture outcome")}})
+        let delivery = match status {
+            "accepted" => json!({"status":"submitted","method":"profile","reason":null}),
+            "queued" => json!({"status":"queued","method":null,"reason":"interaction_open"}),
+            "held" => json!({"status":"held","method":null,"reason":"observer_unavailable"}),
+            "rejected" => json!({"status":"not_submitted","method":null,"reason":"runner_stopped"}),
+            _ => json!({"status":"uncertain","method":"fallback","reason":"composer_unverified"}),
+        };
+        json!({"status":status,"input_id":id,"stage":stage,"output_seq":null,"reason":if status=="accepted" {Value::Null} else {json!("fixture outcome")},"delivery":delivery})
     }
     fn reply(kind: &str, field: &str, payload: Value) -> Value {
         let mut result = json!({"kind":kind});
@@ -1085,6 +1092,10 @@ mod tests {
         assert_eq!(actual.input_id, expected["input_id"].as_i64());
         assert_eq!(actual.output_seq, expected["output_seq"].as_u64());
         assert_eq!(actual.reason.as_deref(), expected["reason"].as_str());
+        assert_eq!(
+            serde_json::to_value(actual).unwrap()["delivery"],
+            expected["delivery"]
+        );
     }
     fn body(frame: &[u8]) -> &[u8] {
         assert!(frame.len() >= 4);
@@ -1478,6 +1489,7 @@ mod tests {
         let request = Case::new().request("submit_prompt", None);
         for (status, stage, id) in [
             ("accepted", "submitted", Some(13)),
+            ("queued", "zero_bytes", Some(13)),
             ("held", "zero_bytes", None),
             ("rejected", "zero_bytes", None),
             ("uncertain", "partial", Some(13)),
@@ -1491,6 +1503,41 @@ mod tests {
                 _ => panic!("submission result has exact kind"),
             }
         }
+    }
+
+    #[test]
+    fn reply_queued_submission_requires_zero_bytes_a_durable_id_and_a_delivery_projection() {
+        let request = Case::new().request("submit_prompt", None);
+        let good = reply(
+            "submission",
+            "submission",
+            submission("queued", "zero_bytes", Some(13)),
+        );
+        for (field, value) in [
+            ("stage", json!("partial")),
+            ("stage", json!("submitted")),
+            ("input_id", Value::Null),
+            ("delivery", Value::Null),
+            (
+                "delivery",
+                json!({"status":"queued","method":"bogus","reason":"interaction_open"}),
+            ),
+            (
+                "delivery",
+                json!({"status":"queued","method":null,"reason":"interaction_open","extra":true}),
+            ),
+            ("delivery", json!({"status":"queued","method":null})),
+        ] {
+            let mut bad = good.clone();
+            bad["result"]["submission"][field] = value;
+            reject_reply(&good, &bytes(&bad), &request);
+        }
+        let mut missing = good.clone();
+        missing["result"]["submission"]
+            .as_object_mut()
+            .unwrap()
+            .remove("delivery");
+        reject_reply(&good, &bytes(&missing), &request);
     }
     #[test]
     fn reply_inspection_supported_and_unknown_preserve_complete_public_object() {

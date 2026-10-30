@@ -822,7 +822,7 @@ mod tests {
         impl RefreshFixture {
             fn new() -> Self {
                 let mut fixture = Fixture::new();
-                fixture.conn.execute("UPDATE member_runs SET profile_version='fixture-v1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+                fixture.conn.execute("UPDATE member_runs SET profile_version='fixture-v1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
                 let owner = fixture.activate();
                 let event = fixture.open(&owner);
                 let update = InteractionEvidenceUpdate {
@@ -1038,7 +1038,6 @@ mod tests {
             spec.runtime_path.push_str("-other");
             spec.launch_nonce = "b".repeat(64);
             spec.profile_version = Some("fixture-v1".into());
-            spec.profile_match = Some(ProfileMatch::Exact);
             spec.coverage = Coverage::Tested;
             let other = storage::create_run(&mut fixture.fixture.conn, &spec).unwrap();
             fixture.fixture.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2 WHERE run_id=?1",[other.run_id]).unwrap();
@@ -1295,7 +1294,7 @@ mod tests {
             .map(|table| {
                 let columns = conn
                     .prepare(&format!(
-                        "SELECT name FROM pragma_table_info('{table}') WHERE name != 'profile_match' ORDER BY cid"
+                        "SELECT name FROM pragma_table_info('{table}') ORDER BY cid"
                     ))
                     .unwrap()
                     .query_map([], |row| row.get::<_, String>(0))
@@ -1386,7 +1385,6 @@ mod tests {
                 crate::broker::deregister_member(&mut conn, member).unwrap();
             }
             let run = storage::get_run(&conn, run_id).unwrap();
-            assert_eq!(run.profile_match, None);
             let fixture = Fixture {
                 _dir: dir,
                 conn,
@@ -3134,6 +3132,183 @@ mod tests {
                 storage::get_event(&fixture.conn, event.event_id).is_err(),
                 "redacted={redacted}"
             );
+        }
+    }
+
+    mod input_delivery_result_events {
+        use super::*;
+
+        const SUBMITTED: &str = r#"{"status":"submitted","method":"profile","reason":null}"#;
+
+        fn envelope(
+            base: &Value,
+            input_id: i64,
+            message_id: Value,
+            delivery: Value,
+            stage: &str,
+        ) -> Value {
+            let mut object = base.as_object().unwrap().clone();
+            object.remove("cause");
+            object.remove("director_action");
+            object.insert("kind".into(), json!("input_delivery_result"));
+            object.insert("input_id".into(), json!(input_id));
+            object.insert("message_id".into(), message_id);
+            object.insert("delivery".into(), delivery);
+            object.insert("stage".into(), json!(stage));
+            object.insert("director_action".into(), Value::Null);
+            Value::Object(object)
+        }
+
+        fn deferred_result(fixture: &mut Fixture) -> (RuntimeEventRecord, i64, Value) {
+            let owner = fixture.activate();
+            fixture.reserve(&owner);
+            let input = fixture.input(&owner, "prompt:deferred", InputKind::Prompt, None);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET state='settled',disposition='submitted',delivery_method='profile',deferred_at=?1,defer_reason='interaction_open' WHERE input_id=?2",
+                    params![NOW, input.input_id],
+                )
+                .unwrap();
+            let transition = ObservedTransition {
+                kind: RuntimeEventKind::CoverageUnknown,
+                cause_json: Some(json!({"kind":"coverage_unknown"})),
+                ..native_exit(owner.run_id, 1)
+            };
+            let event = storage::persist_event(
+                &mut fixture.conn,
+                &owner,
+                &transition,
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runtime_events SET kind='input_delivery_result' WHERE event_id=?1",
+                    [event.event_id],
+                )
+                .unwrap();
+            let payload = envelope(
+                &event.payload_json,
+                input.input_id,
+                Value::Null,
+                serde_json::from_str(SUBMITTED).unwrap(),
+                "submitted",
+            );
+            replace_public_payload(&mut fixture.conn, &event, payload.clone());
+            (event, input.input_id, payload)
+        }
+
+        #[test]
+        fn input_delivery_result_envelope_appends_its_receipt_fields_before_a_null_action() {
+            let mut fixture = Fixture::new();
+            let (event, input_id, payload) = deferred_result(&mut fixture);
+            let view = storage::get_event(&fixture.conn, event.event_id)
+                .unwrap_or_else(|error| panic!("{}", error.message()));
+            assert_eq!(view.event.kind, RuntimeEventKind::InputDeliveryResult);
+            assert!(view.interaction.is_none());
+            let read = &view.event.payload_json;
+            assert_eq!(*read, payload);
+            assert_eq!(read["interaction_id"], Value::Null);
+            assert_eq!(read["classification"], Value::Null);
+            assert_eq!(read["source"], "runner_lifecycle");
+            assert_eq!(read["input_id"], input_id);
+            let keys = read
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                keys[keys.len() - 5..],
+                [
+                    "input_id",
+                    "message_id",
+                    "delivery",
+                    "stage",
+                    "director_action"
+                ]
+            );
+            assert_key_order(&read["delivery"], &["status", "method", "reason"]);
+        }
+
+        #[test]
+        fn input_delivery_result_reader_rejects_an_envelope_that_disagrees_with_its_receipt() {
+            let mut fixture = Fixture::new();
+            let (event, input_id, payload) = deferred_result(&mut fixture);
+            for (label, forged) in [
+                (
+                    "delivery differs from the stored receipt",
+                    envelope(
+                        &payload,
+                        input_id,
+                        Value::Null,
+                        json!({"status":"not_submitted","method":null,"reason":"runner_stopped"}),
+                        "submitted",
+                    ),
+                ),
+                (
+                    "unknown input",
+                    envelope(
+                        &payload,
+                        input_id + 1000,
+                        Value::Null,
+                        serde_json::from_str(SUBMITTED).unwrap(),
+                        "submitted",
+                    ),
+                ),
+                (
+                    "explicit input names a message",
+                    envelope(
+                        &payload,
+                        input_id,
+                        json!(event.message_id.unwrap()),
+                        serde_json::from_str(SUBMITTED).unwrap(),
+                        "submitted",
+                    ),
+                ),
+                (
+                    "stage outside its domain",
+                    envelope(
+                        &payload,
+                        input_id,
+                        Value::Null,
+                        serde_json::from_str(SUBMITTED).unwrap(),
+                        "done",
+                    ),
+                ),
+            ] {
+                replace_public_payload(&mut fixture.conn, &event, forged);
+                assert!(
+                    storage::get_event(&fixture.conn, event.event_id).is_err(),
+                    "{label}"
+                );
+            }
+            for (label, change) in [
+                (
+                    "non-null action",
+                    (
+                        "director_action",
+                        json!({"kind":"review_permission_request"}),
+                    ),
+                ),
+                ("literal payload", ("literal", json!("private prompt"))),
+                (
+                    "cause on a submitted result",
+                    ("cause", json!({"kind":"coverage_unknown"})),
+                ),
+            ] {
+                let mut forged = payload.clone();
+                forged[change.0] = change.1;
+                replace_public_payload(&mut fixture.conn, &event, forged);
+                assert!(
+                    storage::get_event(&fixture.conn, event.event_id).is_err(),
+                    "{label}"
+                );
+            }
+            replace_public_payload(&mut fixture.conn, &event, payload);
+            storage::get_event(&fixture.conn, event.event_id).unwrap();
         }
     }
 }

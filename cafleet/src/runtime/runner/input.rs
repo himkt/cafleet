@@ -2857,7 +2857,12 @@ mod tests {
                 ));
                 h.drain();
                 assert!(h.advance().is_none());
-                assert_eq!(h.pty.program, vec![encoded()]);
+                assert!(h.pty.program.is_empty());
+                assert_eq!(
+                    h.pty.stage_bytes(),
+                    vec![LITERAL.as_bytes().to_vec()],
+                    "a short literal stage is never followed by its submit stage"
+                );
                 assert_eq!(h.hooks.count("after"), 1);
                 let after = h
                     .hooks
@@ -3101,15 +3106,7 @@ mod tests {
             }
 
             fn complete(host: &mut Host, request: InputControlRequest) -> SubmissionResult {
-                assert!(host.handle(request).unwrap().is_none());
-                let reply = submitted(
-                    (0..3)
-                        .find_map(|_| {
-                            host.drain();
-                            host.advance()
-                        })
-                        .expect("operation completes through three genuine drained turns"),
-                );
+                let reply = settle(host, request);
                 assert_eq!(reply.status, SubmissionStatus::Accepted);
                 assert_eq!(reply.stage, SubmissionStage::Submitted);
                 reply
@@ -3180,7 +3177,10 @@ mod tests {
                     assert_eq!(row.operation_key, key);
                     assert_eq!(row.message_id, Some(message.message_id));
                     assert_eq!(row.state, storage::InputState::Accepted);
-                    assert_eq!(host.pty.offers, vec![encoded()]);
+                    assert_eq!(
+                        host.pty.offers,
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                    );
                     assert_eq!(
                         crate::broker::get_message(&host.fixture.conn, message.message_id).unwrap(),
                         message
@@ -3257,21 +3257,319 @@ mod tests {
                     assert_eq!(row.operation_key, key);
                     assert_eq!(row.message_id, None);
                     assert_eq!(row.state, storage::InputState::Accepted);
-                    assert_eq!(host.pty.offers, vec![expected]);
-                });
-
-                let prompt_catalog = catalog();
-                let coverage = prompt_catalog.capabilities(CodingAgent::Codex, Some(VERSION));
-                assert_eq!(coverage.prompt_submission, storage::Coverage::Tested);
-                assert_eq!(coverage.native_exec_submission, storage::Coverage::Unknown);
-                with_catalog_host(prompt_catalog, encoded(), |host| {
-                    let input = request(
-                        host,
-                        format!("exec:{}:{}", host.fixture.run.run_id, "c".repeat(64)),
-                        storage::InputKind::Exec,
-                        None,
+                    let mut literal = b"! ".to_vec();
+                    literal.extend_from_slice(LITERAL.as_bytes());
+                    assert_eq!(host.pty.offers, vec![literal, b"kl".to_vec()]);
+                    assert_eq!(
+                        delivery_selection(host, row.input_id),
+                        (Some("profile".into()), None)
                     );
-                    refuse(host, input);
+                });
+            }
+        }
+
+        mod staged_delivery {
+            use super::*;
+            use crate::coding_agent::CodingAgent;
+
+            const SETTLE: Duration = Duration::from_millis(500);
+            const ESCAPE: &[u8] = b"\x1b";
+
+            fn prompt_request(host: &Host, key: &str) -> InputControlRequest {
+                host.request(key)
+            }
+
+            fn exec_request(host: &Host, key: &str) -> InputControlRequest {
+                let mut request = host.request(key);
+                request.operation = InputControlOperation::SubmitExec(SubmitInput {
+                    operation_key: key.into(),
+                    input_kind: storage::InputKind::Exec,
+                    message_id: None,
+                    literal: LITERAL.into(),
+                });
+                request
+            }
+
+            fn fallback_program(prefix: &[u8]) -> Vec<u8> {
+                let mut bytes = ESCAPE.to_vec();
+                bytes.extend_from_slice(prefix);
+                bytes.extend_from_slice(LITERAL.as_bytes());
+                bytes.push(b'\r');
+                bytes
+            }
+
+            fn literal_with(prefix: &[u8]) -> Vec<u8> {
+                let mut bytes = prefix.to_vec();
+                bytes.extend_from_slice(LITERAL.as_bytes());
+                bytes
+            }
+
+            fn assert_settled_gaps(host: &Host, count: usize) {
+                let gaps = host.pty.stage_gaps();
+                assert_eq!(gaps.len(), count, "{gaps:?}");
+                for gap in gaps {
+                    assert!(gap >= SETTLE, "each stage follows a 500 ms settle: {gap:?}");
+                }
+            }
+
+            fn permission_catalog() -> ProfileCatalog {
+                let mut definition =
+                    crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition();
+                let composer = catalog_definition();
+                definition["fixtures"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(composer["fixtures"][1].clone());
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(composer["profiles"][0]["rules"][0].clone());
+                definition["profiles"][0]["capabilities"]["composer"] =
+                    composer["profiles"][0]["capabilities"]["composer"].clone();
+                ProfileCatalog::from_definitions(&definition).unwrap()
+            }
+
+            /// Drives turns until the literal stage has been written, then returns.
+            fn until_literal_written(host: &mut Host, request: InputControlRequest) {
+                assert!(host.handle(request).unwrap().is_none());
+                while host.pty.stages.is_empty() {
+                    assert!(Instant::now() < host.until, "the literal stage is written");
+                    host.drain();
+                    assert!(host.advance().is_none(), "no reply before the submit stage");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            fn finish_after_interruption(host: &mut Host) -> SubmissionResult {
+                loop {
+                    assert!(Instant::now() < host.until, "the interrupted input replies");
+                    host.drain();
+                    if let Some(reply) = host.advance() {
+                        return submitted(reply);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            #[test]
+            fn staged_profile_delivery_writes_the_literal_then_its_submit_key_after_a_500ms_settle()
+            {
+                with_host(|host| {
+                    let reply = settle(host, prompt_request(host, "prompt:staged"));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(reply.stage, SubmissionStage::Submitted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                    );
+                    assert_settled_gaps(host, 1);
+                    assert!(!host.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
+                    assert_eq!(
+                        delivery_selection(host, reply.input_id.unwrap()),
+                        (Some("profile".into()), None)
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_fallback_without_an_operation_plan_escapes_settles_types_settles_and_enters()
+            {
+                with_catalog_host(catalog(), fallback_program(b"! "), |host| {
+                    let reply = settle(host, exec_request(host, "exec:fallback"));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![ESCAPE.to_vec(), literal_with(b"! "), b"\r".to_vec()]
+                    );
+                    assert_settled_gaps(host, 2);
+                    assert_eq!(
+                        delivery_selection(host, reply.input_id.unwrap()),
+                        (
+                            Some("fallback".into()),
+                            Some("submission_plan_unavailable".into())
+                        )
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_fallback_for_an_unverified_composer_reports_composer_unverified() {
+                with_catalog_host(catalog(), fallback_program(b""), |host| {
+                    host.show(b"\x1b[2J\x1b[1;1Hworking on something".to_vec());
+                    let reply = settle(host, prompt_request(host, "prompt:unverified"));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![ESCAPE.to_vec(), LITERAL.as_bytes().to_vec(), b"\r".to_vec()]
+                    );
+                    assert_settled_gaps(host, 2);
+                    assert_eq!(
+                        delivery_selection(host, reply.input_id.unwrap()),
+                        (Some("fallback".into()), Some("composer_unverified".into()))
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_fallback_for_unknown_coverage_uses_the_missing_plan_reason() {
+                let profile = HostProfile {
+                    backend: CodingAgent::Claude,
+                    profile_version: None,
+                    ..HostProfile::metadata()
+                };
+                with_profile_host(catalog(), fallback_program(b""), profile, |host| {
+                    let reply = settle(host, prompt_request(host, "prompt:unknown-coverage"));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![ESCAPE.to_vec(), LITERAL.as_bytes().to_vec(), b"\r".to_vec()]
+                    );
+                    assert_eq!(
+                        delivery_selection(host, reply.input_id.unwrap()),
+                        (
+                            Some("fallback".into()),
+                            Some("submission_plan_unavailable".into())
+                        )
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_delivery_writes_zero_bytes_including_escape_while_an_interaction_is_open() {
+                with_profile_host(
+                    permission_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    |host| {
+                        super::super::permission_inspection_contracts::stable_form(host);
+                        let deadline = Instant::now() + Duration::from_millis(1200);
+                        let mut reply =
+                            host.handle(prompt_request(host, "prompt:blocked")).unwrap();
+                        while reply.is_none() && Instant::now() < deadline {
+                            host.drain();
+                            reply = host.advance();
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                        if let Some(reply) = reply {
+                            let reply = submitted(reply);
+                            assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
+                            assert!(!matches!(
+                                reply.status,
+                                SubmissionStatus::Accepted | SubmissionStatus::Uncertain
+                            ));
+                        }
+                    },
+                );
+            }
+
+            #[test]
+            fn staged_human_input_during_the_settle_stops_the_submit_stage_with_uncertainty() {
+                with_host(|host| {
+                    until_literal_written(host, prompt_request(host, "prompt:human-race"));
+                    host.human.bytes.extend(b"h");
+                    let reply = finish_after_interruption(host);
+                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                    assert_eq!(reply.stage, SubmissionStage::Partial);
+                    assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
+                    let id = reply.input_id.unwrap();
+                    assert_eq!(
+                        storage::get_input(&host.fixture.conn, id).unwrap().state,
+                        storage::InputState::Uncertain
+                    );
+                    assert_eq!(
+                        delivery_selection(host, id),
+                        (Some("profile".into()), None),
+                        "the selected method survives the uncertain outcome"
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_new_interaction_during_the_settle_stops_the_submit_stage_with_uncertainty() {
+                with_profile_host(
+                    permission_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    |host| {
+                        until_literal_written(
+                            host,
+                            prompt_request(host, "prompt:interaction-race"),
+                        );
+                        super::super::permission_inspection_contracts::form(
+                            host,
+                            "write raced.txt",
+                            "synthetic-only",
+                        );
+                        let reply = finish_after_interruption(host);
+                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                        assert_eq!(reply.stage, SubmissionStage::Partial);
+                        assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
+                        assert!(!host.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
+                    },
+                );
+            }
+
+            fn placement(host: &Host) -> crate::broker::records::Placement {
+                crate::broker::get_member(
+                    &host.fixture.conn,
+                    host.fixture.run.member_id,
+                    host.fixture.run.fleet_id,
+                )
+                .unwrap()
+                .unwrap()
+                .placement
+                .expect("wrapped member placement")
+            }
+
+            #[test]
+            fn staged_runner_holds_the_pane_lock_across_the_settle_and_releases_it_after_submission()
+             {
+                with_host(|host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    let placement = placement(host);
+                    until_literal_written(host, prompt_request(host, "prompt:locked"));
+                    assert!(
+                        crate::input::PaneLock::try_acquire(&url, &placement)
+                            .unwrap()
+                            .is_none(),
+                        "the runner retains the pane lock between its stages"
+                    );
+                    let reply = finish_after_interruption(host);
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert!(
+                        crate::input::PaneLock::acquire_released(&url, &placement)
+                            .unwrap()
+                            .is_some(),
+                        "the runner releases the pane lock after the submit stage"
+                    );
+                });
+            }
+
+            #[test]
+            fn staged_runner_writes_zero_bytes_while_another_writer_holds_the_pane_lock() {
+                with_host(|host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    let placement = placement(host);
+                    let held = crate::input::PaneLock::try_acquire(&url, &placement)
+                        .unwrap()
+                        .expect("the pane lock is free before submission");
+                    assert!(
+                        host.handle(prompt_request(host, "prompt:busy-lock"))
+                            .unwrap()
+                            .is_none()
+                    );
+                    let busy_until = Instant::now() + Duration::from_millis(300);
+                    while Instant::now() < busy_until {
+                        host.drain();
+                        assert!(host.advance().is_none());
+                        assert!(host.pty.offers.is_empty(), "no byte while the lock is busy");
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    drop(held);
+                    let reply = finish_after_interruption(host);
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(host.pty.program, vec![encoded()]);
                 });
             }
         }
@@ -3597,12 +3895,47 @@ mod tests {
                 bytes
             }
 
+            /// Submits `request`, then drives drained turns until its first reply.
+            pub(in crate::runtime::runner::input) fn settle(
+                host: &mut Host,
+                request: InputControlRequest,
+            ) -> SubmissionResult {
+                if let Some(reply) = host.handle(request).unwrap() {
+                    return submitted(reply);
+                }
+                loop {
+                    assert!(
+                        Instant::now() < host.until,
+                        "the submission replies in time"
+                    );
+                    host.drain();
+                    if let Some(reply) = host.advance() {
+                        return submitted(reply);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            pub(in crate::runtime::runner::input) fn delivery_selection(
+                host: &Host,
+                input_id: i64,
+            ) -> (Option<String>, Option<String>) {
+                host.fixture
+                    .conn
+                    .query_row(
+                        "SELECT delivery_method,delivery_reason FROM member_input_operations WHERE input_id=?1",
+                        [input_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap()
+            }
+
             pub(in crate::runtime::runner::input) struct HostProfile {
                 pub(crate) policy: storage::evidence::EvidencePolicy,
                 pub(crate) event_evidence: &'static str,
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'static str,
-                pub(crate) profile_version: &'static str,
+                pub(crate) profile_version: Option<&'static str>,
                 pub(crate) size: TerminalSize,
                 pub(crate) screen: Vec<u8>,
             }
@@ -3616,7 +3949,7 @@ mod tests {
                         event_evidence,
                         backend: crate::coding_agent::CodingAgent::Codex,
                         native_version: VERSION,
-                        profile_version: PROFILE,
+                        profile_version: Some(PROFILE),
                         size: TerminalSize { rows: 24, cols: 80 },
                         screen: SCREEN.to_vec(),
                     }
@@ -3712,15 +4045,31 @@ mod tests {
                 }
             }
 
+            /// `program` holds each completed programmatic input; `stages` holds every
+            /// separately offered programmatic stage with its offer time, so settle intervals
+            /// between a literal and its submit key are observable.
             pub(in crate::runtime::runner::input) struct Pty {
                 pub(crate) child: Reader,
                 pub(crate) offers: Vec<Vec<u8>>,
                 pub(crate) program: Vec<Vec<u8>>,
+                pub(crate) stages: Vec<(Instant, Vec<u8>)>,
                 pub(crate) manual: Vec<u8>,
                 pub(crate) short: Option<usize>,
                 expected_program: Vec<u8>,
+                program_offset: usize,
                 database_url: String,
                 hooks: Arc<Hooks>,
+            }
+            impl Pty {
+                pub(crate) fn stage_bytes(&self) -> Vec<Vec<u8>> {
+                    self.stages.iter().map(|(_, bytes)| bytes.clone()).collect()
+                }
+                pub(crate) fn stage_gaps(&self) -> Vec<Duration> {
+                    self.stages
+                        .windows(2)
+                        .map(|pair| pair[1].0.duration_since(pair[0].0))
+                        .collect()
+                }
             }
             impl ByteInput for Pty {
                 fn try_read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
@@ -3731,13 +4080,19 @@ mod tests {
                 fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
                     assert!(!bytes.is_empty());
                     self.offers.push(bytes.to_vec());
-                    if bytes == self.expected_program {
+                    if self.expected_program[self.program_offset..].starts_with(bytes) {
                         let conn = crate::db::connect(&self.database_url).unwrap();
                         let row = storage::get_input(&conn, self.hooks.input_id()).unwrap();
                         assert!(matches!(row.state, storage::InputState::InProgress));
                         assert!(self.hooks.count("before") > 0);
-                        self.program.push(bytes.to_vec());
-                        Ok(self.short.unwrap_or(bytes.len()))
+                        self.stages.push((Instant::now(), bytes.to_vec()));
+                        let accepted = self.short.unwrap_or(bytes.len());
+                        self.program_offset += accepted;
+                        if self.program_offset == self.expected_program.len() {
+                            self.program.push(self.expected_program.clone());
+                            self.program_offset = 0;
+                        }
+                        Ok(accepted)
                     } else {
                         self.manual.extend_from_slice(bytes);
                         Ok(bytes.len())
@@ -3775,7 +4130,7 @@ mod tests {
             pub(in crate::runtime::runner::input) struct RunSelection {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'static str,
-                pub(crate) profile_version: &'static str,
+                pub(crate) profile_version: Option<&'static str>,
                 pub(crate) event_evidence: &'static str,
             }
 
@@ -3821,8 +4176,7 @@ mod tests {
                         let selected =
                             catalog.capabilities(selection.backend, Some(selection.native_version));
                         let coverage = selected.detection;
-                        let profile_match = selected.profile_match.map(|value| value.as_str());
-                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,profile_match=?4,coverage=?5,event_evidence=?6 WHERE run_id=?7",rusqlite::params![selection.backend.name(),selection.native_version,selection.profile_version,profile_match,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
+                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,coverage=?4,event_evidence=?5 WHERE run_id=?6",rusqlite::params![selection.backend.name(),selection.native_version,selection.profile_version,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
                         fixture
                             .conn
                             .execute(
@@ -4025,9 +4379,11 @@ mod tests {
                         },
                         offers: Vec::new(),
                         program: Vec::new(),
+                        stages: Vec::new(),
                         manual: Vec::new(),
                         short: None,
                         expected_program,
+                        program_offset: 0,
                         database_url: url,
                         hooks: hooks.clone(),
                     };
@@ -4047,10 +4403,12 @@ mod tests {
                         child,
                     };
                     host.drain();
-                    assert!(matches!(
-                        host.controller.health(&host.writer).eligibility,
-                        InputEligibility::ComposerEmpty
-                    ));
+                    if profile_version.is_some() {
+                        assert!(matches!(
+                            host.controller.health(&host.writer).eligibility,
+                            InputEligibility::ComposerEmpty
+                        ));
+                    }
                     host
                 }
                 pub(crate) fn request(&self, key: &str) -> InputControlRequest {
@@ -4337,7 +4695,7 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Claude,
                     native_version: "2.1.302",
-                    profile_version: "claude-2.1.302-auto-1",
+                    profile_version: Some("claude-2.1.302-auto-1"),
                     size: crate::runtime::runner::TerminalSize {
                         rows: 36,
                         cols: 120,
@@ -4363,7 +4721,7 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Opencode,
                     native_version: "2.1.4",
-                    profile_version: "opencode-2.1.4-cafleet-ask-1",
+                    profile_version: Some("opencode-2.1.4-cafleet-ask-1"),
                     size: crate::runtime::runner::TerminalSize {
                         rows: 36,
                         cols: 120,

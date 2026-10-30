@@ -631,7 +631,7 @@ pub(crate) mod test_support {
         synthetic_catalog as catalog, synthetic_definitions as definitions,
     };
     pub(crate) fn configure(fixture: &mut WriterFixture) {
-        fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,profile_match='exact',coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
+        fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
         fixture.fixture.run =
             storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
     }

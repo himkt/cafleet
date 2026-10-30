@@ -19,7 +19,7 @@ pub(crate) use events::persist_transition_in_transaction;
 pub(crate) use events::{
     get_event, latest_event_seq, persist_transition, update_interaction_evidence,
 };
-pub(crate) use inputs::{InputReservation, UNRESOLVED_INPUT_STATES, reserve_input_with_provenance};
+pub(crate) use inputs::{InputReservation, UNRESOLVED_INPUT, reserve_input_with_provenance};
 pub(crate) use inputs::{
     find_input, get_input, input_payload_digest, record_input_state, settle_preview,
 };
@@ -148,7 +148,6 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         created_at: row.get("created_at")?,
         native_version: row.get("native_version")?,
         profile_version: row.get("profile_version")?,
-        profile_match: row.get("profile_match")?,
         effective_policy_json: optional_json(row, "effective_policy_json", false)?,
         owner_epoch: row.get("owner_epoch")?,
         owner_kind: row.get("owner_kind")?,
@@ -357,14 +356,12 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,database_identity_json,
              launch_nonce,runtime_path,requested_mode,resolved_mode,mode_source,permission_argv_json,
              event_evidence,coverage,status,created_at,native_version,profile_version,owner_epoch,
-             owner_kind,owner_pid,owner_start_identity,reachability,cleanup_state,event_seq_reserved_through,observation_gap_count,
-             profile_match)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'starting',?14,?15,?16,1,'creator',?17,?18,'reachable','incomplete',0,0,?19)",
+             owner_kind,owner_pid,owner_start_identity,reachability,cleanup_state,event_seq_reserved_through,observation_gap_count)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'starting',?14,?15,?16,1,'creator',?17,?18,'reachable','incomplete',0,0)",
             params![new.member_id,new.fleet_id,new.director_member_id,new.backend,new.database_identity_json.to_string(),
                 new.launch_nonce,new.runtime_path,new.requested_mode,new.resolved_mode,new.mode_source.as_str(),
                 new.permission_argv_json.to_string(),new.event_evidence.as_str(),new.coverage.as_str(),now,
-                new.native_version,new.profile_version,new.owner_pid,new.owner_start_identity,
-                new.profile_match.map(ProfileMatch::as_str)],
+                new.native_version,new.profile_version,new.owner_pid,new.owner_start_identity],
         )?;
     let run = get_run(conn, conn.last_insert_rowid())?;
     Ok(run)
@@ -409,7 +406,7 @@ pub(crate) fn runtime_snapshot(
         )
         .optional()?;
     let mut statement = conn.prepare(&format!(
-        "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND state IN {UNRESOLVED_INPUT_STATES} ORDER BY input_id"
+        "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND {UNRESOLVED_INPUT} ORDER BY input_id"
     ))?;
     let unresolved_input_ids = statement
         .query_map([run_id], |row| row.get(0))?
@@ -506,7 +503,6 @@ pub(crate) mod test_support {
                 event_evidence: EventEvidence::Metadata,
                 native_version: Some("0.163.0".into()),
                 profile_version: None,
-                profile_match: None,
                 coverage: Coverage::Unknown,
                 owner_pid: i64::from(std::process::id()),
                 owner_start_identity: "fixture-start-identity".into(),
@@ -709,7 +705,7 @@ pub(crate) mod test_support {
     impl ResponseFixture {
         pub(crate) fn new() -> Self {
             let mut base = Fixture::new();
-            base.conn.execute("UPDATE member_runs SET coverage='tested',profile_version='fixture-v1',profile_match='exact' WHERE run_id=?1",[base.run.run_id]).unwrap();
+            base.conn.execute("UPDATE member_runs SET coverage='tested',profile_version='fixture-v1' WHERE run_id=?1",[base.run.run_id]).unwrap();
             let owner = base.activate();
             let event = base.open(&owner);
             let request = NewPermissionResponse {
