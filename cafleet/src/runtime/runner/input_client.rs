@@ -167,7 +167,7 @@ fn submission_context(run_id: i64, request: &SubmitInput) -> InputContext {
     }
 }
 
-fn submission_digest(run_id: i64, request: &SubmitInput) -> Result<String> {
+fn validate_submission_request(run_id: i64, request: &SubmitInput) -> Result<()> {
     validate_operation_key(&request.operation_key)?;
     usage(
         run_id > 0 && crate::input::valid_input(&request.literal),
@@ -188,9 +188,7 @@ fn submission_digest(run_id: i64, request: &SubmitInput) -> Result<String> {
             return Err(CafleetError::Usage("ordinary input kind required".into()));
         }
     }
-    Ok(crate::broker::runtime::input_payload_digest(
-        run_id, request,
-    ))
+    Ok(())
 }
 
 pub(crate) fn find_submission(
@@ -201,7 +199,7 @@ pub(crate) fn find_submission(
 ) -> std::result::Result<Option<InputOperation>, InputFailure> {
     let mut context = submission_context(identity.run_id, request);
     let result = (|| {
-        let digest = submission_digest(identity.run_id, request)?;
+        validate_submission_request(identity.run_id, request)?;
         with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction()?;
             let run = selected_run(&tx, identity.run_id)?;
@@ -212,6 +210,11 @@ pub(crate) fn find_submission(
             let retained = storage::find_input(&tx, identity.run_id, &request.operation_key)?;
             if let Some(input) = &retained {
                 context.input_id = Some(input.input_id);
+                let digest = storage::versioned_payload_digest(
+                    input.payload_digest_version,
+                    identity.run_id,
+                    request,
+                )?;
                 ensure(
                     input.kind == request.input_kind
                         && input.payload_digest == digest
@@ -232,6 +235,11 @@ pub(super) fn durable_outcome(
     input: &InputOperation,
 ) -> Option<(SubmissionStatus, SubmissionStage, Option<String>)> {
     match (input.state, input.disposition) {
+        (InputState::Ready, _) if input.deferred_at.is_some() => Some((
+            SubmissionStatus::Queued,
+            SubmissionStage::ZeroBytes,
+            input.defer_reason.clone(),
+        )),
         (InputState::Ready, _) => None,
         (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
             Some((SubmissionStatus::Accepted, SubmissionStage::Submitted, None))
@@ -532,9 +540,17 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         };
         held.validate_binding(&settings.database_url, expected_placement)?;
         deadline.remaining()?;
-        let reply = host
-            .exchange(expected_run, &request, deadline.instant())
-            .map_err(CafleetError::from)?;
+        held.release()?;
+        let reply = host.exchange(expected_run, &request, deadline.instant());
+        ensure(
+            held.reacquire_within(Deadline::until(
+                deadline
+                    .instant()
+                    .max(Instant::now() + std::time::Duration::from_secs(1)),
+            ))?,
+            "pane input lock remained busy after the runner submission",
+        )?;
+        let reply = reply.map_err(CafleetError::from)?;
         let InputControlReply::Submission(reply) = reply else {
             return Err(error("ordinary submission requires a submission reply"));
         };

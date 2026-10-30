@@ -174,6 +174,109 @@ pub(crate) fn input_payload_digest(
     crate::digest::sha256_hex(crate::digest::canonical_json(&payload).as_bytes())
 }
 
+pub(crate) fn preview_payload_digest_v2(
+    run_id: i64,
+    input: &crate::runtime::runner::SubmitInput,
+) -> String {
+    let payload = json!({"payload_digest_version":2,"run_id":run_id,"kind":input.input_kind.as_str(),
+        "message_id":input.message_id,"literal":input.literal});
+    crate::digest::sha256_hex(crate::digest::canonical_json(&payload).as_bytes())
+}
+
+/// The digest a stored receipt of `version` records for `input`.
+pub(crate) fn versioned_payload_digest(
+    version: i64,
+    run_id: i64,
+    input: &crate::runtime::runner::SubmitInput,
+) -> Result<String, CafleetError> {
+    match (version, input.input_kind) {
+        (1, _) => Ok(input_payload_digest(run_id, input)),
+        (2, InputKind::Preview) => Ok(preview_payload_digest_v2(run_id, input)),
+        _ => Err(invalid(
+            "member_input_operations.payload_digest_version",
+            "unsupported digest version for this input kind",
+        )),
+    }
+}
+
+/// How a new ordinary receipt is reserved: the delivery selected before its first byte, or a
+/// zero-byte queue admission with its defer reason, and its digest version.
+#[derive(Clone, Copy)]
+pub(crate) struct NewReservation<'a> {
+    pub(crate) selection: Option<(DeliveryMethod, Option<&'a str>)>,
+    pub(crate) defer_reason: Option<&'a str>,
+    pub(crate) payload_digest_version: i64,
+}
+
+#[cfg(test)]
+impl NewReservation<'_> {
+    pub(crate) const PLAIN: Self = Self {
+        selection: None,
+        defer_reason: None,
+        payload_digest_version: 1,
+    };
+}
+
+pub(crate) fn begin_deferred_attempt(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    method: DeliveryMethod,
+    reason: Option<&str>,
+) -> Result<InputOperation, CafleetError> {
+    owned_transaction(conn, owner, |conn, run| {
+        let input = owned_input(conn, run, input_id)?;
+        require(
+            input.state == InputState::Ready && input.deferred_at.is_some(),
+            "member_input_operations.state",
+            "a deferred attempt starts from its queued receipt",
+        )?;
+        let changed = conn.execute(
+            "UPDATE member_input_operations SET state='in_progress',updated_at=?1,delivery_method=?2,delivery_reason=?3 WHERE input_id=?4 AND state='ready'",
+            params![now_stamp(), method.as_str(), reason, input_id],
+        )?;
+        require(
+            changed == 1,
+            "member_input_operations.state",
+            "input CAS failed",
+        )?;
+        get_input(conn, input_id)
+    })
+}
+
+/// Settles a queued input that wrote zero bytes as not submitted with its outcome reason.
+pub(crate) fn settle_zero_byte_deferred(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    expected: InputState,
+    reason: &str,
+) -> Result<InputOperation, CafleetError> {
+    require(
+        matches!(expected, InputState::Ready | InputState::InProgress),
+        "member_input_operations.state",
+        "only a zero-byte deferred input is cancelled",
+    )?;
+    owned_transaction(conn, owner, |conn, run| {
+        let input = owned_input(conn, run, input_id)?;
+        require(
+            input.state == expected && input.deferred_at.is_some(),
+            "member_input_operations.state",
+            "deferred input state changed",
+        )?;
+        let changed = conn.execute(
+            "UPDATE member_input_operations SET state='settled',disposition='not_submitted',updated_at=?1,delivery_method=NULL,delivery_reason=?2 WHERE input_id=?3 AND state=?4",
+            params![now_stamp(), reason, input_id, expected.as_str()],
+        )?;
+        require(
+            changed == 1,
+            "member_input_operations.state",
+            "input CAS failed",
+        )?;
+        get_input(conn, input_id)
+    })
+}
+
 pub(crate) fn get_input(conn: &Connection, input_id: i64) -> Result<InputOperation, CafleetError> {
     let input = conn
         .query_row(
@@ -212,8 +315,12 @@ pub(crate) fn reserve_input(
     owner: &RunOwner,
     new: &NewInput,
 ) -> Result<InputOperation, CafleetError> {
-    reserve_input_with_provenance(conn, owner, new).map(|reservation| match reservation {
-        InputReservation::Inserted(operation) | InputReservation::Existing(operation) => operation,
+    reserve_input_with_provenance(conn, owner, new, NewReservation::PLAIN).map(|reservation| {
+        match reservation {
+            InputReservation::Inserted(operation) | InputReservation::Existing(operation) => {
+                operation
+            }
+        }
     })
 }
 
@@ -221,6 +328,7 @@ pub(crate) fn reserve_input_with_provenance(
     conn: &mut Connection,
     owner: &RunOwner,
     new: &NewInput,
+    reservation: NewReservation<'_>,
 ) -> Result<InputReservation, CafleetError> {
     require(
         new.kind != InputKind::PermissionResponse,
@@ -266,10 +374,22 @@ pub(crate) fn reserve_input_with_provenance(
         }
         require_capacity(conn, run.run_id)?;
         let now = now_stamp();
+        let selection = reservation.selection;
+        let deferred = reservation
+            .defer_reason
+            .map(|reason| (now.as_str(), reason));
+        require(
+            selection.is_none() || deferred.is_none(),
+            "delivery_method",
+            "a queued input selects its method when its attempt starts",
+        )?;
         conn.execute(
-            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id)
-             VALUES(?1,?2,?3,?4,'in_progress',?5,?5,?6)",
-            params![run.run_id,new.operation_key,new.kind.as_str(),new.payload_digest,now,new.message_id],
+            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,delivery_method,delivery_reason,deferred_at,defer_reason,payload_digest_version)
+             VALUES(?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11,?12)",
+            params![run.run_id,new.operation_key,new.kind.as_str(),new.payload_digest,
+                if deferred.is_some() { "ready" } else { "in_progress" },now,new.message_id,
+                selection.map(|(method, _)| method.as_str()),selection.and_then(|(_, reason)| reason),
+                deferred.map(|(at, _)| at),deferred.map(|(_, reason)| reason),reservation.payload_digest_version],
         )?;
         get_input(conn, conn.last_insert_rowid()).map(InputReservation::Inserted)
     })
@@ -320,10 +440,17 @@ pub(crate) fn record_input_state(
             "member_input_operations.state",
             "input state changed",
         )?;
-        let changed = conn.execute(
-            "UPDATE member_input_operations SET state=?1,updated_at=?2 WHERE input_id=?3 AND state=?4",
-            params![next.as_str(),now_stamp(),input_id,expected.as_str()],
-        )?;
+        let changed = if next == InputState::Ready {
+            conn.execute(
+                "UPDATE member_input_operations SET state=?1,updated_at=?2,delivery_method=NULL,delivery_reason=NULL WHERE input_id=?3 AND state=?4",
+                params![next.as_str(),now_stamp(),input_id,expected.as_str()],
+            )?
+        } else {
+            conn.execute(
+                "UPDATE member_input_operations SET state=?1,updated_at=?2 WHERE input_id=?3 AND state=?4",
+                params![next.as_str(),now_stamp(),input_id,expected.as_str()],
+            )?
+        };
         require(
             changed == 1,
             "member_input_operations.state",

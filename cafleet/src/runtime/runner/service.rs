@@ -1099,6 +1099,26 @@ pub(crate) fn run_service(
                                 }
                             }
                         }
+                    } else if coordinator.has_deferred_work() {
+                        let deadline = Instant::now() + Duration::from_secs(5);
+                        if let Ok(InputDrain::Quiescent { .. }) =
+                            native.quiesce(coordinator, deadline)
+                            && !terminate.load(Ordering::Acquire)
+                            && !resize.load(Ordering::Acquire)
+                            && let Err(failure) = coordinator.advance(
+                                &mut conn,
+                                &run,
+                                native.transport,
+                                native.pty,
+                                native.controller,
+                                deadline,
+                            )
+                        {
+                            eprintln!(
+                                "member runtime: deferred input: {}",
+                                CafleetError::from(failure).message()
+                            );
+                        }
                     }
                 }
                 std::thread::sleep(tick_sleep(
@@ -1850,6 +1870,10 @@ pub(crate) mod test_support {
         }
         pub(crate) const NATIVE_ENV: &str = "CAFLEET_REVIEW_SERVICE_INPUT_NATIVE";
         pub(crate) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
+        /// A manual line that makes the native child show a detected permission form instead of
+        /// journaling it; the next journaled line restores the composer screen.
+        pub(crate) const FORM_LINE: &str = "show-permission-form";
+        pub(crate) const FORM: &[u8] = b"\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: write held.txt\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ";
         pub(crate) const PANIC_RECORD_LIMIT: usize = 16 * 1024;
         pub(crate) const PANIC_DIRECTORY: &str = "service-input-panics";
 
@@ -1938,7 +1962,14 @@ pub(crate) mod test_support {
             crate::runtime::runner::control::pause(until).expect("original owned service deadline");
         }
 
-        pub(crate) fn configure(fixture: &mut Fixture, spec: &mut SpawnSpec, until: Instant) {
+        /// `detecting` adds the synthetic permission-form detector, so `FORM_LINE` opens a
+        /// detected interaction and the run's coverage is tested.
+        pub(crate) fn configure_with(
+            fixture: &mut Fixture,
+            spec: &mut SpawnSpec,
+            until: Instant,
+            detecting: bool,
+        ) {
             use std::os::unix::fs::DirBuilderExt;
 
             std::fs::DirBuilder::new()
@@ -1947,6 +1978,7 @@ pub(crate) mod test_support {
                 .unwrap();
             let mut catalog =
                 crate::coding_agent::profiles::catalog::test_support::synthetic_definitions();
+            let permission_rule = catalog["profiles"][0]["rules"][0].clone();
             let mut executable = catalog["fixtures"][0].clone();
             executable["id"] = json!("synthetic-service-submission");
             catalog["fixtures"].as_array_mut().unwrap().push(executable);
@@ -1965,7 +1997,19 @@ pub(crate) mod test_support {
                     "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]}
                 }
             }});
-            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            let coverage = if detecting {
+                let fixture_id = catalog["fixtures"][0]["id"].clone();
+                catalog["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(permission_rule);
+                catalog["profiles"][0]["capabilities"]["detection"] =
+                    json!({"rule_ids":["synthetic-permission"],"fixture_ids":[fixture_id]});
+                "tested"
+            } else {
+                "unknown"
+            };
+            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage=?2 WHERE run_id=?1",rusqlite::params![fixture.run.run_id, coverage]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let config = fixture._dir.path().join("service-input-native.json");
             private_write(
@@ -2171,9 +2215,22 @@ pub(crate) mod test_support {
             }
         }
         pub(crate) fn with_input_service(body: impl FnOnce(&mut ServiceFixture, Instant)) {
+            with_configured_input_service(false, body);
+        }
+
+        pub(crate) fn with_detecting_input_service(
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
+            with_configured_input_service(true, body);
+        }
+
+        fn with_configured_input_service(
+            detecting: bool,
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
             let until = Instant::now() + Duration::from_secs(10);
             let mut fixture = ServiceFixture::configured_until(false, until, |fixture, spec| {
-                configure(fixture, spec, until)
+                configure_with(fixture, spec, until, detecting)
             });
             fixture.cleanup_deadline = Some(until);
             let primary = catch_unwind(AssertUnwindSafe(|| {
@@ -2319,6 +2376,11 @@ pub(crate) mod test_support {
                         let line = String::from_utf8(line).unwrap();
                         if line == "finish" {
                             return;
+                        }
+                        if line == FORM_LINE {
+                            output.write_all(FORM).unwrap();
+                            output.flush().unwrap();
+                            continue;
                         }
                         let inputs = receipt_inputs(&conn, run_id, expires).unwrap();
                         journal

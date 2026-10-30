@@ -371,6 +371,37 @@ impl PaneLock {
         }
     }
 
+    /// Releases this held lock so the member's runner can write its staged input.
+    pub(crate) fn release(&self) -> Result<(), CafleetError> {
+        self.file.unlock().map_err(|error| {
+            CafleetError::App(format!(
+                "cannot release pane input {}: {error}",
+                self.path.display()
+            ))
+        })
+    }
+
+    /// Retakes a released lock, retrying every 50 ms until `lock_deadline`; `false` means it
+    /// stayed busy.
+    pub(crate) fn reacquire_within(&self, lock_deadline: Deadline) -> Result<bool, CafleetError> {
+        loop {
+            match self.file.try_lock() {
+                Ok(()) => return Ok(true),
+                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::Error(error)) => {
+                    return Err(CafleetError::App(format!(
+                        "cannot lock pane input {}: {error}",
+                        self.path.display()
+                    )));
+                }
+            }
+            let Ok(left) = lock_deadline.remaining() else {
+                return Ok(false);
+            };
+            std::thread::sleep(left.min(Duration::from_millis(50)));
+        }
+    }
+
     /// Retry a held lock every 50 ms until `lock_deadline`; `None` means it stayed busy.
     pub(crate) fn acquire_within(
         database_url: &str,

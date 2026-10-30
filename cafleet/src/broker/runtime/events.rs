@@ -302,11 +302,20 @@ fn validate_delivery_result(
         "payload_json.message_id",
         "message identity must match the input receipt",
     )?;
-    require(
+    let published: DeliveryProjection = serde_json::from_value(payload["delivery"].clone())
+        .map_err(|_| invalid("payload_json.delivery", "delivery projection required"))?;
+    let consistent = if published.status == DeliveryStatus::Uncertain {
+        delivery.status != DeliveryStatus::Queued
+            && delivery.status != DeliveryStatus::Held
+            && delivery.method == published.method
+    } else {
         matches!(
-            delivery.status,
-            DeliveryStatus::Submitted | DeliveryStatus::NotSubmitted | DeliveryStatus::Uncertain
-        ) && payload["delivery"] == delivery.to_json(),
+            published.status,
+            DeliveryStatus::Submitted | DeliveryStatus::NotSubmitted
+        ) && published == delivery
+    };
+    require(
+        consistent,
         "payload_json.delivery",
         "delivery must match the input receipt's settled result",
     )?;
@@ -352,11 +361,34 @@ pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, Ca
         observed_at: view.event.observed_at.clone(),
         evidence_json: payload["evidence"].clone(),
         close_reason,
-        cause_json: payload
-            .get("cause")
-            .filter(|value| !value.is_null())
-            .cloned(),
+        cause_json: if view.event.kind == RuntimeEventKind::InputDeliveryResult {
+            let mut cause = json!({"kind":"input_delivery_result",
+                "input_id":payload["input_id"],"stage":payload["stage"]});
+            if let Some(diagnostic) = payload.get("cause") {
+                cause["cause"] = diagnostic.clone();
+            }
+            Some(cause)
+        } else {
+            payload
+                .get("cause")
+                .filter(|value| !value.is_null())
+                .cloned()
+        },
     })
+}
+
+/// The runner's internal record of a deferred input's first result: its input, its stage and
+/// an optional diagnostic cause, carried through the outbox as the transition's cause.
+pub(crate) fn input_delivery_result_cause(
+    input_id: i64,
+    stage: &str,
+    diagnostic: Option<Value>,
+) -> Value {
+    let mut cause = json!({"kind":"input_delivery_result","input_id":input_id,"stage":stage});
+    if let Some(diagnostic) = diagnostic {
+        cause["cause"] = diagnostic;
+    }
+    cause
 }
 
 pub(crate) fn validate_transition(
@@ -436,17 +468,38 @@ pub(crate) fn validate_transition(
 }
 
 fn validate_delivery_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
-    let Some(cause) = &transition.cause_json else {
-        return Ok(());
-    };
+    let cause = transition
+        .cause_json
+        .as_ref()
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid("cause_json", "delivery result record required"))?;
     require(
         cause
-            .get("kind")
-            .and_then(Value::as_str)
-            .is_some_and(|kind| !kind.trim().is_empty()),
-        "cause_json.kind",
-        "a delivery result cause names its kind",
-    )
+            .keys()
+            .all(|key| ["kind", "input_id", "stage", "cause"].contains(&key.as_str()))
+            && cause.get("kind").and_then(Value::as_str) == Some("input_delivery_result")
+            && cause
+                .get("input_id")
+                .and_then(Value::as_i64)
+                .is_some_and(|id| id > 0)
+            && cause
+                .get("stage")
+                .and_then(Value::as_str)
+                .is_some_and(|stage| DELIVERY_RESULT_STAGES.contains(&stage)),
+        "cause_json",
+        "a delivery result names its input and stage",
+    )?;
+    if let Some(diagnostic) = cause.get("cause") {
+        require(
+            diagnostic
+                .get("kind")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| !kind.trim().is_empty()),
+            "cause_json.cause.kind",
+            "a delivery result cause names its kind",
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
@@ -590,7 +643,9 @@ fn payload(
     if let Some(reason) = transition.close_reason {
         payload["close_reason"] = json!(reason.as_str());
     }
-    if let Some(cause) = &transition.cause_json {
+    if let Some(cause) = &transition.cause_json
+        && transition.kind != RuntimeEventKind::InputDeliveryResult
+    {
         payload["cause"] = cause.clone();
     }
     payload["director_action"] = director_action(
@@ -673,6 +728,37 @@ pub(crate) fn persist_transition_in_transaction(
     if archive_reason.is_none() {
         super::super::fleets::require_live_fleet(conn, run.fleet_id)?;
     }
+    let delivery_fields = if transition.kind == RuntimeEventKind::InputDeliveryResult {
+        let record = transition
+            .cause_json
+            .as_ref()
+            .expect("validated delivery results carry their record");
+        let input_id = record["input_id"]
+            .as_i64()
+            .expect("validated delivery result input");
+        let published: Option<i64> = conn
+            .query_row(
+                "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                params![run.run_id, input_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(id) = published {
+            return Ok((get_event(conn, id)?.event, false));
+        }
+        let input = super::inputs::get_input(conn, input_id)?;
+        require(
+            input.run_id == run.run_id && input.deferred_at.is_some(),
+            "input_id",
+            "delivery results describe this run's deferred inputs",
+        )?;
+        let delivery = input
+            .delivery()
+            .ok_or_else(|| invalid("input_id", "delivery results describe ordinary inputs"))?;
+        Some((record.clone(), input.message_id, delivery))
+    } else {
+        None
+    };
     let latest = latest_event_seq(conn, run.run_id)?;
     require(
         latest.is_none_or(|latest| transition.event_seq > latest),
@@ -705,7 +791,22 @@ pub(crate) fn persist_transition_in_transaction(
                 now_stamp(),notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
         )?;
     let event_id = conn.last_insert_rowid();
-    let payload = payload(run, transition, event_id, interaction_id)?.to_string();
+    let mut payload = payload(run, transition, event_id, interaction_id)?;
+    if let Some((record, message_id, delivery)) = delivery_fields {
+        let object = payload.as_object_mut().expect("event payload object");
+        let action = object
+            .remove("director_action")
+            .expect("payload carries its action");
+        if let Some(diagnostic) = record.get("cause") {
+            object.insert("cause".into(), diagnostic.clone());
+        }
+        object.insert("input_id".into(), record["input_id"].clone());
+        object.insert("message_id".into(), json!(message_id));
+        object.insert("delivery".into(), delivery.to_json());
+        object.insert("stage".into(), record["stage"].clone());
+        object.insert("director_action".into(), action);
+    }
+    let payload = payload.to_string();
     require(
         payload.len() <= PAYLOAD_LIMIT,
         "payload_json",

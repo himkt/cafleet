@@ -127,6 +127,7 @@ pub(crate) struct ObservationController {
     request_region: Option<RequestRegion>,
     current_classification: Option<storage::InteractionClass>,
     pending_error: Option<CafleetError>,
+    delivery_results: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     #[cfg(test)]
     capture: Option<NativeCapturePort>,
     #[cfg(test)]
@@ -280,11 +281,19 @@ impl ObservationController {
             request_region: None,
             current_classification: None,
             pending_error: None,
+            delivery_results: std::sync::Mutex::default(),
             #[cfg(test)]
             capture: None,
             #[cfg(test)]
             observation_hooks: None,
         })
+    }
+    /// Queues a deferred input's first result for publication on the next poll.
+    pub(crate) fn publish_delivery_result(&self, record: serde_json::Value) {
+        self.delivery_results
+            .lock()
+            .expect("delivery result queue is never poisoned")
+            .push_back(record);
     }
     pub(crate) fn current_request(&self) -> Option<&ObservedRequest> {
         self.current_request.as_ref()
@@ -816,6 +825,26 @@ impl ObservationController {
                 self.diagnostic = None;
                 self.next_deadline = Some(now.monotonic);
             }
+        }
+        if self.started
+            && self.exit_recorded.is_none()
+            && self.pending.is_none()
+            && self.gap.is_none()
+            && !writer.status().degraded
+            && let Some(record) = self
+                .delivery_results
+                .get_mut()
+                .expect("delivery result queue is never poisoned")
+                .pop_front()
+        {
+            let value = self.lifecycle(
+                RuntimeEventKind::InputDeliveryResult,
+                record,
+                &now.observed_at,
+                current.screen_seq,
+            )?;
+            self.retain(self.update(vec![value]))?;
+            self.route(writer, &now)?;
         }
         if self.pending.is_none()
             && self.gap.is_none()

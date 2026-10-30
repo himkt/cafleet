@@ -46,11 +46,15 @@ fn fold_visible(text: &str) -> String {
 pub(crate) fn notification_line(message: &broker::records::MessageRecord) -> String {
     format!(
         "{} {DISMISSED_PROMPT_NOTE}",
-        wrapped_notification_line(message)
+        canonical_preview_line(message)
     )
 }
 
-fn wrapped_notification_line(message: &broker::records::MessageRecord) -> String {
+pub(crate) fn fallback_preview_line(canonical: &str) -> String {
+    format!("{canonical} {DISMISSED_PROMPT_NOTE}")
+}
+
+pub(crate) fn canonical_preview_line(message: &broker::records::MessageRecord) -> String {
     let folded = fold_visible(&message.text);
     let body = if folded.chars().count() <= INLINE_BODY_LIMIT {
         folded
@@ -347,7 +351,7 @@ fn deliver_wrapped_pending(
                 operation_key: operation_key.clone(),
                 input_kind: InputKind::Preview,
                 message_id: Some(message.message_id),
-                literal: wrapped_notification_line(&message),
+                literal: canonical_preview_line(&message),
             };
             let retained =
                 find_submission(conn, &identity, &request, deadline).map_err(CafleetError::from)?;
@@ -694,7 +698,19 @@ mod tests {
         ) -> std::result::Result<InputControlReply, InputFailure> {
             self.calls[2] += 1;
             assert_eq!(deadline, self.until);
-            self.held();
+            if matches!(
+                request.operation,
+                InputControlOperation::SubmitPrompt(_) | InputControlOperation::SubmitExec(_)
+            ) {
+                assert!(
+                    PaneLock::try_acquire(&self.settings.database_url, &self.placement)
+                        .unwrap()
+                        .is_some(),
+                    "a wrapped delivery awaits the runner's submission reply without the pane lock"
+                );
+            } else {
+                self.held();
+            }
             assert_eq!(
                 serde_json::to_value(&request.identity).unwrap(),
                 serde_json::to_value(ControlIdentity::from_run(run)).unwrap()
@@ -2241,8 +2257,8 @@ mod tests {
         use crate::broker::runtime::RunRecord;
         use crate::runtime::runner::service::test_support::ServiceFixture;
         use crate::runtime::runner::service::test_support::input_service::{
-            input_service_barrier, input_service_composer, input_service_records,
-            wait_input_service_record, with_input_service,
+            FORM_LINE, input_service_barrier, input_service_composer, input_service_records,
+            manual, wait_input_service_record, with_detecting_input_service,
         };
         use crate::runtime::runner::*;
 
@@ -2255,29 +2271,25 @@ mod tests {
             };
             use std::collections::BTreeSet;
 
-            fn resize(
-                fixture: &ServiceFixture,
-                process: &ProcessIdentity,
-                size: rustix::termios::Winsize,
-            ) {
-                assert!(
-                    process.matches().unwrap(),
-                    "original owned runner generation"
-                );
-                rustix::termios::tcsetwinsize(&fixture.master, size).unwrap();
-                nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
-                    nix::sys::signal::Signal::SIGWINCH,
-                )
-                .unwrap();
+            /// Consumes the runtime-event notifications the detected interaction sends the
+            /// Director, so the finite wait observes only the preview retry.
+            fn acknowledge_runtime_events(fixture: &mut ServiceFixture, run: &RunRecord) {
+                for pending in
+                    crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id)
+                        .unwrap()
+                {
+                    assert_eq!(pending.from_member_id, run.member_id);
+                    let event: serde_json::Value = serde_json::from_str(&pending.text).unwrap();
+                    assert_eq!(event["run_id"], run.run_id, "{event}");
+                    crate::broker::ack_message(&mut fixture.fixture.conn, pending.message_id)
+                        .unwrap();
+                }
             }
 
             struct ObservedReceiver<'a, 'b> {
                 receiver: BrokerReceiver<'a>,
                 fixture: &'b mut ServiceFixture,
                 run: RunRecord,
-                process: ProcessIdentity,
-                size: rustix::termios::Winsize,
                 until: Instant,
                 message_id: i64,
                 key: String,
@@ -2330,7 +2342,6 @@ mod tests {
                         );
                         assert!(outcome.sent.is_empty());
                         self.untouched();
-                        resize(self.fixture, &self.process, self.size);
                         let until = self.until.min(deadline.instant());
                         input_service_barrier(self.fixture, until);
                         let health = input_service_composer(self.fixture, until);
@@ -2341,6 +2352,7 @@ mod tests {
                         assert!(!observation.degraded);
                         assert_eq!(observation.pending_count, 0);
                         assert!(!observation.pending_evidence);
+                        acknowledge_runtime_events(self.fixture, &self.run);
                         self.untouched();
                         assert_eq!(
                             input_service_records(self.fixture)
@@ -2355,57 +2367,14 @@ mod tests {
                 }
             }
 
-            with_input_service(|fixture, until| {
+            with_detecting_input_service(|fixture, until| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                let notifications =
-                    crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id)
-                        .unwrap();
-                assert_eq!(
-                    notifications.len(),
-                    1,
-                    "startup notifications={notifications:?}"
-                );
-                let notification = &notifications[0];
-                assert_eq!(notification.from_member_id, run.member_id);
-                assert_eq!(notification.to_member_id, run.director_member_id);
-                let event_id: i64 = fixture
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND message_id=?2 AND kind='coverage_unknown'",
-                    rusqlite::params![run.run_id, notification.message_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-                let event = storage::get_event(&fixture.fixture.conn, event_id).unwrap();
-                assert_eq!(event.event.run_id, run.run_id);
-                assert_eq!(event.event.kind, storage::RuntimeEventKind::CoverageUnknown);
-                assert_eq!(event.event.message_id, Some(notification.message_id));
-                assert_eq!(event.run.run.owner(), run.owner());
-                assert_eq!(event.event.payload_json.to_string(), notification.text);
-                let acknowledged =
-                    crate::broker::ack_message(&mut fixture.fixture.conn, notification.message_id)
-                        .unwrap();
-                assert_eq!(acknowledged.message_id, notification.message_id);
-                assert_eq!(acknowledged.status.as_str(), "completed");
                 let settings = Settings::for_database(
                     std::path::Path::new(fixture.fixture.conn.path().unwrap()),
                     None,
                 );
-                let size = rustix::termios::tcgetwinsize(&fixture.master).unwrap();
-                let process = ProcessIdentity::read(run.owner_pid).unwrap().unwrap();
-                assert_eq!(process.start_identity, run.owner_start_identity);
-                resize(
-                    fixture,
-                    &process,
-                    rustix::termios::Winsize {
-                        ws_row: 1,
-                        ws_col: 1,
-                        ws_xpixel: 0,
-                        ws_ypixel: 0,
-                    },
-                );
+                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
                 let mut previous = None;
                 loop {
                     assert!(
@@ -2415,7 +2384,7 @@ mod tests {
                     let health = NativeInputHost.health(&run, until).unwrap();
                     health.validate(&run).unwrap();
                     let observation = health.observation.as_ref().unwrap();
-                    if matches!(observation.eligibility, InputEligibility::Hold(_))
+                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
                         && !observation.degraded
                         && observation.pending_count == 0
                         && !observation.pending_evidence
@@ -2432,6 +2401,7 @@ mod tests {
                             .min(until.saturating_duration_since(Instant::now())),
                     );
                 }
+                acknowledge_runtime_events(fixture, &run);
                 let message = crate::broker::send_message(
                     &mut fixture.fixture.conn,
                     run.director_member_id,
@@ -2461,8 +2431,6 @@ mod tests {
                         receiver: BrokerReceiver::new(conn, &settings, run.director_member_id),
                         fixture: &mut *fixture,
                         run: run.clone(),
-                        process,
-                        size,
                         until,
                         message_id: message.message_id,
                         key: key.clone(),

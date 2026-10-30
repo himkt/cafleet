@@ -17,12 +17,16 @@ pub(crate) use effective_policy::{
 pub(crate) use events::persist_event;
 pub(crate) use events::persist_transition_in_transaction;
 pub(crate) use events::{
-    get_event, latest_event_seq, persist_transition, update_interaction_evidence,
+    get_event, input_delivery_result_cause, latest_event_seq, persist_transition,
+    update_interaction_evidence,
 };
-pub(crate) use inputs::{InputReservation, UNRESOLVED_INPUT, reserve_input_with_provenance};
+#[cfg(test)]
+pub(crate) use inputs::input_payload_digest;
 pub(crate) use inputs::{
-    find_input, get_input, input_payload_digest, record_input_state, settle_preview,
+    InputReservation, NewReservation, UNRESOLVED_INPUT, begin_deferred_attempt,
+    reserve_input_with_provenance, settle_zero_byte_deferred, versioned_payload_digest,
 };
+pub(crate) use inputs::{find_input, get_input, record_input_state, settle_preview};
 #[cfg(test)]
 pub(crate) use inputs::{reserve_input, settle_input};
 #[cfg(test)]

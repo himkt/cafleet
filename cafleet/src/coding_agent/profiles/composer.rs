@@ -83,6 +83,12 @@ impl ComposerPlan {
         bytes.extend_from_slice(&self.submit);
         Ok(bytes)
     }
+
+    pub(crate) fn stages(&self, literal: &str) -> Result<[Vec<u8>; 2], CafleetError> {
+        let mut encoded = self.encode(literal)?;
+        let submit = encoded.split_off(encoded.len() - self.submit.len());
+        Ok([encoded, submit])
+    }
 }
 
 impl ProfileCatalog {
