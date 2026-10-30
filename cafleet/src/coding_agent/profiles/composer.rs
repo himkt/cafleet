@@ -123,7 +123,7 @@ pub(crate) mod test_support {
     pub(crate) const DRAFT: &str = "synthetic-composer_draft";
     pub(crate) const PROMPT_FIXTURE: &str = "synthetic-prompt-plan";
     pub(crate) const EXEC_FIXTURE: &str = "synthetic-exec-plan";
-    pub(crate) const VERSION_TWO: &str = "synthetic-0.0.2";
+    pub(crate) const VERSION_TWO: &str = "0.0.2-synthetic";
 
     pub(crate) fn definition(prompt: Option<&str>, exec: Option<&str>) -> Value {
         let mut value = simple_definition("composer_empty", true);

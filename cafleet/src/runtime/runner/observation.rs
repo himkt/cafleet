@@ -2247,10 +2247,10 @@ pub(crate) mod native_capture {
                     ProcessIdentity::current().unwrap(),
                 )
                 .unwrap();
-                fixture.conn.execute("UPDATE member_runs SET runner_pid=owner_pid,runner_start_identity=owner_start_identity,native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested',event_evidence=?1 WHERE run_id=?2",rusqlite::params![policy["mode"].as_str().unwrap(),fixture.run.run_id]).unwrap();
+                fixture.conn.execute("UPDATE member_runs SET runner_pid=owner_pid,runner_start_identity=owner_start_identity,native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested',event_evidence=?1 WHERE run_id=?2",rusqlite::params![policy["mode"].as_str().unwrap(),fixture.run.run_id]).unwrap();
                 fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 let executable = fixture._dir.path().join("owned-synthetic-process");
-                private_write(&executable,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'synthetic-0.0.1\\n'; exit 0; fi\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; *) printf '%s\\n' \"$line\" ;; esac; done\n");
+                private_write(&executable,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; *) printf '%s\\n' \"$line\" ;; esac; done\n");
                 std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
                     .unwrap();
                 let mut spec = fixture.spec();
@@ -2266,10 +2266,10 @@ pub(crate) mod native_capture {
                 let source = fixture._dir.path().join("source-evidence.json");
                 private_write(
                     &source,
-                    b"{\"kind\":\"synthetic\",\"version\":\"synthetic-0.0.1\"}",
+                    b"{\"kind\":\"synthetic\",\"version\":\"0.0.1-synthetic\"}",
                 );
                 let current = std::env::current_exe().unwrap();
-                let producer_json = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":source,"source_manifest_sha256":digest(&source),"libtest_executable_path":current,"libtest_executable_sha256":digest(&current),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"synthetic","native_executable":{"path":executable,"sha256":digest(&executable),"version":"synthetic-0.0.1","version_evidence_ref":source},"launch_evidence_ref":source,"environment_evidence_ref":source});
+                let producer_json = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":source,"source_manifest_sha256":digest(&source),"libtest_executable_path":current,"libtest_executable_sha256":digest(&current),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"synthetic","native_executable":{"path":executable,"sha256":digest(&executable),"version":"0.0.1-synthetic","version_evidence_ref":source},"launch_evidence_ref":source,"environment_evidence_ref":source});
                 let producer_path = fixture._dir.path().join("producer.json");
                 private_write(&producer_path, &serde_json::to_vec(&producer_json).unwrap());
                 let placement = crate::broker::get_member(
@@ -7578,10 +7578,10 @@ pub(crate) mod test_support {
                 .unwrap()
                 .into(),
         ));
-        fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+        fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         let script = fixture._dir.path().join("owned-observation-process");
-        private_write(&script,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'synthetic-0.0.1\\n'; exit 0; fi\n/usr/bin/touch \"$CAFLEET_REVIEW_NATIVE_START\"\nprintf 'review-native-ready\\n'\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; form*) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write %s.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: ' \"$line\" ;; transient) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write transient.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: \\033[2J\\033[Hworking' ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done\n");
+        private_write(&script,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\n/usr/bin/touch \"$CAFLEET_REVIEW_NATIVE_START\"\nprintf 'review-native-ready\\n'\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; form*) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write %s.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: ' \"$line\" ;; transient) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write transient.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: \\033[2J\\033[Hworking' ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done\n");
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         spec.argv = vec![script.to_str().unwrap().into(), "--approve-for-me".into()];
         let definitions =
@@ -7821,7 +7821,7 @@ mod tests {
             .unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-            fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog =
                 ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
@@ -7897,7 +7897,7 @@ mod tests {
                 let observed = Detector::new(
                     &catalog,
                     crate::coding_agent::CodingAgent::Codex,
-                    Some("synthetic-0.0.1"),
+                    Some("0.0.1-synthetic"),
                 )
                 .observe(&terminal.snapshot())
                 .unwrap();

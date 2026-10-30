@@ -905,11 +905,11 @@ mod tests {
     #[test]
     fn permission_inspection_answer_match_uses_complete_current_rule_choice_and_focus() {
         let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
-        let detector = Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1"));
+        let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
         let plan = catalog
             .answer_plan(
                 CodingAgent::Codex,
-                "synthetic-0.0.1",
+                "0.0.1-synthetic",
                 "synthetic-permission",
                 PermissionDecision::Allow,
             )
@@ -1022,21 +1022,28 @@ mod tests {
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
         let catalog = ProfileCatalog::bundled().unwrap();
-        for version in ["2.1.301", "2.1.306"] {
-            let fallback = Detector::new(&catalog, CodingAgent::Claude, Some(version))
+        for version in ["2.1.308"] {
+            let reused = Detector::new(&catalog, CodingAgent::Claude, Some(version))
                 .observe(&screen)
                 .unwrap();
-            assert_eq!(fallback.kind, observation.kind, "{version}");
-            assert_eq!(fallback.rule_id, observation.rule_id, "{version}");
+            assert_eq!(reused.kind, observation.kind, "{version}");
+            assert_eq!(reused.rule_id, observation.rule_id, "{version}");
             assert_eq!(
-                fallback.profile_version, observation.profile_version,
+                reused.profile_version, observation.profile_version,
                 "{version}"
             );
             assert_eq!(
-                fallback.raw_evidence["operation"], observation.raw_evidence["operation"],
+                reused.raw_evidence["operation"], observation.raw_evidence["operation"],
                 "{version}"
             );
-            assert_eq!(fallback.raw_evidence["native_version"], version);
+            assert_eq!(reused.raw_evidence["native_version"], version);
+        }
+        for version in ["2.1.301"] {
+            let below = Detector::new(&catalog, CodingAgent::Claude, Some(version))
+                .observe(&screen)
+                .unwrap();
+            assert_eq!(below.kind, ObservationKind::Unknown, "{version}");
+            assert_eq!(below.profile_version, None, "{version}");
         }
         let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
             .observe(&screen)
@@ -1667,18 +1674,23 @@ mod tests {
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
         let catalog = ProfileCatalog::bundled().unwrap();
-        for version in ["0.162.0", "0.164.0"] {
-            let fallback = Detector::new(&catalog, CodingAgent::Codex, Some(version))
+        for version in ["0.164.0"] {
+            let reused = Detector::new(&catalog, CodingAgent::Codex, Some(version))
                 .observe(&screen)
                 .unwrap();
-            assert_eq!(fallback.kind, observation.kind, "{version}");
-            assert_eq!(fallback.rule_id, observation.rule_id, "{version}");
+            assert_eq!(reused.kind, observation.kind, "{version}");
+            assert_eq!(reused.rule_id, observation.rule_id, "{version}");
             assert_eq!(
-                fallback.profile_version, observation.profile_version,
+                reused.profile_version, observation.profile_version,
                 "{version}"
             );
-            assert_eq!(fallback.raw_evidence["native_version"], version);
+            assert_eq!(reused.raw_evidence["native_version"], version);
         }
+        let below = Detector::new(&catalog, CodingAgent::Codex, Some("0.162.0"))
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(below.kind, ObservationKind::Unknown);
+        assert_eq!(below.profile_version, None);
         let unprobed = Detector::new(&catalog, CodingAgent::Codex, None)
             .observe(&screen)
             .unwrap();

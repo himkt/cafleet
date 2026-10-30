@@ -1965,7 +1965,7 @@ pub(crate) mod test_support {
                     "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]}
                 }
             }});
-            fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',profile_match='exact',coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let config = fixture._dir.path().join("service-input-native.json");
             private_write(
@@ -2473,7 +2473,7 @@ pub(crate) mod test_support {
                 .unwrap()
                 .capabilities(
                     crate::coding_agent::CodingAgent::Codex,
-                    Some("synthetic-0.0.1"),
+                    Some("0.0.1-synthetic"),
                 );
             fixture
         .conn
@@ -2491,12 +2491,12 @@ pub(crate) mod test_support {
             let evidence = fixture._dir.path().join("synthetic-source.json");
             private_write(
                 &evidence,
-                b"{\"kind\":\"synthetic\",\"version\":\"synthetic-0.0.1\"}",
+                b"{\"kind\":\"synthetic\",\"version\":\"0.0.1-synthetic\"}",
             );
             let hash = |path: &Path| sha256_hex(&std::fs::read(path).unwrap());
             let current = std::env::current_exe().unwrap();
             let executable = Path::new(&spec.argv[0]);
-            let producer = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":evidence,"source_manifest_sha256":hash(&evidence),"libtest_executable_path":current,"libtest_executable_sha256":hash(&current),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"bundled_unknown","native_executable":{"path":executable,"sha256":hash(executable),"version":"synthetic-0.0.1","version_evidence_ref":evidence},"launch_evidence_ref":evidence,"environment_evidence_ref":evidence});
+            let producer = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":evidence,"source_manifest_sha256":hash(&evidence),"libtest_executable_path":current,"libtest_executable_sha256":hash(&current),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"bundled_unknown","native_executable":{"path":executable,"sha256":hash(executable),"version":"0.0.1-synthetic","version_evidence_ref":evidence},"launch_evidence_ref":evidence,"environment_evidence_ref":evidence});
             let producer_path = fixture._dir.path().join("capture-producer.json");
             private_write(&producer_path, &serde_json::to_vec(&producer).unwrap());
             let policy = fixture._dir.path().join("capture-policy.json");

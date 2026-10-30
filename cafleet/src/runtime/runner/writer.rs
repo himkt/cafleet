@@ -624,7 +624,7 @@ pub(crate) mod test_support {
     use crate::broker::runtime::*;
     use crate::runtime::runner::test_support::Fixture;
     use std::sync::Condvar;
-    pub(crate) const VERSION: &str = "synthetic-0.0.1";
+    pub(crate) const VERSION: &str = "0.0.1-synthetic";
     pub(crate) const PROFILE: &str = "synthetic-profile-1";
     pub(crate) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
     pub(in crate::runtime::runner) use crate::coding_agent::profiles::catalog::test_support::{

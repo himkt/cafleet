@@ -3559,7 +3559,7 @@ mod tests {
 
             pub(super) const LITERAL: &str = "ordinary fixture λ";
             pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
-            pub(super) const VERSION: &str = "synthetic-0.0.1";
+            pub(super) const VERSION: &str = "0.0.1-synthetic";
             const PROFILE: &str = "synthetic-profile-1";
 
             pub(in crate::runtime::runner::input) fn catalog_definition() -> serde_json::Value {
@@ -4896,7 +4896,7 @@ mod tests {
             use crate::runtime::runner::{TerminalSize, TerminalState};
             let catalog =
                 ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
-            let detector = Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1"));
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
             let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
             terminal
                 .feed(&inspection_fixture_form(
@@ -6846,7 +6846,7 @@ mod tests {
                     .catalog
                     .answer_plan(
                         CodingAgent::Codex,
-                        "synthetic-0.0.1",
+                        "0.0.1-synthetic",
                         "synthetic-permission",
                         input.decision,
                     )
