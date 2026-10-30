@@ -1554,6 +1554,7 @@ impl InputCoordinator {
             stage,
             output_seq: retained.map(|point| point.output_seq),
             reason,
+            delivery: operation.delivery(),
         }
     }
 
@@ -3164,12 +3165,11 @@ mod tests {
                     )
                     .unwrap();
                     let key = format!("preview:{}:{}", host.fixture.run.run_id, message.message_id);
-                    let input = request(
-                        host,
-                        key.clone(),
-                        storage::InputKind::Preview,
-                        Some(message.message_id),
-                    );
+                    let canonical = canonical_preview(&message);
+                    let mut program = canonical.as_bytes().to_vec();
+                    program.push(b'~');
+                    host.pty.expect_program(program);
+                    let input = preview_request(host, &message, &canonical);
                     let reply = complete(host, input);
                     let row =
                         storage::get_input(&host.fixture.conn, reply.input_id.unwrap()).unwrap();
@@ -3179,7 +3179,7 @@ mod tests {
                     assert_eq!(row.state, storage::InputState::Accepted);
                     assert_eq!(
                         host.pty.offers,
-                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                        vec![canonical.as_bytes().to_vec(), b"~".to_vec()]
                     );
                     assert_eq!(
                         crate::broker::get_message(&host.fixture.conn, message.message_id).unwrap(),
@@ -3312,7 +3312,7 @@ mod tests {
                 }
             }
 
-            fn permission_catalog() -> ProfileCatalog {
+            pub(super) fn permission_catalog() -> ProfileCatalog {
                 let mut definition =
                     crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition();
                 let composer = catalog_definition();
@@ -3570,6 +3570,547 @@ mod tests {
                     let reply = finish_after_interruption(host);
                     assert_eq!(reply.status, SubmissionStatus::Accepted);
                     assert_eq!(host.pty.program, vec![encoded()]);
+                });
+            }
+        }
+
+        mod deferred_queue {
+            use super::staged_delivery::permission_catalog;
+            use super::*;
+            use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
+            use crate::input::PaneLock;
+
+            pub(super) fn form(host: &mut Host) {
+                super::super::permission_inspection_contracts::stable_form(host);
+            }
+
+            pub(super) fn close(host: &mut Host) {
+                host.show(SCREEN.to_vec());
+            }
+
+            pub(super) fn with_permission_host(until: Duration, body: impl FnOnce(&mut Host)) {
+                with_profile_host_until(
+                    permission_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    Instant::now() + until,
+                    body,
+                );
+            }
+
+            pub(super) fn queued(
+                host: &mut Host,
+                request: InputControlRequest,
+                reason: &str,
+            ) -> i64 {
+                let reply = submitted(
+                    host.handle(request)
+                        .unwrap()
+                        .expect("queue acceptance replies immediately"),
+                );
+                assert_eq!(reply.status, SubmissionStatus::Queued);
+                assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
+                assert_eq!(
+                    reply.delivery,
+                    Some(DeliveryProjection {
+                        status: DeliveryStatus::Queued,
+                        method: None,
+                        reason: Some(reason.into()),
+                    })
+                );
+                reply.input_id.expect("queued work has a durable input ID")
+            }
+
+            /// Drives runner turns with no further request until `done` holds.
+            pub(super) fn turns_until(host: &mut Host, mut done: impl FnMut(&Host) -> bool) {
+                while !done(host) {
+                    assert!(Instant::now() < host.until, "queued work resolves in time");
+                    host.drain();
+                    host.advance();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            pub(super) fn row(host: &Host, input_id: i64) -> storage::InputOperation {
+                storage::get_input(&host.fixture.conn, input_id).unwrap()
+            }
+
+            fn settled(host: &Host, input_id: i64) -> bool {
+                matches!(
+                    row(host, input_id).state,
+                    storage::InputState::Accepted | storage::InputState::Settled
+                )
+            }
+
+            fn result_events(host: &Host, input_id: i64) -> i64 {
+                host.fixture
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                        rusqlite::params![host.fixture.run.run_id, input_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            }
+
+            fn assert_not_submitted(host: &Host, input_id: i64, reason: &str) {
+                let input = row(host, input_id);
+                assert_eq!(input.state, storage::InputState::Settled);
+                assert_eq!(
+                    input.disposition,
+                    Some(storage::InputDisposition::NotSubmitted)
+                );
+                assert_eq!(input.delivery_method, None);
+                assert_eq!(input.delivery_reason.as_deref(), Some(reason));
+            }
+
+            fn no_literal_persisted(host: &Host) {
+                let rows = crate::db::test_support::table_snapshot(&host.fixture.conn, |_| true);
+                for table in rows {
+                    for row in table.rows {
+                        for value in row {
+                            if let rusqlite::types::Value::Text(text) = value {
+                                assert!(!text.contains(LITERAL), "{}: {text}", table.name);
+                            }
+                        }
+                    }
+                }
+            }
+
+            #[test]
+            fn queue_admission_commits_a_durable_ready_receipt_and_keeps_the_literal_in_memory() {
+                with_permission_host(Duration::from_secs(5), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:queued"), "interaction_open");
+                    let input = row(host, id);
+                    assert_eq!(input.state, storage::InputState::Ready);
+                    assert!(input.deferred_at.is_some());
+                    assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+                    assert_eq!(input.delivery_method, None);
+                    assert!(host.pty.offers.is_empty());
+                    no_literal_persisted(host);
+                });
+            }
+
+            #[test]
+            fn queue_repeated_key_returns_its_queued_result_and_a_conflicting_digest_fails() {
+                with_permission_host(Duration::from_secs(5), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:repeat"), "interaction_open");
+                    assert_eq!(
+                        queued(host, host.request("prompt:repeat"), "interaction_open"),
+                        id
+                    );
+                    let mut conflicting = host.request("prompt:repeat");
+                    let InputControlOperation::SubmitPrompt(input) = &mut conflicting.operation
+                    else {
+                        panic!("prompt request")
+                    };
+                    input.literal = "different literal".into();
+                    assert!(host.handle(conflicting).is_err());
+                    let count: i64 = host
+                        .fixture
+                        .conn
+                        .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                            row.get(0)
+                        })
+                        .unwrap();
+                    assert_eq!(count, 1);
+                });
+            }
+
+            #[test]
+            fn queue_capacity_bounds_queued_plus_active_work_at_4096_with_a_zero_byte_error() {
+                with_permission_host(Duration::from_secs(120), |host| {
+                    form(host);
+                    for index in 0..RECEIPT_CACHE_CAPACITY {
+                        let reply = host.handle(host.request(&format!("prompt:capacity:{index}")));
+                        assert!(
+                            matches!(&reply, Ok(Some(_))),
+                            "request {index} is queued within the bound"
+                        );
+                    }
+                    assert!(
+                        host.handle(host.request("prompt:capacity:overflow"))
+                            .is_err(),
+                        "the 4097th unresolved input fails explicitly"
+                    );
+                    assert!(
+                        storage::find_input(
+                            &host.fixture.conn,
+                            host.fixture.run.run_id,
+                            "prompt:capacity:overflow"
+                        )
+                        .unwrap()
+                        .is_none()
+                    );
+                    assert!(host.pty.offers.is_empty());
+                });
+            }
+
+            #[test]
+            fn queue_drains_once_after_the_interaction_closes_without_another_request() {
+                with_permission_host(Duration::from_secs(8), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:after-close"), "interaction_open");
+                    close(host);
+                    turns_until(host, |host| {
+                        settled(host, id) && result_events(host, id) == 1
+                    });
+                    assert_eq!(host.pty.program, vec![encoded()]);
+                    let input = row(host, id);
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
+                    assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+                    for _ in 0..20 {
+                        host.drain();
+                        host.advance();
+                    }
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                    assert_eq!(host.pty.program.len(), 1, "no replay");
+                });
+            }
+
+            #[test]
+            fn queue_drains_after_a_candidate_clears() {
+                with_permission_host(Duration::from_secs(8), |host| {
+                    host.show(
+                        crate::coding_agent::profiles::catalog::test_support::inspection_fixture_form(
+                            "write candidate.txt",
+                            "synthetic-only",
+                        ),
+                    );
+                    assert_eq!(
+                        host.controller.health(&host.writer).eligibility,
+                        InputEligibility::Hold(GateReason::Candidate)
+                    );
+                    let id = queued(
+                        host,
+                        host.request("prompt:candidate"),
+                        "interaction_candidate",
+                    );
+                    close(host);
+                    turns_until(host, |host| settled(host, id));
+                    assert_eq!(host.pty.program, vec![encoded()]);
+                });
+            }
+
+            #[test]
+            fn queue_drains_behind_an_earlier_input_when_it_completes() {
+                with_host(|host| {
+                    assert!(host.handle(host.request("prompt:first")).unwrap().is_none());
+                    while host.pty.stages.is_empty() {
+                        assert!(Instant::now() < host.until);
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    let second = queued(host, host.request("prompt:second"), "earlier_input");
+                    turns_until(host, |host| settled(host, second));
+                    assert_eq!(host.pty.program, vec![encoded(), encoded()]);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![
+                            LITERAL.as_bytes().to_vec(),
+                            b"~".to_vec(),
+                            LITERAL.as_bytes().to_vec(),
+                            b"~".to_vec()
+                        ],
+                        "the queued input never interleaves with the active one"
+                    );
+                });
+            }
+
+            fn placement(host: &Host) -> crate::broker::records::Placement {
+                crate::broker::get_member(
+                    &host.fixture.conn,
+                    host.fixture.run.member_id,
+                    host.fixture.run.fleet_id,
+                )
+                .unwrap()
+                .unwrap()
+                .placement
+                .expect("wrapped member placement")
+            }
+
+            #[test]
+            fn queue_timer_retries_a_busy_pane_lock_without_child_output_and_delivers_once_free() {
+                with_permission_host(Duration::from_secs(10), |host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    form(host);
+                    let id = queued(host, host.request("prompt:busy"), "interaction_open");
+                    let held = PaneLock::try_acquire(&url, &placement(host))
+                        .unwrap()
+                        .unwrap();
+                    close(host);
+                    let busy_until = Instant::now() + Duration::from_secs(1);
+                    while Instant::now() < busy_until {
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    assert!(host.pty.offers.is_empty());
+                    assert_eq!(row(host, id).state, storage::InputState::Ready);
+                    drop(held);
+                    turns_until(host, |host| settled(host, id));
+                    assert_eq!(host.pty.program, vec![encoded()]);
+                });
+            }
+
+            #[test]
+            fn queue_attempt_deadline_with_a_busy_pane_lock_settles_not_submitted_and_publishes_once()
+             {
+                with_permission_host(Duration::from_secs(12), |host| {
+                    let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
+                    form(host);
+                    let id = queued(host, host.request("prompt:deadline"), "interaction_open");
+                    let _held = PaneLock::try_acquire(&url, &placement(host))
+                        .unwrap()
+                        .unwrap();
+                    close(host);
+                    let started = Instant::now();
+                    turns_until(host, |host| {
+                        row(host, id).state == storage::InputState::Settled
+                    });
+                    assert!(
+                        started.elapsed() >= Duration::from_secs(5),
+                        "the attempt keeps its five-second budget: {:?}",
+                        started.elapsed()
+                    );
+                    assert_not_submitted(host, id, "pane_input_busy");
+                    assert_eq!(
+                        row(host, id).defer_reason.as_deref(),
+                        Some("interaction_open")
+                    );
+                    assert!(host.pty.offers.is_empty());
+                    turns_until(host, |host| result_events(host, id) == 1);
+                });
+            }
+
+            #[test]
+            fn queued_preview_acknowledged_before_its_drain_settles_not_submitted_without_typing() {
+                with_permission_host(Duration::from_secs(8), |host| {
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "queued preview body",
+                    )
+                    .unwrap();
+                    form(host);
+                    let request = preview_request(host, &message, &canonical_preview(&message));
+                    let id = queued(host, request, "interaction_open");
+                    crate::broker::ack_message(&mut host.fixture.conn, message.message_id).unwrap();
+                    close(host);
+                    turns_until(host, |host| {
+                        row(host, id).state == storage::InputState::Settled
+                    });
+                    assert_not_submitted(host, id, "message_consumed");
+                    assert!(host.pty.offers.is_empty());
+                    let notified: Option<String> = host
+                        .fixture
+                        .conn
+                        .query_row(
+                            "SELECT notified_at FROM messages WHERE message_id=?1",
+                            [message.message_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
+                    assert!(notified.is_none());
+                });
+            }
+
+            #[test]
+            fn preview_receipts_use_the_versioned_canonical_digest_and_reject_another_literal() {
+                with_permission_host(Duration::from_secs(5), |host| {
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "digest preview body",
+                    )
+                    .unwrap();
+                    form(host);
+                    let other = preview_request(host, &message, "not the canonical preview");
+                    assert!(host.handle(other).is_err());
+                    let canonical = canonical_preview(&message);
+                    let id = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "interaction_open",
+                    );
+                    let input = row(host, id);
+                    assert_eq!(input.payload_digest_version, 2);
+                    let expected = crate::digest::sha256_hex(
+                        crate::digest::canonical_json(&serde_json::json!({
+                            "payload_digest_version":2,"run_id":host.fixture.run.run_id,
+                            "kind":"preview","message_id":message.message_id,"literal":canonical
+                        }))
+                        .as_bytes(),
+                    );
+                    assert_eq!(input.payload_digest, expected);
+                });
+            }
+
+            #[test]
+            fn queue_orderly_shutdown_settles_queued_work_not_submitted_without_bytes() {
+                with_permission_host(Duration::from_secs(5), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:shutdown"), "interaction_open");
+                    host.coordinator.finish_pending_attempt();
+                    host.coordinator.fence(host.until).unwrap();
+                    assert_not_submitted(host, id, "runner_stopped");
+                    assert!(host.pty.offers.is_empty());
+                    close(host);
+                    for _ in 0..10 {
+                        host.drain();
+                        host.advance();
+                    }
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "a stopped queue is never replayed"
+                    );
+                });
+            }
+        }
+
+        mod method_rendering {
+            use super::deferred_queue::{
+                close, form, queued, row, turns_until, with_permission_host,
+            };
+            use super::*;
+            use crate::broker::runtime::DeliveryMethod;
+
+            const DISMISSAL: &str = "[cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.";
+
+            fn message(host: &mut Host, body: &str) -> crate::broker::records::MessageRecord {
+                crate::broker::send_message(
+                    &mut host.fixture.conn,
+                    host.fixture.run.director_member_id,
+                    host.fixture.run.member_id,
+                    body,
+                )
+                .unwrap()
+            }
+
+            fn fallback_preview(canonical: &str) -> Vec<u8> {
+                let mut bytes = b"\x1b".to_vec();
+                bytes.extend_from_slice(format!("{canonical} {DISMISSAL}").as_bytes());
+                bytes.push(b'\r');
+                bytes
+            }
+
+            fn preview_digest(host: &Host, message: i64, canonical: &str) -> String {
+                crate::digest::sha256_hex(
+                    crate::digest::canonical_json(&serde_json::json!({
+                        "payload_digest_version":2,"run_id":host.fixture.run.run_id,
+                        "kind":"preview","message_id":message,"literal":canonical
+                    }))
+                    .as_bytes(),
+                )
+            }
+
+            #[test]
+            fn method_rendering_fallback_preview_appends_the_dismissal_clause_outside_its_digest() {
+                with_catalog_host(catalog(), Vec::new(), |host| {
+                    let message = message(host, "fallback preview body");
+                    let canonical = canonical_preview(&message);
+                    host.pty.expect_program(fallback_preview(&canonical));
+                    host.show(b"\x1b[2J\x1b[1;1Hworking on something".to_vec());
+                    let reply = settle(host, preview_request(host, &message, &canonical));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![
+                            b"\x1b".to_vec(),
+                            format!("{canonical} {DISMISSAL}").into_bytes(),
+                            b"\r".to_vec()
+                        ]
+                    );
+                    let input =
+                        storage::get_input(&host.fixture.conn, reply.input_id.unwrap()).unwrap();
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
+                    assert_eq!(input.payload_digest_version, 2);
+                    assert_eq!(
+                        input.payload_digest,
+                        preview_digest(host, message.message_id, &canonical)
+                    );
+                });
+            }
+
+            #[test]
+            fn method_rendering_queued_fallback_keeps_one_input_id_across_composer_changes_and_retries()
+             {
+                with_permission_host(Duration::from_secs(8), |host| {
+                    let message = message(host, "queued fallback body");
+                    let canonical = canonical_preview(&message);
+                    host.pty.expect_program(fallback_preview(&canonical));
+                    form(host);
+                    let id = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "interaction_open",
+                    );
+                    let digest = row(host, id).payload_digest;
+                    close(host);
+                    while host
+                        .fixture
+                        .conn
+                        .query_row(
+                            "SELECT COUNT(*) FROM member_interactions WHERE run_id=?1 AND closed_at IS NULL",
+                            [host.fixture.run.run_id],
+                            |row| row.get::<_, i64>(0),
+                        )
+                        .unwrap()
+                        > 0
+                    {
+                        assert!(Instant::now() < host.until, "the interaction closes");
+                        host.drain();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    host.show(b"\x1b[2J\x1b[1;1Hworking on something".to_vec());
+                    let repeated = submitted(
+                        host.handle(preview_request(host, &message, &canonical))
+                            .unwrap()
+                            .expect("a repeated preview key replies from its receipt"),
+                    );
+                    assert_eq!(repeated.input_id, Some(id));
+                    turns_until(host, |host| {
+                        matches!(
+                            row(host, id).state,
+                            storage::InputState::Accepted | storage::InputState::Settled
+                        )
+                    });
+                    close(host);
+                    let after = submitted(
+                        host.handle(preview_request(host, &message, &canonical))
+                            .unwrap()
+                            .expect("a submitted preview key replies without typing"),
+                    );
+                    assert_eq!(after.input_id, Some(id));
+                    assert_eq!(after.status, SubmissionStatus::Accepted);
+                    for _ in 0..20 {
+                        host.drain();
+                        host.advance();
+                    }
+                    assert_eq!(host.pty.program, vec![fallback_preview(&canonical)]);
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.payload_digest, digest,
+                        "the digest ignores the method"
+                    );
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
+                    assert_eq!(
+                        input.delivery_reason.as_deref(),
+                        Some("composer_unverified")
+                    );
+                    let rows: i64 = host
+                        .fixture
+                        .conn
+                        .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                            row.get(0)
+                        })
+                        .unwrap();
+                    assert_eq!(rows, 1);
                 });
             }
         }
@@ -3916,6 +4457,33 @@ mod tests {
                 }
             }
 
+            /// The method-independent wrapped preview the runner reconstructs from the broker
+            /// message: the visible line ending at the resume clause.
+            pub(in crate::runtime::runner::input) fn canonical_preview(
+                message: &crate::broker::records::MessageRecord,
+            ) -> String {
+                format!(
+                    "[cafleet msg {} from {} {}] {} [cafleet] Resume your work if something was still running.",
+                    message.message_id, message.from_member_id, message.created_at, message.text
+                )
+            }
+
+            pub(in crate::runtime::runner::input) fn preview_request(
+                host: &Host,
+                message: &crate::broker::records::MessageRecord,
+                literal: &str,
+            ) -> InputControlRequest {
+                let key = format!("preview:{}:{}", host.fixture.run.run_id, message.message_id);
+                let mut request = host.request(&key);
+                request.operation = InputControlOperation::SubmitPrompt(SubmitInput {
+                    operation_key: key,
+                    input_kind: storage::InputKind::Preview,
+                    message_id: Some(message.message_id),
+                    literal: literal.into(),
+                });
+                request
+            }
+
             pub(in crate::runtime::runner::input) fn delivery_selection(
                 host: &Host,
                 input_id: i64,
@@ -4061,6 +4629,10 @@ mod tests {
                 hooks: Arc<Hooks>,
             }
             impl Pty {
+                pub(crate) fn expect_program(&mut self, bytes: Vec<u8>) {
+                    assert_eq!(self.program_offset, 0, "no partially written program");
+                    self.expected_program = bytes;
+                }
                 pub(crate) fn stage_bytes(&self) -> Vec<Vec<u8>> {
                     self.stages.iter().map(|(_, bytes)| bytes.clone()).collect()
                 }
@@ -4608,6 +5180,18 @@ mod tests {
                 body: impl FnOnce(&mut Host),
             ) {
                 with_owned_host(Host::with_catalog(catalog, expected_program, profile), body);
+            }
+            pub(in crate::runtime::runner::input) fn with_profile_host_until(
+                catalog: ProfileCatalog,
+                expected_program: Vec<u8>,
+                profile: HostProfile,
+                until: Instant,
+                body: impl FnOnce(&mut Host),
+            ) {
+                with_owned_host(
+                    Host::build(|| catalog, expected_program, profile, until),
+                    body,
+                );
             }
             fn with_owned_host(mut host: Host, body: impl FnOnce(&mut Host)) {
                 let primary = catch_unwind(AssertUnwindSafe(|| body(&mut host)));

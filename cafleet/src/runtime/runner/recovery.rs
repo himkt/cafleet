@@ -3031,4 +3031,54 @@ mod tests {
             historical_control(Stage::OrdinaryTakeover);
         }
     }
+
+    mod deferred_inputs {
+        use super::*;
+
+        fn insert(case: &Case, key: &str, state: &str, deferred: bool) -> i64 {
+            case.fixture
+                .conn
+                .execute(
+                    "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'prompt',?3,?4,?5,?5,?6,?7)",
+                    rusqlite::params![
+                        case.fixture.run.run_id,
+                        key,
+                        "d".repeat(64),
+                        state,
+                        "2026-10-30T10:00:00Z",
+                        deferred.then_some("2026-10-30T10:00:00Z"),
+                        deferred.then_some("interaction_open"),
+                    ],
+                )
+                .unwrap();
+            case.fixture.conn.last_insert_rowid()
+        }
+
+        #[test]
+        fn runner_recovery_settles_a_deferred_ready_receipt_not_submitted_without_replay() {
+            let mut case = Case::creator();
+            let deferred = insert(&case, "prompt:deferred", "ready", true);
+            let attempted = insert(&case, "prompt:attempted", "in_progress", false);
+            let attempted_before = storage::get_input(&case.fixture.conn, attempted).unwrap();
+            let report = case.recover(&mut new_host()).unwrap();
+            assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
+            let settled = storage::get_input(&case.fixture.conn, deferred).unwrap();
+            assert_eq!(settled.state, InputState::Settled);
+            assert_eq!(settled.disposition, Some(InputDisposition::NotSubmitted));
+            assert_eq!(settled.delivery_method, None);
+            assert_eq!(settled.delivery_reason.as_deref(), Some("runner_lost"));
+            assert_eq!(settled.defer_reason.as_deref(), Some("interaction_open"));
+            assert_eq!(
+                storage::get_input(&case.fixture.conn, attempted).unwrap(),
+                attempted_before,
+                "an attempt that may have written bytes keeps its reconciliation state"
+            );
+            case.recover(&mut new_host()).unwrap();
+            assert_eq!(
+                storage::get_input(&case.fixture.conn, deferred).unwrap(),
+                settled,
+                "a repeated recovery leaves the settled receipt unchanged"
+            );
+        }
+    }
 }

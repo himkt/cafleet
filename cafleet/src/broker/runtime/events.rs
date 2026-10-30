@@ -143,16 +143,22 @@ pub(crate) fn get_event(
         "schema_version",
         "unsupported event schema",
     )?;
+    let delivery_result = event.kind == RuntimeEventKind::InputDeliveryResult;
     require(
-        !automatic_review(event.kind) || version == Some(2),
+        !(automatic_review(event.kind) || delivery_result) || version == Some(2),
         "schema_version",
-        "automatic review events use the v2 schema",
+        "automatic review and delivery result events use the v2 schema",
     )?;
     if event.kind == RuntimeEventKind::InteractionClosed {
         fields.push("close_reason");
     }
-    if source(event.kind) == "runner_lifecycle" {
+    if source(event.kind) == "runner_lifecycle"
+        && (!delivery_result || payload.get("cause").is_some())
+    {
         fields.push("cause");
+    }
+    if delivery_result {
+        fields.extend(["input_id", "message_id", "delivery", "stage"]);
     }
     if version == Some(2) {
         fields.push("director_action");
@@ -226,6 +232,9 @@ pub(crate) fn get_event(
             "invalid bound review action",
         )?;
     }
+    if delivery_result {
+        validate_delivery_result(conn, &event, payload)?;
+    }
     let serialized_payload = payload.to_string();
     require(
         serialized_payload.len() <= PAYLOAD_LIMIT,
@@ -264,6 +273,55 @@ pub(crate) fn get_event(
     };
     validate_transition(&view.run.run, &original(&view)?)?;
     Ok(view)
+}
+
+const DELIVERY_RESULT_STAGES: [&str; 4] = ["zero_bytes", "partial", "submitted", "unknown"];
+
+fn validate_delivery_result(
+    conn: &Connection,
+    event: &RuntimeEventRecord,
+    payload: &Value,
+) -> Result<(), CafleetError> {
+    let input_id = payload["input_id"]
+        .as_i64()
+        .ok_or_else(|| invalid("payload_json.input_id", "input identity required"))?;
+    let input = super::inputs::get_input(conn, input_id)?;
+    let delivery = input.delivery().ok_or_else(|| {
+        invalid(
+            "payload_json.input_id",
+            "delivery results describe ordinary inputs",
+        )
+    })?;
+    require(
+        input.run_id == event.run_id && input.deferred_at.is_some(),
+        "payload_json.input_id",
+        "delivery results describe this run's deferred inputs",
+    )?;
+    require(
+        payload["message_id"] == json!(input.message_id),
+        "payload_json.message_id",
+        "message identity must match the input receipt",
+    )?;
+    require(
+        matches!(
+            delivery.status,
+            DeliveryStatus::Submitted | DeliveryStatus::NotSubmitted | DeliveryStatus::Uncertain
+        ) && payload["delivery"] == delivery.to_json(),
+        "payload_json.delivery",
+        "delivery must match the input receipt's settled result",
+    )?;
+    require(
+        payload["stage"]
+            .as_str()
+            .is_some_and(|stage| DELIVERY_RESULT_STAGES.contains(&stage)),
+        "payload_json.stage",
+        "stage outside its domain",
+    )?;
+    require(
+        payload.get("cause").is_none() || delivery.status == DeliveryStatus::Uncertain,
+        "payload_json.cause",
+        "only an uncertain delivery result carries a cause",
+    )
 }
 
 pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, CafleetError> {
@@ -362,7 +420,11 @@ pub(crate) fn validate_transition(
             "episode_seq",
             "run-level events have no interaction",
         )?;
-        validate_cause(transition)?;
+        if transition.kind == RuntimeEventKind::InputDeliveryResult {
+            validate_delivery_cause(transition)?;
+        } else {
+            validate_cause(transition)?;
+        }
     } else {
         require(
             transition.cause_json.is_none(),
@@ -371,6 +433,20 @@ pub(crate) fn validate_transition(
         )?;
     }
     Ok(())
+}
+
+fn validate_delivery_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
+    let Some(cause) = &transition.cause_json else {
+        return Ok(());
+    };
+    require(
+        cause
+            .get("kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| !kind.trim().is_empty()),
+        "cause_json.kind",
+        "a delivery result cause names its kind",
+    )
 }
 
 fn validate_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {

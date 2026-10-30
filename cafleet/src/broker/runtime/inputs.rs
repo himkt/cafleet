@@ -17,7 +17,107 @@ fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
         disposition: row.get("disposition")?,
         evidence_ref: row.get("evidence_ref")?,
         permission_response: None,
+        delivery_method: row.get("delivery_method")?,
+        delivery_reason: row.get("delivery_reason")?,
+        deferred_at: row.get("deferred_at")?,
+        defer_reason: row.get("defer_reason")?,
+        payload_digest_version: row.get("payload_digest_version")?,
     })
+}
+
+impl InputOperation {
+    pub(crate) fn delivery(&self) -> Option<DeliveryProjection> {
+        delivery_projection(self).expect("validated input receipts project their delivery")
+    }
+}
+
+const FALLBACK_REASONS: [&str; 2] = ["submission_plan_unavailable", "composer_unverified"];
+
+fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjection>, CafleetError> {
+    let unknown = || {
+        invalid(
+            "member_input_operations.delivery_method",
+            "unknown stored delivery combination",
+        )
+    };
+    if input.kind == InputKind::PermissionResponse {
+        require(
+            input.delivery_method.is_none()
+                && input.delivery_reason.is_none()
+                && input.deferred_at.is_none()
+                && input.payload_digest_version == 1,
+            "member_input_operations.delivery_method",
+            "permission responses carry no ordinary delivery metadata",
+        )?;
+        return Ok(None);
+    }
+    require(
+        input.payload_digest_version == 1
+            || (input.payload_digest_version == 2 && input.kind == InputKind::Preview),
+        "member_input_operations.payload_digest_version",
+        "unsupported digest version for this input kind",
+    )?;
+    let method = input.delivery_method;
+    let recorded = || match method {
+        Some(DeliveryMethod::Profile) if input.delivery_reason.is_none() => Ok(None),
+        Some(DeliveryMethod::Fallback)
+            if input
+                .delivery_reason
+                .as_deref()
+                .is_some_and(|reason| FALLBACK_REASONS.contains(&reason)) =>
+        {
+            Ok(input.delivery_reason.clone())
+        }
+        None if input.delivery_reason.is_none() => Ok(Some("method_unrecorded".to_owned())),
+        _ => Err(unknown()),
+    };
+    let (status, reason) = match (input.state, input.disposition) {
+        (InputState::Ready, _) if input.deferred_at.is_some() => {
+            require(
+                method.is_none() && input.delivery_reason.is_none(),
+                "member_input_operations.delivery_method",
+                "a queued input has no selected method",
+            )?;
+            (DeliveryStatus::Queued, input.defer_reason.clone())
+        }
+        (InputState::Ready, _) => {
+            require(
+                method.is_none() && input.delivery_reason.is_none(),
+                "member_input_operations.delivery_method",
+                "a ready input has no selected method",
+            )?;
+            (DeliveryStatus::Held, Some("zero_bytes_ready".to_owned()))
+        }
+        (InputState::InProgress | InputState::Uncertain, _)
+        | (InputState::Settled, Some(InputDisposition::AbandonedUncertain)) => {
+            (DeliveryStatus::Uncertain, recorded()?)
+        }
+        (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
+            (DeliveryStatus::Submitted, recorded()?)
+        }
+        (InputState::Settled, Some(InputDisposition::NotSubmitted)) => {
+            require(
+                method.is_none(),
+                "member_input_operations.delivery_method",
+                "a zero-byte cancellation has no selected method",
+            )?;
+            (
+                DeliveryStatus::NotSubmitted,
+                Some(
+                    input
+                        .delivery_reason
+                        .clone()
+                        .unwrap_or_else(|| "method_unrecorded".to_owned()),
+                ),
+            )
+        }
+        (InputState::Settled, None) => return Err(unknown()),
+    };
+    Ok(Some(DeliveryProjection {
+        status,
+        method,
+        reason,
+    }))
 }
 
 fn validate_input(
@@ -61,6 +161,7 @@ fn validate_input(
         )?;
     }
     input.permission_response = super::permissions::validate_input_response(conn, &run, &input)?;
+    delivery_projection(&input)?;
     Ok(input)
 }
 

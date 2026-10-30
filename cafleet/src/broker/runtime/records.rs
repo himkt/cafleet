@@ -237,6 +237,33 @@ pub(crate) struct InputOperation {
     pub(crate) disposition: Option<InputDisposition>,
     pub(crate) evidence_ref: Option<String>,
     pub(crate) permission_response: Option<PermissionResponseRecord>,
+    pub(crate) delivery_method: Option<DeliveryMethod>,
+    pub(crate) delivery_reason: Option<String>,
+    pub(crate) deferred_at: Option<String>,
+    pub(crate) defer_reason: Option<String>,
+    pub(crate) payload_digest_version: i64,
+}
+
+stored_enum!(DeliveryStatus, "delivery.status", {
+    Submitted => "submitted", Queued => "queued", Held => "held", Uncertain => "uncertain",
+    NotSubmitted => "not_submitted", NotApplicable => "not_applicable"
+});
+stored_enum!(DeliveryMethod, "member_input_operations.delivery_method", {
+    Profile => "profile", Fallback => "fallback", Unwrapped => "unwrapped"
+});
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DeliveryProjection {
+    pub(crate) status: DeliveryStatus,
+    pub(crate) method: Option<DeliveryMethod>,
+    pub(crate) reason: Option<String>,
+}
+impl DeliveryProjection {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({"status":self.status.as_str(),
+            "method":self.method.map(DeliveryMethod::as_str),"reason":self.reason})
+    }
 }
 
 stored_enum!(values PermissionDecision, "member_permission_responses.decision", { Allow => "allow", Deny => "deny" });

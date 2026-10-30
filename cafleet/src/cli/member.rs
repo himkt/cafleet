@@ -700,6 +700,7 @@ fn dispatch_input(
         .map_err(CafleetError::from)?;
         if result.status != SubmissionStatus::Accepted {
             let description = match result.status {
+                SubmissionStatus::Queued => "queued",
                 SubmissionStatus::Held => "held",
                 SubmissionStatus::Rejected => "rejected",
                 SubmissionStatus::Uncertain => "uncertain",
@@ -1441,7 +1442,7 @@ mod tests {
                         if json {
                             let expected = if action == "prompt" {
                                 format!(
-                                    "{{\"member_id\":{},\"pane_id\":{},\"text\":{},\"input_id\":{}}}",
+                                    "{{\"member_id\":{},\"pane_id\":{},\"text\":{},\"input_id\":{},\"delivery\":{{\"status\":\"submitted\",\"method\":\"profile\",\"reason\":null}}}}",
                                     run.member_id,
                                     serde_json::to_string(pane).unwrap(),
                                     serde_json::to_string(&literal).unwrap(),
@@ -1449,7 +1450,7 @@ mod tests {
                                 )
                             } else {
                                 format!(
-                                    "{{\"member_id\":{},\"pane_id\":{},\"coding_agent\":{},\"command\":{},\"dispatched\":true,\"input_id\":{}}}",
+                                    "{{\"member_id\":{},\"pane_id\":{},\"coding_agent\":{},\"command\":{},\"dispatched\":true,\"input_id\":{},\"delivery\":{{\"status\":\"submitted\",\"method\":\"profile\",\"reason\":null}}}}",
                                     run.member_id,
                                     serde_json::to_string(pane).unwrap(),
                                     serde_json::to_string(&placement.coding_agent).unwrap(),
@@ -1474,7 +1475,10 @@ mod tests {
                                 )
                             };
                             assert!(
-                                stdout.contains(&format!("{original}\nInput: {}\n", row.input_id)),
+                                stdout.contains(&format!(
+                                    "{original}\nDelivery: status=submitted method=profile reason=-\nInput: {}\n",
+                                    row.input_id
+                                )),
                                 "{stdout:?}"
                             );
                         }

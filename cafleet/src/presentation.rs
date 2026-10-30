@@ -55,7 +55,9 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
     json!({"input":{"input_id":row.input_id,"run_id":row.run_id,"operation_key":row.operation_key,
         "kind":row.kind.as_str(),"payload_digest":row.payload_digest,"state":row.state.as_str(),
         "created_at":row.created_at,"updated_at":row.updated_at,"message_id":row.message_id,
-        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response)}})
+        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response),
+        "delivery":row.delivery().as_ref().map(crate::broker::runtime::DeliveryProjection::to_json),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
+        "payload_digest_version":row.payload_digest_version}})
 }
 
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {

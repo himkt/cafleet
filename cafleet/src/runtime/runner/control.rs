@@ -728,10 +728,15 @@ mod tests {
             } else {
                 json!("fixture uncertainty")
             };
+            let delivery = if status == "accepted" {
+                json!({"status":"submitted","method":"profile","reason":null})
+            } else {
+                json!({"status":"uncertain","method":"fallback","reason":"composer_unverified"})
+            };
             frame(
             &serde_json::to_vec(
                 &json!({"protocol_version":1,"result":{"kind":"submission","submission":{
-                    "status":status,"input_id":13,"stage":stage,"output_seq":null,"reason":reason
+                    "status":status,"input_id":13,"stage":stage,"output_seq":null,"reason":reason,"delivery":delivery
                 }}}),
             )
             .unwrap(),
@@ -922,7 +927,7 @@ mod tests {
             );
             accepted(result);
             assert_eq!(observed.request, expected(&fixture));
-            let duplicate=frame(br#"{"protocol_version":1,"result":{"kind":"submission","submission":{"status":"accepted","input_id":13,"input_id":13,"stage":"submitted","output_seq":null,"reason":null}}}"#);
+            let duplicate=frame(br#"{"protocol_version":1,"result":{"kind":"submission","submission":{"status":"accepted","input_id":13,"input_id":13,"stage":"submitted","output_seq":null,"reason":null,"delivery":{"status":"submitted","method":"profile","reason":null}}}}"#);
             let wrong=frame(br#"{"protocol_version":1,"result":{"kind":"receipt","receipt":{"status":"missing","input_id":null,"submission":null}}}"#);
             for response in [duplicate, wrong] {
                 let (result, actual) = preloaded(&fixture, &response);

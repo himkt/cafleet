@@ -255,6 +255,7 @@ fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
         stage,
         output_seq: None,
         reason,
+        delivery: input.delivery(),
     })
 }
 
@@ -301,6 +302,11 @@ fn validate_reply_against_durable(
                                 | (InputState::Settled, Some(InputDisposition::Submitted))
                         )
                 }
+                SubmissionStatus::Queued => {
+                    reply.stage == SubmissionStage::ZeroBytes
+                        && input.state == InputState::Ready
+                        && input.deferred_at.is_some()
+                }
                 SubmissionStatus::Uncertain => {
                     matches!(input.state, InputState::InProgress | InputState::Uncertain)
                 }
@@ -311,7 +317,10 @@ fn validate_reply_against_durable(
                                 && input.disposition != Some(InputDisposition::Submitted))
                 }
             };
-            ensure(consistent, contradiction)
+            ensure(
+                consistent && reply.delivery == input.delivery(),
+                contradiction,
+            )
         }
         (None, None) => ensure(
             matches!(
@@ -948,6 +957,7 @@ pub(super) fn projection(
             stage,
             output_seq: None,
             reason,
+            delivery: None,
         },
         member_id: run.member_id,
         run_id: run.run_id,
@@ -3186,6 +3196,11 @@ mod tests {
                     input_id: Some(i64::MAX),
                     output_seq: Some(1),
                     reason: None,
+                    delivery: Some(storage::DeliveryProjection {
+                        status: storage::DeliveryStatus::Submitted,
+                        method: Some(storage::DeliveryMethod::Profile),
+                        reason: None,
+                    }),
                 }));
             }
             let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)

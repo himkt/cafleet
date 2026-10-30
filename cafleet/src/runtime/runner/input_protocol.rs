@@ -8,14 +8,15 @@ use serde_json::{Map, Number, json};
 use std::fmt;
 
 use crate::broker::runtime::{
-    DecisionSource, DirectorMode, InputDisposition, InputKind, InputState, InteractionClass,
-    PermissionDecision,
+    DecisionSource, DeliveryProjection, DeliveryStatus, DirectorMode, InputDisposition, InputKind,
+    InputState, InteractionClass, PermissionDecision,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SubmissionStatus {
     Accepted,
+    Queued,
     Held,
     Rejected,
     Uncertain,
@@ -24,6 +25,7 @@ impl SubmissionStatus {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Accepted => "accepted",
+            Self::Queued => "queued",
             Self::Held => "held",
             Self::Rejected => "rejected",
             Self::Uncertain => "uncertain",
@@ -56,6 +58,8 @@ pub(crate) struct SubmissionResult {
     pub(crate) stage: SubmissionStage,
     pub(crate) output_seq: Option<u64>,
     pub(crate) reason: Option<String>,
+    #[serde(default)]
+    pub(crate) delivery: Option<DeliveryProjection>,
 }
 impl SubmissionResult {
     pub(crate) fn held(reason: &str) -> Self {
@@ -65,6 +69,11 @@ impl SubmissionResult {
             stage: SubmissionStage::ZeroBytes,
             output_seq: None,
             reason: Some(reason.into()),
+            delivery: Some(DeliveryProjection {
+                status: DeliveryStatus::Held,
+                method: None,
+                reason: Some(reason.into()),
+            }),
         }
     }
 }
@@ -623,7 +632,16 @@ pub(in crate::runtime::runner) fn encode_input_request(
     frame_control_body(&serde_json::to_vec(&value).map_err(io_error)?)
 }
 
-const SUBMISSION_FIELDS: &[&str] = &["status", "input_id", "stage", "output_seq", "reason"];
+const RESPONSE_SUBMISSION_FIELDS: &[&str] =
+    &["status", "input_id", "stage", "output_seq", "reason"];
+const SUBMISSION_FIELDS: &[&str] = &[
+    "status",
+    "input_id",
+    "stage",
+    "output_seq",
+    "reason",
+    "delivery",
+];
 const RESPONSE_FIELDS: &[&str] = &[
     "status",
     "input_id",
@@ -664,8 +682,7 @@ const INSPECTION_FIELDS: &[&str] = &[
     "missing_evidence",
 ];
 
-fn submission(value: &Value) -> Result<SubmissionResult> {
-    Object::new(value, SUBMISSION_FIELDS)?;
+fn decode_submission(value: &Value) -> Result<SubmissionResult> {
     let result: SubmissionResult = serde_json::from_value(value.clone())
         .map_err(|_| error("invalid control submission fields"))?;
     if let Some(id) = result.input_id {
@@ -674,16 +691,40 @@ fn submission(value: &Value) -> Result<SubmissionResult> {
     Ok(result)
 }
 
+fn submission(value: &Value) -> Result<SubmissionResult> {
+    let object = Object::new(value, SUBMISSION_FIELDS)?;
+    if !object.value("delivery").is_null() {
+        Object::new(object.value("delivery"), &["status", "method", "reason"])?;
+    }
+    let result = decode_submission(value)?;
+    let queued = result.status == SubmissionStatus::Queued;
+    ensure(
+        queued
+            == result
+                .delivery
+                .as_ref()
+                .is_some_and(|delivery| delivery.status == DeliveryStatus::Queued),
+        "queued submission and queued delivery must agree",
+    )?;
+    if queued {
+        ensure(
+            result.stage == SubmissionStage::ZeroBytes && result.input_id.is_some(),
+            "queued submission requires zero bytes and a durable input ID",
+        )?;
+    }
+    Ok(result)
+}
+
 fn response(value: &Value) -> Result<PermissionResponseResult> {
     let object = Object::new(value, RESPONSE_FIELDS)?;
     let submission_value = Value::Object(
-        SUBMISSION_FIELDS
+        RESPONSE_SUBMISSION_FIELDS
             .iter()
             .map(|field| ((*field).into(), object.value(field).clone()))
             .collect(),
     );
     Ok(PermissionResponseResult {
-        submission: submission(&submission_value)?,
+        submission: decode_submission(&submission_value)?,
         member_id: object.positive("member_id")?,
         run_id: object.positive("run_id")?,
         owner_epoch: object.positive("owner_epoch")?,
@@ -815,8 +856,8 @@ fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) ->
     let matches = match (&request.operation, reply) {
         (
             InputControlOperation::SubmitPrompt(_) | InputControlOperation::SubmitExec(_),
-            InputControlReply::Submission(_),
-        ) => true,
+            InputControlReply::Submission(submission),
+        ) => submission.delivery.is_some(),
         (
             InputControlOperation::PermissionInspect(input),
             InputControlReply::Inspection(result),
@@ -2025,6 +2066,11 @@ mod tests {
                     .unwrap()
                     .into(),
             ),
+            delivery: Some(crate::broker::runtime::DeliveryProjection {
+                status: crate::broker::runtime::DeliveryStatus::Uncertain,
+                method: Some(crate::broker::runtime::DeliveryMethod::Fallback),
+                reason: Some("composer_unverified".into()),
+            }),
         });
         assert!(encode_input_reply(Ok(&actual)).is_err());
     }
