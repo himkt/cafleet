@@ -346,11 +346,12 @@ fn deliver_wrapped_pending(
     let mut guard = None;
     let mut sent = Vec::new();
     let mut held_reason = None;
+    let mut skipped = attempted.clone();
     let mut operation_key = format!("preview:{}:{}", run.run_id, message.message_id);
     let mut known_input_id = None;
     let mut stage = Stage::Submission;
     let result = (|| {
-        let end = loop {
+        let end = 'drain: loop {
             deadline.remaining()?;
             let request = SubmitInput {
                 operation_key: operation_key.clone(),
@@ -370,72 +371,90 @@ fn deliver_wrapped_pending(
             }
             let attempt =
                 PreparedSubmission::new(&request, deadline.instant(), &mut RealInputDeadlineClock)?;
-            if guard.is_none() {
-                guard = host
-                    .lock(settings, &run, placement, deadline)
-                    .map_err(CafleetError::from)?;
+            let accepted = 'submit: {
+                if retained.as_ref().is_some_and(|input| {
+                    input.state == InputState::Ready && input.deferred_at.is_some()
+                }) {
+                    break 'submit None;
+                }
                 if guard.is_none() {
-                    break AttemptEnd::Failed(notification_error(
-                        member.member_id,
-                        message.message_id,
-                        "pane input remained busy",
-                    ));
-                }
-            }
-            let held = guard.as_ref().expect("wrapped delivery owns its pane lock");
-            held.validate_binding(&settings.database_url, placement)?;
-            with_database_budget(conn, deadline, |conn| {
-                validate_submission_target(conn, settings, &run, placement)
-            })?;
-            let input_id = match retained.as_ref() {
-                Some(input)
-                    if matches!(input.state, InputState::Accepted | InputState::Settled) =>
-                {
-                    input.input_id
-                }
-                _ => {
-                    let result = submit_wrapped_input_under_pane_lock_with_host(
-                        conn, settings, &run, placement, held, &attempt, deadline, host,
-                    )
-                    .map_err(CafleetError::from)?;
-                    if !matches!(result.status, SubmissionStatus::Accepted) {
-                        if result.status == SubmissionStatus::Held {
-                            held_reason = result.reason;
-                        }
-                        break AttemptEnd::Held;
+                    guard = host
+                        .lock(settings, &run, placement, deadline)
+                        .map_err(CafleetError::from)?;
+                    if guard.is_none() {
+                        break 'drain AttemptEnd::Failed(notification_error(
+                            member.member_id,
+                            message.message_id,
+                            "pane input remained busy",
+                        ));
                     }
-                    result
-                        .input_id
-                        .expect("accepted Preview has its validated durable input ID")
                 }
+                let held = guard.as_ref().expect("wrapped delivery owns its pane lock");
+                held.validate_binding(&settings.database_url, placement)?;
+                with_database_budget(conn, deadline, |conn| {
+                    validate_submission_target(conn, settings, &run, placement)
+                })?;
+                let input_id = match retained.as_ref() {
+                    Some(input)
+                        if matches!(input.state, InputState::Accepted | InputState::Settled) =>
+                    {
+                        input.input_id
+                    }
+                    _ => {
+                        let result = submit_wrapped_input_under_pane_lock_with_host(
+                            conn, settings, &run, placement, held, &attempt, deadline, host,
+                        )
+                        .map_err(CafleetError::from)?;
+                        match result.status {
+                            SubmissionStatus::Accepted => {}
+                            SubmissionStatus::Queued => break 'submit None,
+                            SubmissionStatus::Held => {
+                                held_reason = result.reason;
+                                break 'drain AttemptEnd::Held;
+                            }
+                            SubmissionStatus::Rejected | SubmissionStatus::Uncertain => {
+                                break 'drain AttemptEnd::Held;
+                            }
+                        }
+                        result
+                            .input_id
+                            .expect("accepted Preview has its validated durable input ID")
+                    }
+                };
+                Some(input_id)
             };
-            known_input_id = Some(input_id);
-            let settled = with_database_budget(conn, deadline, |conn| {
-                validate_submission_target(conn, settings, &run, placement)?;
-                storage::settle_preview(conn, &run.owner(), input_id)
-            })
-            .map_err(|source| {
-                CafleetError::from(InputFailure {
-                    source,
-                    run_id: Some(run.run_id),
-                    interaction_id: None,
-                    input_id: Some(input_id),
-                    operation_key: Some(request.operation_key.clone()),
+            if let Some(input_id) = accepted {
+                let held = guard.as_ref().expect("wrapped delivery owns its pane lock");
+                known_input_id = Some(input_id);
+                let settled = with_database_budget(conn, deadline, |conn| {
+                    validate_submission_target(conn, settings, &run, placement)?;
+                    storage::settle_preview(conn, &run.owner(), input_id)
                 })
-            })?;
-            sent.push(message.message_id);
-            stage = Stage::Retirement;
-            deadline.remaining()?;
-            held.validate_binding(&settings.database_url, placement)?;
-            with_database_budget(conn, deadline, |conn| {
-                validate_submission_target(conn, settings, &run, placement)
-            })?;
-            let retirement = attempt.retirement_request(&run, settled.input_id)?;
-            host.exchange(&run, &retirement, deadline.instant())
-                .map_err(CafleetError::from)?;
-            with_database_budget(conn, deadline, |conn| {
-                validate_submission_target(conn, settings, &run, placement)
-            })?;
+                .map_err(|source| {
+                    CafleetError::from(InputFailure {
+                        source,
+                        run_id: Some(run.run_id),
+                        interaction_id: None,
+                        input_id: Some(input_id),
+                        operation_key: Some(request.operation_key.clone()),
+                    })
+                })?;
+                sent.push(message.message_id);
+                stage = Stage::Retirement;
+                deadline.remaining()?;
+                held.validate_binding(&settings.database_url, placement)?;
+                with_database_budget(conn, deadline, |conn| {
+                    validate_submission_target(conn, settings, &run, placement)
+                })?;
+                let retirement = attempt.retirement_request(&run, settled.input_id)?;
+                host.exchange(&run, &retirement, deadline.instant())
+                    .map_err(CafleetError::from)?;
+                with_database_budget(conn, deadline, |conn| {
+                    validate_submission_target(conn, settings, &run, placement)
+                })?;
+            } else {
+                skipped.insert(message.message_id);
+            }
             deadline.remaining()?;
             stage = Stage::NextPreview;
             let Some((current, next)) = preview_snapshot(
@@ -443,7 +462,7 @@ fn deliver_wrapped_pending(
                 member.member_id,
                 Some(member.fleet_id),
                 deadline,
-                attempted,
+                &skipped,
             )?
             else {
                 break AttemptEnd::NoPending;
@@ -2425,6 +2444,104 @@ mod tests {
                         .collect::<Vec<_>>(),
                     vec!["barrier".to_owned(), line],
                     "the runner types the queued preview exactly once without another send or wait"
+                );
+            });
+        }
+
+        #[test]
+        fn deferred_previews_sent_during_one_interaction_queue_separately_and_drain_in_order() {
+            with_detecting_input_service(|fixture, until| {
+                let run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                let settings = Settings::for_database(
+                    std::path::Path::new(fixture.fixture.conn.path().unwrap()),
+                    None,
+                );
+                manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
+                loop {
+                    assert!(Instant::now() < until, "the detected interaction opens");
+                    let health = NativeInputHost.health(&run, until).unwrap();
+                    let observation = health.observation.as_ref().unwrap();
+                    if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
+                        && observation.pending_count == 0
+                        && !observation.pending_evidence
+                    {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                acknowledge_runtime_events(fixture, &run);
+                let mut sent = Vec::new();
+                for body in ["first deferred preview", "second deferred preview"] {
+                    let message = crate::broker::send_message(
+                        &mut fixture.fixture.conn,
+                        run.director_member_id,
+                        run.member_id,
+                        body,
+                    )
+                    .unwrap();
+                    let deadline =
+                        Deadline::until(until.min(Instant::now() + Duration::from_secs(5)));
+                    let outcome = deliver_pending(
+                        &mut fixture.fixture.conn,
+                        &settings,
+                        run.member_id,
+                        None,
+                        deadline,
+                        &std::collections::BTreeSet::new(),
+                    )
+                    .unwrap();
+                    assert!(outcome.sent.is_empty(), "{body}: {outcome:?}");
+                    let key = format!("preview:{}:{}", run.run_id, message.message_id);
+                    let queued = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
+                        .unwrap()
+                        .unwrap_or_else(|| panic!("{body}: a durable queued receipt"));
+                    assert_eq!(queued.state, InputState::Ready, "{body}");
+                    let delivery = queued.delivery().unwrap();
+                    assert_eq!(
+                        delivery.status,
+                        broker::runtime::DeliveryStatus::Queued,
+                        "{body}"
+                    );
+                    assert_eq!(
+                        delivery.reason.as_deref(),
+                        Some("interaction_open"),
+                        "{body}: an open interaction is why each preview first queued"
+                    );
+                    sent.push((message, queued.input_id));
+                }
+                assert_ne!(sent[0].1, sent[1].1, "each preview has its own input ID");
+                assert!(
+                    input_service_records(fixture).is_empty(),
+                    "zero bytes while queued"
+                );
+
+                input_service_barrier(fixture, until);
+                let lines: Vec<String> = sent
+                    .iter()
+                    .map(|(message, _)| canonical_preview_line(message))
+                    .collect();
+                wait_input_service_record(fixture, &lines[1], until);
+                for (message, input_id) in &sent {
+                    while stamp(fixture, message.message_id).is_none() {
+                        assert!(Instant::now() < until, "each drained preview is stamped");
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    let delivered = storage::get_input(&fixture.fixture.conn, *input_id).unwrap();
+                    assert!(matches!(
+                        delivered.state,
+                        InputState::Accepted | InputState::Settled
+                    ));
+                }
+                let mut expected = vec!["barrier".to_owned()];
+                expected.extend(lines);
+                assert_eq!(
+                    input_service_records(fixture)
+                        .iter()
+                        .map(|record| record["line"].as_str().unwrap().to_owned())
+                        .collect::<Vec<_>>(),
+                    expected,
+                    "both queued previews drain once, in order, without another send or wait"
                 );
             });
         }

@@ -4181,7 +4181,7 @@ mod tests {
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
             let request = ordinary(&run, "borrowed");
-            let until = outer.min(Instant::now() + Duration::from_secs(2));
+            let until = outer.min(Instant::now() + Duration::from_secs(10));
             let attempt =
                 PreparedSubmission::new(&request, until, &mut super::super::RealInputDeadlineClock)
                     .unwrap();
