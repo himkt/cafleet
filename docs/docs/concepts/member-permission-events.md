@@ -40,7 +40,7 @@ The runner chooses how each preview, `member prompt` and `member exec` reaches a
 
 | Member state | Delivery | Reported method |
 |---|---|---|
-| A detected interaction is open or a candidate, or earlier input is queued | Queued with no bytes; the runner retries after the interaction closes | `null` while queued |
+| A detected interaction is open or a candidate, or earlier input is queued | Queued with no bytes; the runner retries after the interaction closes or the earlier input finishes | `null` while queued |
 | Empty composer and a measured submission plan for the operation | Text, a short settle, then the measured submit key, without Escape | `profile` |
 | Measured submission plan, but a draft or a composer state the runner cannot classify | Queued with no bytes until the composer empties, then delivered by profile; delivered by fallback after 3 minutes | `null` while queued, then `profile` or `fallback` |
 | No submission plan | Escape, settle, text, settle, Enter | `fallback` |
