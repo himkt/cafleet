@@ -1,6 +1,6 @@
 # Codebase redundancy cleanup
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 56/56 tasks complete
 **Last Updated**: 2026-10-30
 
@@ -651,3 +651,4 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 | 2026-10-29 | Initial draft |
 | 2026-10-29 | Review round 1: audit files committed under `audit/`; concrete `git grep` checks; explicit test-support forms and the `#[cfg(test)] impl` rule; macro placement; `added` ledger kind and the help-capture procedure; GitHub anchor rule; whole-page `cli.md` rows and its sync trigger; dead-code sweep split; INP-41 keeps its error mapping; documentation steps reordered (SPEC → docs → skills → rules) with mirror and docs-spec deletion in one commit |
 | 2026-10-29 | User decision: delete the whole skill runtime mirror, including the one linked concepts page, and retarget that `director.md` link to `cli.md#member-create` |
+| 2026-10-30 | Implemented in PR #519: Steps 1-13 complete (Steps 10-11 committed together because the parallel streams shared files); fresh review approved after one CI fix (`fail-fast: false`); help baseline re-recorded from `main` because the first capture lost trailing spaces |
