@@ -466,7 +466,7 @@ A held `message send` reports one of these reasons:
 | Held reason | Cause |
 |---|---|
 | `observer_unavailable` | The wrapped recipient's runner cannot currently observe its native screen, so it accepted no queue work |
-| `notification_held` | No deliverable pane, a placement or run change during the attempt, or an earlier preview receipt of the recipient still unresolved |
+| `notification_held` | No deliverable pane, a recipient deregistered after the commit, a placement or run change during the attempt, or an unresolved earlier preview receipt |
 | `notification_failed` | The pane stayed busy, the multiplexer or runner exchange failed, storage failed, or the budget could not cover a first preview |
 | `delivery_budget_exhausted` | The send's delivery budget ended after earlier pending previews were delivered |
 

@@ -213,10 +213,16 @@ fn send_delivery(
             projection(DeliveryStatus::NotApplicable, None, Some("self_send")),
         ));
     }
-    let fleet = broker::active_member_fleet(conn, message.to_member_id)?
-        .ok_or_else(|| CafleetError::App(format!("Member {} not found", message.to_member_id)))?;
-    let recipient = broker::get_member(conn, message.to_member_id, fleet)?
-        .ok_or_else(|| CafleetError::App(format!("Member {} not found", message.to_member_id)))?;
+    let recipient = match broker::active_member_fleet(conn, message.to_member_id)? {
+        Some(fleet) => broker::get_member(conn, message.to_member_id, fleet)?,
+        None => None,
+    };
+    let Some(recipient) = recipient else {
+        return Ok((
+            None,
+            projection(DeliveryStatus::Held, None, Some("notification_held")),
+        ));
+    };
     if recipient.kind == crate::broker::records::MemberKind::Director {
         return Ok((
             None,
@@ -257,4 +263,33 @@ fn send_delivery(
         Some(_) => "notification_held",
     };
     Ok((None, projection(DeliveryStatus::Held, None, Some(reason))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::register;
+    use crate::db::test_support::migrated_conn;
+
+    #[test]
+    fn a_send_whose_recipient_is_deregistered_after_the_commit_reports_it_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "deregistered");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = broker::send_message(&mut conn, director, worker, "committed").unwrap();
+        assert!(broker::deregister_member(&mut conn, worker).unwrap());
+        let (input_id, delivery) = send_delivery(&conn, &message, false, None)
+            .expect("a committed send reports its record after the recipient is gone");
+        assert_eq!(input_id, None);
+        assert_eq!(
+            delivery,
+            DeliveryProjection {
+                status: DeliveryStatus::Held,
+                method: None,
+                reason: Some("notification_held".into()),
+            }
+        );
+    }
 }

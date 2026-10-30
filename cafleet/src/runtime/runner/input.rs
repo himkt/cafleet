@@ -2604,7 +2604,7 @@ impl InputCoordinator {
                 }
             }
         };
-        self.queue.push_back(QueuedInput {
+        self.queue.push_front(QueuedInput {
             input_id: operation.input_id,
             request: pending.request,
             literal: composer.literal,
@@ -6343,6 +6343,41 @@ mod tests {
                         assert_eq!(input.delivery_reason, None);
                     },
                 );
+            }
+
+            #[test]
+            fn composer_busy_requeued_immediate_input_keeps_its_place_ahead_of_later_queued_input()
+            {
+                with_busy_host(busy_catalog(), encoded(), |host| {
+                    let first = host.request("prompt:first");
+                    assert!(
+                        host.handle(first).unwrap().is_none(),
+                        "the first input selects its method immediately"
+                    );
+                    let later = queued(host, host.request("prompt:later"), "earlier_input");
+                    busy(host);
+                    hold_turns(host);
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    let first = storage::find_input(
+                        &host.fixture.conn,
+                        host.fixture.run.run_id,
+                        "prompt:first",
+                    )
+                    .unwrap()
+                    .expect("the busy composer requeues the first input")
+                    .input_id;
+                    assert_eq!(row(host, first).state, storage::InputState::Ready);
+                    host.show(SCREEN.to_vec());
+                    turns_until(host, |host| {
+                        if delivered(host, later) {
+                            assert!(
+                                delivered(host, first),
+                                "the requeued first input drains before the later one"
+                            );
+                        }
+                        delivered(host, first) && delivered(host, later)
+                    });
+                });
             }
 
             #[test]
