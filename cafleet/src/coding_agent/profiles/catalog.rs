@@ -1557,6 +1557,28 @@ pub(crate) mod test_support {
         serde_json::from_str(BUNDLED_DEFINITIONS).unwrap()
     }
 
+    /// The fixtures a bundled profile cites as composer prompt/exec submission provenance.
+    pub(crate) fn submission_fixture_ids(backend: CodingAgent) -> BTreeSet<String> {
+        let definitions = bundled_definitions();
+        let profile = definitions["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|profile| profile["backend"] == backend.name())
+            .expect("bundled backend profile");
+        ["prompt", "exec"]
+            .iter()
+            .flat_map(|operation| {
+                profile["capabilities"]["composer"]["submission"][operation]["fixture_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|id| id.as_str().unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
     pub(crate) fn bundled_entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
         definitions["fixtures"]
             .as_array_mut()
@@ -3766,6 +3788,7 @@ mod tests {
                 .filter(|entry| entry["backend"] == "claude")
                 .map(|entry| entry["id"].as_str().unwrap().to_owned())
                 .filter(|id| !super::bundled_claude::PREDECESSOR_FIXTURES.contains(&id.as_str()))
+                .filter(|id| !submission_fixture_ids(CodingAgent::Claude).contains(id))
                 .collect::<BTreeSet<_>>();
             assert_eq!(ids, automatic, "every automatic-mode fixture is classified");
             for (id, kind, rule, annotations) in CLASSIFICATION {
@@ -4639,6 +4662,7 @@ mod tests {
                 .filter(|entry| entry["backend"] == "codex")
                 .map(|entry| entry["id"].as_str().unwrap().to_owned())
                 .filter(|id| !super::bundled_codex::PREDECESSOR_FIXTURES.contains(&id.as_str()))
+                .filter(|id| !submission_fixture_ids(CodingAgent::Codex).contains(id))
                 .collect::<BTreeSet<_>>();
             assert_eq!(
                 CLASSIFICATION
@@ -4938,7 +4962,8 @@ mod tests {
         ];
 
         #[test]
-        fn each_bundled_profile_declares_detection_idle_composer_and_both_answers_only() {
+        fn each_bundled_profile_declares_detection_idle_composer_both_operations_and_both_answers()
+        {
             let bundled = ProfileCatalog::bundled().unwrap();
             for profile in [CLAUDE, CODEX, OPENCODE] {
                 let backend = profile.backend;
@@ -4951,10 +4976,10 @@ mod tests {
                 );
                 assert_eq!(declared.detection, Coverage::Tested, "{backend:?}");
                 assert_eq!(declared.composer, Coverage::Tested, "{backend:?}");
-                assert_eq!(declared.prompt_submission, Coverage::Unknown, "{backend:?}");
+                assert_eq!(declared.prompt_submission, Coverage::Tested, "{backend:?}");
                 assert_eq!(
                     declared.native_exec_submission,
-                    Coverage::Unknown,
+                    Coverage::Tested,
                     "{backend:?}"
                 );
                 assert_eq!(declared.answer_decisions.len(), 2, "{backend:?}");
@@ -4979,6 +5004,61 @@ mod tests {
                         "{other:?} at {backend:?} {}",
                         profile.version
                     );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_submission_fixtures_replay_their_composer_stages_through_the_production_catalog()
+        {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            for (profile, run) in [
+                (CLAUDE, "2.1.308"),
+                (CODEX, CODEX.version),
+                (OPENCODE, OPENCODE.version),
+            ] {
+                let backend = profile.backend;
+                let detector = Detector::new(&bundled, backend, Some(run));
+                for (operation, name) in [
+                    (ComposerOperation::Prompt, "prompt"),
+                    (ComposerOperation::Exec, "exec"),
+                ] {
+                    let plan = bundled
+                        .composer_plan(backend, run, operation)
+                        .unwrap_or_else(|| panic!("{backend:?} {name} plan"));
+                    assert_eq!(plan.native_version(), run);
+                    assert_eq!(plan.profile_version(), profile.profile_version);
+                    for id in plan.fixture_ids() {
+                        assert!(
+                            submission_fixture_ids(backend).contains(id),
+                            "{id} is declared submission provenance"
+                        );
+                        let document: Value =
+                            serde_json::from_slice(bundled_fixture(id).1).unwrap();
+                        let screen = replay_native_fixture(
+                            bundled_screen(id),
+                            |_| {},
+                            document["alternate_screen"].as_bool().unwrap(),
+                            None,
+                        );
+                        let observed = detector.observe(&screen).unwrap();
+                        assert!(
+                            !matches!(observed.kind, ObservationKind::Interaction(_)),
+                            "{id}: a composer stage is never an interaction"
+                        );
+                        if id.ends_with("-empty-composer-1") {
+                            assert_eq!(observed.kind, ObservationKind::ComposerEmpty, "{id}");
+                            assert!(observed.verified_noninteraction, "{id}");
+                        } else if id.ends_with("-typed-literal-1") {
+                            assert_ne!(
+                                observed.kind,
+                                ObservationKind::ComposerEmpty,
+                                "{id}: a typed literal is not an empty composer"
+                            );
+                        } else {
+                            assert!(id.ends_with("-post-submit-1"), "{id}");
+                        }
+                    }
                 }
             }
         }
@@ -5282,7 +5362,21 @@ mod tests {
                 capabilities["composer"]["fixture_ids"],
                 json!([IDLE_FIXTURE])
             );
-            assert!(capabilities["composer"].get("submission").is_none());
+            assert_eq!(
+                capabilities["composer"]["submission"],
+                json!({
+                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":[
+                        "opencode-2.1.4-prompt-empty-composer-1",
+                        "opencode-2.1.4-prompt-typed-literal-1",
+                        "opencode-2.1.4-prompt-post-submit-1"
+                    ]},
+                    "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[
+                        "opencode-2.1.4-exec-empty-composer-1",
+                        "opencode-2.1.4-exec-typed-literal-1",
+                        "opencode-2.1.4-exec-post-submit-1"
+                    ]}
+                })
+            );
             let reason = rule(&definitions, REASON_RULE);
             assert_eq!(reason["observation"], "permission_continuation");
             assert_eq!(reason["continues_rule_id"], PERMISSION_RULE);
@@ -6294,17 +6388,33 @@ mod tests {
                 assert_eq!(profiles.len(), 1, "{:?}", boundary.backend);
                 assert_eq!(profiles[0]["profile_version"], boundary.profile_version);
                 assert_eq!(profiles[0]["min_version"], boundary.min_version);
-                assert!(
-                    definitions["fixtures"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .filter(|fixture| fixture["backend"] == boundary.backend.name())
-                        .all(|fixture| fixture["native_version"] == boundary.min_version),
-                    "{:?} fixtures keep their capture version",
-                    boundary.backend
-                );
+                let minimum = semver::Version::parse(boundary.min_version).unwrap();
+                for fixture in definitions["fixtures"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|fixture| fixture["backend"] == boundary.backend.name())
+                {
+                    let id = fixture["id"].as_str().unwrap();
+                    let captured = fixture["native_version"].as_str().unwrap();
+                    assert!(
+                        id.starts_with(&format!("{}-{captured}-", boundary.backend.name())),
+                        "{id} keeps the native version it was captured at"
+                    );
+                    assert!(
+                        semver::Version::parse(captured).unwrap() >= minimum,
+                        "{id} is captured inside its profile interval"
+                    );
+                }
             }
+            assert!(
+                definitions["fixtures"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|fixture| fixture["native_version"] == "2.1.308"),
+                "the Claude submission captures come from a later version inside the interval"
+            );
         }
 
         #[test]
