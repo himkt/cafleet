@@ -90,7 +90,15 @@ pub(crate) struct InputCoordinator {
     database_url: String,
     queue: std::collections::VecDeque<QueuedInput>,
     finalization: Option<PendingFinalization>,
+    pending_stamp: Option<PendingStamp>,
     deferred_failed: bool,
+}
+
+/// An accepted deferred preview whose notification stamp and settlement storage prevented; like
+/// a pending finalization it blocks later ordinary input and retries on the deferred timer.
+struct PendingStamp {
+    input_id: i64,
+    stage: SubmissionStage,
 }
 
 /// A deferred input's terminal zero-byte transaction that storage prevented; it holds only
@@ -837,9 +845,15 @@ impl InputCoordinator {
             }
             settled.push(id);
         }
-        if !self.queue.is_empty() || self.finalization.is_some() {
+        if !self.queue.is_empty() || self.finalization.is_some() || self.pending_stamp.is_some() {
             let mut conn = crate::db::connect(&self.database_url)?;
             let owner = self.run.owner();
+            if let Some(pending) = self.pending_stamp.take() {
+                with_database_deadline(&mut conn, deadline, |conn| {
+                    storage::settle_preview(conn, &owner, pending.input_id)
+                })?;
+                settled.push(pending.input_id);
+            }
             if let Some(pending) = self.finalization.take() {
                 with_database_deadline(&mut conn, deadline, |conn| {
                     storage::settle_zero_byte_deferred(
@@ -1937,6 +1951,7 @@ impl InputCoordinator {
                 None if self.pending.is_some()
                     || !self.queue.is_empty()
                     || self.finalization.is_some()
+                    || self.pending_stamp.is_some()
                     || unresolved_deferred =>
                 {
                     Some("earlier_input")
@@ -2113,6 +2128,7 @@ impl InputCoordinator {
     pub(super) fn has_deferred_work(&self) -> bool {
         !self.queue.is_empty()
             || self.finalization.is_some()
+            || self.pending_stamp.is_some()
             || self
                 .pending
                 .as_ref()
@@ -2226,6 +2242,12 @@ impl InputCoordinator {
                 pending.reason,
             )?;
             if self.finalization.is_some() {
+                return Ok(());
+            }
+        }
+        if let Some(pending) = self.pending_stamp.take() {
+            self.settle_accepted_preview(conn, observation, pending.input_id, pending.stage)?;
+            if self.pending_stamp.is_some() {
                 return Ok(());
             }
         }
@@ -2607,14 +2629,43 @@ impl InputCoordinator {
         if operation.state == storage::InputState::Accepted
             && operation.kind == storage::InputKind::Preview
         {
-            let settled =
-                with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
-                    storage::settle_preview(conn, &self.run.owner(), operation.input_id)
-                })?;
-            self.operations.remove(&settled.input_id);
+            return self.settle_accepted_preview(conn, observation, operation.input_id, stage);
         }
         Self::publish_result(observation, operation.input_id, stage);
         Ok(())
+    }
+
+    /// Stamps and settles an accepted deferred preview, then publishes its result. A transient
+    /// storage failure keeps it as a pending stamp; a permanent one fences ordinary input.
+    fn settle_accepted_preview(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+        input_id: i64,
+        stage: SubmissionStage,
+    ) -> Result<()> {
+        match with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
+            storage::settle_preview(conn, &self.run.owner(), input_id)
+        }) {
+            Ok(settled) => {
+                self.operations.remove(&settled.input_id);
+                Self::publish_result(observation, input_id, stage);
+                Ok(())
+            }
+            Err(cause) if storage_failure(&cause) => {
+                eprintln!(
+                    "member runtime: input {input_id} notification stamp is pending storage: {}",
+                    cause.message()
+                );
+                self.pending_stamp = Some(PendingStamp { input_id, stage });
+                Ok(())
+            }
+            Err(cause) => {
+                self.input_fenced = true;
+                self.deferred_failed = true;
+                Err(cause)
+            }
+        }
     }
 
     fn retained_checkpoint(&self, input_id: i64) -> Result<InputCheckpoint> {
@@ -3580,6 +3631,7 @@ impl InputCoordinator {
             database_url,
             queue: std::collections::VecDeque::new(),
             finalization: None,
+            pending_stamp: None,
             deferred_failed: false,
         })
     }
@@ -5435,6 +5487,102 @@ mod tests {
                         host.pty.offers[offers..],
                         [canonical.into_bytes(), b"~".to_vec()]
                     );
+                });
+            }
+
+            #[test]
+            fn accepted_preview_stamp_failure_is_retried_and_published_once_without_retyping() {
+                use std::sync::{Arc, Mutex};
+                with_permission_host(Duration::from_secs(60), |host| {
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "preview whose stamp is busy once",
+                    )
+                    .unwrap();
+                    let canonical = canonical_preview(&message);
+                    form(host);
+                    let id = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "interaction_open",
+                    );
+                    let blocker = Arc::new(Mutex::new((
+                        rusqlite::Connection::open(host.fixture.conn.path().unwrap()).unwrap(),
+                        None::<Instant>,
+                    )));
+                    let observer = blocker.clone();
+                    host.fixture
+                        .conn
+                        .authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                            if matches!(
+                                context.action,
+                                rusqlite::hooks::AuthAction::Transaction {
+                                    operation: rusqlite::hooks::TransactionOperation::Begin
+                                }
+                            ) {
+                                let mut held = observer.lock().unwrap();
+                                let state: String = held
+                                    .0
+                                    .query_row(
+                                        "SELECT state FROM member_input_operations WHERE input_id=?1",
+                                        [id],
+                                        |row| row.get(0),
+                                    )
+                                    .unwrap();
+                                if held.1.is_none() && state == "accepted" {
+                                    held.0.execute_batch("BEGIN IMMEDIATE").unwrap();
+                                    held.1 = Some(Instant::now());
+                                }
+                            }
+                            rusqlite::hooks::Authorization::Allow
+                        }))
+                        .unwrap();
+                    close(host);
+                    let stamp = |host: &Host| -> Option<String> {
+                        host.fixture
+                            .conn
+                            .query_row(
+                                "SELECT notified_at FROM messages WHERE message_id=?1",
+                                [message.message_id],
+                                |row| row.get(0),
+                            )
+                            .unwrap()
+                    };
+                    let mut released = false;
+                    while stamp(host).is_none() || result_events(host, id) == 0 {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the stamp and result follow once storage recovers"
+                        );
+                        if !released {
+                            let held = blocker.lock().unwrap();
+                            if held
+                                .1
+                                .is_some_and(|since| since.elapsed() > Duration::from_millis(1200))
+                            {
+                                held.0.execute_batch("ROLLBACK").unwrap();
+                                released = true;
+                            }
+                        }
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(
+                        released,
+                        "storage was busy for the accepted preview's stamp"
+                    );
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                    assert_eq!(row(host, id).state, storage::InputState::Settled);
+                    assert_eq!(
+                        host.pty.offers,
+                        vec![canonical.into_bytes(), b"~".to_vec()],
+                        "the preview is typed once"
+                    );
+                    assert!(!host.coordinator.input_fenced);
                 });
             }
 
