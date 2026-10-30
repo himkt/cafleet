@@ -50,4 +50,16 @@ For a main-session user request matching a scenario below, invoke this skill and
 | Validate / review / interview an existing design doc | the **interview** workflow ([interview/interview.md](interview/interview.md)) — multi-round Q&A |
 | Implement / execute a design doc | the **execute** workflow ([execute/execute.md](execute/execute.md)) — TDD team |
 
-For the document template, section guidelines, or the coordination protocol — consult the **On-demand** reference pages in § Required reading above (no team needed).
+## Member startup
+
+Every design-doc team member opens its authoritative role first. Use an available non-shell text reader; prerequisite file reads may use shell when it is the only reader. Ready is your first operational broker shell command and precedes task work. Complete these reads in order before the first substantive assignment, using your `CODING AGENT:` identity.
+
+| # | Read | Timing and responsibility |
+|---|---|---|
+| 1 | Your backend section in [coding-agents.md](../cafleet/reference/coding-agents.md) | Resolve your Runtime bindings, supported skill loader and bound notes. |
+| 2 | [CAFleet core](../cafleet/SKILL.md) and [member role](../cafleet/roles/member.md) | Startup identity, ready, broker commands, member authority and shutdown. |
+| 3 | [BASE](../cafleet/reference/base-dir.md) | Before task work: inherited BASE, guarded writes and missing-line status. |
+| 4 | This core and [guidelines](reference/guidelines.md) | Load the assigned workflow's format and role references before document work; retain your role's scope. |
+| 5 | [Coordination](reference/coordination.md) | Before payloads, markers and work/status messages. |
+
+Load the listed skills through your executing backend's supported loader; Codex/OpenCode load the cores, own backend and required references by absolute path. Continue the existing assigned workflow without creating a second team. Read [command routing](../cafleet/reference/prompt-routing.md) before routing a command your harness denied. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.

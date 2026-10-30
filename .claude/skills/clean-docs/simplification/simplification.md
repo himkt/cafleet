@@ -21,7 +21,7 @@ verbose prose, de-duplicate documentation, or remove redundant comments.
 
 ## Required reading
 
-Read the umbrella [startup and shared orchestration](../SKILL.md#required-reading) once, then this complete workflow before scanning or reviewing. Read the shared [row format, KEEP guardrails and verdict flow](../reference/review-format.md). Use supplied session equivalents for absent optional host-rule files; route an essential unknown prerequisite to the Director before dependent work.
+Read the umbrella [startup and shared orchestration](../SKILL.md#required-reading) once, then this complete workflow before scanning or reviewing. Read the shared [row format, KEEP guardrails and verdict flow](../reference/review-format.md). The reviewer also reads [documentation maintenance](../../../rules/documentation-maintenance.md) and the [backend-neutrality rule](../../../rules/coding-agent-overlay.md) before judging contract or backend-neutrality changes. Use supplied session equivalents for absent optional host-rule files; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Judgment mechanics
 
@@ -30,6 +30,52 @@ slice in full and proposes exact replacement text — a grep-only pass misses th
 redundancy findings that are the point of the run. Classify each finding P3 /
 P5 per [Finding classes](#finding-classes) and write apply-ready rows
 per the shared [`reference/review-format.md`](../reference/review-format.md).
+
+## Scanner obligations
+
+- **Read your whole slice.** Open every tracked file in your slice in full —
+  this is a judgment review; a grep-only pass misses the redundancy and
+  phrasing findings that are the point of the run.
+- **Propose apply-ready rows.** Classify each finding P3 / P5 per the rubric
+  and write the exact final replacement text per the shared row format. Write
+  your findings to the `findings-<slice>.md` path named in your spawn prompt,
+  under `${BASE}`.
+- **Stay zero-behavior-change.** Voice and behavior stay unchanged; in source
+  code you touch comments and docstrings only. A candidate whose fix would
+  change prohibition structure, voice, or code behavior belongs to the
+  affirmative workflow — record it in Observations, never as a finding.
+- **Re-verify after apply.** Diff your slice and confirm it contains exactly the
+  approved rows, then report.
+- **Honor the invariants.** Every replacement preserves all constraints and
+  contract detail (invariant 1), all test logic (invariant 2), and introduces
+  no narration (invariant 3).
+
+The run pointer is `findings`: report `complete (findings) — <one-line count by class>`
+for written findings and `complete (findings) — <files changed, +/− lines>` after
+the slice apply; a blocker marker sits at the row in your findings file.
+
+## Reviewer checks
+
+Your sole job is guarding an aggressive prose-tightening run against **lost
+meaning, lost contract, and any behavior change**. Per finding row:
+
+1. **Meaning preservation**: the proposed text carries every constraint,
+   condition, qualifier, and cross-reference of the original. A shorter text
+   that drops one is a defect.
+2. **Contract preservation**: SPEC.md contract detail, CLI examples, error
+   strings, IMPORTANT lines, spawn-skeleton lossless items, and backend-neutral
+   base/overlay separation survive verbatim in meaning.
+3. **Zero behavior change**: a simplification run never changes voice or
+   behavior. A row that touches a runtime surface, alters code outside comments
+   and docstrings, or rewrites voice (an affirmative-workflow P2 candidate) is
+   a defect.
+4. **No new narration**: no proposed text introduces past-tense framing
+   (umbrella invariant 3, R1).
+5. **Precision**: approve genuine tightenings (the rubric's 30%+ baseline);
+   reject style-only churn that changes words without reducing them.
+
+Write verdicts per the shared [`reference/review-format.md`](../reference/review-format.md)
+verdict flow, including its post-apply check.
 
 ## Artifact: `findings.md`
 

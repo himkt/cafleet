@@ -113,3 +113,111 @@ impl PressKeys {
             .collect()
     }
 }
+
+#[cfg(test)]
+pub(super) mod test_support {
+    use super::*;
+    pub(crate) fn parse(tokens: &[&str]) -> PressKeys {
+        PressKeys::parse(
+            &tokens
+                .iter()
+                .map(|token| (*token).into())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use super::*;
+    use crate::multiplexer::test_support::argv;
+
+    fn usage(tokens: &[String], expected: &str) {
+        let failure = match PressKeys::parse(tokens) {
+            Ok(_) => panic!("the key vector is outside the common grammar"),
+            Err(failure) => failure,
+        };
+        assert!(matches!(&failure, CafleetError::Usage(message) if message == expected));
+        assert_eq!(failure.exit_code(), 2);
+    }
+    #[test]
+    fn press_keys_validate_the_complete_common_grammar_and_byte_count_bounds() {
+        let keys = parse(&[
+            "A",
+            "a",
+            "+",
+            "-",
+            ";",
+            "!",
+            "~",
+            "sPaCe",
+            "ESCAPE",
+            "enter",
+            "Tab",
+            "Backspace",
+            "up",
+            "down",
+            "left",
+            "right",
+            "f1",
+            "F12",
+            "cTrL+A",
+            "CTRL+Z",
+            "sHiFt+tAb",
+        ]);
+        assert_eq!(
+            keys.canonical(),
+            argv(&[
+                "A",
+                "a",
+                "+",
+                "-",
+                ";",
+                "!",
+                "~",
+                "Space",
+                "Escape",
+                "Enter",
+                "Tab",
+                "Backspace",
+                "Up",
+                "Down",
+                "Left",
+                "Right",
+                "F1",
+                "F12",
+                "Ctrl+a",
+                "Ctrl+z",
+                "Shift+Tab",
+            ])
+        );
+        assert_eq!(
+            PressKeys::parse(&vec!["a".into(); 64])
+                .unwrap()
+                .canonical()
+                .len(),
+            64
+        );
+        usage(&[], "press requires between 1 and 64 keys");
+        usage(
+            &vec!["a".into(); 65],
+            "press requires between 1 and 64 keys",
+        );
+        let long = "é".repeat(17);
+        usage(
+            &["Enter".into(), long],
+            "press key at position 2 exceeds 32 UTF-8 bytes",
+        );
+        for invalid in ["F0", "F13", "Ctrl+1", " ", "é"] {
+            usage(
+                &["a".into(), invalid.into()],
+                &format!(
+                    "invalid press key at position 2: {}",
+                    serde_json::to_string(invalid).unwrap()
+                ),
+            );
+        }
+    }
+}

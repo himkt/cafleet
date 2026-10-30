@@ -30,23 +30,23 @@ impl WriterHooks for InertWriterHooks {
 }
 #[derive(Debug, Clone)]
 pub(crate) struct WriterStatus {
-    pub pending_count: u64,
-    pub pending_evidence: bool,
-    pub gap_count: u64,
-    pub degraded: bool,
-    pub diagnostic: Option<String>,
+    pub(crate) pending_count: u64,
+    pub(crate) pending_evidence: bool,
+    pub(crate) gap_count: u64,
+    pub(crate) degraded: bool,
+    pub(crate) diagnostic: Option<String>,
     #[cfg(test)]
-    pub policy_diagnostic: Option<String>,
+    pub(crate) policy_diagnostic: Option<String>,
 }
 #[derive(Debug)]
 pub(crate) struct RetainedTransition {
-    pub transition: ObservedTransition,
-    pub cause: CafleetError,
+    pub(crate) transition: ObservedTransition,
+    pub(crate) cause: CafleetError,
 }
 #[derive(Debug)]
 pub(crate) struct RetainedEvidenceUpdate {
-    pub update: InteractionEvidenceUpdate,
-    pub cause: CafleetError,
+    pub(crate) update: InteractionEvidenceUpdate,
+    pub(crate) cause: CafleetError,
 }
 #[derive(Clone)]
 struct Refresh {
@@ -122,6 +122,7 @@ impl Pending {
     }
 }
 impl EventWriter {
+    #[cfg(test)]
     pub(crate) fn start(
         database_url: String,
         run: RunRecord,
@@ -196,10 +197,7 @@ impl EventWriter {
                         }
                     }
                     if Instant::now() < next {
-                        std::thread::sleep(
-                            Duration::from_millis(2)
-                                .min(next.saturating_duration_since(Instant::now())),
-                        );
+                        nap_until(next);
                         continue;
                     }
                     let result = (|| -> Result<()> {
@@ -577,9 +575,7 @@ impl EventWriter {
             .expect("shutdown deadline");
         if let Some(thread) = self.thread.as_ref() {
             while !thread.is_finished() && Instant::now() < until {
-                std::thread::sleep(
-                    Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
-                );
+                nap_until(until);
             }
         }
         if self
@@ -623,14 +619,358 @@ impl Drop for EventWriter {
 }
 
 #[cfg(test)]
-pub(super) mod contract_tests {
+pub(crate) mod test_support {
     use super::*;
     use crate::broker::runtime::*;
-    use crate::runtime::runner_tests::Fixture;
-    mod refresh {
-        use super::worker::{Hooks, Release, committed, start, wait_until};
-        use super::*;
+    use crate::runtime::runner::test_support::Fixture;
+    use std::sync::Condvar;
+    pub(crate) const VERSION: &str = "synthetic-0.0.1";
+    pub(crate) const PROFILE: &str = "synthetic-profile-1";
+    pub(crate) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
+    pub(in crate::runtime::runner) use crate::coding_agent::profiles::catalog::test_support::{
+        synthetic_catalog as catalog, synthetic_definitions as definitions,
+    };
+    pub(crate) fn configure(fixture: &mut WriterFixture) {
+        fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,profile_match='exact',coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
+        fixture.fixture.run =
+            storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+    }
+    pub(crate) fn configure_redacted(fixture: &mut WriterFixture) {
+        configure(fixture);
+        fixture
+            .fixture
+            .conn
+            .execute(
+                "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
+                [fixture.fixture.run.run_id],
+            )
+            .unwrap();
+        fixture.fixture.run =
+            storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+    }
+    pub(crate) struct Clock {
+        pub(crate) origin: Instant,
+        pub(crate) millis: AtomicU64,
+    }
+    impl Clock {
+        pub(crate) fn new() -> Self {
+            Self {
+                origin: Instant::now(),
+                millis: AtomicU64::new(0),
+            }
+        }
+        pub(crate) fn set(&self, millis: u64) {
+            self.millis.store(millis, Ordering::Release);
+        }
+    }
+    impl ObservationClock for Clock {
+        fn sample(&self) -> ObservationMoment {
+            ObservationMoment {
+                monotonic: self.origin + Duration::from_millis(self.millis.load(Ordering::Acquire)),
+                observed_at: NOW.into(),
+            }
+        }
+        fn kind(&self) -> ObservationClockKind {
+            ObservationClockKind::Deterministic
+        }
+    }
+    pub(crate) fn running(fixture: &mut WriterFixture, child: &ProcessIdentity) {
+        fixture.fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![child.pid,child.start_identity,NOW,fixture.fixture.run.run_id]).unwrap();
+        fixture.fixture.run =
+            storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+    }
+    pub(crate) fn form(operation: &str) -> Vec<u8> {
+        format!("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ").into_bytes()
+    }
+    pub(crate) fn detailed_form(operation: &str, detail: &str) -> Vec<u8> {
+        format!("\x1b[2J\x1b[18;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nDetail: {detail}\r\nSelection: ").into_bytes()
+    }
+    // Rewrites only the non-fingerprint detail row of `detailed_form` and returns the cursor to the end of `Selection: `.
+    pub(crate) fn detail_rewrite(detail: &str) -> Vec<u8> {
+        format!("\x1b[23;1H\x1b[2KDetail: {detail}\x1b[24;12H").into_bytes()
+    }
+    pub(crate) fn redacted_policy() -> storage::evidence::EvidencePolicy {
+        storage::evidence::EvidencePolicy::redacted(
+                &serde_json::json!({"schema_version":1,"patterns":["synthetic-redaction-canary"],"sensitive_rules":[]}),
+                &["synthetic-permission"],
+            )
+            .unwrap()
+    }
+    pub(crate) fn index(boundary: WriterBoundary) -> usize {
+        match boundary {
+            WriterBoundary::Receive => 0,
+            WriterBoundary::Append => 1,
+            WriterBoundary::Sync => 2,
+            WriterBoundary::Persist => 3,
+            WriterBoundary::Compact => 4,
+        }
+    }
+    #[derive(Debug, Default)]
+    pub(crate) struct HookState {
+        pub(crate) paused: [bool; 5],
+        pub(crate) failures: [u64; 5],
+        pub(crate) calls: [u64; 5],
+        pub(crate) first: [Option<u64>; 5],
+        pub(crate) ordinal: u64,
+    }
+    #[derive(Default)]
+    pub(crate) struct Hooks {
+        pub(crate) state: Mutex<HookState>,
+        pub(crate) changed: Condvar,
+    }
+    impl Hooks {
+        pub(crate) fn pause(&self, boundary: WriterBoundary) {
+            self.state.lock().unwrap().paused[index(boundary)] = true;
+        }
+        pub(crate) fn release_for_cleanup(&self) {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.paused = [false; 5];
+            drop(state);
+            self.changed.notify_all();
+        }
+        pub(crate) fn fail_once(&self, boundary: WriterBoundary) {
+            self.state.lock().unwrap().failures[index(boundary)] += 1;
+        }
+        pub(crate) fn wait(&self, boundary: WriterBoundary, count: u64) {
+            let slot = index(boundary);
+            let until = deadline();
+            let mut state = self.state.lock().unwrap();
+            while state.calls[slot] < count {
+                let remaining = until.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    let calls = state.calls;
+                    drop(state);
+                    panic!("worker boundary {slot} was not reached; calls={calls:?}");
+                }
+                state = self.changed.wait_timeout(state, remaining).unwrap().0;
+            }
+        }
+        pub(crate) fn calls(&self, boundary: WriterBoundary) -> u64 {
+            self.state.lock().unwrap().calls[index(boundary)]
+        }
+    }
+    impl WriterHooks for Hooks {
+        fn before(&self, boundary: WriterBoundary, until: Instant) -> Result<()> {
+            let slot = index(boundary);
+            let mut state = self.state.lock().unwrap();
+            state.ordinal = state.ordinal.checked_add(1).unwrap();
+            state.calls[slot] = state.calls[slot].checked_add(1).unwrap();
+            let ordinal = state.ordinal;
+            state.first[slot].get_or_insert(ordinal);
+            self.changed.notify_all();
+            while state.paused[slot] {
+                let remaining = until.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(CafleetError::DeadlineExceeded);
+                }
+                state = self.changed.wait_timeout(state, remaining).unwrap().0;
+            }
+            if state.failures[slot] > 0 {
+                state.failures[slot] -= 1;
+                return Err(error("fixture writer boundary failure"));
+            }
+            Ok(())
+        }
+    }
+    pub(crate) struct Release(pub(crate) Arc<Hooks>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            self.0.release_for_cleanup();
+        }
+    }
 
+    pub(crate) fn start(fixture: &WriterFixture, hooks: Arc<Hooks>) -> EventWriter {
+        EventWriter::start_with_hooks(
+            format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
+            fixture.fixture.run.clone(),
+            fixture.lock.clone(),
+            fixture.artifacts.paths.outbox.clone(),
+            hooks,
+        )
+        .unwrap()
+    }
+    pub(crate) fn wait_until(condition: impl FnMut() -> bool) {
+        wait_until_within(Duration::from_secs(2), condition);
+    }
+    pub(crate) fn wait_until_within(budget: Duration, mut condition: impl FnMut() -> bool) {
+        let until = Instant::now() + budget;
+        while !condition() {
+            assert!(
+                Instant::now() < until,
+                "bounded worker condition did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    pub(crate) fn committed(fixture: &WriterFixture) -> i64 {
+        fixture
+            .fixture
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1",
+                [fixture.fixture.run.run_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+    pub(crate) const UNAVAILABLE_RULE: &str = "codex-auto-review-unavailable";
+    pub(crate) const AVAILABLE_RULE: &str = "codex-auto-review-indicator";
+
+    pub(crate) fn unavailable(fixture: &WriterFixture, sequence: i64) -> ObservedTransition {
+        let evidence = storage::evidence::run_metadata(
+            &fixture.fixture.run,
+            UNAVAILABLE_RULE,
+            u64::try_from(sequence).unwrap(),
+        )
+        .unwrap();
+        ObservedTransition {
+            kind: RuntimeEventKind::AutomaticReviewUnavailable,
+            evidence_json: evidence,
+            cause_json: None,
+            ..transition(fixture, sequence)
+        }
+    }
+
+    pub(crate) fn observation(automatic_review: AutomaticReview) -> EffectivePolicyObservation {
+        EffectivePolicyObservation {
+            automatic_review,
+            observed_mode: None,
+            rule_id: if automatic_review == AutomaticReview::Unavailable {
+                UNAVAILABLE_RULE
+            } else {
+                AVAILABLE_RULE
+            }
+            .into(),
+            observed_at: "2026-10-26T16:40:00.000000+00:00".into(),
+        }
+    }
+
+    pub(crate) fn record(observation: &EffectivePolicyObservation, event_id: Option<i64>) -> Value {
+        serde_json::json!({
+            "schema_version":1,
+            "automatic_review":observation.automatic_review.as_str(),
+            "observed_mode":observation.observed_mode,
+            "rule_id":observation.rule_id,
+            "event_id":event_id,
+            "observed_at":observation.observed_at,
+        })
+    }
+
+    pub(crate) fn frame_bodies(mut bytes: &[u8]) -> Vec<Value> {
+        let mut bodies = Vec::new();
+        while !bytes.is_empty() {
+            let length =
+                usize::try_from(u32::from_be_bytes(bytes[..4].try_into().unwrap())).unwrap();
+            let body = &bytes[36..36 + length];
+            assert_eq!(&bytes[4..36], &Sha256::digest(body)[..]);
+            bodies.push(serde_json::from_slice(body).unwrap());
+            bytes = &bytes[36 + length..];
+        }
+        bodies
+    }
+    pub(crate) struct WriterFixture {
+        pub(crate) fixture: Fixture,
+        pub(crate) artifacts: RunArtifacts,
+        pub(crate) lock: Arc<RunLock>,
+    }
+    impl WriterFixture {
+        pub(crate) fn new() -> Self {
+            let mut fixture = Fixture::new();
+            let artifacts = fixture.artifacts();
+            let lock = Arc::new(
+                RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                    .unwrap()
+                    .unwrap(),
+            );
+            lock.transfer_to_runner(
+                &mut fixture.conn,
+                &fixture.run.owner(),
+                ProcessIdentity::current().unwrap(),
+            )
+            .unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            Self {
+                fixture,
+                artifacts,
+                lock,
+            }
+        }
+        pub(crate) fn start(&self, path: PathBuf) -> Result<EventWriter> {
+            EventWriter::start(
+                format!("sqlite:///{}", self.fixture.conn.path().unwrap()),
+                self.fixture.run.clone(),
+                self.lock.clone(),
+                path,
+            )
+        }
+    }
+
+    pub(crate) fn deadline() -> Instant {
+        Instant::now() + Duration::from_secs(2)
+    }
+
+    pub(crate) fn transition(fixture: &WriterFixture, sequence: i64) -> ObservedTransition {
+        let evidence = storage::evidence::run_metadata(
+            &fixture.fixture.run,
+            "runner-lifecycle",
+            u64::try_from(sequence).unwrap(),
+        )
+        .unwrap();
+        ObservedTransition {
+            run_id: fixture.fixture.run.run_id,
+            event_seq: sequence,
+            episode_seq: None,
+            kind: RuntimeEventKind::CoverageUnknown,
+            classification: None,
+            observed_at: "2026-10-26T16:40:00.000000+00:00".into(),
+            evidence_json: evidence,
+            close_reason: None,
+            cause_json: Some(serde_json::json!({"kind":"coverage_unknown"})),
+        }
+    }
+
+    /// An outbox frame (length, SHA-256 of the body, body) built without the production encoder.
+    pub(crate) fn outbox_frame(body: &[u8]) -> Vec<u8> {
+        let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
+        bytes.extend_from_slice(&Sha256::digest(body));
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    pub(crate) fn frame(transition: &ObservedTransition) -> Vec<u8> {
+        outbox_frame(&serde_json::to_vec(transition).unwrap())
+    }
+
+    pub(crate) fn independent_frames(mut bytes: &[u8]) -> Vec<ObservedTransition> {
+        let mut values = Vec::new();
+        while !bytes.is_empty() {
+            assert!(bytes.len() >= 36);
+            let length =
+                usize::try_from(u32::from_be_bytes(bytes[..4].try_into().unwrap())).unwrap();
+            assert!(length > 0 && length <= 16 * 1024 * 1024);
+            assert!(bytes.len() >= 36 + length);
+            let body = &bytes[36..36 + length];
+            assert_eq!(&bytes[4..36], &Sha256::digest(body)[..]);
+            values.push(serde_json::from_slice(body).unwrap());
+            bytes = &bytes[36 + length..];
+        }
+        values
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use super::*;
+    use crate::broker::runtime::*;
+
+    mod refresh {
+        use super::*;
         fn opening(fixture: &WriterFixture) -> ObservedTransition {
             ObservedTransition {
                 episode_seq: Some(1),
@@ -668,7 +1008,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_waits_for_its_opening_barrier_without_an_outbox_frame() {
+        fn writer_refresh_waits_for_its_opening_barrier_without_an_outbox_frame() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Persist);
@@ -691,7 +1031,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_newer_revision_survives_an_inflight_successful_attempt() {
+        fn writer_refresh_newer_revision_survives_an_inflight_successful_attempt() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             let mut writer = committed_open(&fixture, hooks.clone());
@@ -709,7 +1049,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_newer_revision_survives_an_inflight_failed_attempt() {
+        fn writer_refresh_newer_revision_survives_an_inflight_failed_attempt() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             let mut writer = committed_open(&fixture, hooks.clone());
@@ -727,7 +1067,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_rejects_regression_conflict_and_foreign_episode_without_replacing_newer_work()
+        fn writer_refresh_rejects_regression_conflict_and_foreign_episode_without_replacing_newer_work()
          {
             for field in ["regression", "conflict", "episode"] {
                 let fixture = WriterFixture::new();
@@ -765,8 +1105,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_closure_follows_earlier_evidence_and_rejects_late_old_episode_updates()
-         {
+        fn writer_refresh_closure_follows_earlier_evidence_and_rejects_late_old_episode_updates() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             let mut writer = committed_open(&fixture, hooks.clone());
@@ -790,7 +1129,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_newer_same_episode_revision_advances_its_semantic_barrier() {
+        fn writer_refresh_newer_same_episode_revision_advances_its_semantic_barrier() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
@@ -814,8 +1153,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_refresh_equal_identical_requests_coalesce_and_expiry_has_no_enqueue_effect()
-         {
+        fn writer_refresh_equal_identical_requests_coalesce_and_expiry_has_no_enqueue_effect() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             let mut writer = committed_open(&fixture, hooks.clone());
@@ -837,255 +1175,11 @@ pub(super) mod contract_tests {
             writer.finish(deadline());
         }
     }
-    pub(in crate::runtime::runner) mod support {
+
+    mod worker {
         use super::*;
-        use crate::coding_agent::ProfileCatalog;
-        use crate::runtime::runner_tests::owned_child::OwnedChild;
-        use std::process::{Command, Stdio};
-
-        pub(in crate::runtime::runner) const VERSION: &str = "synthetic-0.0.1";
-        pub(in crate::runtime::runner) const PROFILE: &str = "synthetic-profile-1";
-        pub(in crate::runtime::runner) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
-        pub(in crate::runtime::runner) fn definitions() -> Value {
-            serde_json::from_str(include_str!(
-                "../runner_tests/fixtures/synthetic-profile.json"
-            ))
-            .unwrap()
-        }
-        pub(in crate::runtime::runner) fn catalog() -> ProfileCatalog {
-            ProfileCatalog::from_definitions(&definitions()).unwrap()
-        }
-        pub(in crate::runtime::runner) fn configure(fixture: &mut WriterFixture) {
-            fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,profile_match='exact',coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
-            fixture.fixture.run =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        }
-        pub(in crate::runtime::runner) fn configure_redacted(fixture: &mut WriterFixture) {
-            configure(fixture);
-            fixture
-                .fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                    [fixture.fixture.run.run_id],
-                )
-                .unwrap();
-            fixture.fixture.run =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        }
-        pub(in crate::runtime::runner) struct Clock {
-            origin: Instant,
-            millis: AtomicU64,
-        }
-        impl Clock {
-            pub(in crate::runtime::runner) fn new() -> Self {
-                Self {
-                    origin: Instant::now(),
-                    millis: AtomicU64::new(0),
-                }
-            }
-            pub(in crate::runtime::runner) fn set(&self, millis: u64) {
-                self.millis.store(millis, Ordering::Release);
-            }
-        }
-        impl ObservationClock for Clock {
-            fn sample(&self) -> ObservationMoment {
-                ObservationMoment {
-                    monotonic: self.origin
-                        + Duration::from_millis(self.millis.load(Ordering::Acquire)),
-                    observed_at: NOW.into(),
-                }
-            }
-            fn kind(&self) -> ObservationClockKind {
-                ObservationClockKind::Deterministic
-            }
-        }
-        pub(in crate::runtime::runner) struct ChildGuard {
-            pub child: OwnedChild,
-            pub identity: ProcessIdentity,
-        }
-        impl ChildGuard {
-            pub(in crate::runtime::runner) fn spawn(
-                executable: &std::path::Path,
-                arguments: &[String],
-            ) -> Self {
-                let child = OwnedChild::new(
-                    Command::new(executable)
-                        .args(arguments)
-                        .stdin(Stdio::piped())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .unwrap(),
-                );
-                let identity = ProcessIdentity::read(i64::from(child.id()))
-                    .unwrap()
-                    .expect("owned child generation");
-                Self { child, identity }
-            }
-        }
-        pub(in crate::runtime::runner) fn running(
-            fixture: &mut WriterFixture,
-            child: &ProcessIdentity,
-        ) {
-            fixture.fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![child.pid,child.start_identity,NOW,fixture.fixture.run.run_id]).unwrap();
-            fixture.fixture.run =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        }
-        pub(in crate::runtime::runner) fn form(operation: &str) -> Vec<u8> {
-            format!("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ").into_bytes()
-        }
-        pub(in crate::runtime::runner) fn detailed_form(operation: &str, detail: &str) -> Vec<u8> {
-            format!("\x1b[2J\x1b[18;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nDetail: {detail}\r\nSelection: ").into_bytes()
-        }
-        // Rewrites only the non-fingerprint detail row of `detailed_form` and returns the cursor to the end of `Selection: `.
-        pub(in crate::runtime::runner) fn detail_rewrite(detail: &str) -> Vec<u8> {
-            format!("\x1b[23;1H\x1b[2KDetail: {detail}\x1b[24;12H").into_bytes()
-        }
-        pub(in crate::runtime::runner) fn redacted_policy() -> storage::evidence::EvidencePolicy {
-            storage::evidence::EvidencePolicy::redacted(
-                &serde_json::json!({"schema_version":1,"patterns":["synthetic-redaction-canary"],"sensitive_rules":[]}),
-                &["synthetic-permission"],
-            )
-            .unwrap()
-        }
-    }
-    pub(in crate::runtime::runner) mod worker {
-        use super::*;
-        use std::sync::Condvar;
-
-        fn index(boundary: WriterBoundary) -> usize {
-            match boundary {
-                WriterBoundary::Receive => 0,
-                WriterBoundary::Append => 1,
-                WriterBoundary::Sync => 2,
-                WriterBoundary::Persist => 3,
-                WriterBoundary::Compact => 4,
-            }
-        }
-        #[derive(Debug, Default)]
-        struct HookState {
-            paused: [bool; 5],
-            failures: [u64; 5],
-            calls: [u64; 5],
-            first: [Option<u64>; 5],
-            ordinal: u64,
-        }
-        #[derive(Default)]
-        pub(in crate::runtime::runner) struct Hooks {
-            state: Mutex<HookState>,
-            changed: Condvar,
-        }
-        impl Hooks {
-            pub(in crate::runtime::runner) fn pause(&self, boundary: WriterBoundary) {
-                self.state.lock().unwrap().paused[index(boundary)] = true;
-            }
-            fn release_for_cleanup(&self) {
-                let mut state = match self.state.lock() {
-                    Ok(state) => state,
-                    Err(poisoned) => {
-                        eprintln!("fixture hook cleanup recovered poisoned state");
-                        poisoned.into_inner()
-                    }
-                };
-                state.paused = [false; 5];
-                drop(state);
-                self.changed.notify_all();
-            }
-            pub(in crate::runtime::runner) fn fail_once(&self, boundary: WriterBoundary) {
-                self.state.lock().unwrap().failures[index(boundary)] += 1;
-            }
-            pub(in crate::runtime::runner) fn wait(&self, boundary: WriterBoundary, count: u64) {
-                let slot = index(boundary);
-                let until = deadline();
-                let mut state = self.state.lock().unwrap();
-                while state.calls[slot] < count {
-                    let remaining = until.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        let calls = state.calls;
-                        drop(state);
-                        panic!("worker boundary {slot} was not reached; calls={calls:?}");
-                    }
-                    state = self.changed.wait_timeout(state, remaining).unwrap().0;
-                }
-            }
-            pub(in crate::runtime::runner) fn calls(&self, boundary: WriterBoundary) -> u64 {
-                self.state.lock().unwrap().calls[index(boundary)]
-            }
-        }
-        impl WriterHooks for Hooks {
-            fn before(&self, boundary: WriterBoundary, until: Instant) -> Result<()> {
-                let slot = index(boundary);
-                let mut state = self.state.lock().unwrap();
-                state.ordinal = state.ordinal.checked_add(1).unwrap();
-                state.calls[slot] = state.calls[slot].checked_add(1).unwrap();
-                let ordinal = state.ordinal;
-                state.first[slot].get_or_insert(ordinal);
-                self.changed.notify_all();
-                while state.paused[slot] {
-                    let remaining = until.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        return Err(CafleetError::DeadlineExceeded);
-                    }
-                    state = self.changed.wait_timeout(state, remaining).unwrap().0;
-                }
-                if state.failures[slot] > 0 {
-                    state.failures[slot] -= 1;
-                    return Err(error("fixture writer boundary failure"));
-                }
-                Ok(())
-            }
-        }
-        pub(in crate::runtime::runner) struct Release(pub Arc<Hooks>);
-        impl Drop for Release {
-            fn drop(&mut self) {
-                self.0.release_for_cleanup();
-            }
-        }
-
-        pub(in crate::runtime::runner) fn start(
-            fixture: &WriterFixture,
-            hooks: Arc<Hooks>,
-        ) -> EventWriter {
-            EventWriter::start_with_hooks(
-                format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
-                fixture.fixture.run.clone(),
-                fixture.lock.clone(),
-                fixture.artifacts.paths.outbox.clone(),
-                hooks,
-            )
-            .unwrap()
-        }
-        pub(in crate::runtime::runner) fn wait_until(condition: impl FnMut() -> bool) {
-            wait_until_within(Duration::from_secs(2), condition);
-        }
-        pub(in crate::runtime::runner) fn wait_until_within(
-            budget: Duration,
-            mut condition: impl FnMut() -> bool,
-        ) {
-            let until = Instant::now() + budget;
-            while !condition() {
-                assert!(
-                    Instant::now() < until,
-                    "bounded worker condition did not complete"
-                );
-                std::thread::sleep(Duration::from_millis(2));
-            }
-        }
-        pub(in crate::runtime::runner) fn committed(fixture: &WriterFixture) -> i64 {
-            fixture
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1",
-                    [fixture.fixture.run.run_id],
-                    |row| row.get(0),
-                )
-                .unwrap()
-        }
-
         #[test]
-        fn runner_batch2_hook_timeout_releases_the_mutex_before_unwinding_through_cleanup() {
+        fn writer_hook_timeout_releases_the_mutex_before_unwinding_through_cleanup() {
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
             let observed = hooks.clone();
@@ -1099,8 +1193,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_hook_cleanup_releases_known_state_after_a_worker_poison_without_panicking()
-        {
+        fn writer_hook_cleanup_releases_known_state_after_a_worker_poison_without_panicking() {
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
             let observed = hooks.clone();
@@ -1122,8 +1215,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_worker_receive_stall_pins_64_channel_slots_and_returns_the_failed_original()
-         {
+        fn writer_worker_receive_stall_pins_64_channel_slots_and_returns_the_failed_original() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
@@ -1152,7 +1244,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_worker_sync_precedes_sqlite_and_pending_delivery_is_not_an_inbox_commit() {
+        fn writer_worker_sync_precedes_sqlite_and_pending_delivery_is_not_an_inbox_commit() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Persist);
@@ -1176,7 +1268,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_worker_ambiguous_sync_failure_rescans_and_reuses_the_complete_original() {
+        fn writer_worker_ambiguous_sync_failure_rescans_and_reuses_the_complete_original() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.fail_once(WriterBoundary::Sync);
@@ -1198,8 +1290,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_worker_append_and_database_failures_retain_the_same_transition_for_retry()
-        {
+        fn writer_worker_append_and_database_failures_retain_the_same_transition_for_retry() {
             for boundary in [WriterBoundary::Append, WriterBoundary::Persist] {
                 let fixture = WriterFixture::new();
                 let hooks = Arc::new(Hooks::default());
@@ -1222,7 +1313,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_worker_pending_capacity_counts_channel_and_worker_queue_without_growth() {
+        fn writer_worker_pending_capacity_counts_channel_and_worker_queue_without_growth() {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Persist);
@@ -1250,7 +1341,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_worker_refill_is_nonblocking_coalesced_and_published_only_after_commit() {
+        fn writer_worker_refill_is_nonblocking_coalesced_and_published_only_after_commit() {
             let fixture = WriterFixture::new();
             let blocking = crate::db::connect(&format!(
                 "sqlite:///{}",
@@ -1290,8 +1381,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_worker_shutdown_retains_synced_uncommitted_frames_and_the_original_budget()
-        {
+        fn writer_worker_shutdown_retains_synced_uncommitted_frames_and_the_original_budget() {
             let fixture = WriterFixture::new();
             let blocking = crate::db::connect(&format!(
                 "sqlite:///{}",
@@ -1334,7 +1424,7 @@ pub(super) mod contract_tests {
         }
 
         #[test]
-        fn runner_batch2_worker_final_compaction_slower_than_one_work_slice_commits_before_the_shutdown_deadline()
+        fn writer_worker_final_compaction_slower_than_one_work_slice_commits_before_the_shutdown_deadline()
          {
             let fixture = WriterFixture::new();
             let hooks = Arc::new(SlowCompaction {
@@ -1367,71 +1457,8 @@ pub(super) mod contract_tests {
         }
     }
 
-    pub(in crate::runtime::runner) mod effective_policy {
-        use super::worker::{Hooks, Release, committed, start, wait_until};
+    mod effective_policy {
         use super::*;
-
-        const UNAVAILABLE_RULE: &str = "codex-auto-review-unavailable";
-        const AVAILABLE_RULE: &str = "codex-auto-review-indicator";
-
-        pub(in crate::runtime::runner) fn unavailable(
-            fixture: &WriterFixture,
-            sequence: i64,
-        ) -> ObservedTransition {
-            let evidence = storage::evidence::EvidencePolicy::metadata()
-                .apply(&serde_json::json!({"backend":fixture.fixture.run.backend,"native_version":fixture.fixture.run.native_version,"profile_version":fixture.fixture.run.profile_version,"rule_id":UNAVAILABLE_RULE,"screen_seq":sequence,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}))
-                .unwrap();
-            ObservedTransition {
-                kind: RuntimeEventKind::AutomaticReviewUnavailable,
-                evidence_json: evidence,
-                cause_json: None,
-                ..transition(fixture, sequence)
-            }
-        }
-
-        pub(in crate::runtime::runner) fn observation(
-            automatic_review: AutomaticReview,
-        ) -> EffectivePolicyObservation {
-            EffectivePolicyObservation {
-                automatic_review,
-                observed_mode: None,
-                rule_id: if automatic_review == AutomaticReview::Unavailable {
-                    UNAVAILABLE_RULE
-                } else {
-                    AVAILABLE_RULE
-                }
-                .into(),
-                observed_at: "2026-10-26T16:40:00.000000+00:00".into(),
-            }
-        }
-
-        pub(in crate::runtime::runner) fn record(
-            observation: &EffectivePolicyObservation,
-            event_id: Option<i64>,
-        ) -> Value {
-            serde_json::json!({
-                "schema_version":1,
-                "automatic_review":observation.automatic_review.as_str(),
-                "observed_mode":observation.observed_mode,
-                "rule_id":observation.rule_id,
-                "event_id":event_id,
-                "observed_at":observation.observed_at,
-            })
-        }
-
-        pub(in crate::runtime::runner) fn frame_bodies(mut bytes: &[u8]) -> Vec<Value> {
-            let mut bodies = Vec::new();
-            while !bytes.is_empty() {
-                let length =
-                    usize::try_from(u32::from_be_bytes(bytes[..4].try_into().unwrap())).unwrap();
-                let body = &bytes[36..36 + length];
-                assert_eq!(&bytes[4..36], &Sha256::digest(body)[..]);
-                bodies.push(serde_json::from_slice(body).unwrap());
-                bytes = &bytes[36 + length..];
-            }
-            bodies
-        }
-
         fn set_status(fixture: &mut WriterFixture, status: &str) {
             fixture
                 .fixture
@@ -1599,94 +1626,6 @@ pub(super) mod contract_tests {
             writer.finish(deadline());
         }
     }
-
-    pub(in crate::runtime::runner) struct WriterFixture {
-        pub(in crate::runtime::runner) fixture: Fixture,
-        pub(in crate::runtime::runner) artifacts: RunArtifacts,
-        pub(in crate::runtime::runner) lock: Arc<RunLock>,
-    }
-    impl WriterFixture {
-        pub(in crate::runtime::runner) fn new() -> Self {
-            let mut fixture = Fixture::new();
-            let artifacts = fixture.artifacts();
-            let lock = Arc::new(
-                RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                    .unwrap()
-                    .unwrap(),
-            );
-            lock.transfer_to_runner(
-                &mut fixture.conn,
-                &fixture.run.owner(),
-                ProcessIdentity::current().unwrap(),
-            )
-            .unwrap();
-            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            Self {
-                fixture,
-                artifacts,
-                lock,
-            }
-        }
-        fn start(&self, path: PathBuf) -> Result<EventWriter> {
-            EventWriter::start(
-                format!("sqlite:///{}", self.fixture.conn.path().unwrap()),
-                self.fixture.run.clone(),
-                self.lock.clone(),
-                path,
-            )
-        }
-    }
-
-    pub(in crate::runtime::runner) fn deadline() -> Instant {
-        Instant::now() + Duration::from_secs(2)
-    }
-
-    pub(in crate::runtime::runner) fn transition(
-        fixture: &WriterFixture,
-        sequence: i64,
-    ) -> ObservedTransition {
-        let evidence=storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":fixture.fixture.run.backend,"native_version":fixture.fixture.run.native_version,"profile_version":fixture.fixture.run.profile_version,"rule_id":"runner-lifecycle","screen_seq":sequence,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
-        ObservedTransition {
-            run_id: fixture.fixture.run.run_id,
-            event_seq: sequence,
-            episode_seq: None,
-            kind: RuntimeEventKind::CoverageUnknown,
-            classification: None,
-            observed_at: "2026-10-26T16:40:00.000000+00:00".into(),
-            evidence_json: evidence,
-            close_reason: None,
-            cause_json: Some(serde_json::json!({"kind":"coverage_unknown"})),
-        }
-    }
-
-    pub(in crate::runtime::runner) fn frame(transition: &ObservedTransition) -> Vec<u8> {
-        let body = serde_json::to_vec(transition).unwrap();
-        let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-        bytes.extend_from_slice(&Sha256::digest(&body));
-        bytes.extend(body);
-        bytes
-    }
-
-    pub(in crate::runtime::runner) fn independent_frames(
-        mut bytes: &[u8],
-    ) -> Vec<ObservedTransition> {
-        let mut values = Vec::new();
-        while !bytes.is_empty() {
-            assert!(bytes.len() >= 36);
-            let length =
-                usize::try_from(u32::from_be_bytes(bytes[..4].try_into().unwrap())).unwrap();
-            assert!(length > 0 && length <= 16 * 1024 * 1024);
-            assert!(bytes.len() >= 36 + length);
-            let body = &bytes[36..36 + length];
-            assert_eq!(&bytes[4..36], &Sha256::digest(body)[..]);
-            values.push(serde_json::from_slice(body).unwrap());
-            bytes = &bytes[36 + length..];
-        }
-        values
-    }
-
     fn assert_start_rejected(fixture: &WriterFixture, path: PathBuf) {
         let result = fixture.start(path);
         let rejected = result.is_err();
@@ -1700,7 +1639,7 @@ pub(super) mod contract_tests {
     }
 
     #[test]
-    fn runner_batch2_writer_starts_with_the_exact_private_recorded_outbox() {
+    fn writer_starts_with_the_exact_private_recorded_outbox() {
         let fixture = WriterFixture::new();
         let mut writer = fixture
             .start(fixture.artifacts.paths.outbox.clone())
@@ -1712,7 +1651,7 @@ pub(super) mod contract_tests {
     }
 
     #[test]
-    fn runner_batch2_writer_foreign_outbox_path_fails_before_worker_start() {
+    fn writer_foreign_outbox_path_fails_before_worker_start() {
         let fixture = WriterFixture::new();
         let foreign = fixture.fixture._dir.path().join("foreign-outbox");
         std::fs::write(&foreign, []).unwrap();
@@ -1721,7 +1660,7 @@ pub(super) mod contract_tests {
     }
 
     #[test]
-    fn runner_batch2_writer_missing_or_symlinked_outbox_fails_before_worker_start() {
+    fn writer_missing_or_symlinked_outbox_fails_before_worker_start() {
         for symlink in [false, true] {
             let fixture = WriterFixture::new();
             let path = &fixture.artifacts.paths.outbox;
@@ -1737,14 +1676,14 @@ pub(super) mod contract_tests {
     }
 
     #[test]
-    fn runner_batch2_writer_stale_owner_is_rejected_before_worker_start() {
+    fn writer_stale_owner_is_rejected_before_worker_start() {
         let mut fixture = WriterFixture::new();
         fixture.fixture.run.owner_epoch += 1;
         assert_start_rejected(&fixture, fixture.artifacts.paths.outbox.clone());
     }
 
     #[test]
-    fn runner_batch2_writer_spool_sync_is_pending_until_the_actual_sqlite_commit() {
+    fn writer_spool_sync_is_pending_until_the_actual_sqlite_commit() {
         let fixture = WriterFixture::new();
         let blocking = crate::db::connect(&format!(
             "sqlite:///{}",

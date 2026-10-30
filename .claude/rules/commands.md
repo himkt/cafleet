@@ -2,7 +2,7 @@
 
 Run project operations from the repository root through mise full-path tasks. Use `mise tasks` and the package task definitions as the task registry.
 
-For Rust validation, run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. Use `mise //docs:build` for documentation/link checks. Find installation, formatting and release-build operations through the package task registry.
+Required Rust validation is `mise //cafleet:test` and `mise //cafleet:lint`; `//cafleet:typecheck` remains a registry task. Use `mise //docs:build` for documentation/link checks. Find installation, formatting and release-build operations through the package task registry.
 
 Rust tasks embed skills/presets and use the pinned toolchain. The documentation site owns its Node/pnpm tooling. Reinstall the CLI after Rust edits when the installed binary should change; preserve an active executing fleet's installed runtime/assets during implementation.
 

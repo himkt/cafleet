@@ -6,11 +6,11 @@ use serde_json::Value;
 static ANSI_ESCAPE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\x1b\[[0-?]*[ -/]*[@-~]").expect("the CSI pattern is valid"));
 
-pub fn is_visually_blank(line: &str) -> bool {
+pub(crate) fn is_visually_blank(line: &str) -> bool {
     ANSI_ESCAPE_RE.replace_all(line, "").trim().is_empty()
 }
 
-pub fn strip_ansi(text: &str) -> String {
+pub(crate) fn strip_ansi(text: &str) -> String {
     let cleaned = ANSI_ESCAPE_RE.replace_all(text, "");
     cleaned
         .split('\n')
@@ -19,11 +19,11 @@ pub fn strip_ansi(text: &str) -> String {
         .join("\n")
 }
 
-pub fn format_json(data: &Value) -> String {
+pub(crate) fn format_json(data: &Value) -> String {
     serde_json::to_string(data).expect("a JSON value always serializes")
 }
 
-pub fn truncate_text(value: &str, limit: usize) -> String {
+pub(crate) fn truncate_text(value: &str, limit: usize) -> String {
     match value.char_indices().nth(limit) {
         Some((byte, _)) => format!("{}…", &value[..byte]),
         None => value.to_owned(),

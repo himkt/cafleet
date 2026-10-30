@@ -7,7 +7,6 @@ fn main() {
     println!("cargo:rerun-if-changed=migrations");
     println!("cargo:rerun-if-changed=../skills");
     println!("cargo:rerun-if-changed=../presets");
-    println!("cargo:rerun-if-changed=../docs/docs");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by cargo");
     let skills = Path::new(&manifest_dir).join("../skills");

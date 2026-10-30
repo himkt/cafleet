@@ -29,10 +29,10 @@ impl OutboxIo for File {
     }
 }
 pub(crate) struct OutboxFrame {
-    pub transition: ObservedTransition,
-    pub effective_policy: Option<EffectivePolicyObservation>,
-    pub start: u64,
-    pub end: u64,
+    pub(crate) transition: ObservedTransition,
+    pub(crate) effective_policy: Option<EffectivePolicyObservation>,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
 }
 const EFFECTIVE_POLICY_KEY: &str = "effective_policy";
 fn frame_body(
@@ -75,9 +75,9 @@ fn parse_frame_body(
     Ok((transition, effective_policy))
 }
 pub(crate) struct OutboxScan {
-    pub frames: Vec<OutboxFrame>,
-    pub incomplete_tail: Option<String>,
-    pub maximum_event_seq: Option<i64>,
+    pub(crate) frames: Vec<OutboxFrame>,
+    pub(crate) incomplete_tail: Option<String>,
+    pub(crate) maximum_event_seq: Option<i64>,
 }
 pub(crate) struct Outbox<S: OutboxIo> {
     io: S,
@@ -90,6 +90,57 @@ pub(crate) struct Outbox<S: OutboxIo> {
     path_identity: Option<(u64, u64)>,
     hooks: Arc<dyn WriterHooks>,
 }
+fn open_private(
+    conn: &Connection,
+    run: &RunRecord,
+    lock: &RunLock,
+    until: Instant,
+) -> Result<(File, (u64, u64))> {
+    check_deadline(Instant::now(), until)?;
+    lock.validate(conn, &run.owner())?;
+    let paths = validate_run_paths(conn, run)?;
+    validate_private_file(&paths.outbox, nix::unistd::geteuid().as_raw(), 0o600)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(&paths.outbox)
+        .map_err(io_error)?;
+    let meta = file.metadata().map_err(io_error)?;
+    let named = std::fs::symlink_metadata(&paths.outbox).map_err(io_error)?;
+    ensure(
+        (meta.dev(), meta.ino()) == (named.dev(), named.ino()),
+        "outbox pathname changed during open",
+    )?;
+    Ok((file, (meta.dev(), meta.ino())))
+}
+fn validate_with(
+    conn: &mut Connection,
+    lock: &RunLock,
+    current: &RunRecord,
+    path_identity: Option<(u64, u64)>,
+    until: Instant,
+) -> Result<RunRecord> {
+    let run = with_database_deadline(conn, until, |conn| {
+        lock.validate(conn, &current.owner())?;
+        storage::get_run(conn, current.run_id)
+    })?;
+    if let Some((dev, ino)) = path_identity {
+        let meta =
+            std::fs::symlink_metadata(PathBuf::from(&run.runtime_path).join("events.outbox"))
+                .map_err(io_error)?;
+        ensure(
+            meta.is_file()
+                && !meta.file_type().is_symlink()
+                && meta.uid() == nix::unistd::geteuid().as_raw()
+                && meta.mode() & 0o777 == 0o600
+                && meta.dev() == dev
+                && meta.ino() == ino,
+            "owned outbox inode changed",
+        )?;
+    }
+    Ok(run)
+}
 impl Outbox<File> {
     pub(crate) fn open_recovery(
         conn: &mut Connection,
@@ -97,24 +148,9 @@ impl Outbox<File> {
         lock: Arc<RunLock>,
         until: Instant,
     ) -> Result<Self> {
-        check_deadline(Instant::now(), until)?;
-        lock.validate(conn, &run.owner())?;
-        let paths = validate_run_paths(conn, run)?;
-        validate_private_file(&paths.outbox, nix::unistd::geteuid().as_raw(), 0o600)?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(nix::libc::O_NOFOLLOW)
-            .open(&paths.outbox)
-            .map_err(io_error)?;
-        let meta = file.metadata().map_err(io_error)?;
-        let named = std::fs::symlink_metadata(&paths.outbox).map_err(io_error)?;
-        ensure(
-            (meta.dev(), meta.ino()) == (named.dev(), named.ino()),
-            "outbox pathname changed during open",
-        )?;
+        let (file, identity) = open_private(conn, run, &lock, until)?;
         let mut value = Self::state(run, lock, file, None);
-        value.path_identity = Some((meta.dev(), meta.ino()));
+        value.path_identity = Some(identity);
         value.scan_recovery(conn, until)?;
         Ok(value)
     }
@@ -124,24 +160,9 @@ impl Outbox<File> {
         lock: Arc<RunLock>,
         until: Instant,
     ) -> Result<Self> {
-        check_deadline(Instant::now(), until)?;
-        lock.validate(conn, &run.owner())?;
-        let paths = validate_run_paths(conn, run)?;
-        validate_private_file(&paths.outbox, nix::unistd::geteuid().as_raw(), 0o600)?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(nix::libc::O_NOFOLLOW)
-            .open(&paths.outbox)
-            .map_err(io_error)?;
-        let meta = file.metadata().map_err(io_error)?;
-        let named = std::fs::symlink_metadata(&paths.outbox).map_err(io_error)?;
-        ensure(
-            meta.dev() == named.dev() && meta.ino() == named.ino(),
-            "outbox pathname changed during open",
-        )?;
+        let (file, identity) = open_private(conn, run, &lock, until)?;
         let mut value = Self::initialize(conn, run, lock, file, until)?;
-        value.path_identity = Some((meta.dev(), meta.ino()));
+        value.path_identity = Some(identity);
         Ok(value)
     }
 }
@@ -176,58 +197,16 @@ impl<S: OutboxIo> Outbox<S> {
         value.scan(until)?;
         Ok(value)
     }
-    #[cfg(test)]
-    pub(crate) fn from_io(
-        conn: &Connection,
-        run: &RunRecord,
-        lock: Arc<RunLock>,
-        io: S,
-        until: Instant,
-    ) -> Result<Self> {
-        Self::initialize(conn, run, lock, io, until)
-    }
     pub(super) fn set_hooks(&mut self, hooks: Arc<dyn WriterHooks>) {
         self.hooks = hooks;
     }
     fn validate(&mut self, until: Instant) -> Result<RunRecord> {
         check_deadline(Instant::now(), until)?;
-        let owner = self.run.owner();
-        let lock = &self.lock;
-        let run = with_database_deadline(
-            self.conn.as_mut().expect("worker validation connection"),
-            until,
-            |conn| {
-                lock.validate(conn, &owner)?;
-                storage::get_run(conn, owner.run_id)
-            },
-        )?;
-        self.validate_named(&run)?;
-        Ok(run)
+        let conn = self.conn.as_mut().expect("worker validation connection");
+        validate_with(conn, &self.lock, &self.run, self.path_identity, until)
     }
     fn validate_on(&self, conn: &mut Connection, until: Instant) -> Result<RunRecord> {
-        let run = with_database_deadline(conn, until, |conn| {
-            self.lock.validate(conn, &self.run.owner())?;
-            storage::get_run(conn, self.run.run_id)
-        })?;
-        self.validate_named(&run)?;
-        Ok(run)
-    }
-    fn validate_named(&self, run: &RunRecord) -> Result<()> {
-        if let Some((dev, ino)) = self.path_identity {
-            let meta =
-                std::fs::symlink_metadata(PathBuf::from(&run.runtime_path).join("events.outbox"))
-                    .map_err(io_error)?;
-            ensure(
-                meta.is_file()
-                    && !meta.file_type().is_symlink()
-                    && meta.uid() == nix::unistd::geteuid().as_raw()
-                    && meta.mode() & 0o777 == 0o600
-                    && meta.dev() == dev
-                    && meta.ino() == ino,
-                "owned outbox inode changed",
-            )?;
-        }
-        Ok(())
+        validate_with(conn, &self.lock, &self.run, self.path_identity, until)
     }
     pub(crate) fn scan(&mut self, until: Instant) -> Result<OutboxScan> {
         let run = self.validate(until)?;
@@ -408,8 +387,7 @@ impl<S: OutboxIo> Outbox<S> {
                     rusqlite::params![owner.run_id, frame.transition.event_seq],
                     |row| row.get(0),
                 )
-                .optional()
-                .map_err(crate::broker::members::db_err)?;
+                .optional()?;
                     if let Some(id) = id {
                         let view = storage::get_event(conn, id)?;
                         ensure(
@@ -452,7 +430,7 @@ impl<S: OutboxIo> Outbox<S> {
 mod tests {
     use super::*;
     use crate::broker::runtime::*;
-    use crate::runtime::runner::writer::contract_tests::{
+    use crate::runtime::runner::writer::test_support::{
         WriterFixture, deadline, frame, independent_frames, transition,
     };
     use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
@@ -460,7 +438,7 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
-    mod review {
+    mod supplied_connection_compaction {
         use super::*;
 
         fn ordinary_connection_work(conn: &rusqlite::Connection, timeout: i64) {
@@ -470,10 +448,9 @@ mod tests {
                 timeout
             );
             assert_eq!(
-                conn.query_row(
-                    "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10000) SELECT sum(x) FROM counter",
-                    [],
-                    |row| row.get::<_, i64>(0),
+                crate::runtime::runner::lifecycle::test_support::sum(
+                    conn,
+                    crate::runtime::runner::lifecycle::test_support::FAST_SUM,
                 )
                 .unwrap(),
                 50005000
@@ -481,11 +458,10 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_r2_compaction_cancels_supplied_connection_sql_preserves_bytes_and_retries()
-        {
+        fn compaction_cancels_supplied_connection_sql_preserves_bytes_and_retries() {
             let mut fixture = WriterFixture::new();
             let original = transition(&fixture, 1);
-            storage::persist_transition(
+            storage::persist_event(
                 &mut fixture.fixture.conn,
                 &fixture.fixture.run.owner(),
                 &original,
@@ -500,9 +476,14 @@ mod tests {
                 .conn
                 .busy_timeout(Duration::from_millis(137))
                 .unwrap();
-            fixture.fixture.conn.execute_batch(
-                "CREATE TEMP VIEW member_runtime_events AS SELECT original.* FROM main.member_runtime_events original WHERE (WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter)>0",
-            ).unwrap();
+            fixture
+                .fixture
+                .conn
+                .execute_batch(&format!(
+                    "CREATE TEMP VIEW member_runtime_events AS SELECT original.* FROM main.member_runtime_events original WHERE ({})>0",
+                    crate::runtime::runner::lifecycle::test_support::SLOW_SUM
+                ))
+                .unwrap();
             let interrupt = fixture.fixture.conn.get_interrupt_handle();
             let emergency = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let fired = emergency.clone();
@@ -570,12 +551,11 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_r2_compaction_restores_supplied_connection_after_success_error_and_unwind()
-        {
+        fn compaction_restores_supplied_connection_after_success_error_and_unwind() {
             for outcome in ["success", "error", "unwind"] {
                 let mut fixture = WriterFixture::new();
                 let original = transition(&fixture, 1);
-                storage::persist_transition(
+                storage::persist_event(
                     &mut fixture.fixture.conn,
                     &fixture.fixture.run.owner(),
                     &original,
@@ -648,7 +628,7 @@ mod tests {
                     ),
                     ..transition(&fixture, 1)
                 };
-                storage::persist_transition(
+                storage::persist_event(
                     &mut fixture.fixture.conn,
                     &fixture.fixture.run.owner(),
                     &original,
@@ -886,7 +866,7 @@ mod tests {
     }
 
     fn open(fixture: &WriterFixture, io: FaultIo) -> Outbox<FaultIo> {
-        Outbox::from_io(
+        Outbox::initialize(
             &fixture.fixture.conn,
             &fixture.fixture.run,
             fixture.lock.clone(),
@@ -898,16 +878,12 @@ mod tests {
 
     mod effective_policy_frames {
         use super::*;
-        use crate::runtime::runner::writer::contract_tests::effective_policy::{
-            frame_bodies, observation, unavailable,
+        use crate::runtime::runner::writer::test_support::{
+            frame_bodies, observation, outbox_frame, unavailable,
         };
 
         fn framed(body: &Value) -> Vec<u8> {
-            let body = serde_json::to_vec(body).unwrap();
-            let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
-            bytes.extend_from_slice(&Sha256::digest(&body));
-            bytes.extend(body);
-            bytes
+            outbox_frame(&serde_json::to_vec(body).unwrap())
         }
 
         #[test]
@@ -972,7 +948,7 @@ mod tests {
             forged["effective_policy"] = serde_json::to_value(&lost).unwrap();
             let on_disk = FaultIo::from_bytes(framed(&forged));
             assert!(
-                Outbox::from_io(
+                Outbox::initialize(
                     &fixture.fixture.conn,
                     &fixture.fixture.run,
                     fixture.lock.clone(),
@@ -984,7 +960,7 @@ mod tests {
             let mut malformed = serde_json::to_value(unavailable(&fixture, 1)).unwrap();
             malformed["effective_policy"] = serde_json::json!({"automatic_review":"available"});
             assert!(
-                Outbox::from_io(
+                Outbox::initialize(
                     &fixture.fixture.conn,
                     &fixture.fixture.run,
                     fixture.lock.clone(),
@@ -997,7 +973,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_frames_pin_big_endian_length_checksum_and_original_identity() {
+    fn outbox_frames_pin_big_endian_length_checksum_and_original_identity() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         let mut outbox = open(&fixture, io.clone());
@@ -1016,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_matching_duplicates_reconcile_but_conflicting_sequence_bytes_fail() {
+    fn outbox_matching_duplicates_reconcile_but_conflicting_sequence_bytes_fail() {
         let fixture = WriterFixture::new();
         let original = transition(&fixture, 1);
         let mut duplicate = frame(&original);
@@ -1029,7 +1005,7 @@ mod tests {
         let mut bytes = frame(&original);
         bytes.extend(frame(&changed));
         let io = FaultIo::from_bytes(bytes.clone());
-        let result = Outbox::from_io(
+        let result = Outbox::initialize(
             &fixture.fixture.conn,
             &fixture.fixture.run,
             fixture.lock.clone(),
@@ -1042,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_total_capacity_includes_frame_overhead_and_rejects_before_append() {
+    fn outbox_total_capacity_includes_frame_overhead_and_rejects_before_append() {
         let mut fixture = WriterFixture::new();
         fixture
             .fixture
@@ -1094,7 +1070,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_short_writes_preserve_the_complete_frame() {
+    fn outbox_short_writes_preserve_the_complete_frame() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         io.0.lock().unwrap().short_write = Some(1);
@@ -1105,7 +1081,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_reopen_recovers_complete_original_frames_in_order() {
+    fn outbox_reopen_recovers_complete_original_frames_in_order() {
         let fixture = WriterFixture::new();
         let values = [
             transition(&fixture, 1),
@@ -1129,7 +1105,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_each_incomplete_final_component_retains_the_valid_prefix() {
+    fn outbox_each_incomplete_final_component_retains_the_valid_prefix() {
         let fixture = WriterFixture::new();
         let first = frame(&transition(&fixture, 1));
         let second = frame(&transition(&fixture, 2));
@@ -1147,7 +1123,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_append_diagnoses_and_truncates_only_an_incomplete_tail() {
+    fn outbox_append_diagnoses_and_truncates_only_an_incomplete_tail() {
         let fixture = WriterFixture::new();
         let first = frame(&transition(&fixture, 1));
         let mut initial = first.clone();
@@ -1171,7 +1147,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_completed_corruption_preserves_all_original_bytes() {
+    fn outbox_completed_corruption_preserves_all_original_bytes() {
         let fixture = WriterFixture::new();
         let valid = frame(&transition(&fixture, 1));
         for corrupt in ["checksum", "json", "run", "sequence"] {
@@ -1196,7 +1172,7 @@ mod tests {
                 bytes[4..36].copy_from_slice(&digest);
             }
             let io = FaultIo::from_bytes(bytes.clone());
-            let result = Outbox::from_io(
+            let result = Outbox::initialize(
                 &fixture.fixture.conn,
                 &fixture.fixture.run,
                 fixture.lock.clone(),
@@ -1210,10 +1186,10 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_oversized_declared_length_fails_before_large_reads() {
+    fn outbox_oversized_declared_length_fails_before_large_reads() {
         let fixture = WriterFixture::new();
         let io = FaultIo::from_bytes(u32::MAX.to_be_bytes().to_vec());
-        let result = Outbox::from_io(
+        let result = Outbox::initialize(
             &fixture.fixture.conn,
             &fixture.fixture.run,
             fixture.lock.clone(),
@@ -1227,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_sync_failure_leaves_a_complete_recoverable_pending_frame() {
+    fn outbox_sync_failure_leaves_a_complete_recoverable_pending_frame() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         let mut outbox = open(&fixture, io.clone());
@@ -1257,7 +1233,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_partial_write_failure_is_an_explicit_tail_without_a_commit() {
+    fn outbox_partial_write_failure_is_an_explicit_tail_without_a_commit() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         let mut outbox = open(&fixture, io.clone());
@@ -1274,13 +1250,13 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_compaction_retains_committed_prefix_until_every_frame_is_durable() {
+    fn outbox_compaction_retains_committed_prefix_until_every_frame_is_durable() {
         let mut fixture = WriterFixture::new();
         let values = [transition(&fixture, 1), transition(&fixture, 2)];
         let io = FaultIo::from_bytes(values.iter().flat_map(frame).collect());
         let mut outbox = open(&fixture, io.clone());
         let original = io.snapshot_bytes();
-        storage::persist_transition(
+        storage::persist_event(
             &mut fixture.fixture.conn,
             &fixture.fixture.run.owner(),
             &values[0],
@@ -1295,7 +1271,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(io.snapshot_bytes(), original);
-        storage::persist_transition(
+        storage::persist_event(
             &mut fixture.fixture.conn,
             &fixture.fixture.run.owner(),
             &values[1],
@@ -1314,41 +1290,10 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_compaction_checks_event_message_association_before_removal() {
+    fn outbox_truncate_failure_preserves_committed_originals_for_retry() {
         let mut fixture = WriterFixture::new();
         let value = transition(&fixture, 1);
-        storage::persist_transition(
-            &mut fixture.fixture.conn,
-            &fixture.fixture.run.owner(),
-            &value,
-            PersistenceMode::Live,
-        )
-        .unwrap();
-        let io = FaultIo::from_bytes(frame(&value));
-        let mut outbox = open(&fixture, io.clone());
-        fixture
-            .fixture
-            .conn
-            .execute("UPDATE messages SET text='corrupt durable association'", [])
-            .unwrap();
-        let before = io.snapshot_bytes();
-        assert!(
-            outbox
-                .compact_committed(
-                    &mut fixture.fixture.conn,
-                    &fixture.fixture.run.owner(),
-                    deadline()
-                )
-                .is_err()
-        );
-        assert_eq!(io.snapshot_bytes(), before);
-    }
-
-    #[test]
-    fn runner_batch2_outbox_truncate_failure_preserves_committed_originals_for_retry() {
-        let mut fixture = WriterFixture::new();
-        let value = transition(&fixture, 1);
-        storage::persist_transition(
+        storage::persist_event(
             &mut fixture.fixture.conn,
             &fixture.fixture.run.owner(),
             &value,
@@ -1381,7 +1326,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_expired_deadline_and_stale_epoch_have_zero_content_effect() {
+    fn outbox_expired_deadline_and_stale_epoch_have_zero_content_effect() {
         let fixture = WriterFixture::new();
         let io = FaultIo::default();
         let mut outbox = open(&fixture, io.clone());
@@ -1411,7 +1356,7 @@ mod tests {
     }
 
     #[test]
-    fn runner_batch2_outbox_holds_the_original_lock_for_its_entire_content_lifetime() {
+    fn outbox_holds_the_original_lock_for_its_entire_content_lifetime() {
         let WriterFixture {
             fixture,
             artifacts: _artifacts,

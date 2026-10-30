@@ -33,6 +33,18 @@ impl CafleetError {
         }
     }
 
+    /// Keep the primary failure and append the cleanup failure when both fail.
+    pub(crate) fn merge_cleanup<T>(
+        result: Result<T, Self>,
+        cleanup: Result<(), Self>,
+    ) -> Result<T, Self> {
+        match (result, cleanup) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(cleanup.message())),
+            (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        }
+    }
+
     pub fn exit_code(&self) -> i32 {
         match self {
             CafleetError::WithDiagnostics { cause, .. } => cause.exit_code(),
@@ -65,6 +77,23 @@ impl CafleetError {
 impl fmt::Display for CafleetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message())
+    }
+}
+
+impl From<rusqlite::Error> for CafleetError {
+    fn from(e: rusqlite::Error) -> Self {
+        if matches!(
+            e.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+        ) {
+            return CafleetError::DatabaseBusy(format!("database error: {e}"));
+        }
+        if let rusqlite::Error::FromSqlConversionFailure(_, _, source) = &e
+            && let Some(error) = source.downcast_ref::<CafleetError>()
+        {
+            return error.clone();
+        }
+        CafleetError::App(format!("database error: {e}"))
     }
 }
 

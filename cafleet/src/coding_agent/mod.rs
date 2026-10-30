@@ -3,545 +3,27 @@ pub(crate) use native_version::native_launch_identity;
 #[cfg(test)]
 pub(crate) use native_version::version_token;
 mod policy;
-pub use policy::LaunchPolicySelection;
-mod profiles;
+pub(crate) use policy::LaunchPolicySelection;
+pub(crate) mod profiles;
+pub(crate) use profiles::ComposerOperation;
 #[cfg(test)]
 pub(crate) use profiles::ScreenRegion;
 pub(crate) use profiles::{
     AnnotationBlock, AnnotationFingerprint, Detector, MatchEvidence, ObservationKind,
     ScreenObservation, SemanticFingerprint,
 };
-pub use profiles::{AnswerCapability, NativeCapabilities, ProfileCatalog};
+pub(crate) use profiles::{AnswerCapability, ProfileCatalog};
 pub(crate) use profiles::{AnswerMatch, AnswerPlan};
 pub(crate) use profiles::{AnswerStage, StageGate};
-#[cfg_attr(
-    not(test),
-    expect(
-        unused_imports,
-        reason = "the reviewed input coordinator consumes the canonical composer exports"
-    )
-)]
-pub(crate) use profiles::{ComposerOperation, ComposerPlan};
-#[cfg(test)]
-pub(crate) use profiles::{
-    background_rewrite, gated_fixture_definition, gated_fixture_form, gated_reason_dialog,
-    inspection_fixture_definition, inspection_fixture_form,
-};
-
-#[cfg(test)]
-mod policy_contract_tests {
-    use super::*;
-    use crate::broker::runtime::ModeSource;
-
-    fn version(backend: CodingAgent) -> Option<&'static str> {
-        match backend {
-            CodingAgent::Claude => Some("2.1.302"),
-            CodingAgent::Codex => Some("0.163.0"),
-            CodingAgent::Opencode => None,
-        }
-    }
-
-    fn permission_argv(backend: CodingAgent, selected: &str) -> Vec<String> {
-        match backend {
-            CodingAgent::Claude => vec!["--permission-mode".into(), selected.into()],
-            CodingAgent::Codex if selected == "approve-for-me" => vec!["--approve-for-me".into()],
-            CodingAgent::Codex => vec![
-                "--ask-for-approval".into(),
-                selected.into(),
-                "--sandbox".into(),
-                "workspace-write".into(),
-            ],
-            CodingAgent::Opencode => vec!["--agent".into(), selected.into()],
-        }
-    }
-
-    #[test]
-    fn runtime_policy_omission_selects_each_backends_automatic_default_argv() {
-        for &backend in CodingAgent::all() {
-            let selection = backend.resolve_policy(version(backend), None).unwrap();
-            let expected_mode = match backend {
-                CodingAgent::Claude => "auto",
-                CodingAgent::Codex => "approve-for-me",
-                CodingAgent::Opencode => "cafleet",
-            };
-            assert_eq!(selection.requested_mode, None);
-            assert_eq!(selection.resolved_mode, expected_mode);
-            assert_eq!(selection.mode_source, ModeSource::Default);
-            assert_eq!(
-                selection.permission_argv,
-                permission_argv(backend, expected_mode)
-            );
-            assert_eq!(
-                backend
-                    .build_spawn_argv_with_policy(
-                        "literal '$x' `text`",
-                        "fixture name",
-                        Some("provider/model"),
-                        None,
-                        &selection
-                    )
-                    .unwrap(),
-                backend.build_spawn_argv(
-                    "literal '$x' `text`",
-                    "fixture name",
-                    Some("provider/model"),
-                    None
-                )
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_policy_each_registered_explicit_choice_maps_to_one_literal_native_mode() {
-        for &backend in CodingAgent::all() {
-            let choices = backend.policy_choices(version(backend));
-            assert!(!choices.is_empty());
-            let mut unique = std::collections::BTreeSet::new();
-            for mode in choices {
-                assert!(unique.insert(mode.clone()), "duplicate policy {mode}");
-                let selection = backend
-                    .resolve_policy(version(backend), Some(&mode))
-                    .unwrap();
-                assert_eq!(selection.requested_mode.as_deref(), Some(mode.as_str()));
-                assert_eq!(selection.resolved_mode, mode);
-                assert_eq!(selection.mode_source, ModeSource::Explicit);
-                assert_eq!(selection.permission_argv, permission_argv(backend, &mode));
-                let mut expected: Vec<String> = match backend {
-                    CodingAgent::Claude => vec![
-                        "claude".into(),
-                        "--permission-mode".into(),
-                        mode.clone(),
-                        "--prompt-suggestions".into(),
-                        "false".into(),
-                        "--allowedTools".into(),
-                        "Bash(cafleet message *)".into(),
-                        "--name".into(),
-                        "fixture name".into(),
-                    ],
-                    CodingAgent::Codex => {
-                        let mut argv = vec!["codex".into()];
-                        argv.extend(permission_argv(backend, &mode));
-                        argv
-                    }
-                    CodingAgent::Opencode => vec![
-                        "opencode".into(),
-                        "mini".into(),
-                        "--standalone".into(),
-                        "--agent".into(),
-                        mode.clone(),
-                    ],
-                };
-                expected.extend(["--model".into(), "provider/model".into()]);
-                let effort = (backend != CodingAgent::Opencode).then_some("high");
-                match backend {
-                    CodingAgent::Claude => expected.extend(["--effort".into(), "high".into()]),
-                    CodingAgent::Codex => {
-                        expected.push("--config=model_reasoning_effort=high".into())
-                    }
-                    CodingAgent::Opencode => expected.push("--prompt".into()),
-                }
-                expected.push("literal '$x' `text` assignment".into());
-                assert_eq!(
-                    backend
-                        .build_spawn_argv_with_policy(
-                            "literal '$x' `text` assignment",
-                            "fixture name",
-                            Some("provider/model"),
-                            effort,
-                            &selection
-                        )
-                        .unwrap(),
-                    expected
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn runtime_policy_claude_default_and_manual_preserve_their_requested_spelling() {
-        let backend = CodingAgent::Claude;
-        for mode in ["default", "manual"] {
-            assert!(
-                backend
-                    .policy_choices(Some("2.1.302"))
-                    .contains(&mode.into())
-            );
-            let selected = backend.resolve_policy(Some("2.1.302"), Some(mode)).unwrap();
-            assert_eq!(selected.resolved_mode, mode);
-            assert_eq!(selected.permission_argv, ["--permission-mode", mode]);
-        }
-    }
-
-    #[test]
-    fn runtime_policy_invalid_explicit_selection_reports_backend_and_catalog_choices() {
-        for &backend in CodingAgent::all() {
-            for invalid in ["", " ", "unsupported-fixture-mode"] {
-                let failure = backend
-                    .resolve_policy(version(backend), Some(invalid))
-                    .expect_err("invalid explicit policy must fail");
-                assert!(matches!(failure, CafleetError::Usage(_)));
-                let text = failure.message();
-                assert!(text.contains(backend.name()), "{text}");
-                for choice in backend.policy_choices(version(backend)) {
-                    assert!(text.contains(&choice), "{text}");
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn runtime_policy_fixed_preset_and_unknown_native_version_keep_launch_intent() {
-        let backend = CodingAgent::Opencode;
-        assert_eq!(backend.policy_choices(None), ["cafleet", "cafleet-ask"]);
-        assert_eq!(
-            backend
-                .resolve_policy(None, Some("cafleet"))
-                .unwrap()
-                .mode_source,
-            ModeSource::Explicit
-        );
-        for &backend in CodingAgent::all() {
-            let known = backend.resolve_policy(version(backend), None).unwrap();
-            let unknown = backend.resolve_policy(None, None).unwrap();
-            assert_eq!(unknown.resolved_mode, known.resolved_mode);
-            assert_eq!(unknown.permission_argv, known.permission_argv);
-        }
-    }
-
-    #[test]
-    fn runtime_policy_opencode_catalog_offers_cafleet_and_cafleet_ask_for_every_native_version() {
-        for native_version in [None, Some("2.1.4"), Some("2.1.3"), Some("9.0.0-beta.1")] {
-            assert_eq!(
-                CodingAgent::Opencode.policy_choices(native_version),
-                ["cafleet", "cafleet-ask"],
-                "{native_version:?}"
-            );
-            for mode in ["cafleet", "cafleet-ask"] {
-                let selection = CodingAgent::Opencode
-                    .resolve_policy(native_version, Some(mode))
-                    .unwrap();
-                assert_eq!(selection.permission_argv, ["--agent", mode]);
-            }
-        }
-    }
-
-    #[test]
-    fn runtime_policy_opencode_explicit_cafleet_ask_launches_its_agent_and_records_launch_intent() {
-        let selection = CodingAgent::Opencode
-            .resolve_policy(Some("2.1.4"), Some("cafleet-ask"))
-            .unwrap();
-        assert_eq!(selection.requested_mode.as_deref(), Some("cafleet-ask"));
-        assert_eq!(selection.resolved_mode, "cafleet-ask");
-        assert_eq!(selection.mode_source, ModeSource::Explicit);
-        assert_eq!(
-            serde_json::to_value(&selection.permission_argv).unwrap(),
-            serde_json::json!(["--agent", "cafleet-ask"])
-        );
-        assert_eq!(
-            CodingAgent::Opencode
-                .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
-                .unwrap(),
-            [
-                "opencode",
-                "mini",
-                "--standalone",
-                "--agent",
-                "cafleet-ask",
-                "--prompt",
-                "assignment"
-            ]
-        );
-        assert_eq!(
-            CodingAgent::Opencode
-                .build_spawn_argv_with_policy(
-                    "assignment",
-                    "worker",
-                    Some("provider/model"),
-                    None,
-                    &selection
-                )
-                .unwrap(),
-            [
-                "opencode",
-                "mini",
-                "--standalone",
-                "--agent",
-                "cafleet-ask",
-                "--model",
-                "provider/model",
-                "--prompt",
-                "assignment"
-            ]
-        );
-    }
-
-    #[test]
-    fn runtime_policy_opencode_omitted_selection_keeps_the_cafleet_agent_as_default() {
-        let selection = CodingAgent::Opencode
-            .resolve_policy(Some("2.1.4"), None)
-            .unwrap();
-        assert_eq!(selection.requested_mode, None);
-        assert_eq!(selection.resolved_mode, "cafleet");
-        assert_eq!(selection.mode_source, ModeSource::Default);
-        assert_eq!(selection.permission_argv, ["--agent", "cafleet"]);
-        assert_eq!(
-            CodingAgent::Opencode
-                .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
-                .unwrap(),
-            [
-                "opencode",
-                "mini",
-                "--standalone",
-                "--agent",
-                "cafleet",
-                "--prompt",
-                "assignment"
-            ]
-        );
-    }
-
-    #[test]
-    fn runtime_policy_opencode_unknown_choice_fails_with_the_exact_usage_error() {
-        for native_version in [None, Some("2.1.4")] {
-            let failure = CodingAgent::Opencode
-                .resolve_policy(native_version, Some("ask"))
-                .expect_err("unknown OpenCode policy must fail");
-            assert!(matches!(failure, CafleetError::Usage(_)));
-            assert_eq!(
-                failure.message(),
-                "--permission-mode for opencode must be one of cafleet, cafleet-ask (got 'ask')"
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_policy_help_lists_both_opencode_choices_with_the_cafleet_default() {
-        assert!(
-            CodingAgent::permission_mode_help()
-                .contains("opencode: cafleet, cafleet-ask (default cafleet)"),
-            "{}",
-            CodingAgent::permission_mode_help()
-        );
-    }
-
-    #[test]
-    fn runtime_policy_help_lists_every_catalog_with_the_automatic_defaults() {
-        assert_eq!(
-            CodingAgent::permission_mode_help(),
-            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet)"
-        );
-    }
-
-    #[test]
-    fn runtime_policy_codex_catalog_appends_approve_for_me_after_the_existing_choices() {
-        for native_version in [None, Some("0.163.0")] {
-            assert_eq!(
-                CodingAgent::Codex.policy_choices(native_version),
-                ["on-request", "never", "approve-for-me"],
-                "{native_version:?}"
-            );
-        }
-        for native_version in [None, Some("2.1.302")] {
-            assert_eq!(
-                CodingAgent::Claude.policy_choices(native_version),
-                [
-                    "default",
-                    "manual",
-                    "dontAsk",
-                    "acceptEdits",
-                    "auto",
-                    "bypassPermissions",
-                    "plan"
-                ],
-                "{native_version:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_policy_omitted_claude_launches_auto_and_records_default_launch_intent() {
-        for native_version in [Some("2.1.302"), None, Some("2.1.306")] {
-            let selection = CodingAgent::Claude
-                .resolve_policy(native_version, None)
-                .unwrap();
-            assert_eq!(selection.requested_mode, None, "{native_version:?}");
-            assert_eq!(selection.resolved_mode, "auto", "{native_version:?}");
-            assert_eq!(selection.mode_source, ModeSource::Default);
-            assert_eq!(
-                serde_json::to_value(&selection.permission_argv).unwrap(),
-                serde_json::json!(["--permission-mode", "auto"])
-            );
-            assert_eq!(
-                CodingAgent::Claude
-                    .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
-                    .unwrap(),
-                [
-                    "claude",
-                    "--permission-mode",
-                    "auto",
-                    "--prompt-suggestions",
-                    "false",
-                    "--allowedTools",
-                    "Bash(cafleet message *)",
-                    "--name",
-                    "worker",
-                    "assignment"
-                ],
-                "{native_version:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_policy_omitted_codex_launches_approve_for_me_as_its_single_flag() {
-        for native_version in [Some("0.163.0"), None, Some("0.164.0")] {
-            let selection = CodingAgent::Codex
-                .resolve_policy(native_version, None)
-                .unwrap();
-            assert_eq!(selection.requested_mode, None, "{native_version:?}");
-            assert_eq!(
-                selection.resolved_mode, "approve-for-me",
-                "{native_version:?}"
-            );
-            assert_eq!(selection.mode_source, ModeSource::Default);
-            assert_eq!(
-                serde_json::to_value(&selection.permission_argv).unwrap(),
-                serde_json::json!(["--approve-for-me"])
-            );
-            assert_eq!(
-                CodingAgent::Codex
-                    .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
-                    .unwrap(),
-                ["codex", "--approve-for-me", "assignment"],
-                "{native_version:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_policy_explicit_approve_for_me_records_explicit_launch_intent() {
-        for native_version in [Some("0.163.0"), None] {
-            let selection = CodingAgent::Codex
-                .resolve_policy(native_version, Some("approve-for-me"))
-                .unwrap();
-            assert_eq!(selection.requested_mode.as_deref(), Some("approve-for-me"));
-            assert_eq!(selection.resolved_mode, "approve-for-me");
-            assert_eq!(selection.mode_source, ModeSource::Explicit);
-            assert_eq!(selection.permission_argv, ["--approve-for-me"]);
-            assert_eq!(
-                CodingAgent::Codex
-                    .build_spawn_argv_with_policy(
-                        "assignment",
-                        "worker",
-                        Some("provider/model"),
-                        Some("high"),
-                        &selection
-                    )
-                    .unwrap(),
-                [
-                    "codex",
-                    "--approve-for-me",
-                    "--model",
-                    "provider/model",
-                    "--config=model_reasoning_effort=high",
-                    "assignment"
-                ]
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_policy_previous_defaults_remain_explicit_choices_with_unchanged_argv() {
-        for (backend, version, mode, argv) in [
-            (
-                CodingAgent::Claude,
-                "2.1.302",
-                "dontAsk",
-                &["--permission-mode", "dontAsk"][..],
-            ),
-            (
-                CodingAgent::Codex,
-                "0.163.0",
-                "on-request",
-                &[
-                    "--ask-for-approval",
-                    "on-request",
-                    "--sandbox",
-                    "workspace-write",
-                ][..],
-            ),
-            (
-                CodingAgent::Codex,
-                "0.163.0",
-                "never",
-                &[
-                    "--ask-for-approval",
-                    "never",
-                    "--sandbox",
-                    "workspace-write",
-                ][..],
-            ),
-            (
-                CodingAgent::Opencode,
-                "2.1.4",
-                "cafleet",
-                &["--agent", "cafleet"][..],
-            ),
-            (
-                CodingAgent::Opencode,
-                "2.1.4",
-                "cafleet-ask",
-                &["--agent", "cafleet-ask"][..],
-            ),
-        ] {
-            let selection = backend.resolve_policy(Some(version), Some(mode)).unwrap();
-            assert_eq!(selection.requested_mode.as_deref(), Some(mode));
-            assert_eq!(selection.resolved_mode, mode);
-            assert_eq!(selection.mode_source, ModeSource::Explicit);
-            assert_eq!(selection.permission_argv, argv, "{backend:?} {mode}");
-        }
-    }
-
-    #[test]
-    fn runtime_policy_codex_unknown_choice_fails_with_the_exact_usage_error() {
-        for native_version in [None, Some("0.163.0")] {
-            for value in ["auto", "untrusted", "approve_for_me"] {
-                let failure = CodingAgent::Codex
-                    .resolve_policy(native_version, Some(value))
-                    .expect_err("unknown Codex policy must fail");
-                assert!(matches!(failure, CafleetError::Usage(_)));
-                assert_eq!(failure.exit_code(), 2);
-                assert_eq!(
-                    failure.message(),
-                    format!(
-                        "--permission-mode for codex must be one of on-request, never, approve-for-me (got '{value}')"
-                    )
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn runtime_policy_foreign_selection_is_rejected_before_native_argv_construction() {
-        let selected = CodingAgent::Claude
-            .resolve_policy(Some("2.1.302"), Some("default"))
-            .unwrap();
-        assert!(
-            CodingAgent::Codex
-                .build_spawn_argv_with_policy("assignment", "worker", None, None, &selected)
-                .is_err()
-        );
-    }
-}
 
 use std::path::{Path, PathBuf};
 
 use clap::ValueEnum;
 
-use crate::config_dir::{self, EnvLookup, ResolvedDir};
+use crate::config_dir::{self, EnvLookup};
 use crate::error::CafleetError;
 
-pub trait SpawnProbe {
+pub(crate) trait SpawnProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf>;
     fn home_dir(&self) -> PathBuf;
     fn env_var(&self, name: &str) -> Option<String>;
@@ -549,18 +31,18 @@ pub trait SpawnProbe {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lower")]
-pub enum CodingAgent {
+pub(crate) enum CodingAgent {
     Claude,
     Codex,
     Opencode,
 }
 
 impl CodingAgent {
-    pub fn all() -> &'static [Self] {
+    pub(crate) fn all() -> &'static [Self] {
         Self::value_variants()
     }
 
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -568,11 +50,7 @@ impl CodingAgent {
         }
     }
 
-    pub fn binary_name(self) -> &'static str {
-        self.name()
-    }
-
-    pub fn config_variable(self) -> &'static str {
+    pub(crate) fn config_variable(self) -> &'static str {
         match self {
             Self::Claude => "CLAUDE_CONFIG_DIR",
             Self::Codex => "CODEX_HOME",
@@ -580,15 +58,20 @@ impl CodingAgent {
         }
     }
 
-    pub fn config_dir(self, env: EnvLookup<'_>, home: &Path) -> Result<ResolvedDir, CafleetError> {
-        match self {
-            Self::Claude => config_dir::claude_config_dir(env, home),
-            Self::Codex => config_dir::codex_home(env, home),
-            Self::Opencode => config_dir::opencode_preset_base(env, home),
-        }
+    pub(crate) fn config_dir(
+        self,
+        env: EnvLookup<'_>,
+        home: &Path,
+    ) -> Result<PathBuf, CafleetError> {
+        let default = match self {
+            Self::Claude => home.join(".claude"),
+            Self::Codex => home.join(".codex"),
+            Self::Opencode => config_dir::opencode_skills_base(home),
+        };
+        config_dir::resolve(self.config_variable(), env, default)
     }
 
-    pub fn spawn_environment(
+    pub(crate) fn spawn_environment(
         self,
         database_url: &str,
         env: EnvLookup<'_>,
@@ -601,11 +84,11 @@ impl CodingAgent {
         Ok(environment)
     }
 
-    pub fn required_preset(self, config: &Path, mode: &str) -> Option<PathBuf> {
+    pub(crate) fn required_preset(self, config: &Path, mode: &str) -> Option<PathBuf> {
         (self == Self::Opencode).then(|| config.join(format!("agents/{mode}.md")))
     }
 
-    pub fn validate_model(self, model: Option<&str>) -> Result<(), CafleetError> {
+    pub(crate) fn validate_model(self, model: Option<&str>) -> Result<(), CafleetError> {
         if self == Self::Opencode
             && let Some(model) = model
             && !model
@@ -619,7 +102,7 @@ impl CodingAgent {
         Ok(())
     }
 
-    pub fn validate_effort(self, effort: Option<&str>) -> Result<(), CafleetError> {
+    pub(crate) fn validate_effort(self, effort: Option<&str>) -> Result<(), CafleetError> {
         let Some(effort) = effort else { return Ok(()) };
         let choices = match self {
             Self::Claude => &["low", "medium", "high", "xhigh", "max"][..],
@@ -641,16 +124,16 @@ impl CodingAgent {
         }
     }
 
-    pub fn ensure_available(
+    pub(crate) fn ensure_available(
         self,
         probe: &dyn SpawnProbe,
         mode: &str,
     ) -> Result<PathBuf, CafleetError> {
         let config = self.config_dir(&|name| probe.env_var(name), &probe.home_dir())?;
-        let executable = probe.resolve_binary(self.binary_name()).ok_or_else(|| {
-            CafleetError::App(format!("binary {} not found on PATH", self.binary_name()))
+        let executable = probe.resolve_binary(self.name()).ok_or_else(|| {
+            CafleetError::App(format!("binary {} not found on PATH", self.name()))
         })?;
-        if let Some(preset) = self.required_preset(&config.path, mode) {
+        if let Some(preset) = self.required_preset(&config, mode) {
             std::fs::read(&preset).map_err(|error| CafleetError::App(format!(
                 "cannot read opencode agent preset at {}: {error}; run 'cafleet setup --coding-agent opencode' first", preset.display()
             )))?;
@@ -658,7 +141,7 @@ impl CodingAgent {
         Ok(executable)
     }
 
-    pub fn launch_argv(
+    pub(crate) fn launch_argv(
         self,
         executable: &Path,
         prompt: &str,
@@ -681,23 +164,9 @@ impl CodingAgent {
         argv[0] = program.into();
         Ok(argv)
     }
-
-    pub fn build_spawn_argv(
-        self,
-        prompt: &str,
-        display_name: &str,
-        model: Option<&str>,
-        effort: Option<&str>,
-    ) -> Vec<String> {
-        let policy = self
-            .resolve_policy(None, None)
-            .expect("registered backend has a valid default policy");
-        self.build_spawn_argv_with_policy(prompt, display_name, model, effort, &policy)
-            .expect("spawn inputs satisfy backend validation")
-    }
 }
 
-pub fn coding_agent(name: &str) -> Option<CodingAgent> {
+pub(crate) fn coding_agent(name: &str) -> Option<CodingAgent> {
     CodingAgent::all()
         .iter()
         .copied()
@@ -717,7 +186,7 @@ mod tests {
 
     impl SpawnProbe for Probe {
         fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
-            assert_eq!(name, self.agent.binary_name());
+            assert_eq!(name, self.agent.name());
             self.available
                 .then(|| PathBuf::from("/fixture/bin").join(name))
         }
@@ -781,12 +250,15 @@ mod tests {
                 }
                 expected.push(prompt.into());
                 assert_eq!(
-                    agent.build_spawn_argv(
-                        prompt,
-                        "display name",
-                        configured.then_some("provider/model with spaces"),
-                        effort
-                    ),
+                    agent
+                        .build_spawn_argv_with_policy(
+                            prompt,
+                            "display name",
+                            configured.then_some("provider/model with spaces"),
+                            effort,
+                            &agent.resolve_policy(None, None).unwrap()
+                        )
+                        .unwrap(),
                     expected
                 );
             }
@@ -825,190 +297,6 @@ mod tests {
             agent.validate_model(Some("arbitrary model")).unwrap();
         }
         assert!(CodingAgent::Opencode.validate_effort(Some("high")).is_err());
-    }
-
-    mod native_version_probe {
-        use super::*;
-        use crate::broker::runtime::{Coverage, ProfileMatch};
-        use std::os::unix::fs::PermissionsExt;
-        use std::time::{Duration, Instant};
-
-        fn stub(dir: &Path, name: &str, body: &str) -> PathBuf {
-            let path = dir.join(name);
-            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-            path
-        }
-
-        fn probe(executable: &Path) -> Result<String, CafleetError> {
-            CodingAgent::Claude
-                .probe_native_version(executable, Instant::now() + Duration::from_secs(2))
-        }
-
-        #[test]
-        fn native_version_probe_records_the_single_version_token_of_a_version_only_invocation() {
-            let dir = tempfile::tempdir().unwrap();
-            let only_version =
-                "[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nread -r ignored || true";
-            for (index, (output, expected)) in [
-                ("2.1.302 (Claude Code)", "2.1.302"),
-                ("codex-cli 0.163.0", "0.163.0"),
-                ("opencode v2.1.4", "2.1.4"),
-                ("1.2.3-beta.1", "1.2.3-beta.1"),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let path = stub(
-                    dir.path(),
-                    &format!("native-{index}"),
-                    &format!("{only_version}\nprintf '%s\\n' '{output}'\nprintf 'ignored\\n' >&2"),
-                );
-                assert_eq!(probe(&path).unwrap(), expected, "{output}");
-            }
-        }
-
-        #[test]
-        fn native_version_probe_rejects_failed_ambiguous_invalid_or_missing_versions() {
-            let dir = tempfile::tempdir().unwrap();
-            for (index, (case, body)) in [
-                ("nonzero exit", "printf '2.1.302\\n'; exit 1"),
-                ("no version token", "printf 'Claude Code\\n'"),
-                ("two version tokens", "printf '2.1.302 2.1.303\\n'"),
-                (
-                    "v-prefixed and plain version tokens",
-                    "printf 'v2.1.4 2.1.5\\n'",
-                ),
-                (
-                    "version outside the first line",
-                    "printf 'Claude Code\\n2.1.302\\n'",
-                ),
-                ("empty output", "exit 0"),
-                ("non-UTF-8 output", "printf '2.1.302 \\377\\n'"),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let path = stub(dir.path(), &format!("native-{index}"), body);
-                assert!(probe(&path).is_err(), "{case} must not yield a version");
-            }
-            assert!(
-                probe(&dir.path().join("absent")).is_err(),
-                "unstartable binary"
-            );
-        }
-
-        #[test]
-        fn native_version_probe_kills_and_reaps_a_probe_running_at_its_bound() {
-            let dir = tempfile::tempdir().unwrap();
-            let pid_file = dir.path().join("probe.pid");
-            let path = stub(
-                dir.path(),
-                "native",
-                &format!(
-                    "printf '%s' \"$$\" > '{}'\nexec /bin/sleep 30",
-                    pid_file.display()
-                ),
-            );
-            let start = Instant::now();
-            let result =
-                CodingAgent::Claude.probe_native_version(&path, start + Duration::from_millis(300));
-            assert!(result.is_err());
-            assert!(
-                start.elapsed() < Duration::from_secs(2),
-                "{:?}",
-                start.elapsed()
-            );
-            let pid: i32 = std::fs::read_to_string(&pid_file).unwrap().parse().unwrap();
-            assert_eq!(
-                nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None),
-                Err(nix::errno::Errno::ESRCH),
-                "the timed-out probe is killed and reaped"
-            );
-        }
-
-        #[test]
-        fn native_launch_identity_selects_the_bundled_profile_or_records_unknown_with_a_warning() {
-            let catalog = ProfileCatalog::bundled().unwrap();
-            let tested =
-                native_launch_identity(CodingAgent::Claude, Ok("2.1.302".into()), &catalog);
-            assert_eq!(tested.native_version.as_deref(), Some("2.1.302"));
-            assert_eq!(
-                tested.profile_version,
-                catalog
-                    .capabilities(CodingAgent::Claude, Some("2.1.302"))
-                    .profile_version
-            );
-            assert!(tested.profile_version.is_some());
-            assert_eq!(tested.profile_match, Some(ProfileMatch::Exact));
-            assert_eq!(tested.coverage, Coverage::Tested);
-            assert_eq!(tested.warning, None);
-            let failed = native_launch_identity(
-                CodingAgent::Codex,
-                Err(CafleetError::App("probe exited with status 1".into())),
-                &catalog,
-            );
-            assert_eq!(failed.native_version, None);
-            assert_eq!(failed.profile_version, None);
-            assert_eq!(failed.profile_match, None);
-            assert_eq!(failed.coverage, Coverage::Unknown);
-            assert_eq!(
-                failed.warning.as_deref(),
-                Some(
-                    "Warning: native version unavailable for codex: probe exited with status 1; coverage unknown."
-                )
-            );
-        }
-
-        #[test]
-        fn native_launch_identity_runs_an_unprofiled_version_under_the_newest_bundled_profile() {
-            let catalog = ProfileCatalog::bundled().unwrap();
-            for (backend, pinned, probes) in [
-                (CodingAgent::Claude, "2.1.302", ["2.1.306", "2.1.301"]),
-                (CodingAgent::Codex, "0.163.0", ["0.164.0", "0.162.0"]),
-                (CodingAgent::Opencode, "2.1.4", ["2.1.5", "2.1.3"]),
-            ] {
-                let exact = catalog.capabilities(backend, Some(pinned));
-                let profile = exact
-                    .profile_version
-                    .clone()
-                    .expect("each backend bundles a profile for its pinned version");
-                for probe in probes {
-                    let identity = native_launch_identity(backend, Ok(probe.into()), &catalog);
-                    assert_eq!(identity.native_version.as_deref(), Some(probe));
-                    assert_eq!(identity.profile_version.as_deref(), Some(profile.as_str()));
-                    assert_eq!(identity.profile_match, Some(ProfileMatch::Fallback));
-                    assert_eq!(identity.coverage, exact.detection, "{backend:?} {probe}");
-                    assert_eq!(identity.coverage, Coverage::Tested, "{backend:?} {probe}");
-                    assert_eq!(
-                        identity.warning,
-                        Some(format!(
-                            "Warning: no bundled profile for {} {probe}; using {profile} (profile_match=fallback).",
-                            backend.name()
-                        ))
-                    );
-                }
-                let exact_identity = native_launch_identity(backend, Ok(pinned.into()), &catalog);
-                assert_eq!(exact_identity.profile_match, Some(ProfileMatch::Exact));
-                assert_eq!(exact_identity.warning, None);
-            }
-        }
-
-        #[test]
-        fn native_launch_identity_without_any_profile_for_the_backend_records_unknown_silently() {
-            let catalog = ProfileCatalog::from_definitions(
-                &crate::coding_agent::profiles::inspection_fixture_definition(),
-            )
-            .unwrap();
-            for backend in [CodingAgent::Claude, CodingAgent::Opencode] {
-                let identity = native_launch_identity(backend, Ok("2.1.302".into()), &catalog);
-                assert_eq!(identity.native_version.as_deref(), Some("2.1.302"));
-                assert_eq!(identity.profile_version, None);
-                assert_eq!(identity.profile_match, None);
-                assert_eq!(identity.coverage, Coverage::Unknown);
-                assert_eq!(identity.warning, None);
-            }
-        }
     }
 
     #[test]
@@ -1052,7 +340,7 @@ mod tests {
             } else {
                 assert_eq!(
                     agent.ensure_available(&probe, &mode).unwrap(),
-                    PathBuf::from("/fixture/bin").join(agent.binary_name())
+                    PathBuf::from("/fixture/bin").join(agent.name())
                 );
             }
         }
@@ -1264,6 +552,93 @@ mod tests {
         std::fs::remove_file(&ask_preset).unwrap();
         std::fs::create_dir(&ask_preset).unwrap();
         assert_missing("cafleet-ask", &ask_preset);
+    }
+
+    fn home() -> PathBuf {
+        PathBuf::from("/home/tester")
+    }
+
+    fn default_config_dir(agent: CodingAgent) -> PathBuf {
+        home().join(match agent {
+            CodingAgent::Claude => ".claude",
+            CodingAgent::Codex => ".codex",
+            CodingAgent::Opencode => ".config/opencode",
+        })
+    }
+
+    #[test]
+    fn unset_variable_resolves_the_default() {
+        for &agent in CodingAgent::all() {
+            assert_eq!(
+                agent.config_dir(&|_| None, &home()).unwrap(),
+                default_config_dir(agent),
+                "default for {agent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn absolute_value_is_used_verbatim() {
+        for &agent in CodingAgent::all() {
+            let var = agent.config_variable();
+            let lookup = move |name: &str| (name == var).then(|| "/custom/cfg".to_string());
+            assert_eq!(
+                agent.config_dir(&lookup, &home()).unwrap(),
+                PathBuf::from("/custom/cfg")
+            );
+        }
+    }
+
+    #[test]
+    fn each_resolver_reads_only_its_own_variable() {
+        for &agent in CodingAgent::all() {
+            let var = agent.config_variable();
+            let lookup = move |name: &str| (name != var).then(|| "/other/cfg".to_string());
+            assert_eq!(
+                agent.config_dir(&lookup, &home()).unwrap(),
+                default_config_dir(agent),
+                "{var}'s resolver must ignore every other variable"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_value_fails_with_the_pinned_error() {
+        for &agent in CodingAgent::all() {
+            let var = agent.config_variable();
+            let lookup = move |name: &str| (name == var).then(String::new);
+            let err = agent.config_dir(&lookup, &home()).unwrap_err();
+            assert!(matches!(err, CafleetError::App(_)), "App error for {var}");
+            assert_eq!(
+                err.message(),
+                format!("{var} must be an absolute path (got '')")
+            );
+        }
+    }
+
+    #[test]
+    fn relative_or_tilde_value_fails_with_the_pinned_error() {
+        for &agent in CodingAgent::all() {
+            let var = agent.config_variable();
+            for value in ["cfg/dir", "~/cfg"] {
+                let lookup = move |name: &str| (name == var).then(|| value.to_string());
+                let err = agent.config_dir(&lookup, &home()).unwrap_err();
+                assert!(matches!(err, CafleetError::App(_)), "App error for {var}");
+                assert_eq!(
+                    err.message(),
+                    format!("{var} must be an absolute path (got '{value}')")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn opencode_config_dir_defaults_to_the_skills_base_the_native_cli_reads() {
+        let home = home();
+        assert_eq!(
+            CodingAgent::Opencode.config_dir(&|_| None, &home).unwrap(),
+            config_dir::opencode_skills_base(&home)
+        );
     }
 
     #[test]

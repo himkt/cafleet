@@ -1,1 +1,0 @@
-../../../../../docs/docs/concepts/member-permission-events.md

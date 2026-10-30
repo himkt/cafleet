@@ -1,9 +1,8 @@
 use super::*;
-use crate::broker::members::db_err;
 use crate::broker::records::{MemberStatus, Placement};
 use crate::broker::runtime::{self as storage, *};
 use crate::config::Settings;
-use crate::input::{PaneLock, inherited_database_deadline};
+use crate::input::{PaneLock, bounded_by_inherited};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -16,16 +15,14 @@ pub(super) fn receipt_placement(conn: &Connection, run: &RunRecord) -> Result<Op
             "SELECT m.status,f.deleted_at FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id WHERE m.member_id=?1 AND m.fleet_id=?2",
             params![run.member_id, run.fleet_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(db_err)?;
+        )?;
     let placement = conn
         .query_row(
             "SELECT backend,mux_session,mux_window_id,mux_pane_id,coding_agent,created_at FROM member_placements WHERE member_id=?1",
             [run.member_id],
             |row| Placement::from_row(row, 0),
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     ensure(
         placement.is_some() || status != MemberStatus::Active || deleted.is_some(),
         "active receipt member requires its recorded placement",
@@ -138,8 +135,7 @@ impl<'a> ExclusiveReceiptGuard<'a> {
         deadline: Instant,
         host: &mut impl RecoveryHost,
     ) -> Result<Self> {
-        let deadline = inherited_database_deadline(conn)
-            .map_or(deadline, |bound| deadline.min(bound.instant()));
+        let deadline = bounded_by_inherited(conn, deadline);
         check_deadline(Instant::now(), deadline)?;
         ensure(
             input.input_id > 0,
@@ -149,15 +145,11 @@ impl<'a> ExclusiveReceiptGuard<'a> {
             input.state != InputState::Settled,
             "exclusive receipt requires an unresolved input",
         )?;
-        ensure(
-            pane.0.is_some() == pane.1.is_some(),
-            "receipt placement and pane guard must form a matching pair",
-        )?;
         with_database_deadline(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             validate_snapshot(&tx, settings, input, run, pane.0, pane.1)?;
             check_deadline(Instant::now(), deadline)?;
-            tx.commit().map_err(db_err)
+            tx.commit().map_err(crate::error::CafleetError::from)
         })?;
         host.checkpoint(RecoveryBoundary::AfterSnapshot, run, deadline)?;
         check_deadline(Instant::now(), deadline)?;
@@ -255,9 +247,7 @@ impl<'a> ExclusiveReceiptGuard<'a> {
         host.checkpoint(RecoveryBoundary::BeforeTakeover, self.run, self.deadline)?;
         check_deadline(Instant::now(), self.deadline)?;
         with_database_deadline(conn, self.deadline, |conn| {
-            let tx = conn
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .map_err(db_err)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             check_deadline(Instant::now(), self.deadline)?;
             let current = validate_snapshot(
                 &tx,
@@ -283,7 +273,7 @@ impl<'a> ExclusiveReceiptGuard<'a> {
             let changed = tx.execute(
                 "UPDATE member_runs SET owner_epoch=?1,owner_kind='reconciler',owner_pid=?2,owner_start_identity=?3 WHERE run_id=?4 AND owner_epoch=?5 AND owner_kind=?6 AND owner_pid=?7 AND owner_start_identity=?8",
                 params![epoch,self.process.pid,self.process.start_identity,current.run_id,current.owner_epoch,current.owner_kind.as_str(),current.owner_pid,current.owner_start_identity],
-            ).map_err(db_err)?;
+            )?;
             ensure(changed == 1, "exclusive receipt ownership CAS failed")?;
             let mut expected = current;
             expected.owner_epoch = epoch;
@@ -300,47 +290,36 @@ impl<'a> ExclusiveReceiptGuard<'a> {
             exclude_previous_owner(self.run, self.placement, self.deadline, host)?;
             self.validate_locked_snapshot(&tx, self.input, &owned)?;
             check_deadline(Instant::now(), self.deadline)?;
-            let settled = if self.input.kind == InputKind::PermissionResponse {
-                let proof = if self.input.state == InputState::Ready
-                    && disposition == InputDisposition::NotSubmitted
-                {
-                    let audit = self
-                        .input
-                        .permission_response
-                        .as_ref()
-                        .expect("validated permission input retains its audit");
-                    Some(self.zero_byte_retirement(
-                        &owned.owner(),
-                        self.input.input_id,
-                        audit.metadata.interaction_id,
-                    )?)
-                } else {
-                    None
-                };
-                storage::settle_permission_response_in_transaction(
-                    &tx,
-                    &owned.owner(),
-                    self.input,
-                    disposition,
-                    evidence_ref,
-                    proof.as_ref(),
-                    self.deadline,
-                )?
-                .input
-            } else {
-                storage::settle_input_in_transaction(
-                    &tx,
+            let proof = if self.input.kind == InputKind::PermissionResponse
+                && self.input.state == InputState::Ready
+                && disposition == InputDisposition::NotSubmitted
+            {
+                let audit = self
+                    .input
+                    .permission_response
+                    .as_ref()
+                    .expect("validated permission input retains its audit");
+                Some(self.zero_byte_retirement(
                     &owned.owner(),
                     self.input.input_id,
-                    self.input.state,
-                    disposition,
-                    evidence_ref,
-                )?
+                    audit.metadata.interaction_id,
+                )?)
+            } else {
+                None
             };
+            let settled = storage::settle_any_input_in_transaction(
+                &tx,
+                &owned.owner(),
+                self.input,
+                disposition,
+                evidence_ref,
+                proof.as_ref(),
+                self.deadline,
+            )?;
             check_deadline(Instant::now(), self.deadline)?;
             self.validate_locked_snapshot(&tx, &settled, &owned)?;
             check_deadline(Instant::now(), self.deadline)?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(settled)
         })
     }
@@ -387,39 +366,35 @@ pub(crate) fn reconcile_input_with_host(
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+pub(crate) mod test_support {
     use super::super::*;
     use crate::broker::records::Placement;
-    use crate::broker::runtime::{self as storage, *};
-    use crate::config::Settings;
-    use crate::input::{Deadline, PaneLock, with_database_budget};
-    use crate::runtime::runner_tests::Fixture;
-    use rusqlite::Connection;
-    use serde_json::json;
-    use std::os::unix::fs::MetadataExt;
-    use std::time::{Duration, Instant};
+    use crate::broker::runtime::*;
+    use crate::input::Deadline;
+    use std::time::Instant;
 
-    pub(in crate::runtime::runner) enum Termination {
+    pub(crate) enum Termination {
         Terminated,
         Alive,
         Unknown,
     }
 
-    type BoundaryAction = Box<dyn FnMut(RecoveryBoundary, &RunRecord, Instant) -> Result<()>>;
+    pub(crate) type BoundaryAction =
+        Box<dyn FnMut(RecoveryBoundary, &RunRecord, Instant) -> Result<()>>;
 
-    pub(in crate::runtime::runner) struct TypedHost {
-        pub(in crate::runtime::runner) until: Instant,
-        pub(in crate::runtime::runner) owner: Termination,
-        pub(in crate::runtime::runner) startup: Termination,
-        pub(in crate::runtime::runner) matching_health: bool,
-        pub(in crate::runtime::runner) calls: Vec<&'static str>,
-        pub(in crate::runtime::runner) processes: Vec<ProcessIdentity>,
-        pub(in crate::runtime::runner) startups: Vec<(RunRecord, Option<Placement>)>,
-        pub(in crate::runtime::runner) action: Option<BoundaryAction>,
+    pub(crate) struct TypedHost {
+        pub(crate) until: Instant,
+        pub(crate) owner: Termination,
+        pub(crate) startup: Termination,
+        pub(crate) matching_health: bool,
+        pub(crate) calls: Vec<&'static str>,
+        pub(crate) processes: Vec<ProcessIdentity>,
+        pub(crate) startups: Vec<(RunRecord, Option<Placement>)>,
+        pub(crate) action: Option<BoundaryAction>,
     }
 
     impl TypedHost {
-        pub(in crate::runtime::runner) fn new(until: Instant) -> Self {
+        pub(crate) fn new(until: Instant) -> Self {
             Self {
                 until,
                 owner: Termination::Terminated,
@@ -432,7 +407,7 @@ pub(super) mod tests {
             }
         }
 
-        fn check(&self, until: Instant) -> Result<()> {
+        pub(crate) fn check(&self, until: Instant) -> Result<()> {
             assert_eq!(
                 until, self.until,
                 "evidence uses the original effective bound"
@@ -440,7 +415,7 @@ pub(super) mod tests {
             Deadline::until(until).remaining().map(|_| ())
         }
 
-        fn evidence(value: &Termination) -> ProcessEvidence {
+        pub(crate) fn evidence(value: &Termination) -> ProcessEvidence {
             match value {
                 Termination::Terminated => ProcessEvidence::Terminated,
                 Termination::Alive => ProcessEvidence::Alive,
@@ -532,6 +507,21 @@ pub(super) mod tests {
             Ok(())
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::*;
+    use super::test_support::*;
+    use crate::broker::records::Placement;
+    use crate::broker::runtime::{self as storage, *};
+    use crate::config::Settings;
+    use crate::input::{Deadline, PaneLock, with_database_budget};
+    use crate::runtime::runner::test_support::Fixture;
+    use rusqlite::Connection;
+    use serde_json::json;
+    use std::os::unix::fs::MetadataExt;
+    use std::time::{Duration, Instant};
 
     struct ReceiptCase {
         fixture: Fixture,
@@ -600,20 +590,9 @@ pub(super) mod tests {
             fixture.run = storage::get_run(&fixture.conn, owner.run_id).unwrap();
             lock.validate(&fixture.conn, &fixture.run.owner()).unwrap();
             std::fs::write(&artifacts.paths.outbox, [0, 0]).unwrap();
-            let placement = crate::broker::get_member(
-                &fixture.conn,
-                fixture.run.member_id,
-                fixture.run.fleet_id,
-            )
-            .unwrap()
-            .unwrap()
-            .placement
-            .unwrap();
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
+            let placement = member_placement(&fixture.conn, &fixture.run);
+            let settings =
+                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()), None);
             drop(lock);
             Self {
                 fixture,
@@ -645,53 +624,50 @@ pub(super) mod tests {
 
         fn assert_original_lock_available(&self) {
             let run = storage::get_run(&self.fixture.conn, self.input.run_id).unwrap();
-            let lock = RunLock::acquire_released(&self.fixture.conn, &run.owner())
-                .unwrap()
-                .expect("receipt-only ownership releases its original namespace on return");
-            lock.validate(&self.fixture.conn, &run.owner()).unwrap();
+            assert_lock_released(&self.fixture.conn, &run);
         }
 
         fn spool(&self) -> (Vec<u8>, u64, u64) {
-            let metadata = std::fs::symlink_metadata(&self.artifacts.paths.outbox).unwrap();
-            (
-                std::fs::read(&self.artifacts.paths.outbox).unwrap(),
-                metadata.dev(),
-                metadata.ino(),
-            )
+            outbox_spool(&self.artifacts.paths.outbox)
         }
     }
 
-    type DatabaseRows = Vec<(String, Vec<Vec<rusqlite::types::Value>>)>;
+    fn outbox_spool(outbox: &std::path::Path) -> (Vec<u8>, u64, u64) {
+        let metadata = std::fs::symlink_metadata(outbox).unwrap();
+        (
+            std::fs::read(outbox).unwrap(),
+            metadata.dev(),
+            metadata.ino(),
+        )
+    }
 
-    fn rows(conn: &Connection, excluded: &[&str]) -> DatabaseRows {
-        let names = conn
-            .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
+    fn assert_lock_released(conn: &Connection, run: &RunRecord) {
+        RunLock::acquire_released(conn, &run.owner())
             .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("receipt-only ownership releases its original namespace on return")
+            .validate(conn, &run.owner())
             .unwrap();
-        names
-            .into_iter()
-            .filter(|name| !excluded.contains(&name.as_str()))
-            .map(|name| {
-                let quoted = name.replace('"', "\"\"");
-                let mut statement = conn
-                    .prepare(&format!("SELECT * FROM \"{quoted}\" ORDER BY rowid"))
-                    .unwrap();
-                let width = statement.column_count();
-                let values = statement
-                    .query_map([], |row| {
-                        (0..width)
-                            .map(|index| row.get(index))
-                            .collect::<rusqlite::Result<Vec<_>>>()
-                    })
-                    .unwrap()
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap();
-                (name, values)
-            })
-            .collect()
+    }
+
+    fn notified_at(conn: &Connection, message_id: i64) -> Option<String> {
+        conn.query_row(
+            "SELECT notified_at FROM messages WHERE message_id=?1",
+            [message_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn member_placement(conn: &Connection, run: &RunRecord) -> Placement {
+        crate::broker::get_member(conn, run.member_id, run.fleet_id)
+            .unwrap()
+            .unwrap()
+            .placement
+            .unwrap()
+    }
+
+    fn rows(conn: &Connection, excluded: &[&str]) -> Vec<crate::db::test_support::TableSnapshot> {
+        crate::db::test_support::table_snapshot(conn, |name| !excluded.contains(&name))
     }
 
     fn assert_owner_only(before: &RunRecord, after: &RunRecord) {
@@ -706,7 +682,7 @@ pub(super) mod tests {
 
     #[test]
     fn exclusive_permission_ready_proof_and_claim_release_share_the_owner_transaction() {
-        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::{Case, Retained};
 
         let mut case = Case::new(Retained::InProgress);
         storage::record_input_state(
@@ -723,24 +699,13 @@ pub(super) mod tests {
         ).unwrap();
         let run = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
         let original = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-        let placement = crate::broker::get_member(&case.fixture.conn, run.member_id, run.fleet_id)
-            .unwrap()
-            .unwrap()
-            .placement
-            .unwrap();
+        let placement = member_placement(&case.fixture.conn, &run);
         let held = PaneLock::try_acquire(&case.settings.database_url, &placement)
             .unwrap()
             .unwrap();
         let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id).unwrap();
         std::fs::write(&paths.outbox, [0, 0]).unwrap();
-        let spool = || {
-            let meta = std::fs::symlink_metadata(&paths.outbox).unwrap();
-            (
-                std::fs::read(&paths.outbox).unwrap(),
-                meta.dev(),
-                meta.ino(),
-            )
-        };
+        let spool = || outbox_spool(&paths.outbox);
         let original_spool = spool();
         let before = rows(&case.fixture.conn, &[]);
         drop(case._lock);
@@ -824,11 +789,7 @@ pub(super) mod tests {
         assert!(host.calls.contains(&"after"));
         assert_eq!(rows(&case.fixture.conn, &[]), before);
         assert_eq!(spool(), original_spool);
-        let lock = RunLock::acquire_released(&case.fixture.conn, &run.owner())
-            .unwrap()
-            .unwrap();
-        lock.validate(&case.fixture.conn, &run.owner()).unwrap();
-        drop(lock);
+        assert_lock_released(&case.fixture.conn, &run);
         let mut retry = TypedHost::new(until);
         let settled = super::reconcile_input_with_host(
             &mut case.fixture.conn,
@@ -863,22 +824,18 @@ pub(super) mod tests {
         ];
         let expected_history: Vec<_> = before
             .into_iter()
-            .filter(|(name, _)| !excluded.contains(&name.as_str()))
+            .filter(|table| !excluded.contains(&table.name.as_str()))
             .collect();
         assert_eq!(rows(&case.fixture.conn, excluded), expected_history);
         assert_eq!(spool(), original_spool);
         held.validate_binding(&case.settings.database_url, &placement)
             .unwrap();
-        RunLock::acquire_released(&case.fixture.conn, &current.owner())
-            .unwrap()
-            .unwrap()
-            .validate(&case.fixture.conn, &current.owner())
-            .unwrap();
+        assert_lock_released(&case.fixture.conn, &current);
     }
 
     #[test]
     fn exclusive_permission_receipt_pins_original_audit_and_creation_after_snapshot() {
-        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::{Case, Retained};
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -887,12 +844,7 @@ pub(super) mod tests {
             let run = case.fixture.run.clone();
             let original =
                 storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-            let placement =
-                crate::broker::get_member(&case.fixture.conn, run.member_id, run.fleet_id)
-                    .unwrap()
-                    .unwrap()
-                    .placement
-                    .unwrap();
+            let placement = member_placement(&case.fixture.conn, &run);
             let held = PaneLock::try_acquire(&case.settings.database_url, &placement)
                 .unwrap()
                 .unwrap();
@@ -968,11 +920,7 @@ pub(super) mod tests {
                 expected
             );
             assert_eq!(rows(&case.fixture.conn, &[excluded]), before);
-            RunLock::acquire_released(&case.fixture.conn, &run.owner())
-                .unwrap()
-                .unwrap()
-                .validate(&case.fixture.conn, &run.owner())
-                .unwrap();
+            assert_lock_released(&case.fixture.conn, &run);
             held.validate_binding(&case.settings.database_url, &placement)
                 .unwrap();
         }
@@ -991,16 +939,7 @@ pub(super) mod tests {
         );
         let message =
             crate::broker::get_message(&case.fixture.conn, case.input.message_id.unwrap()).unwrap();
-        let stamp: Option<String> = case
-            .fixture
-            .conn
-            .query_row(
-                "SELECT notified_at FROM messages WHERE message_id=?1",
-                [message.message_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(stamp.is_none());
+        assert!(notified_at(&case.fixture.conn, message.message_id).is_none());
         let spool = case.spool();
         let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
         let settled = case.invoke(Some(&held), &mut host).unwrap();
@@ -1022,16 +961,7 @@ pub(super) mod tests {
             &storage::get_run(&case.fixture.conn, before.run_id).unwrap(),
         );
         let stamped = crate::broker::get_message(&case.fixture.conn, message.message_id).unwrap();
-        let stamp: Option<String> = case
-            .fixture
-            .conn
-            .query_row(
-                "SELECT notified_at FROM messages WHERE message_id=?1",
-                [message.message_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(stamp.is_some());
+        assert!(notified_at(&case.fixture.conn, message.message_id).is_some());
         assert_eq!(stamped, message);
         assert_eq!(
             rows(

@@ -8,8 +8,6 @@ The host continues its own task and owns native tool/background work. CAFleet re
 
 ## Communication Model
 
-Use point-to-point `cafleet message send` for coordination. Fan out with an individual send to each selected recipient, retaining each committed message ID and reporting recipient failures. Retrieve complete payloads with `--json`; long/multiline bodies use `--file <path>`.
-
 Read every delivery, record any deferred action with its ID/artifact pointer in host-owned task state, then ACK it immediately. ACK means consumption; a pending user decision or unfinished assignment remains tracked outside the inbox. Reconcile replayed or already-known IDs through `poll --json` or `show --json` before acting; completed records need no second action or ACK. Stream output and native event delivery leave consumption unchanged.
 
 ## Spawn Protocol
@@ -29,7 +27,7 @@ Receive Director messages through broker reads and stdout only. Automatic recept
 1. Retain one owned native handle while assignments or an authorized user-feedback phase remain outstanding. Store its pinned member/fleet IDs, receive status, incomplete JSONL and unfinished actions across context compaction.
 2. Consume complete `ready`, `message` and `closed` records from that handle. Preserve incomplete chunks for the next read. A healthy live read with no output keeps the same process; receiving a message supplies no reason to replace it.
 3. On every received batch/wake and before reporting completion, run `cafleet message poll <director-member-id> --json`. Read full bodies, reconcile known/replayed IDs, record deferred actions, ACK consumed deliveries and dispatch work whose inputs are ready.
-4. On every wake, run `cafleet member list <fleet-id> --json` and check assignments past their expected reply point, using `cafleet member capture` / `cafleet fleet capture` and artifacts as evidence. Consume the Director's own pending IDs through broker reads. Explicit finite `wait` remains available when ordinary-member retry rotation is needed; the listener performs no preview retries.
+4. On every wake, run `cafleet member list <fleet-id> --json` and check assignments past their expected reply point, using `cafleet member capture` and artifacts as evidence. Consume the Director's own pending IDs through broker reads. Explicit finite `wait` remains available when ordinary-member retry rotation is needed; the listener performs no preview retries.
 5. Keep required user decisions pending until the operator answers. Incoming broker records are events, not user answers. Continue independent authorized work and reception where the host permits it; when a decision blocks host tools, reconcile the inbox on the next authorized activation.
 
 #### Receiver recovery
@@ -40,7 +38,7 @@ Receive Director messages through broker reads and stdout only. Automatic recept
 | Clean `closed` with `timeout` | Establish task exit, then renew only while authorized delegated work remains |
 | `member_inactive` / `fleet_deleted` | Retire the handle; resume only with an explicitly established new task/identity |
 | Unexpected EOF, failed native call or receiver exit | Inspect output/exit and complete a fresh successful broker health/inbox check before replacing the receiver |
-| Fatal database/schema/assets error | Surface the cause and follow the existing repair/authorization procedure before restarting |
+| Fatal database/schema error | Surface the cause and follow the existing repair/authorization procedure before restarting |
 | Truncated output or incomplete JSONL | Preserve complete records, leave incomplete messages unACKed and retrieve full output or reconcile/replay through the broker |
 | Old receiver liveness unknown | Preserve its handle and diagnose or use explicit manual reads; establish termination before replacing it |
 | Native stream tool unavailable or denied | On a host satisfying both [Director requirements](coding-agents.md#role-requirements), state the reception limit and use manual `poll`/finite `wait` within host permissions |
@@ -49,11 +47,11 @@ Retain pending messages across recovery. Repeated receiver failures require diag
 
 #### Sender follow-up
 
-When an ordinary-recipient `cafleet message send` prints `Message N was persisted. …` on stderr, send exactly one follow-up to the same recipient with the body `message N was not delivered to your pane; poll your inbox`. Its drain retries `N` first. When the follow-up also prints a persisted diagnostic, send no further follow-up: a later send or `message wait` retries both, and the overdue-reply check in Director wake covers a recipient that stays silent.
+Send the one follow-up the [member role](../roles/member.md#on-spawn--send-the-ready-signal) defines for a persisted-but-undelivered send. When the follow-up also prints a persisted diagnostic, send no further follow-up: a later send or `message wait` retries both, and the overdue-reply check in Director wake covers a recipient that stays silent.
 
 ## Runner observations
 
-Use the [member runtime procedure](member-runtime.md) on a runtime event: verify its durable association and current episode, keep the pending action after ACK, establish risk/mode evidence, decide allow/deny in verified Director auto or obtain user permission otherwise, and submit the current bound response or use manual native input. Inspect actual output and continued work independently of key submission. Consume/ACK available records, then explicitly invoke finite `message wait` to retry held member previews; repeat consumption/receive for a new batch. A live listener alone performs no preview retry.
+Handle each runtime event under the [member runtime procedure](member-runtime.md), which owns verification, the mode-dependent decision, the bound response and the finite `message wait` that retries held previews. A live listener alone performs no preview retry.
 
 Programmatic input remains held for observed/candidate interactions and unknown composer coverage. Preserve durable input uncertainty and ownership during receipt settlement or run recovery; event persistence, inbox consumption and operation continuation have separate evidence.
 
@@ -71,21 +69,7 @@ Carry the user's authorization forward across wakes and checks. Dispatch already
 
 Explicit cancellation, a required user decision, a concrete unrecoverable failure or a workflow gate changes what can proceed. Track that state and continue independent authorized work when available. Preserve the host's objective, activation authority and budget as supplied.
 
-### When you genuinely need user input
-
-Use the executing backend's decision surface for a concrete choice. State the evidence and pending action. A member routes its question through the Director; the Director relays the answer faithfully.
-
-## Team-facilitation instructions
-
-At every wake and active workflow boundary:
-
-1. Read full broker payloads and artifacts; ACK every consumed message.
-2. Record deferred user decisions and remaining actions in host-owned state.
-3. Dispatch ready work immediately.
-4. Inspect overdue/failed work using roster, targeted captures and artifacts.
-5. Keep the backend's native receive lifecycle active until completion, a required user gate or explicit handoff.
-
-### Routing member command requests
+## Routing member command requests
 
 A member runs host-permitted commands and sends required denied commands through [prompt-routing](prompt-routing.md). Authorize native dispatch, inspect the actual result and explicitly continue the member after completion evidence when its host has not resumed it. Process requests in inbox order and close every request with an action or reasoned reply.
 
@@ -95,11 +79,11 @@ Start with your inbox and assignment/artifact state, then use a read-only target
 
 ### Stage 1 — Message-based check (`cafleet message poll`)
 
-Use `cafleet message poll <director-member-id> --json`, record unfinished actions, ACK each delivery and act on it.
+Run the inbox check of [Director wake](#director-wake) step 3.
 
 ### Stage 2 — Terminal capture fallback (`cafleet member capture`)
 
-Use `cafleet member capture <member-id> --lines <depth>` for complete backend UI evidence. `cafleet fleet capture <fleet-id>` supplies a one-shot roster-wide diagnostic. Capture is safe while the member works.
+Use `cafleet member capture <member-id> --lines <depth>` for complete backend UI evidence. Capture is safe while the member works.
 
 ### Escalation
 
@@ -108,10 +92,6 @@ When two actually delivered concrete re-engagement messages produce no progress 
 ## User Delegation Protocol
 
 Relay explicit member questions through the executing backend's decision surface, then send the user's answer verbatim. A capture alone supplies evidence, not authority to answer a prompt. Interpret free-form replies by intent; record ordinary revision requests through the consuming workflow's coordination format and preserve its gates.
-
-## Cleanup Protocol
-
-Read [Shutdown](#shutdown) immediately before cleanup. Delete authorized ordinary members, verify the root-only roster, deregister the fleet and confirm closure. Preserve workflow-specific review/approval preconditions.
 
 ## Recovery
 

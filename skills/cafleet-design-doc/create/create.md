@@ -6,7 +6,7 @@ Create a reviewed design document with a Director, Drafter and independent Revie
 
 Read and resolve your [backend](../../cafleet/reference/coding-agents.md), then the [Director role](../../cafleet/roles/director.md), [file layout](../reference/guidelines.md#file-layout), [BASE resolver](../../cafleet/reference/base-dir.md), [supervision](../../cafleet/reference/supervision.md), [coordination](../reference/coordination.md) and [guidelines](../reference/guidelines.md). These references own model selection, paths, reception, messages and document format.
 
-Use absolute role/core/backend paths and the canonical CAFleet spawn frame. Preserve literal identity placeholders, BASE/output paths, the poll-handling instruction and role boundaries. Assigned members continue this team. Read recovery or shutdown immediately before those actions.
+Use absolute role/core/backend paths and the canonical CAFleet spawn frame with the Step 1 delta table. Preserve literal identity placeholders, BASE/output paths and role boundaries. Assigned members continue this team. Read recovery or shutdown immediately before those actions.
 
 ## Director responsibilities
 
@@ -21,9 +21,20 @@ For an existing document, retain its content and answered questions. Existing us
 ### Step 1: Register & Spawn Members (Director)
 
 1. Diagnose actual prerequisites with `cafleet doctor`, register the calling Director and retain returned literal IDs.
-2. Arm native inbox reception as specified by supervision; use its documented fallback when the adapter is unavailable.
+2. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake).
 3. Spawn the [Drafter](roles/drafter.md) and [Reviewer](roles/reviewer.md) with their role paths, required skills, concrete document/BASE paths and scoped assignments.
 4. Receive and ACK ready before depending on a member. Dispatch each assignment when its inputs exist; inspect actual placement when launch evidence is uncertain.
+
+Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the CAFleet load purpose `for communication with the Director` and this per-role delta. Each line in the IMPORTANT row is a separate prompt line, rendered verbatim.
+
+| Slot | Drafter (fresh draft) | Drafter (resume or review-only) | Reviewer |
+|---|---|---|---|
+| ROLE TITLE / TEAM | `the Drafter` / `design document creation` | `the Drafter` / `design document creation` | `the Reviewer` / `design document creation` |
+| role-file + ROLE-DEF SUFFIX | `roles/drafter.md` | `roles/drafter.md` + `Follow the Resume Mode section in particular.` (resume) or `Follow the Review-only Mode section in particular.` (review-only) | `roles/reviewer.md` |
+| EXTRA SKILL LOADS | `cafleet-design-doc` | `cafleet-design-doc` | `cafleet-design-doc` |
+| CONTEXT LINES | `OUTPUT PATH: [INSERT absolute design-doc path]`, `USER REQUEST: [INSERT the user's request]` | `OUTPUT PATH: [INSERT absolute design-doc path]` | `DESIGN DOCUMENT: [INSERT absolute design-doc path]` |
+| IMPORTANT / ROLE-CONSTRAINT LINES (verbatim) | `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.`, `Send your questions to the Director who will relay them to the user.`, `Do NOT create any design document file until you have received answers.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` | `When you see cafleet message poll output with a message from the Director, act on those instructions.` | `IMPORTANT: Your only edits are COMMENT(reviewer) markers in the design document.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
+| start cue (verbatim) | `Read the target codebase for context, then send your clarifying questions to the Director.` | `Read the design document, then wait for the Director's revision assignment.` | `Wait for the Director to route the draft with ready (doc).` |
 
 ### Step 2: Clarification Phase (Director)
 

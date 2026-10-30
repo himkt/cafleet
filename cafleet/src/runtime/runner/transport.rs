@@ -24,11 +24,11 @@ pub(super) struct DrainedInput {
 }
 
 impl DrainedInput {
-    pub(super) fn evidence(&self) -> InputDrain {
-        InputDrain::Quiescent {
-            human_generation: self.human_generation,
-            output_seq: self.output_seq,
-        }
+    pub(super) fn human_generation(&self) -> u64 {
+        self.human_generation
+    }
+    pub(super) fn output_seq(&self) -> u64 {
+        self.output_seq
     }
 }
 
@@ -64,19 +64,19 @@ pub(crate) trait ScreenObserver {
 }
 #[derive(Default)]
 pub(crate) struct TransportProgress {
-    pub child_eof: bool,
-    pub outer_eof: bool,
-    pub child_bytes: usize,
-    pub human_bytes: usize,
-    pub forwarded_bytes: usize,
-    pub display_bytes: usize,
-    pub observation_error: Option<String>,
-    pub observation_failure: Option<ObservationFailure>,
+    pub(crate) child_eof: bool,
+    pub(crate) outer_eof: bool,
+    pub(crate) child_bytes: usize,
+    pub(crate) human_bytes: usize,
+    pub(crate) forwarded_bytes: usize,
+    pub(crate) display_bytes: usize,
+    pub(crate) observation_error: Option<String>,
+    pub(crate) observation_failure: Option<ObservationFailure>,
 }
 pub(crate) struct TransportLimits {
-    pub input_bytes: usize,
-    pub display_bytes: usize,
-    pub bytes_per_tick: usize,
+    pub(crate) input_bytes: usize,
+    pub(crate) display_bytes: usize,
+    pub(crate) bytes_per_tick: usize,
 }
 pub(crate) struct Transport {
     terminal: TerminalState,
@@ -459,12 +459,45 @@ impl Transport {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::error::CafleetError;
+    #[derive(Default)]
+    pub(crate) struct Observer {
+        pub(crate) screens: Vec<(u64, String)>,
+        pub(crate) fail: bool,
+        pub(crate) ordering: Option<Rc<RefCell<Vec<&'static str>>>>,
+    }
+
+    impl ScreenObserver for Observer {
+        fn observe(&mut self, screen: &ScreenSnapshot) -> std::result::Result<(), CafleetError> {
+            if let Some(ordering) = &self.ordering {
+                ordering.borrow_mut().push("observe");
+            }
+            self.screens
+                .push((screen.screen_seq, screen.screen.contents()));
+            if self.fail {
+                Err(CafleetError::App(
+                    "fixture observation queue unavailable".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::io::{self, ErrorKind};
     use std::rc::Rc;
 
+    use super::test_support::*;
     use super::*;
     use crate::error::CafleetError;
 
@@ -579,30 +612,6 @@ mod tests {
         fn try_flush(&mut self) -> io::Result<()> {
             if self.blocked {
                 Err(ErrorKind::WouldBlock.into())
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    #[derive(Default)]
-    struct Observer {
-        screens: Vec<(u64, String)>,
-        fail: bool,
-        ordering: Option<Rc<RefCell<Vec<&'static str>>>>,
-    }
-
-    impl ScreenObserver for Observer {
-        fn observe(&mut self, screen: &ScreenSnapshot) -> std::result::Result<(), CafleetError> {
-            if let Some(ordering) = &self.ordering {
-                ordering.borrow_mut().push("observe");
-            }
-            self.screens
-                .push((screen.screen_seq, screen.contents.clone()));
-            if self.fail {
-                Err(CafleetError::App(
-                    "fixture observation queue unavailable".into(),
-                ))
             } else {
                 Ok(())
             }
@@ -836,34 +845,6 @@ mod tests {
                 .screens
                 .iter()
                 .any(|(_, screen)| screen.contains("request"))
-        );
-    }
-
-    #[test]
-    fn runner_transport_visits_a_transient_screen_before_a_later_clear_in_one_fragment() {
-        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-        let mut observer = Observer::default();
-        terminal
-            .feed_observed(b"candidate request\x1b[2J\x1b[Hcomposer", &mut observer)
-            .unwrap();
-        let candidate = observer
-            .screens
-            .iter()
-            .position(|(_, screen)| screen.contains("candidate request"))
-            .unwrap();
-        let composer = observer
-            .screens
-            .iter()
-            .rposition(|(_, screen)| {
-                screen.contains("composer") && !screen.contains("candidate request")
-            })
-            .unwrap();
-        assert!(candidate < composer);
-        assert!(
-            observer
-                .screens
-                .windows(2)
-                .all(|pair| pair[1].0 > pair[0].0)
         );
     }
 

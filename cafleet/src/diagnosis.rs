@@ -2,7 +2,6 @@
 
 use rusqlite::Connection;
 
-use crate::broker::members::db_err;
 use crate::error::CafleetError;
 
 #[derive(Debug)]
@@ -34,11 +33,11 @@ impl SchemaState {
     }
 }
 
-pub(crate) fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
+fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
     let ledger_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='refinery_schema_history')",
         [], |row| row.get(0),
-    ).map_err(db_err)?;
+    )?;
     if !ledger_exists {
         return Ok(None);
     }
@@ -47,7 +46,7 @@ pub(crate) fn recorded_version(conn: &Connection) -> Result<Option<u32>, Cafleet
         [],
         |row| row.get(0),
     )
-    .map_err(db_err)
+    .map_err(crate::error::CafleetError::from)
 }
 
 pub(crate) fn incompatible_format(path: &str) -> CafleetError {
@@ -61,13 +60,11 @@ pub(crate) fn classify_schema(conn: &Connection, head: u32) -> SchemaState {
         path: conn.path().unwrap_or(":memory:").to_owned(),
     };
     let inspect = || -> Result<SchemaState, CafleetError> {
-        let identity: i64 = conn
-            .query_row("PRAGMA application_id", [], |row| row.get(0))
-            .map_err(db_err)?;
+        let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
         let populated: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
             [], |row| row.get(0)
-        ).map_err(db_err)?;
+        )?;
         if identity == 0 && !populated {
             return Ok(SchemaState::Missing);
         }

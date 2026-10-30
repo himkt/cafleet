@@ -1,48 +1,63 @@
-use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ValueRef};
-
-use crate::error::CafleetError;
-
 macro_rules! stored_enum {
-    ($name:ident, $field:literal, {$($variant:ident => $wire:literal),+ $(,)?}) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum $name { $($variant),+ }
+    (values $name:ident, $field:literal, {$($variant:ident => $wire:literal),+ $(,)?}) => {
+        stored_enum!(@enum $name, $field, {$($variant => $wire),+});
         impl $name {
-            pub fn as_str(self) -> &'static str {
+            pub(crate) const VALUES: &'static [&'static str] = &[$($wire),+];
+        }
+    };
+    (test_values $name:ident, $field:literal, {$($variant:ident => $wire:literal),+ $(,)?}) => {
+        stored_enum!(@enum $name, $field, {$($variant => $wire),+});
+        #[cfg(test)]
+        impl $name {
+            pub(crate) const VALUES: &'static [&'static str] = &[$($wire),+];
+        }
+    };
+    (@enum $name:ident, $field:literal, {$($variant:ident => $wire:literal),+}) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        pub(crate) enum $name { $(#[serde(rename = $wire)] $variant),+ }
+        impl $name {
+            pub(crate) fn as_str(self) -> &'static str {
                 match self { $(Self::$variant => $wire),+ }
             }
         }
         impl TryFrom<&str> for $name {
-            type Error = CafleetError;
+            type Error = $crate::error::CafleetError;
             fn try_from(value: &str) -> Result<Self, Self::Error> {
                 match value {
                     $($wire => Ok(Self::$variant),)+
-                    _ => Err(CafleetError::InvalidStoredValue {
+                    _ => Err($crate::error::CafleetError::InvalidStoredValue {
                         field: $field.into(), value: value.into(),
                     }),
                 }
             }
         }
-        impl FromSql for $name {
-            fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                value: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
                 Self::try_from(value.as_str()?)
-                    .map_err(|error| FromSqlError::Other(Box::new(error)))
+                    .map_err(|error| rusqlite::types::FromSqlError::Other(Box::new(error)))
             }
         }
     };
+    ($name:ident, $field:literal, {$($variant:ident => $wire:literal),+ $(,)?}) => {
+        stored_enum!(@enum $name, $field, {$($variant => $wire),+});
+    };
 }
+pub(crate) use stored_enum;
 
 stored_enum!(MemberStatus, "members.status", {Active => "active", Deregistered => "deregistered"});
 stored_enum!(MemberKind, "member.kind", {Director => "director", Member => "member"});
 stored_enum!(MessageStatus, "messages.status_state", {InputRequired => "input_required", Completed => "completed"});
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Placement {
-    pub backend: String,
-    pub mux_session: String,
-    pub mux_window_id: String,
-    pub mux_pane_id: Option<String>,
-    pub coding_agent: String,
-    pub created_at: String,
+pub(crate) struct Placement {
+    pub(crate) backend: String,
+    pub(crate) mux_session: String,
+    pub(crate) mux_window_id: String,
+    pub(crate) mux_pane_id: Option<String>,
+    pub(crate) coding_agent: String,
+    pub(crate) created_at: String,
 }
 
 impl Placement {
@@ -59,96 +74,113 @@ impl Placement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MemberRecord {
-    pub member_id: i64,
-    pub fleet_id: i64,
-    pub name: String,
-    pub description: String,
-    pub registered_at: String,
-    pub status: MemberStatus,
-    pub kind: MemberKind,
-    pub placement: Option<Placement>,
-    pub runtime: Option<super::runtime::RuntimeSnapshot>,
+pub(crate) struct MemberRecord {
+    pub(crate) member_id: i64,
+    pub(crate) fleet_id: i64,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) registered_at: String,
+    pub(crate) status: MemberStatus,
+    pub(crate) kind: MemberKind,
+    pub(crate) placement: Option<Placement>,
+    pub(crate) runtime: Option<super::runtime::RuntimeSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MemberActivity {
-    pub member: MemberRecord,
-    pub last_sent: Option<String>,
-    pub last_recv: Option<String>,
-    pub last_ack: Option<String>,
-    pub idle: Option<i64>,
+pub(crate) struct MemberActivity {
+    pub(crate) member: MemberRecord,
+    pub(crate) last_sent: Option<String>,
+    pub(crate) last_recv: Option<String>,
+    pub(crate) last_ack: Option<String>,
+    pub(crate) idle: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RegisteredMember {
-    pub member_id: i64,
-    pub name: String,
-    pub registered_at: String,
+pub(crate) struct RegisteredMember {
+    pub(crate) member_id: i64,
+    pub(crate) name: String,
+    pub(crate) registered_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MessageRecord {
-    pub message_id: i64,
-    pub from_member_id: i64,
-    pub to_member_id: i64,
-    pub created_at: String,
-    pub status: MessageStatus,
-    pub status_timestamp: String,
-    pub text: String,
+pub(crate) struct MessageRecord {
+    pub(crate) message_id: i64,
+    pub(crate) from_member_id: i64,
+    pub(crate) to_member_id: i64,
+    pub(crate) created_at: String,
+    pub(crate) status: MessageStatus,
+    pub(crate) status_timestamp: String,
+    pub(crate) text: String,
+}
+
+#[cfg(test)]
+impl MessageRecord {
+    pub(crate) const FIXTURE_STAMP: &str = "2026-10-25T01:00:00.000000+00:00";
+
+    pub(crate) fn fixture(id: i64, from: i64, to: i64, text: &str) -> Self {
+        Self {
+            message_id: id,
+            from_member_id: from,
+            to_member_id: to,
+            created_at: Self::FIXTURE_STAMP.into(),
+            status: MessageStatus::InputRequired,
+            status_timestamp: Self::FIXTURE_STAMP.into(),
+            text: text.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FleetRecord {
-    pub fleet_id: i64,
-    pub name: Option<String>,
-    pub created_at: String,
-    pub deleted_at: Option<String>,
-    pub director_member_id: Option<i64>,
+pub(crate) struct FleetRecord {
+    pub(crate) fleet_id: i64,
+    pub(crate) name: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) deleted_at: Option<String>,
+    pub(crate) director_member_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FleetSummary {
-    pub fleet_id: i64,
-    pub name: Option<String>,
-    pub created_at: String,
-    pub director_member_id: Option<i64>,
-    pub member_count: i64,
+pub(crate) struct FleetSummary {
+    pub(crate) fleet_id: i64,
+    pub(crate) name: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) director_member_id: Option<i64>,
+    pub(crate) member_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CreatedFleet {
-    pub fleet_id: i64,
-    pub name: Option<String>,
-    pub created_at: String,
-    pub director: MemberRecord,
+pub(crate) struct CreatedFleet {
+    pub(crate) fleet_id: i64,
+    pub(crate) name: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) director: MemberRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeletedFleet {
-    pub fleet_id: i64,
-    pub deregistered_count: usize,
-    pub members: Vec<DeletedMember>,
+pub(crate) struct DeletedFleet {
+    pub(crate) fleet_id: i64,
+    pub(crate) deregistered_count: usize,
+    pub(crate) members: Vec<DeletedMember>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeletedMember {
-    pub member_id: i64,
-    pub pane_status: String,
+pub(crate) struct DeletedMember {
+    pub(crate) member_id: i64,
+    pub(crate) pane_status: String,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::broker::{self, tests as common};
+    use crate::broker;
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::register;
+    use crate::db::test_support::migrated_conn;
+    use crate::error::CafleetError;
 
     fn fixture() -> (tempfile::TempDir, rusqlite::Connection, i64, i64) {
-        let dir = tempfile::Builder::new()
-            .prefix(".typed-records-")
-            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-            .unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "typed-records");
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "typed-records");
         (dir, conn, fleet, director)
     }
 
@@ -170,7 +202,7 @@ mod tests {
     #[test]
     fn corrupt_recipient_status_stops_a_send_with_the_domain_cause_before_inserting() {
         let (_dir, mut conn, fleet, director) = fixture();
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
         conn.execute_batch("PRAGMA ignore_check_constraints=ON")
             .unwrap();
         conn.execute(

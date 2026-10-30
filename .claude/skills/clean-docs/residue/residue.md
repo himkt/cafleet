@@ -2,8 +2,8 @@
 
 Sweep the tracked tree for **historical narration** (past-state prose, "this
 replaces X", "renamed from Y", design-number provenance citations, trajectory
-notes, version qualifiers) and historical sentinel framing, preserving current-behavior absence tests, per `~/.claude/rules/removal.md` and
-`~/.claude/rules/affirmative-writing.md`. After a run, every artifact reads as
+notes, version qualifiers) and historical sentinel framing, preserving current-behavior absence tests, per the host's Removal and Affirmative Writing
+rules. After a run, every artifact reads as
 a clean present-tense statement of current behavior — and no behavior, no flag,
 no column, no code path, and no live test assertion is lost.
 
@@ -22,7 +22,7 @@ residue, remove deprecation notes / "this replaces X" / "renamed from Y" /
 
 ## Required reading
 
-Read the umbrella [startup and shared orchestration](../SKILL.md#required-reading) once, then this complete workflow before scanning or reviewing. Read [every pattern pass and exclusion](reference/patterns.md), plus the host removal and affirmative-writing rules. Use supplied session equivalents for absent optional host-rule files; route an essential unknown prerequisite to the Director before dependent work.
+Read the umbrella [startup and shared orchestration](../SKILL.md#required-reading) once, then this complete workflow before scanning or reviewing. Read [every pattern pass and exclusion](reference/patterns.md), plus the host's Removal and Affirmative Writing rules. Use supplied session equivalents for absent optional host-rule files; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Sweep mechanics
 
@@ -35,6 +35,62 @@ narration/citation/trajectory, (c) keep, plus the known-benign KEEP sub-case.
 The catalog is a **floor, not a ceiling**: a scanner may classify a hit no
 pattern named. A single grep is never sufficient, and no hit is ever classified
 from the matched substring alone.
+
+## Scanner obligations
+
+- **Sweep your slice thoroughly.** Run *every* pass in `reference/patterns.md`
+  over your assigned files. A single grep is never sufficient.
+- **Hand-inspect every hit.** Read each hit with its surrounding context (the whole
+  sentence / docstring / test body) and classify it with [Classification](#classification).
+  Never classify from the matched substring alone.
+- **Write a partial inventory.** Record every hit — including KEEP and known-benign
+  — as a `COMMENT(scanner)` marker at the hit's `<file>:<line>` in the run's
+  inventory, or as a partial table under `${BASE}` (per the Director's instruction).
+  Each row: location + quoted text anchor + rubric class + action.
+- **Re-sweep after apply.** Re-run the sweep over your slice after applying.
+- **Preserve the three invariants.** No runtime behavior
+  removed (every flag / table / column / code path survives); no live coverage
+  lost (a mixed sentinel test keeps its live assertion; a reworded narration keeps
+  the behavior description and the test); **no** new narration (R1) — every edit
+  is clean present-tense.
+
+The run pointer is `inventory`: report `complete (inventory)` for the partial
+inventory, and `complete (<file>:<line>)` per file or a single
+`complete (inventory)` for the slice apply.
+
+## Reviewer checks
+
+Your sole job is to **guard against over-deletion and lost coverage**.
+
+**Before apply — validate the merged inventory:**
+
+- **Catch mis-classification.** Re-judge every non-KEEP row against
+  [Classification](#classification). A row marked (a) Sentinel or (b) Narration that is really
+  (c) Keep is a defect — flag it.
+- **Catch over-deletion.** Any KEEP-item or known-benign match marked for removal
+  is a defect. Any planned deletion of a runtime flag / table / column / code path
+  is a defect (violates *no runtime behavior removed* — umbrella invariant 1; a
+  residue run is strictly zero-behavior-change).
+- **Catch lost coverage.** Any planned edit that would drop a live test assertion —
+  including deleting a mixed sentinel test outright instead of keeping its live
+  assertion or removing a current absence/rejection regression — is a defect (violates *no live coverage lost* — umbrella invariant 2).
+- **Catch new narration (R1).** Any planned reword that would introduce
+  "previously / now / no longer (as past) / formerly", "this replaces X", or
+  "renamed from Y" is a defect. Every reworded string must read as clean
+  present-tense current behavior.
+- **Confirm sweep completeness.** Every hit from the pattern catalog is accounted
+  for in the inventory (action, KEEP, or exempt) — no unclassified matches.
+
+On a failed check, mark the offending `<file>:<line>` in the inventory and reply
+`blocked (inventory)`, or `ready (<file>:<line>)` routing a specific fix.
+
+**After apply — re-check the git diff:**
+
+- Re-run the sweep (or review the scanners' re-sweep results): every remaining hit
+  is KEEP-listed, known-benign, or exempt (zero unaccounted matches).
+- Confirm the diff removed only sentinel framing and narration prose — no runtime
+  behavior, no live assertion lost.
+- Confirm no reworded string introduced new narration (R1).
 
 ## Artifact: `inventory.md`
 

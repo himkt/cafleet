@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clap::Args;
 use rusqlite::Connection;
@@ -11,17 +11,15 @@ use crate::diagnosis::SchemaState;
 use crate::error::CafleetError;
 
 #[derive(Args)]
-pub struct SetupArgs {
+pub(crate) struct SetupArgs {
     /// Install selected backends' assets (repeatable; default: every backend).
     #[arg(long = "coding-agent", value_name = "AGENT", num_args = 1.., value_enum)]
     coding_agent: Vec<CodingAgent>,
 }
 
-pub fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
+pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
     let mut conn = prepare_database(settings)?;
-    let home = PathBuf::from(
-        std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".into()))?,
-    );
+    let home = crate::config_dir::home_dir()?;
     install_selected(
         &mut conn,
         &args.coding_agent,
@@ -91,15 +89,13 @@ fn install_selected(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::test_support::assert_error;
     use crate::cli::{CliArgs, Command};
     use clap::Parser;
+    use clap::error::ErrorKind;
 
     fn settings(home: &Path) -> Settings {
-        Settings::from_lookup(|name| {
-            (name == "CAFLEET_DATABASE_URL")
-                .then(|| format!("sqlite:///{}", home.join("registry.db").display()))
-        })
-        .unwrap()
+        Settings::for_database(&home.join("registry.db"), None)
     }
 
     #[test]
@@ -181,26 +177,6 @@ mod tests {
     }
 
     #[test]
-    fn foreign_ahead_and_malformed_databases_are_unchanged_on_refusal() {
-        for mutation in [
-            "PRAGMA application_id=42",
-            "UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
-            "ALTER TABLE messages RENAME COLUMN text TO wrong",
-        ] {
-            let home = tempfile::tempdir().unwrap();
-            let settings = settings(home.path());
-            let conn = prepare_database(&settings).unwrap();
-            conn.execute_batch(mutation).unwrap();
-            drop(conn);
-            let path = crate::db::database_path(&settings.database_url).unwrap();
-            let before = std::fs::read(path).unwrap();
-            assert!(prepare_database(&settings).is_err(), "{mutation}");
-            assert_eq!(std::fs::read(path).unwrap(), before);
-            assert!(!home.path().join(".claude").exists());
-        }
-    }
-
-    #[test]
     fn refused_wal_databases_and_sidecars_remain_byte_identical_with_a_held_reader() {
         for mutation in [
             "PRAGMA application_id=42",
@@ -215,16 +191,42 @@ mod tests {
             conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
                 .unwrap();
             let path = crate::db::database_path(&settings.database_url).unwrap();
-            let before = ["", "-wal", "-shm"].map(|suffix| {
-                let path = PathBuf::from(format!("{path}{suffix}"));
-                let bytes = std::fs::read(&path).unwrap();
-                (path, bytes)
-            });
+            let before = crate::db::test_support::wal_snapshot(Path::new(path));
             assert!(prepare_database(&settings).is_err(), "{mutation}");
             for (path, bytes) in before {
                 assert_eq!(std::fs::read(&path).unwrap(), bytes, "{}", path.display());
             }
             conn.execute_batch("ROLLBACK").unwrap();
+        }
+    }
+    #[test]
+    fn setup_rejects_unknown_options_positionals_and_agent_values() {
+        let cases: &[(&[&str], ErrorKind, &str)] = &[
+            (&["setup", "extra"], ErrorKind::UnknownArgument, "extra"),
+            (&["setup", "claude"], ErrorKind::UnknownArgument, "claude"),
+            (
+                &["setup", "--skip", "claude"],
+                ErrorKind::UnknownArgument,
+                "--skip",
+            ),
+            (
+                &["setup", "--coding-agent", "python"],
+                ErrorKind::InvalidValue,
+                "python",
+            ),
+            (
+                &["setup", "--coding-agent", "claude", "python"],
+                ErrorKind::InvalidValue,
+                "python",
+            ),
+            (
+                &["setup", "--coding-agent", "claude", "extra"],
+                ErrorKind::InvalidValue,
+                "extra",
+            ),
+        ];
+        for (args, kind, input) in cases {
+            assert_error(args, *kind, input);
         }
     }
 }

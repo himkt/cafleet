@@ -32,7 +32,7 @@ implementing the approved work.
 
 ## Watch the team work
 
-Read durable coordination with message poll/show and inspect the team’s visible panes with member/fleet capture. The Director retains native reception and owns evidence checks until delegated work resolves, preserving host continuation and user gates. Follow the [manual lifecycle](mixed-backend-team.md#manual-lifecycle).
+Read durable coordination with message poll/show and inspect the team’s visible panes with `member capture`. The Director receives replies and checks evidence until delegated work resolves; the [manual lifecycle](mixed-backend-team.md#manual-lifecycle) explains reception.
 
 ## Invocation syntax
 

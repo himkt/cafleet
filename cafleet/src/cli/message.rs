@@ -6,7 +6,10 @@ use super::helpers::{emit, resolve_body};
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::output::{format_message, format_messages};
+use crate::output::{
+    format_message, format_message_acknowledged, format_message_sent, format_message_wait,
+    format_messages,
+};
 use crate::presentation;
 use crate::receive::{AttemptEnd, BrokerReceiver, SystemClock};
 
@@ -22,7 +25,7 @@ pub(crate) struct BodyArgs {
 }
 
 #[derive(Subcommand)]
-pub enum MessageCommand {
+pub(crate) enum MessageCommand {
     /// Send a unicast message.
     Send {
         /// Sender's member ID.
@@ -87,7 +90,7 @@ pub enum MessageCommand {
     },
 }
 
-pub fn run(
+pub(crate) fn run(
     conn: &mut Connection,
     settings: &Settings,
     command: MessageCommand,
@@ -108,7 +111,7 @@ pub fn run(
             let notification_sent = if from_member_id == to_member_id {
                 false
             } else {
-                match crate::runtime::deliver_pending(
+                match crate::delivery::deliver_pending(
                     conn,
                     settings,
                     to_member_id,
@@ -131,12 +134,7 @@ pub fn run(
             emit(
                 json,
                 &presentation::send_outcome(&message, notification_sent),
-                || {
-                    format!(
-                        "Message sent.\n{}",
-                        format_message(&message, settings.max_text_len)
-                    )
-                },
+                || format_message_sent(&message, settings.max_text_len),
             );
             Ok(())
         }
@@ -155,26 +153,18 @@ pub fn run(
             json,
         } => {
             let mut receiver = BrokerReceiver::new(conn, settings, member_id);
-            let outcome = crate::receive::wait(
+            let messages = &crate::receive::wait(
                 &SystemClock,
                 &mut receiver,
                 std::time::Duration::from_secs(timeout),
             )?;
-            let messages = &outcome.messages;
             let payload = serde_json::json!({
                 "member_id":member_id,
                 "outcome":if messages.is_empty() { "timeout" } else { "messages" },
                 "messages":messages.iter().map(presentation::message).collect::<Vec<_>>(),
             });
             emit(json, &payload, || {
-                if messages.is_empty() {
-                    format!("Timed out waiting for member {member_id}.")
-                } else {
-                    format!(
-                        "Messages available for member {member_id}.\n{}",
-                        format_messages(messages, settings.max_text_len)
-                    )
-                }
+                format_message_wait(member_id, messages, settings.max_text_len)
             });
             Ok(())
         }
@@ -184,10 +174,7 @@ pub fn run(
         MessageCommand::Ack { message_id, json } => {
             let message = broker::ack_message(conn, message_id)?;
             emit(json, &presentation::message_envelope(&message), || {
-                format!(
-                    "Message acknowledged.\n{}",
-                    format_message(&message, settings.max_text_len)
-                )
+                format_message_acknowledged(&message, settings.max_text_len)
             });
             Ok(())
         }

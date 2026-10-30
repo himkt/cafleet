@@ -239,11 +239,3 @@ maintainer:
 
 Installing skills directly from a checkout is a separate contributor operation;
 it does not replace the embedded-binary build/release → upgrade → setup path.
-
-## Ownership boundary
-
-This skill owns model catalogs, provenance/context notes, canonical Role defaults,
-and freshness metadata in the unified reference. Runtime documentation maintenance
-owns Runtime bindings, bound notes, and worked resolutions. The CAFleet
-Director owns per-spawn selection under `skills/cafleet/roles/director.md`; `cafleet member create` remains the execution
-boundary.

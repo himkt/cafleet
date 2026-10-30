@@ -1,7 +1,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::*;
-use crate::time::{format_utc, now_utc};
+use crate::time::now_stamp;
 
 fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
     Ok(InputOperation {
@@ -64,20 +64,28 @@ fn validate_input(
     Ok(input)
 }
 
-pub fn get_input(conn: &Connection, input_id: i64) -> Result<InputOperation, CafleetError> {
+pub(crate) fn input_payload_digest(
+    run_id: i64,
+    input: &crate::runtime::runner::SubmitInput,
+) -> String {
+    let payload = json!({"run_id":run_id,"kind":input.input_kind.as_str(),
+        "message_id":input.message_id,"literal":input.literal});
+    crate::digest::sha256_hex(crate::digest::canonical_json(&payload).as_bytes())
+}
+
+pub(crate) fn get_input(conn: &Connection, input_id: i64) -> Result<InputOperation, CafleetError> {
     let input = conn
         .query_row(
             "SELECT * FROM member_input_operations WHERE input_id=?1",
             [input_id],
             map_input,
         )
-        .optional()
-        .map_err(db_err)?
+        .optional()?
         .ok_or_else(|| CafleetError::Value(format!("Input {input_id} not found")))?;
     validate_input(conn, input)
 }
 
-pub fn find_input(
+pub(crate) fn find_input(
     conn: &Connection,
     run_id: i64,
     key: &str,
@@ -88,8 +96,7 @@ pub fn find_input(
             params![run_id, key],
             map_input,
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     input.map(|input| validate_input(conn, input)).transpose()
 }
 
@@ -98,7 +105,8 @@ pub(crate) enum InputReservation {
     Existing(InputOperation),
 }
 
-pub fn reserve_input(
+#[cfg(test)]
+pub(crate) fn reserve_input(
     conn: &mut Connection,
     owner: &RunOwner,
     new: &NewInput,
@@ -156,12 +164,12 @@ pub(crate) fn reserve_input_with_provenance(
             )?;
         }
         require_capacity(conn, run.run_id)?;
-        let now = format_utc(now_utc());
+        let now = now_stamp();
         conn.execute(
             "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id)
              VALUES(?1,?2,?3,?4,'in_progress',?5,?5,?6)",
             params![run.run_id,new.operation_key,new.kind.as_str(),new.payload_digest,now,new.message_id],
-        ).map_err(db_err)?;
+        )?;
         get_input(conn, conn.last_insert_rowid()).map(InputReservation::Inserted)
     })
 }
@@ -180,7 +188,7 @@ fn owned_input(
     Ok(input)
 }
 
-pub fn record_input_state(
+pub(crate) fn record_input_state(
     conn: &mut Connection,
     owner: &RunOwner,
     input_id: i64,
@@ -213,8 +221,8 @@ pub fn record_input_state(
         )?;
         let changed = conn.execute(
             "UPDATE member_input_operations SET state=?1,updated_at=?2 WHERE input_id=?3 AND state=?4",
-            params![next.as_str(),format_utc(now_utc()),input_id,expected.as_str()],
-        ).map_err(db_err)?;
+            params![next.as_str(),now_stamp(),input_id,expected.as_str()],
+        )?;
         require(
             changed == 1,
             "member_input_operations.state",
@@ -224,7 +232,8 @@ pub fn record_input_state(
     })
 }
 
-pub fn settle_input(
+#[cfg(test)]
+pub(crate) fn settle_input(
     conn: &mut Connection,
     owner: &RunOwner,
     input_id: i64,
@@ -232,12 +241,6 @@ pub fn settle_input(
     disposition: InputDisposition,
     evidence_ref: &str,
 ) -> Result<InputOperation, CafleetError> {
-    nonblank(evidence_ref, "evidence_ref")?;
-    require(
-        expected != InputState::Settled,
-        "state",
-        "settled operations retain their disposition",
-    )?;
     owned_transaction(conn, owner, |conn, _run| {
         settle_input_in_transaction(conn, owner, input_id, expected, disposition, evidence_ref)
     })
@@ -285,8 +288,8 @@ fn settle(
     let changed = conn.execute(
         "UPDATE member_input_operations SET state='settled',disposition=?1,evidence_ref=?2,updated_at=?3
          WHERE input_id=?4 AND state=?5",
-        params![disposition.as_str(),evidence_ref,format_utc(now_utc()),input_id,expected.as_str()],
-    ).map_err(db_err)?;
+        params![disposition.as_str(),evidence_ref,now_stamp(),input_id,expected.as_str()],
+    )?;
     require(
         changed == 1,
         "member_input_operations.state",
@@ -295,7 +298,7 @@ fn settle(
     get_input(conn, input_id)
 }
 
-pub fn settle_preview(
+pub(crate) fn settle_preview(
     conn: &mut Connection,
     owner: &RunOwner,
     input_id: i64,
@@ -347,21 +350,391 @@ fn stamp_preview(
     )?;
     conn.execute(
         "UPDATE messages SET notified_at=?1 WHERE message_id=?2 AND notified_at IS NULL",
-        params![format_utc(now_utc()), message_id],
-    )
-    .map_err(db_err)?;
+        params![now_stamp(), message_id],
+    )?;
     Ok(())
 }
 
+pub(crate) const UNRESOLVED_INPUT_STATES: &str = "('in_progress','accepted','uncertain')";
+
 pub(super) fn require_capacity(conn: &Connection, run_id: i64) -> Result<(), CafleetError> {
     let unresolved: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain')",
-        [run_id], |row| row.get(0),
-    ).map_err(db_err)?;
+        &format!(
+            "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN {UNRESOLVED_INPUT_STATES}"
+        ),
+        [run_id],
+        |row| row.get(0),
+    )?;
     require(
         unresolved < 4096,
         "member_input_operations",
         "unresolved input limit reached",
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::broker::members::test_support::register;
+    use crate::broker::runtime::test_support::*;
+    use crate::broker::runtime::{self as storage, *};
+
+    #[test]
+    fn input_payload_digest_hashes_the_key_sorted_payload() {
+        use crate::runtime::runner::SubmitInput;
+        let literal = "say \"hi\" λ";
+        let preview = SubmitInput {
+            operation_key: "preview:7:9".into(),
+            input_kind: InputKind::Preview,
+            message_id: Some(9),
+            literal: literal.into(),
+        };
+        let prompt = SubmitInput {
+            operation_key: "prompt:7".into(),
+            input_kind: InputKind::Prompt,
+            message_id: None,
+            literal: literal.into(),
+        };
+        let quoted = serde_json::to_string(literal).unwrap();
+        let expected = |kind: &str, message_id: &str| {
+            crate::digest::sha256_hex(
+                format!(
+                    "{{\"kind\":\"{kind}\",\"literal\":{quoted},\"message_id\":{message_id},\"run_id\":7}}"
+                )
+                .as_bytes(),
+            )
+        };
+        assert_eq!(input_payload_digest(7, &preview), expected("preview", "9"));
+        assert_eq!(input_payload_digest(7, &prompt), expected("prompt", "null"));
+    }
+
+    #[test]
+    fn receipt_key_digest_and_settled_disposition_survive_reconnection() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        let input = fixture.input(&owner, "prompt:one", InputKind::Prompt, None);
+        assert_eq!(input.state, InputState::InProgress);
+        let request = NewInput {
+            operation_key: "prompt:one".into(),
+            kind: InputKind::Prompt,
+            payload_digest: "d".repeat(64),
+            message_id: None,
+        };
+        let mut other = fixture.reopen();
+        assert_eq!(
+            storage::reserve_input(&mut other, &owner, &request)
+                .unwrap()
+                .input_id,
+            input.input_id
+        );
+        let settled = storage::settle_input(
+            &mut other,
+            &owner,
+            input.input_id,
+            InputState::InProgress,
+            InputDisposition::NotSubmitted,
+            "audit:zero-byte-confirmation",
+        )
+        .unwrap();
+        assert_eq!(settled.state, InputState::Settled);
+        let retry = storage::reserve_input(&mut fixture.conn, &owner, &request).unwrap();
+        assert_eq!(retry.input_id, input.input_id);
+        assert_eq!(retry.disposition, Some(InputDisposition::NotSubmitted));
+        assert_eq!(rows(&fixture.conn, "member_input_operations").len(), 1);
+    }
+
+    #[test]
+    fn operation_key_rejects_a_changed_digest_kind_or_message() {
+        for changed in ["digest", "kind", "message"] {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            fixture.input(&owner, "same-key", InputKind::Prompt, None);
+            let message = crate::broker::send_message(
+                &mut fixture.conn,
+                fixture.director,
+                fixture.member,
+                "preview",
+            )
+            .unwrap();
+            let mut request = NewInput {
+                operation_key: "same-key".into(),
+                kind: InputKind::Prompt,
+                payload_digest: "d".repeat(64),
+                message_id: None,
+            };
+            match changed {
+                "digest" => request.payload_digest = "e".repeat(64),
+                "kind" => request.kind = InputKind::Exec,
+                "message" => {
+                    request.kind = InputKind::Preview;
+                    request.message_id = Some(message.message_id);
+                }
+                _ => unreachable!(),
+            }
+            let before = durable_state(&fixture.conn);
+            assert!(
+                storage::reserve_input(&mut fixture.conn, &owner, &request).is_err(),
+                "{changed}"
+            );
+            assert_eq!(durable_state(&fixture.conn), before);
+        }
+    }
+
+    #[test]
+    fn preview_receipt_requires_a_message_addressed_to_its_run_member() {
+        for destination in ["missing", "director", "foreign"] {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let recipient = if destination == "director" {
+                fixture.director
+            } else {
+                register(&mut fixture.conn, fixture.fleet, "other", None)
+            };
+            let message = crate::broker::send_message(
+                &mut fixture.conn,
+                fixture.director,
+                recipient,
+                "other-message",
+            )
+            .unwrap();
+            let request = NewInput {
+                operation_key: format!("preview:{}:{}", owner.run_id, message.message_id),
+                kind: InputKind::Preview,
+                payload_digest: "d".repeat(64),
+                message_id: if destination == "missing" {
+                    None
+                } else {
+                    Some(message.message_id)
+                },
+            };
+            assert!(
+                storage::reserve_input(&mut fixture.conn, &owner, &request).is_err(),
+                "{destination}"
+            );
+            assert!(rows(&fixture.conn, "member_input_operations").is_empty());
+        }
+    }
+
+    #[test]
+    fn accepted_preview_settlement_and_message_stamp_are_atomic() {
+        for already_acked in [false, true] {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message = crate::broker::send_message(
+                &mut fixture.conn,
+                fixture.director,
+                fixture.member,
+                "held preview",
+            )
+            .unwrap();
+            let input = fixture.input(
+                &owner,
+                &format!("preview:{}:{}", owner.run_id, message.message_id),
+                InputKind::Preview,
+                Some(message.message_id),
+            );
+            storage::record_input_state(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                InputState::InProgress,
+                InputState::Accepted,
+            )
+            .unwrap();
+            if already_acked {
+                crate::broker::ack_message(&mut fixture.conn, message.message_id).unwrap();
+            }
+            let settled =
+                storage::settle_preview(&mut fixture.conn, &owner, input.input_id).unwrap();
+            assert_eq!(settled.state, InputState::Settled);
+            assert_eq!(settled.disposition, Some(InputDisposition::Submitted));
+            let stamp: Option<String> = fixture
+                .conn
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message.message_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(stamp.is_some());
+        }
+    }
+
+    #[test]
+    fn failed_preview_stamp_retains_the_durable_accepted_receipt_for_a_later_invocation() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        let message = crate::broker::send_message(
+            &mut fixture.conn,
+            fixture.director,
+            fixture.member,
+            "preview",
+        )
+        .unwrap();
+        let input = fixture.input(
+            &owner,
+            &format!("preview:{}:{}", owner.run_id, message.message_id),
+            InputKind::Preview,
+            Some(message.message_id),
+        );
+        storage::record_input_state(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            InputState::InProgress,
+            InputState::Accepted,
+        )
+        .unwrap();
+        fixture.conn.execute_batch("CREATE TRIGGER fail_stamp BEFORE UPDATE OF notified_at ON messages BEGIN SELECT RAISE(ABORT,'stamp failure'); END").unwrap();
+        assert!(storage::settle_preview(&mut fixture.conn, &owner, input.input_id).is_err());
+        let mut other = fixture.reopen();
+        let durable = storage::find_input(&other, owner.run_id, &input.operation_key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(durable.state, InputState::Accepted);
+        assert_eq!(
+            other
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message.message_id],
+                    |row| row.get::<_, Option<String>>(0)
+                )
+                .unwrap(),
+            None
+        );
+        other.execute_batch("DROP TRIGGER fail_stamp").unwrap();
+        storage::settle_preview(&mut other, &owner, input.input_id).unwrap();
+        assert_eq!(rows(&other, "member_input_operations").len(), 1);
+    }
+
+    #[test]
+    fn settlement_cas_rejects_stale_state_and_preserves_recorded_evidence() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        let input = fixture.input(&owner, "exec:lost-stdout", InputKind::Exec, None);
+        storage::record_input_state(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            InputState::InProgress,
+            InputState::Uncertain,
+        )
+        .unwrap();
+        assert!(
+            storage::settle_input(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                InputState::InProgress,
+                InputDisposition::Submitted,
+                "audit:stale"
+            )
+            .is_err()
+        );
+        assert!(
+            storage::settle_input(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                InputState::Uncertain,
+                InputDisposition::Submitted,
+                " "
+            )
+            .is_err()
+        );
+        let settled = storage::settle_input(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            InputState::Uncertain,
+            InputDisposition::AbandonedUncertain,
+            "audit:inspected-output",
+        )
+        .unwrap();
+        assert_eq!(
+            settled.disposition,
+            Some(InputDisposition::AbandonedUncertain)
+        );
+        assert_eq!(
+            settled.evidence_ref.as_deref(),
+            Some("audit:inspected-output")
+        );
+        let read = storage::get_input(&fixture.reopen(), input.input_id).unwrap();
+        assert_eq!(read.state, InputState::Settled);
+        assert!(
+            storage::settle_input(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                InputState::Uncertain,
+                InputDisposition::NotSubmitted,
+                "audit:changed"
+            )
+            .is_err()
+        );
+        assert!(rows(&fixture.conn, "member_runtime_events").is_empty());
+    }
+
+    #[test]
+    fn settled_receipt_history_can_exceed_the_unresolved_cache_bound() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        for index in 0..4097 {
+            let input = fixture.input(&owner, &format!("settled:{index}"), InputKind::Prompt, None);
+            storage::settle_input(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                InputState::InProgress,
+                InputDisposition::NotSubmitted,
+                "audit:zero-byte",
+            )
+            .unwrap();
+        }
+        assert_eq!(rows(&fixture.conn, "member_input_operations").len(), 4097);
+        assert!(
+            storage::find_input(&fixture.reopen(), owner.run_id, "settled:0")
+                .unwrap()
+                .is_some()
+        );
+    }
+    #[test]
+    fn failed_input_reservation_and_corrupt_receipt_reads_surface_the_original_state() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        fixture.conn.execute_batch("CREATE TRIGGER fail_input BEFORE INSERT ON member_input_operations BEGIN SELECT RAISE(ABORT,'injected input failure'); END").unwrap();
+        assert!(
+            storage::reserve_input(
+                &mut fixture.conn,
+                &owner,
+                &NewInput {
+                    operation_key: "reserved".into(),
+                    kind: InputKind::Exec,
+                    payload_digest: "d".repeat(64),
+                    message_id: None
+                }
+            )
+            .is_err()
+        );
+        assert!(rows(&fixture.reopen(), "member_input_operations").is_empty());
+        fixture
+            .conn
+            .execute_batch("DROP TRIGGER fail_input")
+            .unwrap();
+        let input = fixture.input(&owner, "reserved", InputKind::Exec, None);
+        fixture
+            .conn
+            .execute_batch("PRAGMA ignore_check_constraints=ON")
+            .unwrap();
+        fixture
+            .conn
+            .execute(
+                "UPDATE member_input_operations SET state='corrupt' WHERE input_id=?1",
+                [input.input_id],
+            )
+            .unwrap();
+        let error = storage::get_input(&fixture.conn, input.input_id).unwrap_err();
+        assert!(error.message().contains("state"));
+        assert!(error.message().contains("corrupt"));
+    }
 }

@@ -1,15 +1,13 @@
 use super::*;
-use crate::broker::members::db_err;
 use crate::broker::records::Placement;
 use crate::broker::runtime::{self as storage, *};
 use crate::config::Settings;
-use crate::input::{Deadline, PaneLock, inherited_database_deadline, with_database_budget};
+use crate::input::{Deadline, PaneLock, bounded_by_inherited, with_database_budget};
 use rusqlite::{Connection, OptionalExtension};
-use sha2::{Digest, Sha256};
 use std::time::Instant;
 
 pub(crate) struct PreparedSubmission<'a> {
-    pub request: &'a SubmitInput,
+    pub(crate) request: &'a SubmitInput,
     expiration: InputExpiration,
     deadline: Instant,
 }
@@ -33,7 +31,6 @@ impl<'a> PreparedSubmission<'a> {
     ) -> Result<InputControlRequest> {
         ensure(input_id > 0, "positive retirement input ID required")?;
         Ok(InputControlRequest {
-            protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: ControlIdentity::from_run(run),
             expires_at_mono_ns: self.expiration.monotonic_ns(),
             operation: InputControlOperation::Receipt(ReceiptAction::Retire { input_id }),
@@ -191,14 +188,9 @@ fn submission_digest(run_id: i64, request: &SubmitInput) -> Result<String> {
             return Err(CafleetError::Usage("ordinary input kind required".into()));
         }
     }
-    let bytes = canonical_json(&serde_json::json!({
-        "run_id":run_id,"kind":request.input_kind.as_str(),
-        "message_id":request.message_id,"literal":request.literal,
-    }));
-    Ok(Sha256::digest(bytes.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    Ok(crate::broker::runtime::input_payload_digest(
+        run_id, request,
+    ))
 }
 
 pub(crate) fn find_submission(
@@ -211,7 +203,7 @@ pub(crate) fn find_submission(
     let result = (|| {
         let digest = submission_digest(identity.run_id, request)?;
         with_database_budget(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             let run = selected_run(&tx, identity.run_id)?;
             ensure(
                 run.database_identity_json == identity.database_identity_json,
@@ -228,28 +220,35 @@ pub(crate) fn find_submission(
                 )?;
             }
             deadline.remaining()?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(retained)
         })
     })();
     result.map_err(|source| context.failure(source))
 }
 
-fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
-    let (status, stage, reason) = match (input.state, input.disposition) {
-        (InputState::Ready, _) => return None,
+/// The outcome a durable input already determines; a `Ready` input needs live revalidation.
+pub(super) fn durable_outcome(
+    input: &InputOperation,
+) -> Option<(SubmissionStatus, SubmissionStage, Option<String>)> {
+    match (input.state, input.disposition) {
+        (InputState::Ready, _) => None,
         (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
-            (SubmissionStatus::Accepted, SubmissionStage::Submitted, None)
+            Some((SubmissionStatus::Accepted, SubmissionStage::Submitted, None))
         }
         (InputState::InProgress | InputState::Uncertain, _) => {
-            (SubmissionStatus::Uncertain, SubmissionStage::Unknown, None)
+            Some((SubmissionStatus::Uncertain, SubmissionStage::Unknown, None))
         }
-        (InputState::Settled, _) => (
+        (InputState::Settled, _) => Some((
             SubmissionStatus::Rejected,
             SubmissionStage::ZeroBytes,
             Some("input operation key is consumed".into()),
-        ),
-    };
+        )),
+    }
+}
+
+fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
+    let (status, stage, reason) = durable_outcome(input)?;
     Some(SubmissionResult {
         status,
         input_id: Some(input.input_id),
@@ -260,12 +259,69 @@ fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
 }
 
 fn submission_deadline(conn: &Connection, deadline: Deadline) -> Result<Deadline> {
-    let effective = inherited_database_deadline(conn).map_or(deadline.instant(), |bound| {
-        bound.instant().min(deadline.instant())
-    });
-    let deadline = Deadline::until(effective);
+    let deadline = Deadline::until(bounded_by_inherited(conn, deadline.instant()));
     deadline.remaining()?;
     Ok(deadline)
+}
+
+fn same_association(
+    view: &storage::RuntimeEventView,
+    original: &storage::RuntimeEventView,
+) -> bool {
+    let interaction = |view: &storage::RuntimeEventView| {
+        view.interaction
+            .as_ref()
+            .map(|i| (i.interaction_id, i.run_id, i.episode_seq, i.classification))
+    };
+    view.event == original.event && interaction(view) == interaction(original)
+}
+
+fn permission_placement(conn: &Connection, run: &RunRecord) -> Result<Placement> {
+    crate::broker::get_member(conn, run.member_id, run.fleet_id)?
+        .and_then(|member| member.placement)
+        .ok_or_else(|| error("permission member placement unavailable"))
+}
+
+/// `messages` are the identity, contradiction, missing-durable and unmatched errors, in that order.
+fn validate_reply_against_durable(
+    reply: &SubmissionResult,
+    durable: Option<&InputOperation>,
+    messages: [&str; 4],
+) -> Result<()> {
+    let [identity, contradiction, missing, unmatched] = messages;
+    match (reply.input_id, durable) {
+        (Some(id), Some(input)) => {
+            ensure(id == input.input_id, identity)?;
+            let consistent = match reply.status {
+                SubmissionStatus::Accepted => {
+                    reply.stage == SubmissionStage::Submitted
+                        && matches!(
+                            (input.state, input.disposition),
+                            (InputState::Accepted, _)
+                                | (InputState::Settled, Some(InputDisposition::Submitted))
+                        )
+                }
+                SubmissionStatus::Uncertain => {
+                    matches!(input.state, InputState::InProgress | InputState::Uncertain)
+                }
+                SubmissionStatus::Held | SubmissionStatus::Rejected => {
+                    reply.stage == SubmissionStage::ZeroBytes
+                        && (input.state == InputState::Ready
+                            || input.state == InputState::Settled
+                                && input.disposition != Some(InputDisposition::Submitted))
+                }
+            };
+            ensure(consistent, contradiction)
+        }
+        (None, None) => ensure(
+            matches!(
+                reply.status,
+                SubmissionStatus::Held | SubmissionStatus::Rejected
+            ) && reply.stage == SubmissionStage::ZeroBytes,
+            missing,
+        ),
+        _ => Err(error(unmatched)),
+    }
 }
 
 pub(crate) fn validate_submission_target(
@@ -274,13 +330,10 @@ pub(crate) fn validate_submission_target(
     expected: &RunRecord,
     placement: &Placement,
 ) -> Result<()> {
-    let selected_path = conn
-        .path()
-        .ok_or_else(|| error("file-backed input database required"))?;
-    ensure(
-        std::fs::canonicalize(selected_path).map_err(io_error)?
-            == std::fs::canonicalize(crate::db::database_path(&settings.database_url)?)
-                .map_err(io_error)?,
+    validate_configured_database(
+        conn,
+        settings,
+        "file-backed input database required",
         "submission connection and configured database differ",
     )?;
     let current = storage::validate_owner(conn, &expected.owner())?;
@@ -324,7 +377,7 @@ pub(crate) fn submit_wrapped_input(
     request: &SubmitInput,
     deadline: Deadline,
 ) -> std::result::Result<SubmissionResult, InputFailure> {
-    match prepare_submission_with_host(
+    submit_wrapped_input_with_host(
         conn,
         settings,
         expected_run,
@@ -332,25 +385,9 @@ pub(crate) fn submit_wrapped_input(
         request,
         deadline,
         &mut NativeInputHost,
-    )? {
-        SubmissionPreparation::History(result) => Ok(result),
-        SubmissionPreparation::Locked {
-            attempt,
-            held,
-            deadline,
-        } => submit_wrapped_input_under_pane_lock(
-            conn,
-            settings,
-            expected_run,
-            expected_placement,
-            &held,
-            &attempt,
-            deadline,
-        ),
-    }
+    )
 }
 
-#[cfg(test)]
 fn submit_wrapped_input_with_host(
     conn: &mut Connection,
     settings: &Settings,
@@ -396,10 +433,7 @@ fn prepare_submission_with_host<'a>(
     deadline: Deadline,
     host: &mut impl InputCommandHost,
 ) -> std::result::Result<SubmissionPreparation<'a>, InputFailure> {
-    let identity = PermissionReceiptIdentity {
-        database_identity_json: expected_run.database_identity_json.clone(),
-        run_id: expected_run.run_id,
-    };
+    let identity = PermissionReceiptIdentity::for_run(expected_run);
     let retained = find_submission(conn, &identity, request, deadline)?;
     if let Some(result) = retained.as_ref().and_then(historical_submission) {
         return Ok(SubmissionPreparation::History(result));
@@ -427,27 +461,6 @@ fn prepare_submission_with_host<'a>(
     .map_err(|source| context.failure(source))
 }
 
-pub(crate) fn submit_wrapped_input_under_pane_lock(
-    conn: &mut Connection,
-    settings: &Settings,
-    expected_run: &RunRecord,
-    expected_placement: &Placement,
-    held: &PaneLock,
-    attempt: &PreparedSubmission<'_>,
-    deadline: Deadline,
-) -> std::result::Result<SubmissionResult, InputFailure> {
-    submit_wrapped_input_under_pane_lock_with_host(
-        conn,
-        settings,
-        expected_run,
-        expected_placement,
-        held,
-        attempt,
-        deadline,
-        &mut NativeInputHost,
-    )
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "the approved borrowed submission entry adds its host to the same fixed arguments"
@@ -467,10 +480,7 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         Deadline::until(deadline.instant().min(attempt.deadline)),
     )
     .map_err(|source| submission_context(expected_run.run_id, attempt.request).failure(source))?;
-    let identity = PermissionReceiptIdentity {
-        database_identity_json: expected_run.database_identity_json.clone(),
-        run_id: expected_run.run_id,
-    };
+    let identity = PermissionReceiptIdentity::for_run(expected_run);
     let retained = find_submission(conn, &identity, attempt.request, deadline)?;
     if let Some(result) = retained.as_ref().and_then(historical_submission) {
         return Ok(result);
@@ -489,32 +499,24 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         health.validate(expected_run)?;
         deadline.remaining()?;
         with_database_budget(conn, deadline, |conn| {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(db_err)?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             held.validate_binding(&settings.database_url, expected_placement)?;
             validate_submission_target(&tx, settings, expected_run, expected_placement)?;
             let changed = tx.execute(
                 "UPDATE member_runs SET reachability='reachable',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3",
-                rusqlite::params![crate::time::format_utc(crate::time::now_utc()), expected_run.run_id, expected_run.owner_epoch],
-            ).map_err(db_err)?;
+                rusqlite::params![crate::time::now_stamp(), expected_run.run_id, expected_run.owner_epoch],
+            )?;
             ensure(changed == 1, "submission health ownership changed")?;
             deadline.remaining()?;
-            tx.commit().map_err(db_err)
+            tx.commit().map_err(crate::error::CafleetError::from)
         })?;
-        let input = SubmitInput {
-            operation_key: attempt.request.operation_key.clone(),
-            input_kind: attempt.request.input_kind,
-            message_id: attempt.request.message_id,
-            literal: attempt.request.literal.clone(),
-        };
+        let input = attempt.request.clone();
         let operation = match input.input_kind {
             InputKind::Preview | InputKind::Prompt => InputControlOperation::SubmitPrompt(input),
             InputKind::Exec => InputControlOperation::SubmitExec(input),
             InputKind::PermissionResponse => unreachable!("validated ordinary input kind"),
         };
         let request = InputControlRequest {
-            protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: ControlIdentity::from_run(expected_run),
             expires_at_mono_ns: attempt.expiration.monotonic_ns(),
             operation,
@@ -534,42 +536,16 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
             held.validate_binding(&settings.database_url, expected_placement)?;
             validate_submission_target(conn, settings, expected_run, expected_placement)
         })?;
-        match (reply.input_id, recorded.as_ref()) {
-            (Some(id), Some(input)) => {
-                ensure(
-                    id == input.input_id,
-                    "submission reply input identity mismatch",
-                )?;
-                let matches = match reply.status {
-                    SubmissionStatus::Accepted => {
-                        reply.stage == SubmissionStage::Submitted
-                            && matches!(
-                                (input.state, input.disposition),
-                                (InputState::Accepted, _)
-                                    | (InputState::Settled, Some(InputDisposition::Submitted))
-                            )
-                    }
-                    SubmissionStatus::Uncertain => {
-                        matches!(input.state, InputState::InProgress | InputState::Uncertain)
-                    }
-                    SubmissionStatus::Held | SubmissionStatus::Rejected => {
-                        reply.stage == SubmissionStage::ZeroBytes
-                            && (input.state == InputState::Ready
-                                || input.state == InputState::Settled
-                                    && input.disposition != Some(InputDisposition::Submitted))
-                    }
-                };
-                ensure(matches, "submission reply contradicts durable state")?;
-            }
-            (None, None) => ensure(
-                matches!(
-                    reply.status,
-                    SubmissionStatus::Held | SubmissionStatus::Rejected
-                ) && reply.stage == SubmissionStage::ZeroBytes,
+        validate_reply_against_durable(
+            &reply,
+            recorded.as_ref(),
+            [
+                "submission reply input identity mismatch",
+                "submission reply contradicts durable state",
                 "submission outcome requires a durable input identity",
-            )?,
-            _ => return Err(error("submission reply has no matching durable input")),
-        }
+                "submission reply has no matching durable input",
+            ],
+        )?;
         deadline.remaining()?;
         Ok(reply)
     })();
@@ -595,14 +571,26 @@ fn validate_receipt_target(
 }
 
 pub(super) fn validate_receipt_database(conn: &Connection, settings: &Settings) -> Result<()> {
-    let selected_path = conn
-        .path()
-        .ok_or_else(|| error("file-backed receipt database required"))?;
+    validate_configured_database(
+        conn,
+        settings,
+        "file-backed receipt database required",
+        "receipt connection and configured database differ",
+    )
+}
+
+fn validate_configured_database(
+    conn: &Connection,
+    settings: &Settings,
+    memory_message: &str,
+    mismatch_message: &str,
+) -> Result<()> {
+    let selected_path = conn.path().ok_or_else(|| error(memory_message))?;
     ensure(
         std::fs::canonicalize(selected_path).map_err(io_error)?
             == std::fs::canonicalize(crate::db::database_path(&settings.database_url)?)
                 .map_err(io_error)?,
-        "receipt connection and configured database differ",
+        mismatch_message,
     )
 }
 
@@ -669,7 +657,7 @@ fn reconcile_receipt_with_hosts(
             "nonempty reconciliation evidence required",
         )?;
         let (original, run, placement) = with_database_budget(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             validate_receipt_database(&tx, settings)?;
             let input = storage::get_input(&tx, input_id)?;
             context.run_id = Some(input.run_id);
@@ -690,7 +678,7 @@ fn reconcile_receipt_with_hosts(
                 super::input_recovery::receipt_placement(&tx, &run)?
             };
             deadline.remaining()?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok((input, run, placement))
         })?;
         if original.state == InputState::Settled {
@@ -719,7 +707,7 @@ fn reconcile_receipt_with_hosts(
         let live = (|| {
             let read_target = |conn: &mut Connection| {
                 with_database_budget(conn, deadline, |conn| {
-                    let tx = conn.transaction().map_err(db_err)?;
+                    let tx = conn.transaction()?;
                     held.validate_binding(&settings.database_url, &placement)?;
                     validate_receipt_target(&tx, settings, &run, &placement)?;
                     let input = storage::get_input(&tx, input_id)?;
@@ -734,7 +722,7 @@ fn reconcile_receipt_with_hosts(
                         "receipt immutable input identity changed",
                     )?;
                     deadline.remaining()?;
-                    tx.commit().map_err(db_err)?;
+                    tx.commit()?;
                     Ok(input)
                 })
             };
@@ -746,7 +734,6 @@ fn reconcile_receipt_with_hosts(
             deadline.remaining()?;
             read_target(conn)?;
             let request = |action| InputControlRequest {
-                protocol_version: CONTROL_PROTOCOL_VERSION,
                 identity: ControlIdentity::from_run(&run),
                 expires_at_mono_ns: expiration.monotonic_ns(),
                 operation: InputControlOperation::Receipt(action),
@@ -758,8 +745,8 @@ fn reconcile_receipt_with_hosts(
                 .exchange(&run, &query, deadline.instant())
                 .map_err(CafleetError::from)?;
             ensure(
-                matches!(reply, InputControlReply::Receipt(ReceiptReply::Present { input_id: actual, submission })
-                if actual == input_id && submission.input_id == Some(input_id)),
+                matches!(reply, InputControlReply::Receipt(ReceiptReply::Present { input_id: actual, .. })
+                if actual == input_id),
                 "receipt query has no matching durable input identity",
             )?;
             deadline.remaining()?;
@@ -770,13 +757,8 @@ fn reconcile_receipt_with_hosts(
                 disposition,
                 evidence_ref: evidence_ref.into(),
             });
-            let reply = host
-                .exchange(&run, &reconcile, deadline.instant())
+            host.exchange(&run, &reconcile, deadline.instant())
                 .map_err(CafleetError::from)?;
-            ensure(
-                matches!(reply, InputControlReply::Receipt(ReceiptReply::Settled { input_id: actual }) if actual == input_id),
-                "receipt settlement acknowledgment identity mismatch",
-            )?;
             let settled = read_target(conn)?;
             ensure(
                 settled.state == InputState::Settled
@@ -786,13 +768,8 @@ fn reconcile_receipt_with_hosts(
             )?;
             deadline.remaining()?;
             let retirement = request(ReceiptAction::Retire { input_id });
-            let reply = host
-                .exchange(&run, &retirement, deadline.instant())
+            host.exchange(&run, &retirement, deadline.instant())
                 .map_err(CafleetError::from)?;
-            ensure(
-                matches!(reply, InputControlReply::Receipt(ReceiptReply::Retired { input_id: actual }) if actual == input_id),
-                "receipt retirement acknowledgment identity mismatch",
-            )?;
             deadline.remaining()?;
             let recorded = read_target(conn)?;
             ensure(recorded == settled, "receipt changed after retirement")?;
@@ -993,8 +970,7 @@ pub(super) fn response_lookup(
             rusqlite::params![run.run_id, input.operation_key],
             |row| row.get::<_, i64>(0),
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     let Some(id) = id else {
         return Ok(None);
     };
@@ -1004,10 +980,7 @@ pub(super) fn response_lookup(
         operation_key: input.operation_key.clone(),
         metadata: metadata(input, &retained.response),
     };
-    let identity = PermissionReceiptIdentity {
-        database_identity_json: run.database_identity_json.clone(),
-        run_id: run.run_id,
-    };
+    let identity = PermissionReceiptIdentity::for_run(run);
     let receipt = storage::lookup_permission_response(conn, &identity, &request)?
         .ok_or_else(|| error("retained permission response disappeared from its snapshot"))?;
     Ok(Some(receipt))
@@ -1029,7 +1002,7 @@ fn prepare_response(
         operation_key: Some(input.operation_key.clone()),
     };
     let result = with_database_budget(conn, deadline, |conn| {
-        let tx = conn.transaction().map_err(db_err)?;
+        let tx = conn.transaction()?;
         let run = selected_run(&tx, input.expected_run_id)?;
         let retained = response_lookup(&tx, &run, input, &mut context.input_id)?;
         let prepared = if let Some(receipt) = &retained
@@ -1048,39 +1021,14 @@ fn prepare_response(
                 input.expected_owner_epoch == run.owner_epoch,
                 "permission owner epoch changed",
             )?;
-            let original = super::input::inspection_association(
-                &tx,
-                &run,
-                &PermissionInspectInput {
-                    interaction_id: input.interaction_id,
-                    event_id: input.event_id,
-                    director_member_id: input.director_member_id,
-                },
-            )?;
+            let original = super::input::inspection_association(&tx, &run, &input.inspection())?;
             ResponsePreparation::Live(Box::new((run, original, retained)))
         };
         deadline.remaining()?;
-        tx.commit().map_err(db_err)?;
+        tx.commit()?;
         Ok(prepared)
     });
     result.map_err(|source| context.failure(source))
-}
-
-fn copy_response_input(input: &PermissionRespondInput) -> PermissionRespondInput {
-    PermissionRespondInput {
-        interaction_id: input.interaction_id,
-        event_id: input.event_id,
-        director_member_id: input.director_member_id,
-        expected_run_id: input.expected_run_id,
-        expected_owner_epoch: input.expected_owner_epoch,
-        request_token: input.request_token.clone(),
-        decision: input.decision,
-        decision_source: input.decision_source,
-        director_mode: input.director_mode,
-        mode_evidence_ref: input.mode_evidence_ref.clone(),
-        decision_evidence_ref: input.decision_evidence_ref.clone(),
-        operation_key: input.operation_key.clone(),
-    }
 }
 
 pub(crate) fn respond_permission_with_host(
@@ -1108,61 +1056,43 @@ pub(crate) fn respond_permission_with_host(
     };
     context.input_id = ready.as_ref().map(|r| r.input.input_id);
     let result = (|| {
-        let placement = with_database_budget(conn, deadline, |conn| {
-            crate::broker::get_member(conn, run.member_id, run.fleet_id)?
-                .and_then(|member| member.placement)
-                .ok_or_else(|| error("permission member placement unavailable"))
-        })?;
+        let placement =
+            with_database_budget(conn, deadline, |conn| permission_placement(conn, &run))?;
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
         let held = host
             .lock(settings, &run, &placement, deadline)
             .map_err(CafleetError::from)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
-        let validate =
-            |conn: &mut Connection| -> Result<()> {
-                deadline.remaining()?;
-                held.validate_binding(&settings.database_url, &placement)?;
-                with_database_budget(conn, deadline, |conn| {
-                    let tx = conn.transaction().map_err(db_err)?;
-                    validate_submission_target(&tx, settings, &run, &placement)?;
-                    let view = super::input::inspection_association(
-                        &tx,
-                        &run,
-                        &PermissionInspectInput {
-                            interaction_id: input.interaction_id,
-                            event_id: input.event_id,
-                            director_member_id: input.director_member_id,
-                        },
-                    )?;
+        let validate = |conn: &mut Connection| -> Result<()> {
+            deadline.remaining()?;
+            held.validate_binding(&settings.database_url, &placement)?;
+            with_database_budget(conn, deadline, |conn| {
+                let tx = conn.transaction()?;
+                validate_submission_target(&tx, settings, &run, &placement)?;
+                let view = super::input::inspection_association(&tx, &run, &input.inspection())?;
+                ensure(
+                    same_association(&view, &original),
+                    "permission response association changed",
+                )?;
+                if let Some(ready) = &ready {
                     ensure(
-                        view.event == original.event
-                            && view.interaction.as_ref().map(|i| {
-                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
-                            }) == original.interaction.as_ref().map(|i| {
-                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
-                            }),
-                        "permission response association changed",
+                        storage::get_permission_response(&tx, ready.input.input_id)? == *ready,
+                        "ready response snapshot changed",
                     )?;
-                    if let Some(ready) = &ready {
-                        ensure(
-                            storage::get_permission_response(&tx, ready.input.input_id)? == *ready,
-                            "ready response snapshot changed",
-                        )?;
-                    }
-                    deadline.remaining()?;
-                    tx.commit().map_err(db_err)
-                })
-            };
+                }
+                deadline.remaining()?;
+                tx.commit().map_err(crate::error::CafleetError::from)
+            })
+        };
         validate(conn)?;
         host.health(&run, deadline.instant())
             .map_err(CafleetError::from)?
             .validate(&run)?;
         validate(conn)?;
         let request = InputControlRequest {
-            protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: ControlIdentity::from_run(&run),
             expires_at_mono_ns: expiration.monotonic_ns(),
-            operation: InputControlOperation::PermissionRespond(copy_response_input(input)),
+            operation: InputControlOperation::PermissionRespond(input.clone()),
         };
         let reply = host
             .exchange(&run, &request, deadline.instant())
@@ -1170,18 +1100,8 @@ pub(crate) fn respond_permission_with_host(
         let InputControlReply::PermissionResponse(reply) = reply else {
             return Err(error("permission response requires its typed reply"));
         };
-        ensure(
-            reply.member_id == run.member_id
-                && reply.run_id == run.run_id
-                && reply.owner_epoch == input.expected_owner_epoch
-                && reply.interaction_id == input.interaction_id
-                && reply.event_id == input.event_id
-                && reply.decision == input.decision
-                && reply.decision_source == input.decision_source,
-            "permission response reply identity mismatch",
-        )?;
         let receipt = with_database_budget(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             held.validate_binding(&settings.database_url, &placement)?;
             validate_submission_target(&tx, settings, &run, &placement)?;
             association(
@@ -1194,50 +1114,19 @@ pub(crate) fn respond_permission_with_host(
             let receipt = response_lookup(&tx, &run, input, &mut context.input_id)?;
             context.input_id = receipt.as_ref().map(|r| r.input.input_id);
             deadline.remaining()?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(receipt)
         })?;
-        match (reply.submission.input_id, receipt.as_ref()) {
-            (Some(id), Some(receipt)) => {
-                ensure(
-                    id == receipt.input.input_id,
-                    "permission response reply input identity mismatch",
-                )?;
-                let valid = match reply.submission.status {
-                    SubmissionStatus::Accepted => {
-                        reply.submission.stage == SubmissionStage::Submitted
-                            && (receipt.input.state == InputState::Accepted
-                                || receipt.input.state == InputState::Settled
-                                    && receipt.input.disposition
-                                        == Some(InputDisposition::Submitted))
-                    }
-                    SubmissionStatus::Uncertain => matches!(
-                        receipt.input.state,
-                        InputState::InProgress | InputState::Uncertain
-                    ),
-                    SubmissionStatus::Held | SubmissionStatus::Rejected => {
-                        reply.submission.stage == SubmissionStage::ZeroBytes
-                            && (receipt.input.state == InputState::Ready
-                                || receipt.input.state == InputState::Settled
-                                    && receipt.input.disposition
-                                        != Some(InputDisposition::Submitted))
-                    }
-                };
-                ensure(valid, "permission response reply contradicts durable state")?;
-            }
-            (None, None) => ensure(
-                matches!(
-                    reply.submission.status,
-                    SubmissionStatus::Held | SubmissionStatus::Rejected
-                ) && reply.submission.stage == SubmissionStage::ZeroBytes,
+        validate_reply_against_durable(
+            &reply.submission,
+            receipt.as_ref().map(|receipt| &receipt.input),
+            [
+                "permission response reply input identity mismatch",
+                "permission response reply contradicts durable state",
                 "permission response outcome requires its durable input",
-            )?,
-            _ => {
-                return Err(error(
-                    "permission response reply has no matching durable input",
-                ));
-            }
-        }
+                "permission response reply has no matching durable input",
+            ],
+        )?;
         deadline.remaining()?;
         Ok(reply)
     })();
@@ -1286,15 +1175,14 @@ fn inspect_permission_with_host(
         )?;
         let deadline = submission_deadline(conn, deadline)?;
         let (run, placement, original) = with_database_budget(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             let interaction_exists = tx
                 .query_row(
                     "SELECT 1 FROM member_interactions WHERE interaction_id=?1",
                     [input.interaction_id],
                     |_| Ok(()),
                 )
-                .optional()
-                .map_err(db_err)?
+                .optional()?
                 .is_some();
             if !interaction_exists {
                 return Err(CafleetError::App(format!(
@@ -1309,13 +1197,11 @@ fn inspect_permission_with_host(
                 "member_runs.database_identity_json",
             )?;
             context.run_id = Some(run.run_id);
-            let placement = crate::broker::get_member(&tx, run.member_id, run.fleet_id)?
-                .and_then(|member| member.placement)
-                .ok_or_else(|| error("permission member placement unavailable"))?;
+            let placement = permission_placement(&tx, &run)?;
             validate_submission_target(&tx, settings, &run, &placement)?;
             let view = super::input::inspection_association(&tx, &run, input)?;
             deadline.remaining()?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok((run, placement, view))
         })?;
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
@@ -1323,41 +1209,30 @@ fn inspect_permission_with_host(
             .lock(settings, &run, &placement, deadline)
             .map_err(CafleetError::from)?
             .ok_or_else(|| error("permission pane input lock is busy"))?;
-        let validate =
-            |conn: &mut Connection| -> Result<()> {
+        let validate = |conn: &mut Connection| -> Result<()> {
+            deadline.remaining()?;
+            held.validate_binding(&settings.database_url, &placement)?;
+            with_database_budget(conn, deadline, |conn| {
+                let tx = conn.transaction()?;
+                validate_submission_target(&tx, settings, &run, &placement)?;
+                let view = super::input::inspection_association(&tx, &run, input)?;
+                ensure(
+                    same_association(&view, &original),
+                    "permission inspection association changed",
+                )?;
                 deadline.remaining()?;
-                held.validate_binding(&settings.database_url, &placement)?;
-                with_database_budget(conn, deadline, |conn| {
-                    let tx = conn.transaction().map_err(db_err)?;
-                    validate_submission_target(&tx, settings, &run, &placement)?;
-                    let view = super::input::inspection_association(&tx, &run, input)?;
-                    ensure(
-                        view.event == original.event
-                            && view.interaction.as_ref().map(|i| {
-                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
-                            }) == original.interaction.as_ref().map(|i| {
-                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
-                            }),
-                        "permission inspection association changed",
-                    )?;
-                    deadline.remaining()?;
-                    tx.commit().map_err(db_err)
-                })
-            };
+                tx.commit().map_err(crate::error::CafleetError::from)
+            })
+        };
         validate(conn)?;
         host.health(&run, deadline.instant())
             .map_err(CafleetError::from)?
             .validate(&run)?;
         validate(conn)?;
         let request = InputControlRequest {
-            protocol_version: CONTROL_PROTOCOL_VERSION,
             identity: ControlIdentity::from_run(&run),
             expires_at_mono_ns: expiration.monotonic_ns(),
-            operation: InputControlOperation::PermissionInspect(PermissionInspectInput {
-                event_id: input.event_id,
-                interaction_id: input.interaction_id,
-                director_member_id: input.director_member_id,
-            }),
+            operation: InputControlOperation::PermissionInspect(input.clone()),
         };
         let reply = host
             .exchange(&run, &request, deadline.instant())
@@ -1371,21 +1246,13 @@ fn inspect_permission_with_host(
             .as_ref()
             .expect("validated permission interaction");
         ensure(
-            reply.event_id == input.event_id
-                && reply.interaction_id == input.interaction_id
-                && reply.message_id == original.event.message_id.expect("validated inbox message")
-                && reply.run_id == run.run_id
-                && reply.owner_epoch == run.owner_epoch
-                && reply.member_id == run.member_id
-                && reply.fleet_id == run.fleet_id
-                && reply.director_member_id == run.director_member_id
+            reply.message_id == original.event.message_id.expect("validated inbox message")
                 && reply.episode_seq == interaction.episode_seq
                 && reply.backend == run.backend
                 && reply.native_version == run.native_version
                 && reply.profile_version == run.profile_version,
             "permission inspection reply identity mismatch",
         )?;
-        storage::evidence::validate(&reply.evidence)?;
         ensure(
             reply.evidence["backend"].as_str() == Some(run.backend.as_str())
                 && reply.evidence["native_version"].as_str() == run.native_version.as_deref()
@@ -1401,17 +1268,6 @@ fn inspect_permission_with_host(
                 .map(MissingEvidence::as_str)
                 .eq(missing.iter().map(MissingEvidence::as_str)),
             "permission inspection evidence completeness mismatch",
-        )?;
-        if let Some(token) = &reply.request_token {
-            validate_request_token(token)?;
-        }
-        let expected_order = [PermissionDecision::Allow, PermissionDecision::Deny]
-            .into_iter()
-            .filter(|decision| reply.supported_decisions.contains(decision))
-            .collect::<Vec<_>>();
-        ensure(
-            reply.supported_decisions == expected_order,
-            "permission inspection decisions are not an ordered subset",
         )?;
         match reply.answer_capability {
             Coverage::Tested => ensure(
@@ -1449,300 +1305,314 @@ fn inspect_permission_with_host(
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use crate::broker::runtime::{self as storage, *};
+    use crate::config::Settings;
+    use crate::runtime::runner::test_support::Fixture;
+    use crate::runtime::runner::*;
+    use serde_json::json;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    pub(crate) const NOW: &str = "2026-10-26T22:00:00.000000+00:00";
+
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) enum Retained {
+        InProgress,
+        Accepted,
+        Uncertain,
+        Submitted,
+        NotSubmitted,
+        Abandoned,
+    }
+    pub(crate) struct Case {
+        pub(crate) fixture: Fixture,
+        pub(crate) owner: RunOwner,
+        pub(crate) event: RuntimeEventRecord,
+        pub(crate) request: NewPermissionResponse,
+        pub(crate) input_id: i64,
+        pub(crate) settings: Settings,
+        pub(crate) placement: crate::broker::records::Placement,
+        pub(crate) _artifacts: RunArtifacts,
+        pub(crate) _lock: Arc<RunLock>,
+    }
+    impl Case {
+        pub(crate) fn command(&self) -> PermissionRespondInput {
+            let metadata = &self.request.metadata;
+            PermissionRespondInput {
+                interaction_id: metadata.interaction_id,
+                event_id: metadata.event_id,
+                director_member_id: metadata.director_member_id,
+                expected_run_id: self.owner.run_id,
+                expected_owner_epoch: metadata.expected_owner_epoch,
+                request_token: metadata.request_token.clone(),
+                decision: metadata.decision,
+                decision_source: metadata.decision_source,
+                director_mode: metadata.director_mode,
+                mode_evidence_ref: metadata.mode_evidence_ref.clone(),
+                decision_evidence_ref: metadata.decision_evidence_ref.clone(),
+                operation_key: self.request.operation_key.clone(),
+            }
+        }
+        pub(crate) fn new(state: Retained) -> Self {
+            Self::decision(
+                state,
+                PermissionDecision::Allow,
+                DirectorMode::Auto,
+                DecisionSource::DirectorAuto,
+            )
+        }
+        pub(crate) fn decision(
+            state: Retained,
+            decision: PermissionDecision,
+            mode: DirectorMode,
+            source: DecisionSource,
+        ) -> Self {
+            Self::from_fixture(Fixture::new(), state, decision, mode, source)
+        }
+        pub(crate) fn from_fixture(
+            mut fixture: Fixture,
+            state: Retained,
+            decision: PermissionDecision,
+            mode: DirectorMode,
+            source: DecisionSource,
+        ) -> Self {
+            let artifacts = fixture.artifacts();
+            let lock = Arc::new(
+                RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                    .unwrap()
+                    .unwrap(),
+            );
+            let owner = lock
+                .transfer_to_runner(
+                    &mut fixture.conn,
+                    &fixture.run.owner(),
+                    ProcessIdentity::current().unwrap(),
+                )
+                .unwrap();
+            assert_eq!(fixture.conn.execute(
+                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',profile_version='fixture-detector-v1',profile_match='exact',started_at=?1 WHERE run_id=?2",
+                rusqlite::params![NOW, fixture.run.run_id],
+            ).unwrap(), 1);
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            storage::reserve_event_sequences(&mut fixture.conn, &owner).unwrap();
+            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&json!({
+                "backend":"codex","native_version":fixture.run.native_version,"profile_version":"fixture-detector-v1",
+                "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,
+                "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
+            })).unwrap();
+            let transition = ObservedTransition {
+                run_id: owner.run_id,
+                event_seq: 1,
+                episode_seq: Some(1),
+                kind: RuntimeEventKind::InteractionOpened,
+                classification: Some(InteractionClass::PermissionRequest),
+                observed_at: NOW.into(),
+                evidence_json: evidence,
+                close_reason: None,
+                cause_json: None,
+            };
+            let event = storage::persist_event(
+                &mut fixture.conn,
+                &owner,
+                &transition,
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            let answer_rule = match decision {
+                PermissionDecision::Allow => "fixture-allow-once",
+                PermissionDecision::Deny => "fixture-deny-once",
+            };
+            let capability = crate::coding_agent::AnswerCapability::fixture(
+                crate::coding_agent::CodingAgent::Codex,
+                fixture.run.native_version.as_deref().unwrap(),
+                "fixture-answer-v1",
+                "fixture-permission",
+                answer_rule,
+                decision,
+                &["synthetic-history-storage".into()],
+            )
+            .unwrap();
+            let request = NewPermissionResponse {
+                operation_key: "fixture:retained-response".into(),
+                metadata: PermissionResponseMetadata {
+                    event_id: event.event_id,
+                    interaction_id: event.interaction_id.unwrap(),
+                    expected_owner_epoch: owner.owner_epoch,
+                    request_token: "a".repeat(64),
+                    decision,
+                    director_member_id: fixture.run.director_member_id,
+                    director_mode: mode,
+                    decision_source: source,
+                    mode_evidence_ref: "fixture:host-mode".into(),
+                    decision_evidence_ref: "fixture:attributed-decision".into(),
+                    answer_profile_version: "fixture-answer-v1".into(),
+                    answer_rule_id: answer_rule.into(),
+                },
+            };
+            let receipt = match storage::reserve_permission_response(
+                &mut fixture.conn,
+                &owner,
+                &request,
+                Some(&capability),
+                Instant::now() + Duration::from_secs(1),
+            )
+            .unwrap()
+            {
+                PermissionReservation::Reserved(receipt) => receipt,
+                PermissionReservation::Retained(_) => {
+                    panic!("a fresh history fixture reserves its own identity")
+                }
+            };
+            let input_id = receipt.input.input_id;
+            match state {
+                Retained::InProgress => {}
+                Retained::Accepted | Retained::Uncertain => {
+                    storage::record_input_state(
+                        &mut fixture.conn,
+                        &owner,
+                        input_id,
+                        InputState::InProgress,
+                        if matches!(state, Retained::Accepted) {
+                            InputState::Accepted
+                        } else {
+                            InputState::Uncertain
+                        },
+                    )
+                    .unwrap();
+                }
+                Retained::Submitted | Retained::Abandoned => {
+                    storage::settle_input(
+                        &mut fixture.conn,
+                        &owner,
+                        input_id,
+                        InputState::InProgress,
+                        if matches!(state, Retained::Submitted) {
+                            InputDisposition::Submitted
+                        } else {
+                            InputDisposition::AbandonedUncertain
+                        },
+                        "fixture:recorded-disposition",
+                    )
+                    .unwrap();
+                }
+                Retained::NotSubmitted => {
+                    storage::record_input_state(
+                        &mut fixture.conn,
+                        &owner,
+                        input_id,
+                        InputState::InProgress,
+                        InputState::Ready,
+                    )
+                    .unwrap();
+                    storage::settle_input(
+                        &mut fixture.conn,
+                        &owner,
+                        input_id,
+                        InputState::Ready,
+                        InputDisposition::NotSubmitted,
+                        "fixture:recorded-zero-byte-disposition",
+                    )
+                    .unwrap();
+                }
+            }
+            let read = storage::get_permission_response(&fixture.conn, input_id).unwrap();
+            assert!(read.claim.is_some());
+            assert_eq!(read.response.metadata, request.metadata);
+            let settings =
+                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()), None);
+            let placement = crate::broker::get_member(
+                &fixture.conn,
+                fixture.run.member_id,
+                fixture.run.fleet_id,
+            )
+            .unwrap()
+            .unwrap()
+            .placement
+            .unwrap();
+            Self {
+                fixture,
+                owner,
+                event,
+                request,
+                input_id,
+                settings,
+                placement,
+                _artifacts: artifacts,
+                _lock: lock,
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::runner_tests::Fixture;
-    use crate::runtime::{
-        InputServiceFixture, input_service_barrier, input_service_composer, input_service_records,
+    use crate::runtime::runner::service::test_support::ServiceFixture;
+    use crate::runtime::runner::service::test_support::input_service::{
+        input_service_barrier, input_service_composer, input_service_records,
         wait_input_service_record, with_input_service,
     };
-    use sha2::{Digest, Sha256};
+    use crate::runtime::runner::test_support::Fixture;
     use std::io::Write;
     use std::net::Shutdown;
     use std::time::Duration;
 
-    #[test]
-    fn external_finite_wait_retries_held_preview_after_actual_composer_recovery() {
-        use crate::receive::{
-            AttemptEnd, AttemptOutcome, BrokerReceiver, ReceiveIo, ReceiveSnapshot, SystemClock,
-        };
-        use std::collections::BTreeSet;
-
-        fn resize(
-            fixture: &InputServiceFixture,
-            process: &ProcessIdentity,
-            size: rustix::termios::Winsize,
-        ) {
-            assert!(
-                process.matches().unwrap(),
-                "original owned runner generation"
-            );
-            rustix::termios::tcsetwinsize(&fixture.master, size).unwrap();
-            nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
-                nix::sys::signal::Signal::SIGWINCH,
-            )
-            .unwrap();
-        }
-
-        struct ObservedReceiver<'a, 'b> {
-            receiver: BrokerReceiver<'a>,
-            fixture: &'b mut InputServiceFixture,
-            run: RunRecord,
-            process: ProcessIdentity,
-            size: rustix::termios::Winsize,
-            until: Instant,
-            message_id: i64,
-            key: String,
-            line: String,
-            outcomes: Vec<AttemptOutcome>,
-        }
-        impl ObservedReceiver<'_, '_> {
-            fn untouched(&self) {
-                assert!(
-                    storage::find_input(&self.fixture.fixture.conn, self.run.run_id, &self.key)
-                        .unwrap()
-                        .is_none()
-                );
-                let stamp: Option<String> = self
-                    .fixture
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT notified_at FROM messages WHERE message_id=?1",
-                        [self.message_id],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert!(stamp.is_none());
-                assert!(
-                    input_service_records(self.fixture)
-                        .iter()
-                        .all(|record| record["line"].as_str() != Some(self.line.as_str()))
-                );
-            }
-        }
-        impl ReceiveIo for ObservedReceiver<'_, '_> {
-            fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot> {
-                self.receiver.check(deadline)
-            }
-            fn attempt(
-                &mut self,
-                member_id: i64,
-                deadline: Deadline,
-                attempted: &BTreeSet<i64>,
-            ) -> Result<AttemptOutcome> {
-                assert_eq!(member_id, self.run.member_id);
-                assert!(!attempted.contains(&self.message_id));
-                let outcome = self.receiver.attempt(member_id, deadline, attempted)?;
-                if self.outcomes.is_empty() {
-                    assert_eq!(
-                        outcome.end,
-                        AttemptEnd::Held,
-                        "actual first outcome={outcome:?}"
-                    );
-                    assert!(outcome.sent.is_empty());
-                    self.untouched();
-                    resize(self.fixture, &self.process, self.size);
-                    let until = self.until.min(deadline.instant());
-                    input_service_barrier(self.fixture, until);
-                    let health = input_service_composer(self.fixture, until);
-                    health.validate(&self.run).unwrap();
-                    let observation = health.observation.unwrap();
-                    assert_eq!(observation.eligibility, InputEligibility::ComposerEmpty);
-                    assert_eq!(observation.visibility, Visibility::NotVisible);
-                    assert!(!observation.degraded);
-                    assert_eq!(observation.pending_count, 0);
-                    assert!(!observation.pending_evidence);
-                    self.untouched();
-                    assert_eq!(
-                        input_service_records(self.fixture)
-                            .iter()
-                            .map(|record| record["line"].as_str().unwrap().to_owned())
-                            .collect::<Vec<_>>(),
-                        vec!["barrier"]
-                    );
-                }
-                self.outcomes.push(outcome.clone());
-                Ok(outcome)
-            }
-        }
-
-        with_input_service(|fixture, until| {
-            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            let notifications =
-                crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id)
-                    .unwrap();
-            assert_eq!(
-                notifications.len(),
-                1,
-                "startup notifications={notifications:?}"
-            );
-            let notification = &notifications[0];
-            assert_eq!(notification.from_member_id, run.member_id);
-            assert_eq!(notification.to_member_id, run.director_member_id);
-            let event_id: i64 = fixture
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND message_id=?2 AND kind='coverage_unknown'",
-                    rusqlite::params![run.run_id, notification.message_id],
-                    |row| row.get(0),
+    /// The `(event_id, interaction_id, message_id)` of the run's opened interaction, polled
+    /// until it is committed or `until` passes.
+    fn opened_interaction(fixture: &mut ServiceFixture, until: Instant) -> (i64, i64, i64) {
+        let run_id = fixture.fixture.run.run_id;
+        loop {
+            let row = with_database_budget(&mut fixture.fixture.conn, Deadline::until(until), |conn| {
+                conn.query_row(
+                    "SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
+                    [run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
-                .unwrap();
-            let event = storage::get_event(&fixture.fixture.conn, event_id).unwrap();
-            assert_eq!(event.event.run_id, run.run_id);
-            assert_eq!(event.event.kind, storage::RuntimeEventKind::CoverageUnknown);
-            assert_eq!(event.event.message_id, Some(notification.message_id));
-            assert_eq!(event.run.run.owner(), run.owner());
-            assert_eq!(event.event.payload_json.to_string(), notification.text);
-            let acknowledged =
-                crate::broker::ack_message(&mut fixture.fixture.conn, notification.message_id)
-                    .unwrap();
-            assert_eq!(acknowledged.message_id, notification.message_id);
-            assert_eq!(acknowledged.status.as_str(), "completed");
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
-            let size = rustix::termios::tcgetwinsize(&fixture.master).unwrap();
-            let process = ProcessIdentity::read(run.owner_pid).unwrap().unwrap();
-            assert_eq!(process.start_identity, run.owner_start_identity);
-            resize(
-                fixture,
-                &process,
-                rustix::termios::Winsize {
-                    ws_row: 1,
-                    ws_col: 1,
-                    ws_xpixel: 0,
-                    ws_ypixel: 0,
-                },
-            );
-            let mut previous = None;
-            loop {
-                assert!(
-                    Instant::now() < until,
-                    "actual stable Hold setup within original fixture cap"
-                );
-                let health = NativeInputHost.health(&run, until).unwrap();
-                health.validate(&run).unwrap();
-                let observation = health.observation.as_ref().unwrap();
-                if matches!(observation.eligibility, InputEligibility::Hold(_))
-                    && !observation.degraded
-                    && observation.pending_count == 0
-                    && !observation.pending_evidence
-                {
-                    if previous == Some(health.output_seq) {
-                        break;
-                    }
-                    previous = Some(health.output_seq);
-                } else {
-                    previous = None;
-                }
-                std::thread::sleep(
-                    Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
-                );
-            }
-            let message = crate::broker::send_message(
-                &mut fixture.fixture.conn,
-                run.director_member_id,
-                run.member_id,
-                "actual external Held retry fixture",
-            )
-            .unwrap();
-            assert!(
-                crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id)
-                    .unwrap()
-                    .is_empty()
-            );
-            assert!(input_service_records(fixture).is_empty());
-            let line = format!(
-                "[cafleet msg {} from {} {}] {} [cafleet] Resume your work if something was still running.",
-                message.message_id, message.from_member_id, message.created_at, message.text,
-            );
-            let key = format!("preview:{}:{}", run.run_id, message.message_id);
-            let timeout = Duration::from_secs(2);
-            assert!(
-                until.saturating_duration_since(Instant::now()) > timeout,
-                "original fixture cap contains the finite retry and cleanup"
-            );
-            let mut conn = crate::db::connect(&settings.database_url).unwrap();
-            let outcomes = with_database_budget(&mut conn, Deadline::until(until), |conn| {
-                let mut io = ObservedReceiver {
-                    receiver: BrokerReceiver::new(conn, &settings, run.director_member_id),
-                    fixture: &mut *fixture,
-                    run: run.clone(),
-                    process,
-                    size,
-                    until,
-                    message_id: message.message_id,
-                    key: key.clone(),
-                    line: line.clone(),
-                    outcomes: Vec::new(),
-                };
-                let waited = crate::receive::wait(&SystemClock, &mut io, timeout);
-                assert!(
-                    waited.is_ok(),
-                    "receive_error={:?}; actual_attempts={:?}",
-                    waited.as_ref().err(),
-                    io.outcomes
-                );
-                assert!(waited.unwrap().messages.is_empty());
-                Ok(io.outcomes)
+                .optional()
+                .map_err(crate::error::CafleetError::from)
             })
             .unwrap();
-            assert_eq!(outcomes.len(), 2);
-            assert_eq!(outcomes[0].end, AttemptEnd::Held);
-            assert!(outcomes[0].sent.is_empty());
-            assert_eq!(outcomes[1].end, AttemptEnd::NoPending);
-            assert_eq!(outcomes[1].sent, vec![message.message_id]);
-            let input = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
-                .unwrap()
-                .unwrap();
-            assert_eq!(input.kind, InputKind::Preview);
-            assert_eq!(input.message_id, Some(message.message_id));
-            assert_eq!(input.state, InputState::Settled);
-            assert_eq!(input.disposition, Some(InputDisposition::Submitted));
-            assert_eq!(input.evidence_ref, None);
-            let stamp: Option<String> = fixture
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT notified_at FROM messages WHERE message_id=?1",
-                    [message.message_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(stamp.is_some());
-            wait_input_service_record(fixture, &line, until);
-            assert_eq!(
-                input_service_records(fixture)
-                    .iter()
-                    .map(|record| record["line"].as_str().unwrap().to_owned())
-                    .collect::<Vec<_>>(),
-                vec!["barrier", line.as_str()]
-            );
-            let records = input_service_records(fixture);
-            let native = records
-                .iter()
-                .find(|record| record["line"] == line)
-                .unwrap();
+            if let Some(row) = row {
+                return row;
+            }
             assert!(
-                native["inputs"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|row| row["input_id"] == input.input_id)
+                Instant::now() < until,
+                "the opened interaction commits before the original deadline"
             );
-        });
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 
-    fn inspection_barrier(fixture: &mut InputServiceFixture, start: usize, barrier: &str) {
+    /// Row counts of the input, permission-response and claim tables, in that order.
+    fn permission_counts(conn: &Connection) -> [i64; 3] {
+        [
+            "member_input_operations",
+            "member_permission_responses",
+            "member_permission_response_claims",
+        ]
+        .map(|table| {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        })
+    }
+
+    fn notified_at(conn: &Connection, message_id: i64) -> Option<String> {
+        conn.query_row(
+            "SELECT notified_at FROM messages WHERE message_id=?1",
+            [message_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn inspection_barrier(fixture: &mut ServiceFixture, start: usize, barrier: &str) {
         native_answers_through_barrier(fixture, start, barrier, &[]);
     }
     fn native_answers_through_barrier(
-        fixture: &mut InputServiceFixture,
+        fixture: &mut ServiceFixture,
         start: usize,
         barrier: &str,
         prior: &[&str],
@@ -1794,47 +1664,21 @@ mod tests {
     #[test]
     fn permission_inspection_actual_service_projects_current_unsupported_request_without_answering()
     {
-        use crate::runtime::runner_tests::control_service::observation_services::synthetic;
+        use crate::runtime::runner::observation::test_support::synthetic;
 
-        let mut fixture = InputServiceFixture::configured(false, synthetic);
+        let mut fixture = ServiceFixture::configured(false, synthetic);
         fixture.start_running();
         let until = Instant::now() + Duration::from_secs(2);
         fixture.master.write_all(b"form-inspection\r").unwrap();
         fixture.read_until("Operation: write form-inspection.txt");
         let output_start = fixture.output.len();
-        let (event_id, interaction_id, message_id) = loop {
-            let row = with_database_budget(&mut fixture.fixture.conn, Deadline::until(until), |conn| {
-                conn.query_row(
-                    "SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
-                    [fixture.fixture.run.run_id], |row| Ok((row.get::<_, i64>(0)?,row.get::<_, i64>(1)?,row.get::<_, i64>(2)?)),
-                ).optional().map_err(db_err)
-            }).unwrap();
-            if let Some(row) = row {
-                break row;
-            }
-            assert!(Instant::now() < until, "original stable-request deadline");
-            std::thread::sleep(Duration::from_millis(2));
-        };
+        let (event_id, interaction_id, message_id) = opened_interaction(&mut fixture, until);
         let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        let settings = Settings {
-            database_url: format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
-            max_text_len: 200,
-            multiplexer: Some("tmux".into()),
-        };
-        let counts = |conn: &Connection| {
-            [
-                "member_input_operations",
-                "member_permission_responses",
-                "member_permission_response_claims",
-            ]
-            .map(|table| {
-                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap()
-            })
-        };
-        let before = counts(&fixture.fixture.conn);
+        let settings = Settings::for_database(
+            std::path::Path::new(fixture.fixture.conn.path().unwrap()),
+            Some("tmux"),
+        );
+        let before = permission_counts(&fixture.fixture.conn);
         let inspected = inspect_permission(
             &mut fixture.fixture.conn,
             &settings,
@@ -1880,84 +1724,20 @@ mod tests {
                 "choice_scope"
             ]
         );
-        assert_eq!(counts(&fixture.fixture.conn), before);
-        let notified: Option<String> = fixture
-            .fixture
-            .conn
-            .query_row(
-                "SELECT notified_at FROM messages WHERE message_id=?1",
-                [message_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(notified.is_none());
+        assert_eq!(permission_counts(&fixture.fixture.conn), before);
+        assert!(notified_at(&fixture.fixture.conn, message_id).is_none());
         inspection_barrier(&mut fixture, output_start, "inspection-barrier");
         fixture.finish();
     }
 
-    struct InspectionHost {
-        socket: SocketHost,
-        wrong_event: bool,
-    }
-    impl InputCommandHost for InspectionHost {
-        fn lock(
-            &mut self,
-            settings: &Settings,
-            run: &RunRecord,
-            placement: &Placement,
-            deadline: Deadline,
-        ) -> std::result::Result<Option<PaneLock>, InputFailure> {
-            self.socket.lock(settings, run, placement, deadline)
-        }
-        fn health(
-            &mut self,
-            run: &RunRecord,
-            deadline: Instant,
-        ) -> std::result::Result<HealthSnapshot, InputFailure> {
-            self.socket.health(run, deadline)
-        }
-        fn exchange(
-            &mut self,
-            run: &RunRecord,
-            request: &InputControlRequest,
-            deadline: Instant,
-        ) -> std::result::Result<InputControlReply, InputFailure> {
-            assert!(matches!(
-                request.operation,
-                InputControlOperation::PermissionInspect(_)
-            ));
-            let mut reply = self.socket.exchange(run, request, deadline)?;
-            if self.wrong_event {
-                let InputControlReply::Inspection(value) = &mut reply else {
-                    panic!("actual typed permission inspection")
-                };
-                value.event_id += 1;
-            }
-            Ok(reply)
-        }
-    }
-
     #[test]
     fn permission_inspection_client_uses_real_guard_original_sql_bound_and_validates_live_reply() {
-        use crate::coding_agent::inspection_fixture_definition;
-        use crate::runtime::runner_tests::control_service::observation_services::synthetic;
+        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
+        use crate::runtime::runner::observation::test_support::synthetic;
 
-        let mut fixture = InputServiceFixture::configured(false, |fixture, spec| {
+        let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
             synthetic(fixture, spec);
-            let path = fixture._dir.path().join("observation-services.json");
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(path)
-                .unwrap();
-            file.write_all(
-                &serde_json::to_vec(
-                    &serde_json::json!({"catalog":inspection_fixture_definition()}),
-                )
-                .unwrap(),
-            )
-            .unwrap();
-            file.sync_all().unwrap();
+            overwrite_observation_catalog(fixture, inspection_fixture_definition());
         });
         fixture.start_running();
         let outer = Instant::now() + Duration::from_secs(2);
@@ -1967,19 +1747,7 @@ mod tests {
             .unwrap();
         fixture.read_until("Operation: write form-executable-inspection.txt");
         let output_start = fixture.output.len();
-        let (event_id, interaction_id, message_id) = loop {
-            let ids = with_database_budget(&mut fixture.fixture.conn,Deadline::until(outer),|conn| {
-                conn.query_row("SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?))).optional().map_err(db_err)
-            }).unwrap();
-            if let Some(ids) = ids {
-                break ids;
-            }
-            assert!(
-                Instant::now() < outer,
-                "original request stabilization deadline"
-            );
-            std::thread::sleep(Duration::from_millis(2));
-        };
+        let (event_id, interaction_id, message_id) = opened_interaction(&mut fixture, outer);
         let (settings, run, placement) = service_target(&fixture);
         let request = PermissionInspectInput {
             event_id,
@@ -2002,10 +1770,7 @@ mod tests {
         assert_eq!(health_records(&fixture.fixture.conn), records);
 
         let inherited = outer - Duration::from_millis(100);
-        let mut host = InspectionHost {
-            socket: SocketHost::new(&settings, &placement, inherited),
-            wrong_event: false,
-        };
+        let mut host = SocketHost::new(&settings, &placement, inherited);
         let value = with_database_budget(
             &mut fixture.fixture.conn,
             Deadline::until(inherited),
@@ -2021,8 +1786,8 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(host.socket.calls, [1, 1, 1]);
-        assert!(host.socket.expiration.is_some());
+        assert_eq!(host.calls, [1, 1, 1]);
+        assert!(host.expiration.is_some());
         assert_eq!(
             (value.event_id, value.interaction_id, value.message_id),
             (event_id, interaction_id, message_id)
@@ -2040,36 +1805,6 @@ mod tests {
                 .missing_evidence
                 .iter()
                 .any(|v| matches!(v, MissingEvidence::ChoiceScope))
-        );
-
-        let mut wrong = InspectionHost {
-            socket: SocketHost::new(&settings, &placement, outer),
-            wrong_event: true,
-        };
-        let failure = match inspect_permission_with_host(
-            &mut fixture.fixture.conn,
-            &settings,
-            &request,
-            Deadline::until(outer),
-            &mut wrong,
-        ) {
-            Err(failure) => failure,
-            Ok(_) => panic!("a real typed reply still requires its pinned event identity"),
-        };
-        assert_eq!(wrong.socket.calls, [1, 1, 1]);
-        assert_eq!(failure.run_id, Some(run.run_id));
-        assert_eq!(failure.interaction_id, Some(interaction_id));
-        assert!(
-            !failure
-                .source
-                .message()
-                .contains("form-executable-inspection")
-        );
-        assert!(
-            !failure
-                .source
-                .message()
-                .contains(value.request_token.as_ref().unwrap())
         );
 
         let original_sender: i64 = fixture
@@ -2142,56 +1877,22 @@ mod tests {
             )
             .unwrap();
         assert_eq!(actual_sender, replacement_sender);
-        for table in [
-            "member_input_operations",
-            "member_permission_responses",
-            "member_permission_response_claims",
-        ] {
-            let count: i64 = fixture
-                .fixture
-                .conn
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(count, 0);
-        }
-        let notified: Option<String> = fixture
-            .fixture
-            .conn
-            .query_row(
-                "SELECT notified_at FROM messages WHERE message_id=?1",
-                [message_id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(notified.is_none());
+        assert_eq!(permission_counts(&fixture.fixture.conn), [0, 0, 0]);
+        assert!(notified_at(&fixture.fixture.conn, message_id).is_none());
         inspection_barrier(&mut fixture, output_start, "inspection-client-barrier");
         fixture.finish();
     }
 
     #[test]
     fn permission_response_history_honors_expired_inherited_budget_before_sql_or_live_calls() {
-        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::{Case, Retained};
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::{Arc, Mutex};
 
         let mut case = Case::new(Retained::Accepted);
         let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-        let metadata = &receipt.response.metadata;
-        let input = PermissionRespondInput {
-            interaction_id: metadata.interaction_id,
-            event_id: metadata.event_id,
-            director_member_id: metadata.director_member_id,
-            expected_run_id: receipt.input.run_id,
-            expected_owner_epoch: metadata.expected_owner_epoch,
-            request_token: metadata.request_token.clone(),
-            decision: metadata.decision,
-            decision_source: metadata.decision_source,
-            director_mode: metadata.director_mode,
-            mode_evidence_ref: metadata.mode_evidence_ref.clone(),
-            decision_evidence_ref: metadata.decision_evidence_ref.clone(),
-            operation_key: receipt.input.operation_key.clone(),
-        };
+        let input = case.command();
         let run = storage::get_run(&case.fixture.conn, input.expected_run_id).unwrap();
         let records = health_records(&case.fixture.conn);
         let changes = case.fixture.conn.total_changes();
@@ -2222,8 +1923,7 @@ mod tests {
                             .push(Deadline::inherited_or_new().instant());
                     }
                     Authorization::Allow
-                }))
-                .map_err(db_err)?;
+                }))?;
                 active = Some(respond_permission_with_host(
                     conn,
                     &case.settings,
@@ -2248,18 +1948,10 @@ mod tests {
                 ));
                 expired_calls = Some(calls.load(Ordering::SeqCst));
                 conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
-                    .map_err(db_err)
+                    .map_err(crate::error::CafleetError::from)
             });
         let expired = expired.expect("expired-frame invocation completed");
         let expired_calls = expired_calls.expect("SQL count sampled after expired invocation");
-        eprintln!(
-            "permission inherited expiry: result={:?}; SQL={expired_calls}; scope_cleanup={scoped:?}",
-            expired.as_ref().map(|reply| (
-                reply.submission.status,
-                reply.submission.input_id,
-                reply.submission.stage
-            ))
-        );
         scoped.unwrap();
         let active = active
             .expect("same history has a live-budget control")
@@ -2305,13 +1997,16 @@ mod tests {
     }
 
     fn response_services(fixture: &mut Fixture, spec: &mut SpawnSpec) {
-        crate::runtime::runner_tests::control_service::observation_services::synthetic(
-            fixture, spec,
-        );
-        let mut catalog = crate::coding_agent::inspection_fixture_definition();
+        crate::runtime::runner::observation::test_support::synthetic(fixture, spec);
+        let mut catalog =
+            crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition();
         catalog["profiles"][0]["capabilities"]["answers"][0]["stages"] = serde_json::json!([{
             "bytes_hex":"790d","required_rule_id":"synthetic-permission","required_choice_id":"allow-once"
         }]);
+        overwrite_observation_catalog(fixture, catalog);
+    }
+    /// Replaces the catalog in the observation-services file that `synthetic` already wrote.
+    fn overwrite_observation_catalog(fixture: &Fixture, catalog: serde_json::Value) {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .truncate(true)
@@ -2322,7 +2017,7 @@ mod tests {
         file.sync_all().unwrap();
     }
     fn response_command(
-        fixture: &mut InputServiceFixture,
+        fixture: &mut ServiceFixture,
         until: Instant,
         key: &str,
     ) -> (Settings, RunRecord, Placement, PermissionRespondInput) {
@@ -2330,7 +2025,7 @@ mod tests {
         fixture.read_until("Operation: write form-response.txt");
         let (event_id, interaction_id) = loop {
             let row=with_database_budget(&mut fixture.fixture.conn,Deadline::until(until),|conn| {
-                conn.query_row("SELECT event_id,interaction_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).optional().map_err(db_err)
+                conn.query_row("SELECT event_id,interaction_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).optional().map_err(crate::error::CafleetError::from)
             }).unwrap();
             if let Some(ids) = row {
                 break ids;
@@ -2375,7 +2070,7 @@ mod tests {
         (settings, run, placement, input)
     }
     fn service_response_audit(
-        fixture: &InputServiceFixture,
+        fixture: &ServiceFixture,
         input: &PermissionRespondInput,
     ) -> PermissionReceipt {
         let operation = storage::find_input(
@@ -2438,7 +2133,7 @@ mod tests {
 
     #[test]
     fn permission_response_actual_service_returns_typed_durable_audit_and_one_selected_answer() {
-        let mut fixture = InputServiceFixture::configured(false, response_services);
+        let mut fixture = ServiceFixture::configured(false, response_services);
         fixture.start_running();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, run, placement, input) =
@@ -2453,7 +2148,7 @@ mod tests {
             let conn = crate::db::connect(&database).unwrap();
             assert_eq!(conn.execute(
                 "UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2 AND closed_at IS NULL",
-                rusqlite::params![crate::time::format_utc(crate::time::now_utc()), interaction_id],
+                rusqlite::params![crate::time::now_stamp(), interaction_id],
             ).unwrap(), 1);
             let closed_at: Option<String> = conn
                 .query_row(
@@ -2495,21 +2190,8 @@ mod tests {
         let process = ProcessIdentity::read(run.owner_pid).unwrap().unwrap();
         assert_eq!(process.start_identity, run.owner_start_identity);
         assert!(process.matches().unwrap(), "generation-bound owned runner");
-        rustix::termios::tcsetwinsize(
-            &fixture.master,
-            rustix::termios::Winsize {
-                ws_row: 24,
-                ws_col: 81,
-                ws_xpixel: 0,
-                ws_ypixel: 0,
-            },
-        )
-        .unwrap();
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
-            nix::sys::signal::Signal::SIGWINCH,
-        )
-        .unwrap();
+        assert_eq!(i64::from(fixture.child.id()), process.pid);
+        fixture.resize(24, 81);
         let resized = loop {
             let current = inspect_permission(
                 &mut fixture.fixture.conn,
@@ -2612,7 +2294,7 @@ mod tests {
 
     #[test]
     fn permission_response_actual_service_lost_reply_retains_audit_and_same_key_never_retypes() {
-        let mut fixture = InputServiceFixture::configured(false, response_services);
+        let mut fixture = ServiceFixture::configured(false, response_services);
         fixture.start_running();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, run, placement, input) =
@@ -2752,7 +2434,7 @@ mod tests {
 
     #[test]
     fn permission_receipt_postcommit_expiry_preserves_claim_context_and_consumed_history() {
-        let mut fixture = InputServiceFixture::configured(false, response_services);
+        let mut fixture = ServiceFixture::configured(false, response_services);
         fixture.start_running();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, run, placement, input) =
@@ -2858,8 +2540,8 @@ mod tests {
 
     #[test]
     fn permission_receipt_live_failure_preserves_original_error_without_exclusive_effects() {
-        use super::super::input_recovery::tests::TypedHost;
-        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::{Case, Retained};
+        use crate::runtime::runner::input_recovery::test_support::TypedHost;
 
         let mut case = Case::new(Retained::Accepted);
         let original = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
@@ -2925,8 +2607,8 @@ mod tests {
 
     #[test]
     fn exclusive_permission_receipt_client_preserves_uncertain_claim_and_continuous_guard() {
-        use super::super::input_recovery::tests::TypedHost;
-        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::{Case, Retained};
+        use crate::runtime::runner::input_recovery::test_support::TypedHost;
 
         for absent in [false, true] {
             let mut case = Case::new(Retained::Uncertain);
@@ -3129,7 +2811,7 @@ mod tests {
 
     #[test]
     fn exclusive_receipt_client_keeps_one_guard_original_row_and_error_across_live_fallback() {
-        use super::super::input_recovery::tests::{Termination, TypedHost};
+        use crate::runtime::runner::input_recovery::test_support::{Termination, TypedHost};
 
         for mode in [
             "eligible",
@@ -3306,17 +2988,6 @@ mod tests {
         _run_lock: RunLock,
     }
 
-    fn digest(run_id: i64, request: &SubmitInput) -> String {
-        let value = serde_json::json!({
-            "kind":request.input_kind.as_str(), "literal":request.literal,
-            "message_id":request.message_id, "run_id":run_id,
-        });
-        Sha256::digest(serde_json::to_vec(&value).unwrap())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
-    }
-
     struct NoLiveHost;
     impl InputCommandHost for NoLiveHost {
         fn lock(
@@ -3367,7 +3038,7 @@ mod tests {
         skip_reconcile: bool,
     }
 
-    fn service_target(fixture: &InputServiceFixture) -> (Settings, RunRecord, Placement) {
+    fn service_target(fixture: &ServiceFixture) -> (Settings, RunRecord, Placement) {
         let conn = &fixture.fixture.conn;
         let run = storage::get_run(conn, fixture.fixture.run.run_id).unwrap();
         let placement = crate::broker::get_member(conn, run.member_id, run.fleet_id)
@@ -3376,11 +3047,7 @@ mod tests {
             .placement
             .unwrap();
         (
-            Settings {
-                database_url: format!("sqlite:///{}", conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: Some("tmux".into()),
-            },
+            Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux")),
             run,
             placement,
         )
@@ -3404,16 +3071,6 @@ mod tests {
                 skip_reconcile: false,
             }
         }
-
-        fn failure(source: CafleetError) -> InputFailure {
-            InputFailure {
-                source,
-                run_id: None,
-                interaction_id: None,
-                input_id: None,
-                operation_key: None,
-            }
-        }
     }
 
     impl InputCommandHost for SocketHost {
@@ -3427,7 +3084,7 @@ mod tests {
             self.calls[0] += 1;
             assert_eq!(deadline.instant(), self.until);
             PaneLock::acquire_within(&settings.database_url, placement, deadline)
-                .map_err(Self::failure)
+                .map_err(host_failure)
         }
 
         fn health(
@@ -3444,7 +3101,7 @@ mod tests {
             );
             let health = match self.health_reply.take() {
                 Some(health) => health,
-                None => super::super::probe_health(run, deadline).map_err(Self::failure)?,
+                None => super::super::probe_health(run, deadline).map_err(host_failure)?,
             };
             if let Some(callback) = &mut self.after_health {
                 callback();
@@ -3520,21 +3177,21 @@ mod tests {
                 }));
             }
             let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)
-                .map_err(Self::failure)?;
+                .map_err(host_failure)?;
             let mut client =
                 super::super::control::ControlClient::connect(&paths.control_socket, deadline)
-                    .map_err(Self::failure)?;
+                    .map_err(host_failure)?;
             if matches!(self.reply, ReplyMode::Disconnected) {
                 client
                     .stream
                     .shutdown(Shutdown::Read)
                     .map_err(io_error)
-                    .map_err(Self::failure)?;
+                    .map_err(host_failure)?;
                 let bytes = super::super::input_protocol::encode_input_request(request)
-                    .map_err(Self::failure)?;
+                    .map_err(host_failure)?;
                 let mut offset = 0;
                 while offset < bytes.len() {
-                    check_deadline(Instant::now(), deadline).map_err(Self::failure)?;
+                    check_deadline(Instant::now(), deadline).map_err(host_failure)?;
                     match client.stream.write(&bytes[offset..]) {
                         Ok(0) => panic!("owned external request disconnected during send"),
                         Ok(count) => offset += count,
@@ -3544,9 +3201,9 @@ mod tests {
                                 std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
                             ) =>
                         {
-                            super::super::control::pause(deadline).map_err(Self::failure)?;
+                            super::super::control::pause(deadline).map_err(host_failure)?;
                         }
-                        Err(cause) => return Err(Self::failure(io_error(cause))),
+                        Err(cause) => return Err(host_failure(io_error(cause))),
                     }
                 }
                 let key = match &request.operation {
@@ -3561,20 +3218,20 @@ mod tests {
                         with_database_budget(&mut observed, Deadline::until(deadline), |conn| {
                             storage::find_input(conn, run.run_id, key)
                         })
-                        .map_err(Self::failure)?;
+                        .map_err(host_failure)?;
                     if retained.is_some_and(|input| input.state == InputState::Accepted) {
                         break;
                     }
-                    super::super::control::pause(deadline).map_err(Self::failure)?;
+                    super::super::control::pause(deadline).map_err(host_failure)?;
                 }
                 drop(client);
-                return Err(Self::failure(CafleetError::App(
+                return Err(host_failure(CafleetError::App(
                     "owned reply consumer closed".into(),
                 )));
             }
             let mut reply = client
                 .exchange_input(request, deadline)
-                .map_err(Self::failure)?;
+                .map_err(host_failure)?;
             if let Some(wrong) = self.wrong_query_id {
                 let InputControlReply::Receipt(ReceiptReply::Present {
                     input_id,
@@ -3599,26 +3256,17 @@ mod tests {
         }
     }
 
-    fn health_records(conn: &Connection) -> [Vec<Vec<rusqlite::types::Value>>; 3] {
-        ["member_interactions", "member_runtime_events", "messages"].map(|table| {
-            let mut statement = conn
-                .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
-                .unwrap();
-            let columns = statement.column_count();
-            statement
-                .query_map([], |row| {
-                    (0..columns)
-                        .map(|column| row.get(column))
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                })
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap()
+    fn health_records(conn: &Connection) -> Vec<crate::db::test_support::TableSnapshot> {
+        crate::db::test_support::table_snapshot(conn, |table| {
+            matches!(
+                table,
+                "member_interactions" | "member_runtime_events" | "messages"
+            )
         })
     }
 
     fn accepted_service_receipt(
-        fixture: &mut InputServiceFixture,
+        fixture: &mut ServiceFixture,
         outer: Instant,
         key: &str,
     ) -> (Settings, RunRecord, Placement, SubmitInput, InputOperation) {
@@ -3774,7 +3422,7 @@ mod tests {
         }
         case.assert_unchanged(changes);
 
-        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::{Case, Retained};
         let mut permission = Case::new(Retained::Submitted);
         let audit = storage::get_permission_response(&permission.fixture.conn, permission.input_id)
             .unwrap();
@@ -4069,7 +3717,10 @@ mod tests {
                 &NewInput {
                     operation_key: request.operation_key.clone(),
                     kind: request.input_kind,
-                    payload_digest: digest(owner.run_id, &request),
+                    payload_digest: crate::broker::runtime::input_payload_digest(
+                        owner.run_id,
+                        &request,
+                    ),
                     message_id: request.message_id,
                 },
             )
@@ -4105,11 +3756,10 @@ mod tests {
             .unwrap()
             .placement
             .unwrap();
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: Some("tmux".into()),
-            };
+            let settings = Settings::for_database(
+                std::path::Path::new(fixture.conn.path().unwrap()),
+                Some("tmux"),
+            );
             Self {
                 fixture,
                 settings,
@@ -4328,18 +3978,6 @@ mod tests {
             .fixture
             .conn
             .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
-        eprintln!(
-            "prepared history: expired={:?}; expired_reads={expired_reads}; active_sql_budgets_past_original={:?}; authorizer_cleanup={removed:?}",
-            expired
-                .as_ref()
-                .map(|result| (result.status, result.input_id, result.stage)),
-            budgets
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|budget| budget.saturating_duration_since(original_active))
-                .collect::<Vec<_>>()
-        );
         removed.unwrap();
         case.assert_unchanged(changes);
         assert_eq!(
@@ -4561,7 +4199,10 @@ mod tests {
             assert_eq!(host.requests[0]["kind"], "submit_prompt");
             assert_eq!(result.status, SubmissionStatus::Accepted);
             let row = storage::get_input(&fixture.fixture.conn, result.input_id.unwrap()).unwrap();
-            assert_eq!(row.payload_digest, digest(run.run_id, &request));
+            assert_eq!(
+                row.payload_digest,
+                crate::broker::runtime::input_payload_digest(run.run_id, &request)
+            );
             assert_eq!(row.state, InputState::Accepted);
             assert!(
                 PaneLock::try_acquire(&settings.database_url, &placement)
@@ -4764,7 +4405,7 @@ mod tests {
             let run = case.fixture.run.clone();
             storage::reserve_event_sequences(&mut case.fixture.conn, &run.owner()).unwrap();
             let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","profile_version":null,"rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
-            storage::persist_transition(
+            storage::persist_event(
                 &mut case.fixture.conn,
                 &run.owner(),
                 &ObservedTransition {
@@ -4783,7 +4424,11 @@ mod tests {
             .unwrap();
             let before = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
             let records = health_records(&case.fixture.conn);
-            assert_eq!(records[0].len(), 1, "meaningful open interaction control");
+            assert_eq!(
+                records[0].rows.len(),
+                1,
+                "meaningful open interaction control"
+            );
             let until = Instant::now() + Duration::from_secs(1);
             let mut host = SocketHost::new(&case.settings, &case.placement, until);
             if stale {
@@ -4850,7 +4495,9 @@ mod tests {
                 &NewInput {
                     operation_key: request.operation_key.clone(),
                     kind: request.input_kind,
-                    payload_digest: digest(run.run_id, &request),
+                    payload_digest: crate::broker::runtime::input_payload_digest(
+                        run.run_id, &request,
+                    ),
                     message_id: None,
                 },
             )
@@ -4930,7 +4577,10 @@ mod tests {
             .unwrap()
             .expect("actual committed receipt survives reply loss");
             assert_eq!(row.state, InputState::Accepted);
-            assert_eq!(row.payload_digest, digest(run.run_id, &request));
+            assert_eq!(
+                row.payload_digest,
+                crate::broker::runtime::input_payload_digest(run.run_id, &request)
+            );
             let result = submit_wrapped_input_with_host(
                 &mut fixture.fixture.conn,
                 &settings,
@@ -4959,300 +4609,102 @@ mod tests {
             input_service_composer(fixture, outer);
         });
     }
-}
 
-#[cfg(test)]
-pub(super) mod permission_history {
-    use crate::broker::runtime::{self as storage, *};
-    use crate::broker::tests as common;
-    use crate::config::Settings;
-    use crate::error::CafleetError;
-    use crate::input::{Deadline, PaneLock, with_database_budget};
-    use crate::runtime::runner::*;
-    use crate::runtime::runner_tests::Fixture;
-    use rusqlite::Connection;
-    use serde_json::json;
-    use std::sync::Arc;
-    use std::time::{Duration, Instant};
-
-    const NOW: &str = "2026-10-26T22:00:00.000000+00:00";
-
-    #[derive(Clone, Copy, Debug)]
-    pub(in crate::runtime) enum Retained {
-        InProgress,
-        Accepted,
-        Uncertain,
-        Submitted,
-        NotSubmitted,
-        Abandoned,
-    }
-    pub(in crate::runtime) struct Case {
-        pub(in crate::runtime) fixture: Fixture,
-        owner: RunOwner,
-        event: RuntimeEventRecord,
-        request: NewPermissionResponse,
-        pub(in crate::runtime) input_id: i64,
-        pub(in crate::runtime) settings: Settings,
-        placement: crate::broker::records::Placement,
-        _artifacts: RunArtifacts,
-        pub(in crate::runtime) _lock: Arc<RunLock>,
-    }
-    impl Case {
-        pub(in crate::runtime) fn new(state: Retained) -> Self {
-            Self::decision(
-                state,
-                PermissionDecision::Allow,
-                DirectorMode::Auto,
-                DecisionSource::DirectorAuto,
-            )
-        }
-        fn decision(
-            state: Retained,
-            decision: PermissionDecision,
-            mode: DirectorMode,
-            source: DecisionSource,
-        ) -> Self {
-            Self::from_fixture(Fixture::new(), state, decision, mode, source)
-        }
-        fn from_fixture(
-            mut fixture: Fixture,
-            state: Retained,
-            decision: PermissionDecision,
-            mode: DirectorMode,
-            source: DecisionSource,
-        ) -> Self {
-            let artifacts = fixture.artifacts();
-            let lock = Arc::new(
-                RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                    .unwrap()
-                    .unwrap(),
-            );
-            let owner = lock
-                .transfer_to_runner(
-                    &mut fixture.conn,
-                    &fixture.run.owner(),
-                    ProcessIdentity::current().unwrap(),
-                )
-                .unwrap();
-            assert_eq!(fixture.conn.execute(
-                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',profile_version='fixture-detector-v1',profile_match='exact',started_at=?1 WHERE run_id=?2",
-                rusqlite::params![NOW, fixture.run.run_id],
-            ).unwrap(), 1);
-            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            storage::reserve_event_sequences(&mut fixture.conn, &owner).unwrap();
-            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&json!({
-                "backend":"codex","native_version":fixture.run.native_version,"profile_version":"fixture-detector-v1",
-                "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,
-                "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
-            })).unwrap();
-            let transition = ObservedTransition {
-                run_id: owner.run_id,
-                event_seq: 1,
-                episode_seq: Some(1),
-                kind: RuntimeEventKind::InteractionOpened,
-                classification: Some(InteractionClass::PermissionRequest),
-                observed_at: NOW.into(),
-                evidence_json: evidence,
-                close_reason: None,
-                cause_json: None,
-            };
-            let event = storage::persist_transition(
-                &mut fixture.conn,
-                &owner,
-                &transition,
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            let answer_rule = match decision {
-                PermissionDecision::Allow => "fixture-allow-once",
-                PermissionDecision::Deny => "fixture-deny-once",
-            };
-            let capability = crate::coding_agent::AnswerCapability::fixture(
-                crate::coding_agent::CodingAgent::Codex,
-                fixture.run.native_version.as_deref().unwrap(),
-                "fixture-answer-v1",
-                "fixture-permission",
-                answer_rule,
-                decision,
-                &["synthetic-history-storage".into()],
-            )
-            .unwrap();
-            let request = NewPermissionResponse {
-                operation_key: "fixture:retained-response".into(),
-                metadata: PermissionResponseMetadata {
-                    event_id: event.event_id,
-                    interaction_id: event.interaction_id.unwrap(),
-                    expected_owner_epoch: owner.owner_epoch,
-                    request_token: "a".repeat(64),
-                    decision,
-                    director_member_id: fixture.run.director_member_id,
-                    director_mode: mode,
-                    decision_source: source,
-                    mode_evidence_ref: "fixture:host-mode".into(),
-                    decision_evidence_ref: "fixture:attributed-decision".into(),
-                    answer_profile_version: "fixture-answer-v1".into(),
-                    answer_rule_id: answer_rule.into(),
-                },
-            };
-            let receipt = match storage::reserve_permission_response(
-                &mut fixture.conn,
-                &owner,
-                &request,
-                Some(&capability),
-                Instant::now() + Duration::from_secs(1),
-            )
-            .unwrap()
-            {
-                PermissionReservation::Reserved(receipt) => receipt,
-                PermissionReservation::Retained(_) => {
-                    panic!("a fresh history fixture reserves its own identity")
-                }
-            };
-            let input_id = receipt.input.input_id;
-            match state {
-                Retained::InProgress => {}
-                Retained::Accepted | Retained::Uncertain => {
-                    storage::record_input_state(
-                        &mut fixture.conn,
-                        &owner,
-                        input_id,
-                        InputState::InProgress,
-                        if matches!(state, Retained::Accepted) {
-                            InputState::Accepted
-                        } else {
-                            InputState::Uncertain
-                        },
-                    )
-                    .unwrap();
-                }
-                Retained::Submitted | Retained::Abandoned => {
-                    storage::settle_input(
-                        &mut fixture.conn,
-                        &owner,
-                        input_id,
-                        InputState::InProgress,
-                        if matches!(state, Retained::Submitted) {
-                            InputDisposition::Submitted
-                        } else {
-                            InputDisposition::AbandonedUncertain
-                        },
-                        "fixture:recorded-disposition",
-                    )
-                    .unwrap();
-                }
-                Retained::NotSubmitted => {
-                    storage::record_input_state(
-                        &mut fixture.conn,
-                        &owner,
-                        input_id,
-                        InputState::InProgress,
-                        InputState::Ready,
-                    )
-                    .unwrap();
-                    storage::settle_input(
-                        &mut fixture.conn,
-                        &owner,
-                        input_id,
-                        InputState::Ready,
-                        InputDisposition::NotSubmitted,
-                        "fixture:recorded-zero-byte-disposition",
-                    )
-                    .unwrap();
-                }
-            }
-            let read = storage::get_permission_response(&fixture.conn, input_id).unwrap();
-            assert!(read.claim.is_some());
-            assert_eq!(read.response.metadata, request.metadata);
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
-            let placement = crate::broker::get_member(
-                &fixture.conn,
-                fixture.run.member_id,
-                fixture.run.fleet_id,
-            )
-            .unwrap()
-            .unwrap()
-            .placement
-            .unwrap();
-            Self {
-                fixture,
-                owner,
-                event,
-                request,
-                input_id,
-                settings,
-                placement,
-                _artifacts: artifacts,
-                _lock: lock,
-            }
-        }
-    }
-
-    #[derive(PartialEq)]
-    struct Table {
-        name: String,
-        values: Vec<Vec<rusqlite::types::Value>>,
-    }
-    struct Snapshot {
-        tables: Vec<Table>,
-        changes: u64,
-    }
-    impl Snapshot {
-        fn take(conn: &Connection) -> Self {
-            let names = conn
-                .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
-                .unwrap()
-                .query_map([], |row| row.get::<_, String>(0))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            let tables = names
-                .into_iter()
-                .map(|name| {
-                    let quoted = name.replace('"', "\"\"");
-                    let mut statement = conn
-                        .prepare(&format!("SELECT * FROM \"{quoted}\" ORDER BY rowid"))
-                        .unwrap();
-                    let columns = statement.column_count();
-                    let values = statement
-                        .query_map([], |row| {
-                            (0..columns)
-                                .map(|index| row.get(index))
-                                .collect::<rusqlite::Result<Vec<_>>>()
-                        })
-                        .unwrap()
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                        .unwrap();
-                    Table { name, values }
-                })
-                .collect();
-            Self {
-                tables,
-                changes: conn.total_changes(),
-            }
-        }
-        fn unchanged(&self, conn: &Connection) {
-            let actual = Self::take(conn);
-            assert_eq!(
-                actual.changes, self.changes,
-                "historical coordination performs no SQL mutation"
-            );
-            assert!(
-                actual.tables == self.tables,
-                "historical coordination preserves every table exactly"
-            );
-        }
-    }
-
-    mod inspect_errors {
+    mod prepared_submission {
         use super::*;
-        use crate::runtime::runner::{PermissionInspectInput, inspect_permission};
+        use crate::runtime::runner::input_clock::test_support::*;
 
-        fn opened(case: &Case) -> (i64, i64) {
-            case.fixture
+        fn request() -> SubmitInput {
+            SubmitInput {
+                operation_key: format!("prompt:1:{}", "a".repeat(64)),
+                input_kind: InputKind::Prompt,
+                message_id: None,
+                literal: "literal clock fixture".into(),
+            }
+        }
+        #[test]
+        fn clock_prepared_submission_captures_one_paired_sample() {
+            let t = anchor();
+            let request = request();
+            let mut clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 30)));
+            let _prepared = PreparedSubmission::new(&request, ms(t, 100), &mut clock).unwrap();
+            clock.consumed(1, 0);
+        }
+
+        #[test]
+        fn clock_prepared_submission_source_failure_preserves_unused_later_sample() {
+            let t = anchor();
+            let request = request();
+            let mut clock =
+                ScriptClock::new(vec![Err(unavailable()), Ok(sample(t, 1_000_000_000, t))]);
+            one_failure(
+                PreparedSubmission::new(&request, ms(t, 100), &mut clock),
+                &clock,
+                1,
+            );
+        }
+
+        #[test]
+        fn clock_prepared_submission_expiry_rejects_without_resampling_new_budget() {
+            let t = anchor();
+            let request = request();
+            let mut clock = ScriptClock::new(vec![
+                Ok(sample(ms(t, 90), 1_000_000_000, ms(t, 100))),
+                Ok(sample(t, 1_000_000_000, t)),
+            ]);
+            one_failure(
+                PreparedSubmission::new(&request, ms(t, 100), &mut clock),
+                &clock,
+                1,
+            );
+        }
+    }
+
+    mod permission_history {
+        use super::super::test_support::*;
+        use crate::broker::fleets::test_support::create_fleet_fixture;
+        use crate::broker::members::test_support::placement;
+        use crate::broker::runtime::{self as storage, *};
+        use crate::config::Settings;
+        use crate::db::test_support::{TableSnapshot, table_snapshot};
+        use crate::error::CafleetError;
+        use crate::input::{Deadline, PaneLock, with_database_budget};
+        use crate::runtime::runner::test_support::Fixture;
+        use crate::runtime::runner::*;
+        use rusqlite::Connection;
+        use serde_json::json;
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+        struct Snapshot {
+            tables: Vec<TableSnapshot>,
+            changes: u64,
+        }
+        impl Snapshot {
+            fn take(conn: &Connection) -> Self {
+                Self {
+                    tables: table_snapshot(conn, |_| true),
+                    changes: conn.total_changes(),
+                }
+            }
+            fn unchanged(&self, conn: &Connection) {
+                let actual = Self::take(conn);
+                assert_eq!(
+                    actual.changes, self.changes,
+                    "historical coordination performs no SQL mutation"
+                );
+                assert!(
+                    actual.tables == self.tables,
+                    "historical coordination preserves every table exactly"
+                );
+            }
+        }
+
+        mod inspect_errors {
+            use super::*;
+            use crate::runtime::runner::{PermissionInspectInput, inspect_permission};
+
+            fn opened(case: &Case) -> (i64, i64) {
+                case.fixture
                 .conn
                 .query_row(
                     "SELECT event_id,interaction_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
@@ -5260,976 +4712,941 @@ pub(super) mod permission_history {
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap()
-        }
-
-        fn copied(case: &Case) -> (Settings, Connection) {
-            let path = case.fixture._dir.path().join("copied-inspection.db");
-            std::fs::copy(case.fixture.conn.path().unwrap(), &path).unwrap();
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", path.display()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
-            let conn = crate::db::connect(&settings.database_url).unwrap();
-            (settings, conn)
-        }
-
-        fn inspect(
-            conn: &mut Connection,
-            settings: &Settings,
-            event_id: i64,
-            interaction_id: i64,
-            director_member_id: i64,
-        ) -> CafleetError {
-            match inspect_permission(
-                conn,
-                settings,
-                &PermissionInspectInput {
-                    event_id,
-                    interaction_id,
-                    director_member_id,
-                },
-                Deadline::until(Instant::now() + Duration::from_secs(1)),
-            ) {
-                Err(failure) => failure.source,
-                Ok(_) => panic!("this inspection is refused"),
             }
-        }
 
-        #[test]
-        fn permission_inspect_rejects_an_automatic_review_event_naming_an_existing_interaction() {
-            for kind in [
-                RuntimeEventKind::AutomaticRefusalObserved,
-                RuntimeEventKind::AutomaticReviewUnavailable,
-            ] {
-                let mut case = Case::new(Retained::Accepted);
-                let (_, interaction_id) = opened(&case);
-                let evidence = storage::evidence::EvidencePolicy::metadata()
+            fn copied(case: &Case) -> (Settings, Connection) {
+                let path = case.fixture._dir.path().join("copied-inspection.db");
+                std::fs::copy(case.fixture.conn.path().unwrap(), &path).unwrap();
+                let settings = Settings::for_database(&path, None);
+                let conn = crate::db::connect(&settings.database_url).unwrap();
+                (settings, conn)
+            }
+
+            fn inspect(
+                conn: &mut Connection,
+                settings: &Settings,
+                event_id: i64,
+                interaction_id: i64,
+                director_member_id: i64,
+            ) -> CafleetError {
+                match inspect_permission(
+                    conn,
+                    settings,
+                    &PermissionInspectInput {
+                        event_id,
+                        interaction_id,
+                        director_member_id,
+                    },
+                    Deadline::until(Instant::now() + Duration::from_secs(1)),
+                ) {
+                    Err(failure) => failure.source,
+                    Ok(_) => panic!("this inspection is refused"),
+                }
+            }
+
+            #[test]
+            fn permission_inspect_rejects_an_automatic_review_event_naming_an_existing_interaction()
+            {
+                for kind in [
+                    RuntimeEventKind::AutomaticRefusalObserved,
+                    RuntimeEventKind::AutomaticReviewUnavailable,
+                ] {
+                    let mut case = Case::new(Retained::Accepted);
+                    let (_, interaction_id) = opened(&case);
+                    let evidence = storage::evidence::EvidencePolicy::metadata()
                     .apply(&json!({
                         "backend":"codex","native_version":case.fixture.run.native_version,"profile_version":"fixture-detector-v1",
                         "rule_id":"fixture-auto-review","screen_seq":2,"operation":null,"choices":null,
                         "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
                     }))
                     .unwrap();
-                let annotation = storage::persist_transition(
-                    &mut case.fixture.conn,
-                    &case.owner,
-                    &ObservedTransition {
-                        run_id: case.owner.run_id,
-                        event_seq: 2,
-                        episode_seq: None,
-                        kind,
-                        classification: None,
-                        observed_at: NOW.into(),
-                        evidence_json: evidence,
-                        close_reason: None,
-                        cause_json: None,
-                    },
-                    PersistenceMode::Live,
-                )
-                .unwrap();
-                let inputs = |conn: &Connection| -> i64 {
-                    conn.query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
-                        row.get(0)
-                    })
-                    .unwrap()
-                };
-                let before = inputs(&case.fixture.conn);
-                let director = case.fixture.run.director_member_id;
-                let settings = case.settings.clone();
-                let error = inspect(
-                    &mut case.fixture.conn,
-                    &settings,
-                    annotation.event_id,
-                    interaction_id,
-                    director,
-                );
-                assert_eq!(error.exit_code(), 1, "{kind:?}: {}", error.message());
-                assert_eq!(inputs(&case.fixture.conn), before, "{kind:?}");
+                    let annotation = storage::persist_event(
+                        &mut case.fixture.conn,
+                        &case.owner,
+                        &ObservedTransition {
+                            run_id: case.owner.run_id,
+                            event_seq: 2,
+                            episode_seq: None,
+                            kind,
+                            classification: None,
+                            observed_at: NOW.into(),
+                            evidence_json: evidence,
+                            close_reason: None,
+                            cause_json: None,
+                        },
+                        PersistenceMode::Live,
+                    )
+                    .unwrap();
+                    let inputs = |conn: &Connection| -> i64 {
+                        conn.query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                            row.get(0)
+                        })
+                        .unwrap()
+                    };
+                    let before = inputs(&case.fixture.conn);
+                    let director = case.fixture.run.director_member_id;
+                    let settings = case.settings.clone();
+                    let error = inspect(
+                        &mut case.fixture.conn,
+                        &settings,
+                        annotation.event_id,
+                        interaction_id,
+                        director,
+                    );
+                    assert_eq!(error.exit_code(), 1, "{kind:?}: {}", error.message());
+                    assert_eq!(inputs(&case.fixture.conn), before, "{kind:?}");
+                }
             }
-        }
 
-        #[test]
-        fn permission_inspect_reports_a_missing_interaction_before_event_run_or_identity_checks() {
-            let case = Case::new(Retained::Accepted);
-            let (event_id, interaction_id) = opened(&case);
-            let director = case.fixture.run.director_member_id;
-            let missing = interaction_id + 1000;
-            let (settings, mut conn) = copied(&case);
-            for (event, label) in [
-                (event_id, "an existing event"),
-                (event_id + 1000, "a missing event"),
-            ] {
-                let error = inspect(&mut conn, &settings, event, missing, director);
+            #[test]
+            fn permission_inspect_reports_a_missing_interaction_before_event_run_or_identity_checks()
+             {
+                let case = Case::new(Retained::Accepted);
+                let (event_id, interaction_id) = opened(&case);
+                let director = case.fixture.run.director_member_id;
+                let missing = interaction_id + 1000;
+                let (settings, mut conn) = copied(&case);
+                for (event, label) in [
+                    (event_id, "an existing event"),
+                    (event_id + 1000, "a missing event"),
+                ] {
+                    let error = inspect(&mut conn, &settings, event, missing, director);
+                    assert_eq!(
+                        error.message(),
+                        format!("Interaction {missing} not found"),
+                        "{label} with a foreign database identity"
+                    );
+                    assert_eq!(error.exit_code(), 1);
+                }
+            }
+
+            #[test]
+            fn permission_inspect_names_the_run_database_identity_field_on_a_mismatch() {
+                let case = Case::new(Retained::Accepted);
+                let (event_id, interaction_id) = opened(&case);
+                let (settings, mut conn) = copied(&case);
+                let error = inspect(
+                    &mut conn,
+                    &settings,
+                    event_id,
+                    interaction_id,
+                    case.fixture.run.director_member_id,
+                );
+                assert!(
+                    matches!(&error, CafleetError::InvalidStoredValue { field, value }
+                    if field == "member_runs.database_identity_json"
+                        && value == "selected database identity mismatch"),
+                    "{error:?}"
+                );
                 assert_eq!(
                     error.message(),
-                    format!("Interaction {missing} not found"),
-                    "{label} with a foreign database identity"
+                    "invalid stored value for member_runs.database_identity_json: selected database identity mismatch"
                 );
                 assert_eq!(error.exit_code(), 1);
             }
         }
 
-        #[test]
-        fn permission_inspect_names_the_run_database_identity_field_on_a_mismatch() {
-            let case = Case::new(Retained::Accepted);
-            let (event_id, interaction_id) = opened(&case);
-            let (settings, mut conn) = copied(&case);
-            let error = inspect(
-                &mut conn,
-                &settings,
-                event_id,
-                interaction_id,
-                case.fixture.run.director_member_id,
-            );
-            assert!(
-                matches!(&error, CafleetError::InvalidStoredValue { field, value }
-                    if field == "member_runs.database_identity_json"
-                        && value == "selected database identity mismatch"),
-                "{error:?}"
-            );
-            assert_eq!(
-                error.message(),
-                "invalid stored value for member_runs.database_identity_json: selected database identity mismatch"
-            );
-            assert_eq!(error.exit_code(), 1);
-        }
-    }
-
-    mod entry {
-        use super::*;
-        use crate::runtime::runner::{
-            InputCommandHost, InputControlReply, InputControlRequest, InputFailure,
-            PermissionRespondInput, PermissionResponseResult, SubmissionStage, SubmissionStatus,
-            respond_permission_with_host,
-        };
-
-        #[derive(Default)]
-        struct NoLive {
-            calls: Vec<&'static str>,
-        }
-        impl NoLive {
-            fn failure(&mut self, operation: &'static str, run: &RunRecord) -> InputFailure {
-                self.calls.push(operation);
-                InputFailure {
-                    source: CafleetError::App(
-                        "history fixture reached a forbidden live operation".into(),
-                    ),
-                    run_id: Some(run.run_id),
-                    interaction_id: None,
-                    input_id: None,
-                    operation_key: None,
-                }
-            }
-        }
-        impl InputCommandHost for NoLive {
-            fn lock(
-                &mut self,
-                _: &Settings,
-                run: &RunRecord,
-                _: &crate::broker::records::Placement,
-                _: Deadline,
-            ) -> std::result::Result<Option<PaneLock>, InputFailure> {
-                Err(self.failure("lock", run))
-            }
-            fn health(
-                &mut self,
-                run: &RunRecord,
-                _: Instant,
-            ) -> std::result::Result<HealthSnapshot, InputFailure> {
-                Err(self.failure("health", run))
-            }
-            fn exchange(
-                &mut self,
-                run: &RunRecord,
-                _: &InputControlRequest,
-                _: Instant,
-            ) -> std::result::Result<InputControlReply, InputFailure> {
-                Err(self.failure("exchange", run))
-            }
-        }
-        fn command(case: &Case) -> PermissionRespondInput {
-            let metadata = &case.request.metadata;
-            PermissionRespondInput {
-                interaction_id: metadata.interaction_id,
-                event_id: metadata.event_id,
-                director_member_id: metadata.director_member_id,
-                expected_run_id: case.owner.run_id,
-                expected_owner_epoch: metadata.expected_owner_epoch,
-                request_token: metadata.request_token.clone(),
-                decision: metadata.decision,
-                decision_source: metadata.decision_source,
-                director_mode: metadata.director_mode,
-                mode_evidence_ref: metadata.mode_evidence_ref.clone(),
-                decision_evidence_ref: metadata.decision_evidence_ref.clone(),
-                operation_key: case.request.operation_key.clone(),
-            }
-        }
-        fn invoke(
-            conn: &mut Connection,
-            settings: &Settings,
-            request: &PermissionRespondInput,
-            deadline: Deadline,
-        ) -> std::result::Result<PermissionResponseResult, InputFailure> {
-            let mut host = NoLive::default();
-            let result = with_database_budget(conn, deadline, |conn| {
-                Ok(respond_permission_with_host(
-                    conn, settings, request, deadline, &mut host,
-                ))
-            })
-            .unwrap();
-            assert!(
-                host.calls.is_empty(),
-                "historical coordination reached live operations: {:?}",
-                host.calls
-            );
-            result
-        }
-        fn attempt(
-            case: &mut Case,
-            request: &PermissionRespondInput,
-        ) -> std::result::Result<PermissionResponseResult, InputFailure> {
-            invoke(
-                &mut case.fixture.conn,
-                &case.settings,
-                request,
-                Deadline::until(Instant::now() + Duration::from_secs(1)),
-            )
-        }
-        fn success(
-            result: std::result::Result<PermissionResponseResult, InputFailure>,
-        ) -> PermissionResponseResult {
-            match result {
-                Ok(result) => result,
-                Err(error) => panic!("valid retained response returns history: {}", error.source),
-            }
-        }
-        fn assert_projection(case: &Case, result: &PermissionResponseResult, state: Retained) {
-            assert_eq!(result.submission.input_id, Some(case.input_id));
-            assert_eq!(result.member_id, case.fixture.run.member_id);
-            assert_eq!(result.run_id, case.owner.run_id);
-            assert_eq!(
-                result.owner_epoch,
-                case.request.metadata.expected_owner_epoch
-            );
-            assert_eq!(result.interaction_id, case.request.metadata.interaction_id);
-            assert_eq!(result.event_id, case.event.event_id);
-            assert_eq!(result.decision, case.request.metadata.decision);
-            assert_eq!(
-                result.decision_source,
-                case.request.metadata.decision_source
-            );
-            assert_eq!(result.submission.output_seq, None);
-            match state {
-                Retained::Accepted | Retained::Submitted => {
-                    assert!(matches!(
-                        result.submission.status,
-                        SubmissionStatus::Accepted
-                    ));
-                    assert!(matches!(
-                        result.submission.stage,
-                        SubmissionStage::Submitted
-                    ));
-                }
-                Retained::InProgress | Retained::Uncertain => {
-                    assert!(matches!(
-                        result.submission.status,
-                        SubmissionStatus::Uncertain
-                    ));
-                    assert!(matches!(result.submission.stage, SubmissionStage::Unknown));
-                }
-                Retained::NotSubmitted | Retained::Abandoned => {
-                    assert!(matches!(
-                        result.submission.status,
-                        SubmissionStatus::Rejected
-                    ));
-                    assert!(matches!(
-                        result.submission.stage,
-                        SubmissionStage::ZeroBytes
-                    ));
-                    assert!(
-                        result
-                            .submission
-                            .reason
-                            .as_ref()
-                            .is_some_and(|reason| reason.to_ascii_lowercase().contains("consum"))
-                    );
-                }
-            }
-        }
-        fn projection(state: Retained) {
-            let mut case = Case::new(state);
-            let before = Snapshot::take(&case.fixture.conn);
-            let receipt =
-                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-            let request = command(&case);
-            let result = success(attempt(&mut case, &request));
-            assert_projection(&case, &result, state);
-            before.unchanged(&case.fixture.conn);
-            assert_eq!(
-                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
-                receipt
-            );
-        }
-        #[test]
-        fn step5_a1_retained_accepted_preserves_original_binding_without_live_calls() {
-            projection(Retained::Accepted);
-        }
-        #[test]
-        fn step5_a1_retained_inprogress_preserves_unknown_stage_and_claim_without_live_calls() {
-            projection(Retained::InProgress);
-        }
-        #[test]
-        fn step5_a1_retained_uncertain_preserves_unknown_stage_and_claim_without_live_calls() {
-            projection(Retained::Uncertain);
-        }
-        #[test]
-        fn step5_a1_settled_submitted_remains_accepted_without_live_calls() {
-            projection(Retained::Submitted);
-        }
-        #[test]
-        fn step5_a1_consumed_not_submitted_rejects_this_retry_without_changing_claim() {
-            projection(Retained::NotSubmitted);
-        }
-        #[test]
-        fn step5_a1_consumed_abandoned_uncertain_preserves_possible_transmission_claim() {
-            projection(Retained::Abandoned);
-        }
-
-        #[test]
-        fn step5_a1_history_preserves_both_decisions_and_every_valid_attributed_source_mode() {
-            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                for (mode, source) in [
-                    (DirectorMode::Auto, DecisionSource::DirectorAuto),
-                    (DirectorMode::Auto, DecisionSource::User),
-                    (DirectorMode::Manual, DecisionSource::User),
-                    (DirectorMode::Unknown, DecisionSource::User),
-                ] {
-                    let mut case = Case::decision(Retained::Accepted, decision, mode, source);
-                    let before = Snapshot::take(&case.fixture.conn);
-                    let request = command(&case);
-                    let result = success(attempt(&mut case, &request));
-                    assert_projection(&case, &result, Retained::Accepted);
-                    before.unchanged(&case.fixture.conn);
-                }
-            }
-        }
-
-        #[derive(Clone, Copy, Debug)]
-        enum HistoryChange {
-            Closed,
-            MemberInactive,
-            DirectorInactive,
-            FleetDeleted,
-            OwnerFenced,
-        }
-        fn changed_history(change: HistoryChange) {
-            let mut case = Case::new(Retained::Accepted);
-            let run = &case.fixture.run;
-            match change {
-                HistoryChange::Closed => {
-                    assert_eq!(case.fixture.conn.execute(
-                    "UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",
-                    rusqlite::params![NOW,case.request.metadata.interaction_id]).unwrap(),1);
-                }
-                HistoryChange::MemberInactive | HistoryChange::DirectorInactive => {
-                    assert_eq!(case.fixture.conn.execute(
-                    "UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",
-                    rusqlite::params![NOW,if matches!(change,HistoryChange::MemberInactive){run.member_id}else{run.director_member_id}]).unwrap(),1);
-                }
-                HistoryChange::FleetDeleted => {
-                    assert_eq!(
-                        case.fixture
-                            .conn
-                            .execute(
-                                "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
-                                rusqlite::params![NOW, run.fleet_id]
-                            )
-                            .unwrap(),
-                        1
-                    );
-                }
-                HistoryChange::OwnerFenced => {
-                    assert_eq!(case.fixture.conn.execute(
-                    "UPDATE member_runs SET status='lost',owner_kind='reconciler',owner_epoch=owner_epoch+1,ended_at=?1 WHERE run_id=?2",
-                    rusqlite::params![NOW,run.run_id]).unwrap(),1);
-                }
-            }
-            let request = command(&case);
-            let before = Snapshot::take(&case.fixture.conn);
-            let result = success(attempt(&mut case, &request));
-            assert_projection(&case, &result, Retained::Accepted);
-            before.unchanged(&case.fixture.conn);
-            if matches!(change, HistoryChange::OwnerFenced) {
-                assert_eq!(
-                    storage::get_run(&case.fixture.conn, case.owner.run_id)
-                        .unwrap()
-                        .owner_epoch,
-                    result.owner_epoch + 1
-                );
-            }
-        }
-        #[test]
-        fn step5_a1_history_survives_closed_interaction_without_request_reinspection() {
-            changed_history(HistoryChange::Closed);
-        }
-        #[test]
-        fn step5_a1_history_survives_member_deactivation_without_active_preflight() {
-            changed_history(HistoryChange::MemberInactive);
-        }
-        #[test]
-        fn step5_a1_history_survives_director_deactivation_without_active_preflight() {
-            changed_history(HistoryChange::DirectorInactive);
-        }
-        #[test]
-        fn step5_a1_history_survives_deleted_fleet_without_live_preflight() {
-            changed_history(HistoryChange::FleetDeleted);
-        }
-        #[test]
-        fn step5_a1_history_reports_audit_epoch_after_terminal_owner_fencing() {
-            changed_history(HistoryChange::OwnerFenced);
-        }
-
-        #[test]
-        fn step5_a1_retained_result_precedes_the_actual_held_pane_lock() {
-            let mut case = Case::new(Retained::Accepted);
-            let guard = PaneLock::acquire_within(
-                &case.settings.database_url,
-                &case.placement,
-                Deadline::until(Instant::now() + Duration::from_secs(1)),
-            )
-            .unwrap()
-            .unwrap();
-            let request = command(&case);
-            let before = Snapshot::take(&case.fixture.conn);
-            let result = success(attempt(&mut case, &request));
-            assert_projection(&case, &result, Retained::Accepted);
-            before.unchanged(&case.fixture.conn);
-            assert!(
-                PaneLock::acquire_within(
-                    &case.settings.database_url,
-                    &case.placement,
-                    Deadline::until(Instant::now() + Duration::from_millis(20))
-                )
-                .unwrap()
-                .is_none()
-            );
-            drop(guard);
-        }
-        #[test]
-        fn step5_a1_reopened_connection_retries_settled_history_without_mutation() {
-            let mut case = Case::new(Retained::Submitted);
-            let request = command(&case);
-            let before = Snapshot::take(&case.fixture.conn);
-            success(attempt(&mut case, &request));
-            before.unchanged(&case.fixture.conn);
-            let mut reopened = crate::db::connect(&case.settings.database_url).unwrap();
-            let second = Snapshot::take(&reopened);
-            let result = success(invoke(
-                &mut reopened,
-                &case.settings,
-                &request,
-                Deadline::until(Instant::now() + Duration::from_secs(1)),
-            ));
-            assert_projection(&case, &result, Retained::Submitted);
-            second.unchanged(&reopened);
-        }
-        #[test]
-        fn step5_a1_retained_lookup_reads_while_another_connection_holds_sqlite_write_ownership() {
-            let mut case = Case::new(Retained::Accepted);
-            let writer = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
-            writer.execute_batch("BEGIN IMMEDIATE").unwrap();
-            let before = Snapshot::take(&case.fixture.conn);
-            let request = command(&case);
-            let result = invoke(
-                &mut case.fixture.conn,
-                &case.settings,
-                &request,
-                Deadline::until(Instant::now() + Duration::from_millis(250)),
-            );
-            let held = !writer.is_autocommit();
-            writer.execute_batch("ROLLBACK").unwrap();
-            assert!(held);
-            assert_projection(&case, &success(result), Retained::Accepted);
-            before.unchanged(&case.fixture.conn);
-        }
-        #[test]
-        fn step5_a1_retained_lookup_precedes_actual_unresolved_capacity_refusal() {
-            let mut case = Case::new(Retained::Accepted);
-            assert_eq!(case.fixture.conn.execute(
-                "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<4095) INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) SELECT ?1,'fixture:capacity:'||x,'prompt',?2,'in_progress',?3,?3 FROM n",
-                rusqlite::params![case.owner.run_id,"b".repeat(64),NOW]).unwrap(),4095);
-            assert_eq!(case.fixture.conn.query_row("SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain')",[case.owner.run_id],|row|row.get::<_,i64>(0)).unwrap(),4096);
-            let before = Snapshot::take(&case.fixture.conn);
-            let request = command(&case);
-            let result = success(attempt(&mut case, &request));
-            assert_projection(&case, &result, Retained::Accepted);
-            before.unchanged(&case.fixture.conn);
-        }
-
-        #[test]
-        fn step5_a1_each_conflicting_caller_binding_fails_before_live_calls_with_exact_rows() {
-            for field in [
-                "interaction",
-                "event",
-                "director",
-                "run",
-                "epoch",
-                "token",
-                "decision",
-                "source",
-                "mode",
-                "mode_ref",
-                "decision_ref",
-            ] {
-                let mut case = Case::decision(
-                    Retained::Accepted,
-                    PermissionDecision::Allow,
-                    DirectorMode::Auto,
-                    DecisionSource::User,
-                );
-                let mut request = command(&case);
-                match field {
-                    "interaction" => request.interaction_id += 1,
-                    "event" => request.event_id += 1,
-                    "director" => request.director_member_id = case.fixture.run.member_id,
-                    "run" => request.expected_run_id += 1,
-                    "epoch" => request.expected_owner_epoch += 1,
-                    "token" => request.request_token = "b".repeat(64),
-                    "decision" => request.decision = PermissionDecision::Deny,
-                    "source" => request.decision_source = DecisionSource::DirectorAuto,
-                    "mode" => request.director_mode = DirectorMode::Manual,
-                    "mode_ref" => request.mode_evidence_ref = "fixture:other-mode".into(),
-                    "decision_ref" => {
-                        request.decision_evidence_ref = "fixture:other-decision".into()
-                    }
-                    _ => unreachable!(),
-                }
-                let before = Snapshot::take(&case.fixture.conn);
-                assert!(attempt(&mut case, &request).is_err(), "{field}");
-                before.unchanged(&case.fixture.conn);
-            }
-        }
-        #[test]
-        fn step5_a1_retained_ordinary_input_kind_cannot_impersonate_a_permission_response() {
-            let mut case = Case::new(Retained::Accepted);
-            storage::reserve_input(
-                &mut case.fixture.conn,
-                &case.owner,
-                &NewInput {
-                    operation_key: "fixture:ordinary-input".into(),
-                    kind: InputKind::Prompt,
-                    payload_digest: "c".repeat(64),
-                    message_id: None,
-                },
-            )
-            .unwrap();
-            let mut request = command(&case);
-            request.operation_key = "fixture:ordinary-input".into();
-            let before = Snapshot::take(&case.fixture.conn);
-            assert!(attempt(&mut case, &request).is_err());
-            before.unchanged(&case.fixture.conn);
-        }
-        #[test]
-        fn step5_a1_historical_message_association_is_checked_despite_matching_canonical_digest() {
-            let mut case = Case::new(Retained::Accepted);
-            assert_eq!(
-                storage::permission_response_digest(case.owner.run_id, &case.request.metadata)
-                    .unwrap(),
-                storage::get_input(&case.fixture.conn, case.input_id)
-                    .unwrap()
-                    .payload_digest
-            );
-            assert_eq!(
-                case.fixture
-                    .conn
-                    .execute(
-                        "UPDATE messages SET to_member_id=?1 WHERE message_id=?2",
-                        rusqlite::params![
-                            case.fixture.run.member_id,
-                            case.event.message_id.unwrap()
-                        ]
-                    )
-                    .unwrap(),
-                1
-            );
-            let request = command(&case);
-            let source = stored_corruption(&case);
-            let before = Snapshot::take(&case.fixture.conn);
-            let result = attempt(&mut case, &request);
-            known_corruption(&case, result, &source);
-            before.unchanged(&case.fixture.conn);
-        }
-
-        fn stored_corruption(case: &Case) -> CafleetError {
-            match storage::get_permission_response(&case.fixture.conn, case.input_id) {
-                Err(error) => error,
-                Ok(_) => panic!("the fixture exposes actual durable association corruption"),
-            }
-        }
-
-        fn known_corruption(
-            case: &Case,
-            result: std::result::Result<PermissionResponseResult, InputFailure>,
-            source: &CafleetError,
-        ) {
-            let failure = match result {
-                Err(failure) => failure,
-                Ok(_) => panic!("corrupt history rejects before live effects"),
-            };
-            assert_eq!(failure.run_id, Some(case.owner.run_id));
-            assert_eq!(
-                failure.interaction_id,
-                Some(case.request.metadata.interaction_id)
-            );
-            assert_eq!(failure.input_id, Some(case.input_id));
-            assert_eq!(
-                failure.operation_key.as_deref(),
-                Some(case.request.operation_key.as_str())
-            );
-            assert_eq!(
-                std::mem::discriminant(&failure.source),
-                std::mem::discriminant(source)
-            );
-            assert_eq!(failure.source.exit_code(), source.exit_code());
-            assert_eq!(failure.source.message(), source.message());
-        }
-        #[test]
-        fn step5_a1_history_rejects_missing_audit_or_possibly_transmitted_claim_without_live_fallback()
-         {
-            for remove_audit in [false, true] {
-                let mut case = Case::new(Retained::Accepted);
-                assert_eq!(
-                    case.fixture
-                        .conn
-                        .execute(
-                            "DELETE FROM member_permission_response_claims WHERE input_id=?1",
-                            [case.input_id]
-                        )
-                        .unwrap(),
-                    1
-                );
-                if remove_audit {
-                    assert_eq!(
-                        case.fixture
-                            .conn
-                            .execute(
-                                "DELETE FROM member_permission_responses WHERE input_id=?1",
-                                [case.input_id]
-                            )
-                            .unwrap(),
-                        1
-                    );
-                }
-                let request = command(&case);
-                let source = stored_corruption(&case);
-                let before = Snapshot::take(&case.fixture.conn);
-                let result = attempt(&mut case, &request);
-                known_corruption(&case, result, &source);
-                before.unchanged(&case.fixture.conn);
-            }
-        }
-        #[test]
-        fn step5_a1_history_validates_actual_member_fleet_and_director_relationships() {
-            for changed in ["member", "director", "fleet"] {
-                let mut case = Case::new(Retained::Accepted);
-                if changed == "fleet" {
-                    let alternate = crate::broker::register_member(
-                        &mut case.fixture.conn,
-                        case.fixture.run.fleet_id,
-                        "alternative",
-                        "fixture",
-                        None,
-                    )
-                    .unwrap()
-                    .member_id;
-                    assert_eq!(
-                        case.fixture
-                            .conn
-                            .execute(
-                                "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
-                                rusqlite::params![alternate, case.fixture.run.fleet_id]
-                            )
-                            .unwrap(),
-                        1
-                    );
-                } else {
-                    let other =
-                        common::create_fleet(&mut case.fixture.conn, "other-history-fleet").0;
-                    let member = if changed == "member" {
-                        case.fixture.run.member_id
-                    } else {
-                        case.fixture.run.director_member_id
-                    };
-                    assert_eq!(
-                        case.fixture
-                            .conn
-                            .execute(
-                                "UPDATE members SET fleet_id=?1 WHERE member_id=?2",
-                                rusqlite::params![other, member]
-                            )
-                            .unwrap(),
-                        1
-                    );
-                }
-                let request = command(&case);
-                let before = Snapshot::take(&case.fixture.conn);
-                assert!(attempt(&mut case, &request).is_err(), "{changed}");
-                before.unchanged(&case.fixture.conn);
-            }
-        }
-        #[test]
-        fn step5_a1_copied_database_cannot_reuse_the_original_retained_identity() {
-            let case = Case::new(Retained::Accepted);
-            let copied = case.fixture._dir.path().join("copied-history.db");
-            std::fs::copy(case.fixture.conn.path().unwrap(), &copied).unwrap();
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", copied.display()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
-            let mut conn = crate::db::connect(&settings.database_url).unwrap();
-            let before = Snapshot::take(&conn);
-            assert!(
-                invoke(
-                    &mut conn,
-                    &settings,
-                    &command(&case),
-                    Deadline::until(Instant::now() + Duration::from_secs(1))
-                )
-                .is_err()
-            );
-            before.unchanged(&conn);
-        }
-        #[test]
-        fn step5_a1_semantic_source_mode_preflight_preserves_usage_category_before_history_or_live_effects()
-         {
-            for mode in [DirectorMode::Manual, DirectorMode::Unknown] {
-                let mut case = Case::new(Retained::Accepted);
-                let mut request = command(&case);
-                request.director_mode = mode;
-                let before = Snapshot::take(&case.fixture.conn);
-                let failure = match attempt(&mut case, &request) {
-                    Err(failure) => failure,
-                    Ok(_) => panic!("director-auto requires auto before retained projection"),
-                };
-                assert!(matches!(failure.source, CafleetError::Usage(_)));
-                before.unchanged(&case.fixture.conn);
-            }
-        }
-
-        fn causes() -> Vec<CafleetError> {
-            vec![
-                CafleetError::Usage("fixture usage".into()),
-                CafleetError::App("fixture application".into()),
-                CafleetError::Value("fixture value".into()),
-                CafleetError::DatabaseBusy("fixture contention".into()),
-                CafleetError::DeadlineExceeded,
-                CafleetError::InvalidStoredValue {
-                    field: "fixture.field".into(),
-                    value: "invalid".into(),
-                },
-                CafleetError::WithDiagnostics {
-                    cause: Box::new(CafleetError::Usage("nested usage".into())),
-                    diagnostics: vec!["original diagnostic".into()],
-                },
-            ]
-        }
-        #[test]
-        fn step5_a1_input_failure_without_context_preserves_the_complete_source_category() {
-            for cause in causes() {
-                let failure = InputFailure {
-                    source: cause.clone(),
-                    run_id: None,
-                    interaction_id: None,
-                    input_id: None,
-                    operation_key: None,
-                };
-                let converted: CafleetError = failure.into();
-                assert_eq!(
-                    std::mem::discriminant(&converted),
-                    std::mem::discriminant(&cause)
-                );
-                assert_eq!(converted.exit_code(), cause.exit_code());
-                assert_eq!(converted.message(), cause.message());
-            }
-        }
-        #[test]
-        fn step5_a1_input_failure_context_preserves_cause_and_escapes_ordered_key_metadata() {
-            let key = "fixture:key\nwith\"quotes\"\\tail";
-            for original in causes() {
-                let failure = InputFailure {
-                    source: original.clone(),
-                    run_id: Some(29),
-                    interaction_id: Some(17),
-                    input_id: Some(31),
-                    operation_key: Some(key.into()),
-                };
-                let converted: CafleetError = failure.into();
-                assert_eq!(converted.exit_code(), original.exit_code());
-                let CafleetError::WithDiagnostics { cause, diagnostics } = converted else {
-                    panic!("known identities retain the source with context")
-                };
-                assert_eq!(
-                    std::mem::discriminant(cause.as_ref()),
-                    std::mem::discriminant(&original)
-                );
-                assert_eq!(cause.message(), original.message());
-                assert_eq!(diagnostics.len(), 1);
-                let context = &diagnostics[0];
-                let positions = ["run_id", "interaction_id", "input_id", "operation_key"]
-                    .map(|name| context.find(name).expect("known context field"));
-                assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-                assert!(context.contains(&serde_json::to_string(key).unwrap()));
-                assert!(!context.contains('\n'));
-            }
-        }
-        #[test]
-        fn step5_a1_input_failure_context_omits_unknown_optional_identities() {
-            let failure = InputFailure {
-                source: CafleetError::DeadlineExceeded,
-                run_id: None,
-                interaction_id: Some(17),
-                input_id: None,
-                operation_key: None,
-            };
-            let converted: CafleetError = failure.into();
-            let CafleetError::WithDiagnostics { cause, diagnostics } = converted else {
-                panic!("one known identity is represented explicitly")
-            };
-            assert!(matches!(*cause, CafleetError::DeadlineExceeded));
-            assert_eq!(diagnostics.len(), 1);
-            assert!(diagnostics[0].contains("interaction_id"));
-            for absent in ["run_id", "input_id", "operation_key"] {
-                assert!(!diagnostics[0].contains(absent));
-            }
-        }
-
-        mod review {
+        mod entry {
             use super::*;
-            use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
-            use std::sync::Mutex;
+            use crate::runtime::runner::{
+                InputCommandHost, InputControlReply, InputControlRequest, InputFailure,
+                PermissionRespondInput, PermissionResponseResult, SubmissionStage,
+                SubmissionStatus, respond_permission_with_host,
+            };
 
-            #[test]
-            fn step5_a1_h1_released_not_submitted_claim_remains_valid_consumed_history() {
-                let mut case = Case::new(Retained::NotSubmitted);
-                assert_eq!(
-                    case.fixture
-                        .conn
-                        .execute(
-                            "DELETE FROM member_permission_response_claims WHERE input_id=?1",
-                            [case.input_id],
-                        )
-                        .unwrap(),
-                    1
+            #[derive(Default)]
+            struct NoLive {
+                calls: Vec<&'static str>,
+            }
+            impl NoLive {
+                fn failure(&mut self, operation: &'static str, run: &RunRecord) -> InputFailure {
+                    self.calls.push(operation);
+                    InputFailure {
+                        source: CafleetError::App(
+                            "history fixture reached a forbidden live operation".into(),
+                        ),
+                        run_id: Some(run.run_id),
+                        interaction_id: None,
+                        input_id: None,
+                        operation_key: None,
+                    }
+                }
+            }
+            impl InputCommandHost for NoLive {
+                fn lock(
+                    &mut self,
+                    _: &Settings,
+                    run: &RunRecord,
+                    _: &crate::broker::records::Placement,
+                    _: Deadline,
+                ) -> std::result::Result<Option<PaneLock>, InputFailure> {
+                    Err(self.failure("lock", run))
+                }
+                fn health(
+                    &mut self,
+                    run: &RunRecord,
+                    _: Instant,
+                ) -> std::result::Result<HealthSnapshot, InputFailure> {
+                    Err(self.failure("health", run))
+                }
+                fn exchange(
+                    &mut self,
+                    run: &RunRecord,
+                    _: &InputControlRequest,
+                    _: Instant,
+                ) -> std::result::Result<InputControlReply, InputFailure> {
+                    Err(self.failure("exchange", run))
+                }
+            }
+            fn invoke(
+                conn: &mut Connection,
+                settings: &Settings,
+                request: &PermissionRespondInput,
+                deadline: Deadline,
+            ) -> std::result::Result<PermissionResponseResult, InputFailure> {
+                let mut host = NoLive::default();
+                let result = with_database_budget(conn, deadline, |conn| {
+                    Ok(respond_permission_with_host(
+                        conn, settings, request, deadline, &mut host,
+                    ))
+                })
+                .unwrap();
+                assert!(
+                    host.calls.is_empty(),
+                    "historical coordination reached live operations: {:?}",
+                    host.calls
                 );
+                result
+            }
+            fn attempt(
+                case: &mut Case,
+                request: &PermissionRespondInput,
+            ) -> std::result::Result<PermissionResponseResult, InputFailure> {
+                invoke(
+                    &mut case.fixture.conn,
+                    &case.settings,
+                    request,
+                    Deadline::until(Instant::now() + Duration::from_secs(1)),
+                )
+            }
+            fn success(
+                result: std::result::Result<PermissionResponseResult, InputFailure>,
+            ) -> PermissionResponseResult {
+                match result {
+                    Ok(result) => result,
+                    Err(error) => {
+                        panic!("valid retained response returns history: {}", error.source)
+                    }
+                }
+            }
+            fn assert_projection(case: &Case, result: &PermissionResponseResult, state: Retained) {
+                assert_eq!(result.submission.input_id, Some(case.input_id));
+                assert_eq!(result.member_id, case.fixture.run.member_id);
+                assert_eq!(result.run_id, case.owner.run_id);
+                assert_eq!(
+                    result.owner_epoch,
+                    case.request.metadata.expected_owner_epoch
+                );
+                assert_eq!(result.interaction_id, case.request.metadata.interaction_id);
+                assert_eq!(result.event_id, case.event.event_id);
+                assert_eq!(result.decision, case.request.metadata.decision);
+                assert_eq!(
+                    result.decision_source,
+                    case.request.metadata.decision_source
+                );
+                assert_eq!(result.submission.output_seq, None);
+                match state {
+                    Retained::Accepted | Retained::Submitted => {
+                        assert!(matches!(
+                            result.submission.status,
+                            SubmissionStatus::Accepted
+                        ));
+                        assert!(matches!(
+                            result.submission.stage,
+                            SubmissionStage::Submitted
+                        ));
+                    }
+                    Retained::InProgress | Retained::Uncertain => {
+                        assert!(matches!(
+                            result.submission.status,
+                            SubmissionStatus::Uncertain
+                        ));
+                        assert!(matches!(result.submission.stage, SubmissionStage::Unknown));
+                    }
+                    Retained::NotSubmitted | Retained::Abandoned => {
+                        assert!(matches!(
+                            result.submission.status,
+                            SubmissionStatus::Rejected
+                        ));
+                        assert!(matches!(
+                            result.submission.stage,
+                            SubmissionStage::ZeroBytes
+                        ));
+                        assert!(
+                            result
+                                .submission
+                                .reason
+                                .as_ref()
+                                .is_some_and(|reason| reason
+                                    .to_ascii_lowercase()
+                                    .contains("consum"))
+                        );
+                    }
+                }
+            }
+            fn projection(state: Retained) {
+                let mut case = Case::new(state);
+                let before = Snapshot::take(&case.fixture.conn);
                 let receipt =
                     storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-                assert!(receipt.claim.is_none());
-                assert_eq!(receipt.input.state, InputState::Settled);
-                assert_eq!(
-                    receipt.input.disposition,
-                    Some(InputDisposition::NotSubmitted)
-                );
-                assert_eq!(receipt.response.metadata, case.request.metadata);
-                let request = command(&case);
-                let before = Snapshot::take(&case.fixture.conn);
+                let request = case.command();
                 let result = success(attempt(&mut case, &request));
-                assert_projection(&case, &result, Retained::NotSubmitted);
+                assert_projection(&case, &result, state);
                 before.unchanged(&case.fixture.conn);
                 assert_eq!(
                     storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
                     receipt
                 );
             }
-
-            fn related(case: &Case) -> Case {
-                let mut conn = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
-                conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
-                let mut placement = common::placement(Some("%3"));
-                placement.coding_agent = "codex".into();
-                let member = crate::broker::register_member(
-                    &mut conn,
-                    case.fixture.run.fleet_id,
-                    "related-history-worker",
-                    "assignment",
-                    Some(&placement),
-                )
-                .unwrap()
-                .member_id;
-                let next_id = conn
-                    .query_row(
-                        "SELECT COALESCE(MAX(run_id),0)+1 FROM member_runs",
-                        [],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .unwrap();
-                let process = ProcessIdentity::current().unwrap();
-                let original = &case.fixture.run;
-                let run = storage::create_run(
-                    &mut conn,
-                    &NewRun {
-                        member_id: member,
-                        fleet_id: original.fleet_id,
-                        director_member_id: original.director_member_id,
-                        backend: original.backend.clone(),
-                        database_identity_json: original.database_identity_json.clone(),
-                        launch_nonce: "b".repeat(64),
-                        runtime_path: RuntimePaths::for_run(
-                            &original.database_identity_json,
-                            next_id,
-                        )
-                        .unwrap()
-                        .run_dir
-                        .to_str()
-                        .unwrap()
-                        .into(),
-                        requested_mode: original.requested_mode.clone(),
-                        resolved_mode: original.resolved_mode.clone(),
-                        mode_source: original.mode_source,
-                        permission_argv_json: original.permission_argv_json.clone(),
-                        event_evidence: original.event_evidence,
-                        native_version: original.native_version.clone(),
-                        profile_version: None,
-                        profile_match: None,
-                        coverage: Coverage::Unknown,
-                        owner_pid: process.pid,
-                        owner_start_identity: process.start_identity,
-                    },
-                )
-                .unwrap();
-                assert_eq!(run.run_id, next_id);
-                Case::from_fixture(
-                    Fixture {
-                        _dir: tempfile::tempdir().unwrap(),
-                        conn,
-                        run,
-                    },
+            #[test]
+            fn retained_and_consumed_history_projects_each_state_without_live_calls() {
+                for state in [
                     Retained::Accepted,
-                    PermissionDecision::Allow,
-                    DirectorMode::Auto,
-                    DecisionSource::DirectorAuto,
-                )
+                    Retained::InProgress,
+                    Retained::Uncertain,
+                    Retained::Submitted,
+                    Retained::NotSubmitted,
+                    Retained::Abandoned,
+                ] {
+                    projection(state);
+                }
             }
 
             #[test]
-            fn step5_a1_h3_existing_foreign_run_rejects_association_before_live_boundary() {
-                let mut original = Case::new(Retained::Accepted);
-                let foreign = related(&original);
-                assert_ne!(original.owner.run_id, foreign.owner.run_id);
+            fn history_preserves_both_decisions_and_every_valid_attributed_source_mode() {
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    for (mode, source) in [
+                        (DirectorMode::Auto, DecisionSource::DirectorAuto),
+                        (DirectorMode::Auto, DecisionSource::User),
+                        (DirectorMode::Manual, DecisionSource::User),
+                        (DirectorMode::Unknown, DecisionSource::User),
+                    ] {
+                        let mut case = Case::decision(Retained::Accepted, decision, mode, source);
+                        let before = Snapshot::take(&case.fixture.conn);
+                        let request = case.command();
+                        let result = success(attempt(&mut case, &request));
+                        assert_projection(&case, &result, Retained::Accepted);
+                        before.unchanged(&case.fixture.conn);
+                    }
+                }
+            }
+
+            #[derive(Clone, Copy, Debug)]
+            enum HistoryChange {
+                Closed,
+                MemberInactive,
+                DirectorInactive,
+                FleetDeleted,
+                OwnerFenced,
+            }
+            fn changed_history(change: HistoryChange) {
+                let mut case = Case::new(Retained::Accepted);
+                let run = &case.fixture.run;
+                match change {
+                    HistoryChange::Closed => {
+                        assert_eq!(case.fixture.conn.execute(
+                    "UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",
+                    rusqlite::params![NOW,case.request.metadata.interaction_id]).unwrap(),1);
+                    }
+                    HistoryChange::MemberInactive | HistoryChange::DirectorInactive => {
+                        assert_eq!(case.fixture.conn.execute(
+                    "UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",
+                    rusqlite::params![NOW,if matches!(change,HistoryChange::MemberInactive){run.member_id}else{run.director_member_id}]).unwrap(),1);
+                    }
+                    HistoryChange::FleetDeleted => {
+                        assert_eq!(
+                            case.fixture
+                                .conn
+                                .execute(
+                                    "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
+                                    rusqlite::params![NOW, run.fleet_id]
+                                )
+                                .unwrap(),
+                            1
+                        );
+                    }
+                    HistoryChange::OwnerFenced => {
+                        assert_eq!(case.fixture.conn.execute(
+                    "UPDATE member_runs SET status='lost',owner_kind='reconciler',owner_epoch=owner_epoch+1,ended_at=?1 WHERE run_id=?2",
+                    rusqlite::params![NOW,run.run_id]).unwrap(),1);
+                    }
+                }
+                let request = case.command();
+                let before = Snapshot::take(&case.fixture.conn);
+                let result = success(attempt(&mut case, &request));
+                assert_projection(&case, &result, Retained::Accepted);
+                before.unchanged(&case.fixture.conn);
+                if matches!(change, HistoryChange::OwnerFenced) {
+                    assert_eq!(
+                        storage::get_run(&case.fixture.conn, case.owner.run_id)
+                            .unwrap()
+                            .owner_epoch,
+                        result.owner_epoch + 1
+                    );
+                }
+            }
+            #[test]
+            fn history_survives_each_later_lifecycle_change_without_live_preflight() {
+                for change in [
+                    HistoryChange::Closed,
+                    HistoryChange::MemberInactive,
+                    HistoryChange::DirectorInactive,
+                    HistoryChange::FleetDeleted,
+                    HistoryChange::OwnerFenced,
+                ] {
+                    changed_history(change);
+                }
+            }
+
+            #[test]
+            fn retained_result_precedes_the_actual_held_pane_lock() {
+                let mut case = Case::new(Retained::Accepted);
+                let guard = PaneLock::acquire_within(
+                    &case.settings.database_url,
+                    &case.placement,
+                    Deadline::until(Instant::now() + Duration::from_secs(1)),
+                )
+                .unwrap()
+                .unwrap();
+                let request = case.command();
+                let before = Snapshot::take(&case.fixture.conn);
+                let result = success(attempt(&mut case, &request));
+                assert_projection(&case, &result, Retained::Accepted);
+                before.unchanged(&case.fixture.conn);
+                assert!(
+                    PaneLock::acquire_within(
+                        &case.settings.database_url,
+                        &case.placement,
+                        Deadline::until(Instant::now() + Duration::from_millis(20))
+                    )
+                    .unwrap()
+                    .is_none()
+                );
+                drop(guard);
+            }
+            #[test]
+            fn reopened_connection_retries_settled_history_without_mutation() {
+                let mut case = Case::new(Retained::Submitted);
+                let request = case.command();
+                let before = Snapshot::take(&case.fixture.conn);
+                success(attempt(&mut case, &request));
+                before.unchanged(&case.fixture.conn);
+                let mut reopened = crate::db::connect(&case.settings.database_url).unwrap();
+                let second = Snapshot::take(&reopened);
+                let result = success(invoke(
+                    &mut reopened,
+                    &case.settings,
+                    &request,
+                    Deadline::until(Instant::now() + Duration::from_secs(1)),
+                ));
+                assert_projection(&case, &result, Retained::Submitted);
+                second.unchanged(&reopened);
+            }
+            #[test]
+            fn retained_lookup_reads_while_another_connection_holds_sqlite_write_ownership() {
+                let mut case = Case::new(Retained::Accepted);
+                let writer = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
+                writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+                let before = Snapshot::take(&case.fixture.conn);
+                let request = case.command();
+                let result = invoke(
+                    &mut case.fixture.conn,
+                    &case.settings,
+                    &request,
+                    Deadline::until(Instant::now() + Duration::from_millis(250)),
+                );
+                let held = !writer.is_autocommit();
+                writer.execute_batch("ROLLBACK").unwrap();
+                assert!(held);
+                assert_projection(&case, &success(result), Retained::Accepted);
+                before.unchanged(&case.fixture.conn);
+            }
+            #[test]
+            fn retained_lookup_precedes_actual_unresolved_capacity_refusal() {
+                let mut case = Case::new(Retained::Accepted);
+                assert_eq!(case.fixture.conn.execute(
+                "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<4095) INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) SELECT ?1,'fixture:capacity:'||x,'prompt',?2,'in_progress',?3,?3 FROM n",
+                rusqlite::params![case.owner.run_id,"b".repeat(64),NOW]).unwrap(),4095);
+                assert_eq!(case.fixture.conn.query_row("SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain')",[case.owner.run_id],|row|row.get::<_,i64>(0)).unwrap(),4096);
+                let before = Snapshot::take(&case.fixture.conn);
+                let request = case.command();
+                let result = success(attempt(&mut case, &request));
+                assert_projection(&case, &result, Retained::Accepted);
+                before.unchanged(&case.fixture.conn);
+            }
+
+            #[test]
+            fn each_conflicting_caller_binding_fails_before_live_calls_with_exact_rows() {
+                for field in [
+                    "interaction",
+                    "event",
+                    "director",
+                    "run",
+                    "epoch",
+                    "token",
+                    "decision",
+                    "source",
+                    "mode",
+                    "mode_ref",
+                    "decision_ref",
+                ] {
+                    let mut case = Case::decision(
+                        Retained::Accepted,
+                        PermissionDecision::Allow,
+                        DirectorMode::Auto,
+                        DecisionSource::User,
+                    );
+                    let mut request = case.command();
+                    match field {
+                        "interaction" => request.interaction_id += 1,
+                        "event" => request.event_id += 1,
+                        "director" => request.director_member_id = case.fixture.run.member_id,
+                        "run" => request.expected_run_id += 1,
+                        "epoch" => request.expected_owner_epoch += 1,
+                        "token" => request.request_token = "b".repeat(64),
+                        "decision" => request.decision = PermissionDecision::Deny,
+                        "source" => request.decision_source = DecisionSource::DirectorAuto,
+                        "mode" => request.director_mode = DirectorMode::Manual,
+                        "mode_ref" => request.mode_evidence_ref = "fixture:other-mode".into(),
+                        "decision_ref" => {
+                            request.decision_evidence_ref = "fixture:other-decision".into()
+                        }
+                        _ => unreachable!(),
+                    }
+                    let before = Snapshot::take(&case.fixture.conn);
+                    assert!(attempt(&mut case, &request).is_err(), "{field}");
+                    before.unchanged(&case.fixture.conn);
+                }
+            }
+            #[test]
+            fn retained_ordinary_input_kind_cannot_impersonate_a_permission_response() {
+                let mut case = Case::new(Retained::Accepted);
+                storage::reserve_input(
+                    &mut case.fixture.conn,
+                    &case.owner,
+                    &NewInput {
+                        operation_key: "fixture:ordinary-input".into(),
+                        kind: InputKind::Prompt,
+                        payload_digest: "c".repeat(64),
+                        message_id: None,
+                    },
+                )
+                .unwrap();
+                let mut request = case.command();
+                request.operation_key = "fixture:ordinary-input".into();
+                let before = Snapshot::take(&case.fixture.conn);
+                assert!(attempt(&mut case, &request).is_err());
+                before.unchanged(&case.fixture.conn);
+            }
+            #[test]
+            fn historical_message_association_is_checked_despite_matching_canonical_digest() {
+                let mut case = Case::new(Retained::Accepted);
                 assert_eq!(
-                    original.owner.database_identity_json,
-                    foreign.owner.database_identity_json
+                    storage::permission_response_digest(case.owner.run_id, &case.request.metadata)
+                        .unwrap(),
+                    storage::get_input(&case.fixture.conn, case.input_id)
+                        .unwrap()
+                        .payload_digest
                 );
                 assert_eq!(
-                    storage::get_run(&original.fixture.conn, foreign.owner.run_id).unwrap(),
-                    storage::get_run(&foreign.fixture.conn, foreign.owner.run_id).unwrap()
+                    case.fixture
+                        .conn
+                        .execute(
+                            "UPDATE messages SET to_member_id=?1 WHERE message_id=?2",
+                            rusqlite::params![
+                                case.fixture.run.member_id,
+                                case.event.message_id.unwrap()
+                            ]
+                        )
+                        .unwrap(),
+                    1
                 );
-                let mut request = command(&original);
-                request.expected_run_id = foreign.owner.run_id;
-                request.expected_owner_epoch = foreign.owner.owner_epoch;
-                request.operation_key = "fixture:absent-on-foreign-run".into();
+                let request = case.command();
+                let source = stored_corruption(&case);
+                let before = Snapshot::take(&case.fixture.conn);
+                let result = attempt(&mut case, &request);
+                known_corruption(&case, result, &source);
+                before.unchanged(&case.fixture.conn);
+            }
+
+            fn stored_corruption(case: &Case) -> CafleetError {
+                match storage::get_permission_response(&case.fixture.conn, case.input_id) {
+                    Err(error) => error,
+                    Ok(_) => panic!("the fixture exposes actual durable association corruption"),
+                }
+            }
+
+            fn known_corruption(
+                case: &Case,
+                result: std::result::Result<PermissionResponseResult, InputFailure>,
+                source: &CafleetError,
+            ) {
+                let failure = match result {
+                    Err(failure) => failure,
+                    Ok(_) => panic!("corrupt history rejects before live effects"),
+                };
+                assert_eq!(failure.run_id, Some(case.owner.run_id));
                 assert_eq!(
+                    failure.interaction_id,
+                    Some(case.request.metadata.interaction_id)
+                );
+                assert_eq!(failure.input_id, Some(case.input_id));
+                assert_eq!(
+                    failure.operation_key.as_deref(),
+                    Some(case.request.operation_key.as_str())
+                );
+                assert_eq!(
+                    std::mem::discriminant(&failure.source),
+                    std::mem::discriminant(source)
+                );
+                assert_eq!(failure.source.exit_code(), source.exit_code());
+                assert_eq!(failure.source.message(), source.message());
+            }
+            #[test]
+            fn history_rejects_missing_audit_or_possibly_transmitted_claim_without_live_fallback() {
+                for remove_audit in [false, true] {
+                    let mut case = Case::new(Retained::Accepted);
+                    assert_eq!(
+                        case.fixture
+                            .conn
+                            .execute(
+                                "DELETE FROM member_permission_response_claims WHERE input_id=?1",
+                                [case.input_id]
+                            )
+                            .unwrap(),
+                        1
+                    );
+                    if remove_audit {
+                        assert_eq!(
+                            case.fixture
+                                .conn
+                                .execute(
+                                    "DELETE FROM member_permission_responses WHERE input_id=?1",
+                                    [case.input_id]
+                                )
+                                .unwrap(),
+                            1
+                        );
+                    }
+                    let request = case.command();
+                    let source = stored_corruption(&case);
+                    let before = Snapshot::take(&case.fixture.conn);
+                    let result = attempt(&mut case, &request);
+                    known_corruption(&case, result, &source);
+                    before.unchanged(&case.fixture.conn);
+                }
+            }
+            #[test]
+            fn history_validates_actual_member_fleet_and_director_relationships() {
+                for changed in ["member", "director", "fleet"] {
+                    let mut case = Case::new(Retained::Accepted);
+                    if changed == "fleet" {
+                        let alternate = crate::broker::register_member(
+                            &mut case.fixture.conn,
+                            case.fixture.run.fleet_id,
+                            "alternative",
+                            "fixture",
+                            None,
+                        )
+                        .unwrap()
+                        .member_id;
+                        assert_eq!(
+                            case.fixture
+                                .conn
+                                .execute(
+                                    "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+                                    rusqlite::params![alternate, case.fixture.run.fleet_id]
+                                )
+                                .unwrap(),
+                            1
+                        );
+                    } else {
+                        let other =
+                            create_fleet_fixture(&mut case.fixture.conn, "other-history-fleet").0;
+                        let member = if changed == "member" {
+                            case.fixture.run.member_id
+                        } else {
+                            case.fixture.run.director_member_id
+                        };
+                        assert_eq!(
+                            case.fixture
+                                .conn
+                                .execute(
+                                    "UPDATE members SET fleet_id=?1 WHERE member_id=?2",
+                                    rusqlite::params![other, member]
+                                )
+                                .unwrap(),
+                            1
+                        );
+                    }
+                    let request = case.command();
+                    let before = Snapshot::take(&case.fixture.conn);
+                    assert!(attempt(&mut case, &request).is_err(), "{changed}");
+                    before.unchanged(&case.fixture.conn);
+                }
+            }
+            #[test]
+            fn copied_database_cannot_reuse_the_original_retained_identity() {
+                let case = Case::new(Retained::Accepted);
+                let copied = case.fixture._dir.path().join("copied-history.db");
+                std::fs::copy(case.fixture.conn.path().unwrap(), &copied).unwrap();
+                let settings = Settings::for_database(&copied, None);
+                let mut conn = crate::db::connect(&settings.database_url).unwrap();
+                let before = Snapshot::take(&conn);
+                assert!(
+                    invoke(
+                        &mut conn,
+                        &settings,
+                        &case.command(),
+                        Deadline::until(Instant::now() + Duration::from_secs(1))
+                    )
+                    .is_err()
+                );
+                before.unchanged(&conn);
+            }
+            #[test]
+            fn semantic_source_mode_preflight_preserves_usage_category_before_history_or_live_effects()
+             {
+                for mode in [DirectorMode::Manual, DirectorMode::Unknown] {
+                    let mut case = Case::new(Retained::Accepted);
+                    let mut request = case.command();
+                    request.director_mode = mode;
+                    let before = Snapshot::take(&case.fixture.conn);
+                    let failure = match attempt(&mut case, &request) {
+                        Err(failure) => failure,
+                        Ok(_) => panic!("director-auto requires auto before retained projection"),
+                    };
+                    assert!(matches!(failure.source, CafleetError::Usage(_)));
+                    before.unchanged(&case.fixture.conn);
+                }
+            }
+
+            fn causes() -> Vec<CafleetError> {
+                vec![
+                    CafleetError::Usage("fixture usage".into()),
+                    CafleetError::App("fixture application".into()),
+                    CafleetError::Value("fixture value".into()),
+                    CafleetError::DatabaseBusy("fixture contention".into()),
+                    CafleetError::DeadlineExceeded,
+                    CafleetError::InvalidStoredValue {
+                        field: "fixture.field".into(),
+                        value: "invalid".into(),
+                    },
+                    CafleetError::WithDiagnostics {
+                        cause: Box::new(CafleetError::Usage("nested usage".into())),
+                        diagnostics: vec!["original diagnostic".into()],
+                    },
+                ]
+            }
+            #[test]
+            fn input_failure_without_context_preserves_the_complete_source_category() {
+                for cause in causes() {
+                    let failure = InputFailure {
+                        source: cause.clone(),
+                        run_id: None,
+                        interaction_id: None,
+                        input_id: None,
+                        operation_key: None,
+                    };
+                    let converted: CafleetError = failure.into();
+                    assert_eq!(
+                        std::mem::discriminant(&converted),
+                        std::mem::discriminant(&cause)
+                    );
+                    assert_eq!(converted.exit_code(), cause.exit_code());
+                    assert_eq!(converted.message(), cause.message());
+                }
+            }
+            #[test]
+            fn input_failure_context_preserves_cause_and_escapes_ordered_key_metadata() {
+                let key = "fixture:key\nwith\"quotes\"\\tail";
+                for original in causes() {
+                    let failure = InputFailure {
+                        source: original.clone(),
+                        run_id: Some(29),
+                        interaction_id: Some(17),
+                        input_id: Some(31),
+                        operation_key: Some(key.into()),
+                    };
+                    let converted: CafleetError = failure.into();
+                    assert_eq!(converted.exit_code(), original.exit_code());
+                    let CafleetError::WithDiagnostics { cause, diagnostics } = converted else {
+                        panic!("known identities retain the source with context")
+                    };
+                    assert_eq!(
+                        std::mem::discriminant(cause.as_ref()),
+                        std::mem::discriminant(&original)
+                    );
+                    assert_eq!(cause.message(), original.message());
+                    assert_eq!(diagnostics.len(), 1);
+                    let context = &diagnostics[0];
+                    let positions = ["run_id", "interaction_id", "input_id", "operation_key"]
+                        .map(|name| context.find(name).expect("known context field"));
+                    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+                    assert!(context.contains(&serde_json::to_string(key).unwrap()));
+                    assert!(!context.contains('\n'));
+                }
+            }
+            #[test]
+            fn input_failure_context_omits_unknown_optional_identities() {
+                let failure = InputFailure {
+                    source: CafleetError::DeadlineExceeded,
+                    run_id: None,
+                    interaction_id: Some(17),
+                    input_id: None,
+                    operation_key: None,
+                };
+                let converted: CafleetError = failure.into();
+                let CafleetError::WithDiagnostics { cause, diagnostics } = converted else {
+                    panic!("one known identity is represented explicitly")
+                };
+                assert!(matches!(*cause, CafleetError::DeadlineExceeded));
+                assert_eq!(diagnostics.len(), 1);
+                assert!(diagnostics[0].contains("interaction_id"));
+                for absent in ["run_id", "input_id", "operation_key"] {
+                    assert!(!diagnostics[0].contains(absent));
+                }
+            }
+
+            mod claim_and_association_history {
+                use super::*;
+                use rusqlite::hooks::{
+                    AuthAction, AuthContext, Authorization, TransactionOperation,
+                };
+                use std::sync::Mutex;
+
+                #[test]
+                fn released_not_submitted_claim_remains_valid_consumed_history() {
+                    let mut case = Case::new(Retained::NotSubmitted);
+                    assert_eq!(
+                        case.fixture
+                            .conn
+                            .execute(
+                                "DELETE FROM member_permission_response_claims WHERE input_id=?1",
+                                [case.input_id],
+                            )
+                            .unwrap(),
+                        1
+                    );
+                    let receipt =
+                        storage::get_permission_response(&case.fixture.conn, case.input_id)
+                            .unwrap();
+                    assert!(receipt.claim.is_none());
+                    assert_eq!(receipt.input.state, InputState::Settled);
+                    assert_eq!(
+                        receipt.input.disposition,
+                        Some(InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(receipt.response.metadata, case.request.metadata);
+                    let request = case.command();
+                    let before = Snapshot::take(&case.fixture.conn);
+                    let result = success(attempt(&mut case, &request));
+                    assert_projection(&case, &result, Retained::NotSubmitted);
+                    before.unchanged(&case.fixture.conn);
+                    assert_eq!(
+                        storage::get_permission_response(&case.fixture.conn, case.input_id)
+                            .unwrap(),
+                        receipt
+                    );
+                }
+
+                fn related(case: &Case) -> Case {
+                    let mut conn = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
+                    conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+                    let mut placement = placement(Some("%3"));
+                    placement.coding_agent = "codex".into();
+                    let member = crate::broker::register_member(
+                        &mut conn,
+                        case.fixture.run.fleet_id,
+                        "related-history-worker",
+                        "assignment",
+                        Some(&placement),
+                    )
+                    .unwrap()
+                    .member_id;
+                    let next_id = conn
+                        .query_row(
+                            "SELECT COALESCE(MAX(run_id),0)+1 FROM member_runs",
+                            [],
+                            |row| row.get::<_, i64>(0),
+                        )
+                        .unwrap();
+                    let process = ProcessIdentity::current().unwrap();
+                    let original = &case.fixture.run;
+                    let run = storage::create_run(
+                        &mut conn,
+                        &NewRun {
+                            member_id: member,
+                            fleet_id: original.fleet_id,
+                            director_member_id: original.director_member_id,
+                            backend: original.backend.clone(),
+                            database_identity_json: original.database_identity_json.clone(),
+                            launch_nonce: "b".repeat(64),
+                            runtime_path: RuntimePaths::for_run(
+                                &original.database_identity_json,
+                                next_id,
+                            )
+                            .unwrap()
+                            .run_dir
+                            .to_str()
+                            .unwrap()
+                            .into(),
+                            requested_mode: original.requested_mode.clone(),
+                            resolved_mode: original.resolved_mode.clone(),
+                            mode_source: original.mode_source,
+                            permission_argv_json: original.permission_argv_json.clone(),
+                            event_evidence: original.event_evidence,
+                            native_version: original.native_version.clone(),
+                            profile_version: None,
+                            profile_match: None,
+                            coverage: Coverage::Unknown,
+                            owner_pid: process.pid,
+                            owner_start_identity: process.start_identity,
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(run.run_id, next_id);
+                    Case::from_fixture(
+                        Fixture {
+                            _dir: tempfile::tempdir().unwrap(),
+                            conn,
+                            run,
+                        },
+                        Retained::Accepted,
+                        PermissionDecision::Allow,
+                        DirectorMode::Auto,
+                        DecisionSource::DirectorAuto,
+                    )
+                }
+
+                #[test]
+                fn existing_foreign_run_rejects_association_before_live_boundary() {
+                    let mut original = Case::new(Retained::Accepted);
+                    let foreign = related(&original);
+                    assert_ne!(original.owner.run_id, foreign.owner.run_id);
+                    assert_eq!(
+                        original.owner.database_identity_json,
+                        foreign.owner.database_identity_json
+                    );
+                    assert_eq!(
+                        storage::get_run(&original.fixture.conn, foreign.owner.run_id).unwrap(),
+                        storage::get_run(&foreign.fixture.conn, foreign.owner.run_id).unwrap()
+                    );
+                    let mut request = original.command();
+                    request.expected_run_id = foreign.owner.run_id;
+                    request.expected_owner_epoch = foreign.owner.owner_epoch;
+                    request.operation_key = "fixture:absent-on-foreign-run".into();
+                    assert_eq!(
                     original
                         .fixture
                         .conn
@@ -6241,82 +5658,82 @@ pub(super) mod permission_history {
                         .unwrap(),
                     0
                 );
-                let before = Snapshot::take(&original.fixture.conn);
-                let failure = match attempt(&mut original, &request) {
-                    Err(failure) => failure,
-                    Ok(_) => {
-                        panic!("an existing foreign run refuses the original event/interaction")
-                    }
-                };
-                assert!(matches!(&failure.source,CafleetError::App(message)
+                    let before = Snapshot::take(&original.fixture.conn);
+                    let failure = match attempt(&mut original, &request) {
+                        Err(failure) => failure,
+                        Ok(_) => {
+                            panic!("an existing foreign run refuses the original event/interaction")
+                        }
+                    };
+                    assert!(matches!(&failure.source,CafleetError::App(message)
                     if message=="permission run/event/interaction/Director association mismatch"));
-                assert_eq!(failure.source.exit_code(), 1);
-                assert_eq!(failure.run_id, Some(foreign.owner.run_id));
-                assert_eq!(
-                    failure.interaction_id,
-                    Some(original.request.metadata.interaction_id)
-                );
-                assert_eq!(failure.input_id, None);
-                assert_eq!(
-                    failure.operation_key.as_deref(),
-                    Some(request.operation_key.as_str())
-                );
-                before.unchanged(&original.fixture.conn);
-            }
+                    assert_eq!(failure.source.exit_code(), 1);
+                    assert_eq!(failure.run_id, Some(foreign.owner.run_id));
+                    assert_eq!(
+                        failure.interaction_id,
+                        Some(original.request.metadata.interaction_id)
+                    );
+                    assert_eq!(failure.input_id, None);
+                    assert_eq!(
+                        failure.operation_key.as_deref(),
+                        Some(request.operation_key.as_str())
+                    );
+                    before.unchanged(&original.fixture.conn);
+                }
 
-            #[test]
-            fn step5_a1_h3_second_run_matching_history_is_independently_valid() {
-                let original = Case::new(Retained::Accepted);
-                let mut foreign = related(&original);
-                let receipt =
-                    storage::get_permission_response(&foreign.fixture.conn, foreign.input_id)
+                #[test]
+                fn second_run_matching_history_is_independently_valid() {
+                    let original = Case::new(Retained::Accepted);
+                    let mut foreign = related(&original);
+                    let receipt =
+                        storage::get_permission_response(&foreign.fixture.conn, foreign.input_id)
+                            .unwrap();
+                    assert_eq!(receipt.input.run_id, foreign.owner.run_id);
+                    assert_ne!(
+                        receipt.response.metadata.interaction_id,
+                        original.request.metadata.interaction_id
+                    );
+                    let request = foreign.command();
+                    let before = Snapshot::take(&foreign.fixture.conn);
+                    let result = success(attempt(&mut foreign, &request));
+                    assert_projection(&foreign, &result, Retained::Accepted);
+                    before.unchanged(&foreign.fixture.conn);
+                }
+
+                #[derive(Debug)]
+                enum ObservedSql {
+                    Transaction(TransactionOperation),
+                    Read {
+                        table: String,
+                        transaction_open: bool,
+                    },
+                }
+
+                #[test]
+                fn supplied_deferred_snapshot_survives_committed_association_change() {
+                    let mut case = Case::new(Retained::Accepted);
+                    let mode: String = case
+                        .fixture
+                        .conn
+                        .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
                         .unwrap();
-                assert_eq!(receipt.input.run_id, foreign.owner.run_id);
-                assert_ne!(
-                    receipt.response.metadata.interaction_id,
-                    original.request.metadata.interaction_id
-                );
-                let request = command(&foreign);
-                let before = Snapshot::take(&foreign.fixture.conn);
-                let result = success(attempt(&mut foreign, &request));
-                assert_projection(&foreign, &result, Retained::Accepted);
-                before.unchanged(&foreign.fixture.conn);
-            }
-
-            #[derive(Debug)]
-            enum ObservedSql {
-                Transaction(TransactionOperation),
-                Read {
-                    table: String,
-                    transaction_open: bool,
-                },
-            }
-
-            #[test]
-            fn step5_a1_h2_supplied_deferred_snapshot_survives_committed_association_change() {
-                let mut case = Case::new(Retained::Accepted);
-                let mode: String = case
-                    .fixture
-                    .conn
-                    .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
-                    .unwrap();
-                assert_eq!(mode.to_ascii_lowercase(), "wal");
-                let writer = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
-                writer.busy_timeout(Duration::from_millis(200)).unwrap();
-                let writer_mode: String = writer
-                    .query_row("PRAGMA journal_mode", [], |row| row.get(0))
-                    .unwrap();
-                assert_eq!(writer_mode.to_ascii_lowercase(), "wal");
-                let before = Snapshot::take(&case.fixture.conn);
-                let observations = Arc::new(Mutex::new(Vec::new()));
-                let observed = observations.clone();
-                let mutation = Arc::new(Mutex::new(None));
-                let committed = mutation.clone();
-                let mut writer = Some(writer);
-                let message_id = case.event.message_id.unwrap();
-                let wrong_recipient = case.fixture.run.member_id;
-                let mut transaction_open = false;
-                case.fixture
+                    assert_eq!(mode.to_ascii_lowercase(), "wal");
+                    let writer = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
+                    writer.busy_timeout(Duration::from_millis(200)).unwrap();
+                    let writer_mode: String = writer
+                        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                        .unwrap();
+                    assert_eq!(writer_mode.to_ascii_lowercase(), "wal");
+                    let before = Snapshot::take(&case.fixture.conn);
+                    let observations = Arc::new(Mutex::new(Vec::new()));
+                    let observed = observations.clone();
+                    let mutation = Arc::new(Mutex::new(None));
+                    let committed = mutation.clone();
+                    let mut writer = Some(writer);
+                    let message_id = case.event.message_id.unwrap();
+                    let wrong_recipient = case.fixture.run.member_id;
+                    let mut transaction_open = false;
+                    case.fixture
                     .conn
                     .authorizer(Some(move |context: AuthContext<'_>| {
                         match context.action {
@@ -6353,56 +5770,49 @@ pub(super) mod permission_history {
                         Authorization::Allow
                     }))
                     .unwrap();
-                let request = command(&case);
-                let result = attempt(&mut case, &request);
-                case.fixture
-                    .conn
-                    .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
-                    .unwrap();
-                let observed = observations.lock().unwrap();
-                let transactions = observed
-                    .iter()
-                    .filter_map(|operation| match operation {
-                        ObservedSql::Transaction(operation) => Some(*operation),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(
-                    transactions,
-                    // rusqlite represents SQLite's COMMIT authorization action as Unknown.
-                    vec![TransactionOperation::Begin, TransactionOperation::Unknown],
-                    "{observed:?}"
-                );
-                assert!(case.fixture.conn.is_autocommit());
-                for table in [
-                    "member_runs",
-                    "member_input_operations",
-                    "member_permission_responses",
-                    "member_runtime_events",
-                    "member_interactions",
-                    "messages",
-                    "member_permission_response_claims",
-                ] {
-                    assert!(observed.iter().any(|operation|matches!(operation,ObservedSql::Read {table:actual,transaction_open:true} if actual==table)),"supplied-connection preparation inside the observed transaction for {table}: {observed:?}");
-                }
-                assert!(
-                    observed.iter().all(|operation| !matches!(
-                        operation,
-                        ObservedSql::Read {
-                            transaction_open: false,
-                            ..
-                        }
-                    )),
-                    "every supplied-connection read is enclosed by the single transaction: {observed:?}"
-                );
-                eprintln!(
-                    "H2 supplied-connection transaction actions={transactions:?}, read authorizations={}",
-                    observed
+                    let request = case.command();
+                    let result = attempt(&mut case, &request);
+                    case.fixture
+                        .conn
+                        .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+                        .unwrap();
+                    let observed = observations.lock().unwrap();
+                    let transactions = observed
                         .iter()
-                        .filter(|operation| matches!(operation, ObservedSql::Read { .. }))
-                        .count()
-                );
-                let committed = mutation
+                        .filter_map(|operation| match operation {
+                            ObservedSql::Transaction(operation) => Some(*operation),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        transactions,
+                        // rusqlite represents SQLite's COMMIT authorization action as Unknown.
+                        vec![TransactionOperation::Begin, TransactionOperation::Unknown],
+                        "{observed:?}"
+                    );
+                    assert!(case.fixture.conn.is_autocommit());
+                    for table in [
+                        "member_runs",
+                        "member_input_operations",
+                        "member_permission_responses",
+                        "member_runtime_events",
+                        "member_interactions",
+                        "messages",
+                        "member_permission_response_claims",
+                    ] {
+                        assert!(observed.iter().any(|operation|matches!(operation,ObservedSql::Read {table:actual,transaction_open:true} if actual==table)),"supplied-connection preparation inside the observed transaction for {table}: {observed:?}");
+                    }
+                    assert!(
+                        observed.iter().all(|operation| !matches!(
+                            operation,
+                            ObservedSql::Read {
+                                transaction_open: false,
+                                ..
+                            }
+                        )),
+                        "every supplied-connection read is enclosed by the single transaction: {observed:?}"
+                    );
+                    let committed = mutation
                     .lock()
                     .unwrap()
                     .take()
@@ -6410,128 +5820,91 @@ pub(super) mod permission_history {
                     .expect(
                         "the writer commits while the supplied transaction retains its read snapshot",
                     );
-                let after = Snapshot::take(&case.fixture.conn);
-                assert_eq!(
-                    after.changes, before.changes,
-                    "the coordinator makes zero SQL mutations"
-                );
-                assert!(
-                    after.tables == committed.tables,
-                    "all rows match only the intentional committed association change"
-                );
-                assert_eq!(
-                    case.fixture
-                        .conn
-                        .query_row(
-                            "SELECT to_member_id FROM messages WHERE message_id=?1",
-                            [message_id],
-                            |row| row.get::<_, i64>(0)
-                        )
-                        .unwrap(),
-                    wrong_recipient
-                );
-                assert!(
-                    storage::get_permission_response(&case.fixture.conn, case.input_id).is_err(),
-                    "the new snapshot exposes the committed corruption"
-                );
-                assert_projection(&case, &success(result), Retained::Accepted);
-                eprintln!(
-                    "H2 WAL mutation committed before audit preparation; original history accepted, new snapshot rejects association; caller total_changes={}",
-                    after.changes
-                );
-            }
-        }
-
-        mod staged {
-            use super::*;
-
-            fn response_context(
-                case: &Case,
-                failure: &InputFailure,
-                key: &str,
-                input_id: Option<i64>,
-            ) {
-                assert_eq!(failure.run_id, Some(case.owner.run_id));
-                assert_eq!(
-                    failure.interaction_id,
-                    Some(case.request.metadata.interaction_id)
-                );
-                assert_eq!(failure.input_id, input_id);
-                assert_eq!(failure.operation_key.as_deref(), Some(key));
+                    let after = Snapshot::take(&case.fixture.conn);
+                    assert_eq!(
+                        after.changes, before.changes,
+                        "the coordinator makes zero SQL mutations"
+                    );
+                    assert!(
+                        after.tables == committed.tables,
+                        "all rows match only the intentional committed association change"
+                    );
+                    assert_eq!(
+                        case.fixture
+                            .conn
+                            .query_row(
+                                "SELECT to_member_id FROM messages WHERE message_id=?1",
+                                [message_id],
+                                |row| row.get::<_, i64>(0)
+                            )
+                            .unwrap(),
+                        wrong_recipient
+                    );
+                    assert!(
+                        storage::get_permission_response(&case.fixture.conn, case.input_id)
+                            .is_err(),
+                        "the new snapshot exposes the committed corruption"
+                    );
+                    assert_projection(&case, &success(result), Retained::Accepted);
+                }
             }
 
-            fn ready() -> Case {
-                let mut case = Case::new(Retained::InProgress);
-                storage::record_input_state(
-                    &mut case.fixture.conn,
-                    &case.owner,
-                    case.input_id,
-                    InputState::InProgress,
-                    InputState::Ready,
-                )
-                .unwrap();
-                let receipt =
-                    storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-                assert_eq!(receipt.input.state, InputState::Ready);
-                assert_eq!(receipt.response.metadata, case.request.metadata);
-                assert!(receipt.claim.is_some());
-                case
-            }
+            mod staged {
+                use super::*;
 
-            #[test]
-            fn permission_ready_history_reaches_live_lock_with_exact_old_metadata_and_claim() {
-                let mut case = ready();
-                let request = command(&case);
-                let receipt =
-                    storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
-                let before = Snapshot::take(&case.fixture.conn);
-                let mut host = NoLive::default();
-                let failure = respond_permission_with_host(
-                    &mut case.fixture.conn,
-                    &case.settings,
-                    &request,
-                    Deadline::until(Instant::now() + Duration::from_secs(1)),
-                    &mut host,
-                )
-                .err()
-                .expect("the controlled lock failure preserves Ready history");
-                assert_eq!(host.calls, ["lock"]);
-                response_context(&case, &failure, &request.operation_key, Some(case.input_id));
-                before.unchanged(&case.fixture.conn);
-                assert_eq!(
-                    storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
-                    receipt
-                );
-            }
+                fn response_context(
+                    case: &Case,
+                    failure: &InputFailure,
+                    key: &str,
+                    input_id: Option<i64>,
+                ) {
+                    assert_eq!(failure.run_id, Some(case.owner.run_id));
+                    assert_eq!(
+                        failure.interaction_id,
+                        Some(case.request.metadata.interaction_id)
+                    );
+                    assert_eq!(failure.input_id, input_id);
+                    assert_eq!(failure.operation_key.as_deref(), Some(key));
+                }
 
-            #[test]
-            fn permission_ready_conflict_precedes_live_lock_and_preserves_binding() {
-                for field in ["epoch", "token", "decision", "mode_ref", "decision_ref"] {
-                    let mut case = ready();
-                    let mut request = command(&case);
-                    match field {
-                        "epoch" => request.expected_owner_epoch += 1,
-                        "token" => request.request_token = "b".repeat(64),
-                        "decision" => request.decision = PermissionDecision::Deny,
-                        "mode_ref" => request.mode_evidence_ref = "fixture:other-mode".into(),
-                        "decision_ref" => {
-                            request.decision_evidence_ref = "fixture:other-decision".into()
-                        }
-                        _ => unreachable!(),
-                    }
-                    let before = Snapshot::take(&case.fixture.conn);
+                fn ready() -> Case {
+                    let mut case = Case::new(Retained::InProgress);
+                    storage::record_input_state(
+                        &mut case.fixture.conn,
+                        &case.owner,
+                        case.input_id,
+                        InputState::InProgress,
+                        InputState::Ready,
+                    )
+                    .unwrap();
                     let receipt =
                         storage::get_permission_response(&case.fixture.conn, case.input_id)
                             .unwrap();
-                    let failure = match attempt(&mut case, &request) {
-                        Err(failure) => failure,
-                        Ok(_) => panic!("conflicting Ready {field} rejects the attempt"),
-                    };
-                    assert!(
-                        matches!(failure.source, CafleetError::InvalidStoredValue { .. }),
-                        "Ready {field} preserves the metadata-conflict category: {}",
-                        failure.source
-                    );
+                    assert_eq!(receipt.input.state, InputState::Ready);
+                    assert_eq!(receipt.response.metadata, case.request.metadata);
+                    assert!(receipt.claim.is_some());
+                    case
+                }
+
+                #[test]
+                fn permission_ready_history_reaches_live_lock_with_exact_old_metadata_and_claim() {
+                    let mut case = ready();
+                    let request = case.command();
+                    let receipt =
+                        storage::get_permission_response(&case.fixture.conn, case.input_id)
+                            .unwrap();
+                    let before = Snapshot::take(&case.fixture.conn);
+                    let mut host = NoLive::default();
+                    let failure = respond_permission_with_host(
+                        &mut case.fixture.conn,
+                        &case.settings,
+                        &request,
+                        Deadline::until(Instant::now() + Duration::from_secs(1)),
+                        &mut host,
+                    )
+                    .err()
+                    .expect("the controlled lock failure preserves Ready history");
+                    assert_eq!(host.calls, ["lock"]);
                     response_context(&case, &failure, &request.operation_key, Some(case.input_id));
                     before.unchanged(&case.fixture.conn);
                     assert_eq!(
@@ -6539,6 +5912,49 @@ pub(super) mod permission_history {
                             .unwrap(),
                         receipt
                     );
+                }
+
+                #[test]
+                fn permission_ready_conflict_precedes_live_lock_and_preserves_binding() {
+                    for field in ["epoch", "token", "decision", "mode_ref", "decision_ref"] {
+                        let mut case = ready();
+                        let mut request = case.command();
+                        match field {
+                            "epoch" => request.expected_owner_epoch += 1,
+                            "token" => request.request_token = "b".repeat(64),
+                            "decision" => request.decision = PermissionDecision::Deny,
+                            "mode_ref" => request.mode_evidence_ref = "fixture:other-mode".into(),
+                            "decision_ref" => {
+                                request.decision_evidence_ref = "fixture:other-decision".into()
+                            }
+                            _ => unreachable!(),
+                        }
+                        let before = Snapshot::take(&case.fixture.conn);
+                        let receipt =
+                            storage::get_permission_response(&case.fixture.conn, case.input_id)
+                                .unwrap();
+                        let failure = match attempt(&mut case, &request) {
+                            Err(failure) => failure,
+                            Ok(_) => panic!("conflicting Ready {field} rejects the attempt"),
+                        };
+                        assert!(
+                            matches!(failure.source, CafleetError::InvalidStoredValue { .. }),
+                            "Ready {field} preserves the metadata-conflict category: {}",
+                            failure.source
+                        );
+                        response_context(
+                            &case,
+                            &failure,
+                            &request.operation_key,
+                            Some(case.input_id),
+                        );
+                        before.unchanged(&case.fixture.conn);
+                        assert_eq!(
+                            storage::get_permission_response(&case.fixture.conn, case.input_id)
+                                .unwrap(),
+                            receipt
+                        );
+                    }
                 }
             }
         }

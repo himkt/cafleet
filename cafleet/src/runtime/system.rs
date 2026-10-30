@@ -14,9 +14,19 @@ use std::time::{Duration, Instant};
 use crate::coding_agent::SpawnProbe;
 use crate::multiplexer::{CommandRunner, RunError, TimedRunError};
 
+pub(crate) fn random_bytes(bytes: &mut [u8; 32]) -> io::Result<()> {
+    std::fs::File::open("/dev/urandom").and_then(|mut file| file.read_exact(bytes))
+}
+
+pub(crate) fn random_hex32() -> io::Result<String> {
+    let mut bytes = [0; 32];
+    random_bytes(&mut bytes)?;
+    Ok(crate::digest::hex(&bytes))
+}
+
 /// Resolve `name` against the `PATH` environment variable to an executable
 /// regular file.
-pub fn find_on_path(name: &str) -> Option<PathBuf> {
+fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
@@ -25,7 +35,7 @@ pub fn find_on_path(name: &str) -> Option<PathBuf> {
 
 /// Resolve `name` to the first executable regular file under an absolute
 /// entry of `path`, returning the path as found without resolving links.
-pub fn find_executable_in(path: &OsStr, name: &str) -> Option<PathBuf> {
+fn find_executable_in(path: &OsStr, name: &str) -> Option<PathBuf> {
     std::env::split_paths(path)
         .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join(name))
@@ -47,7 +57,7 @@ fn is_executable_file(candidate: &Path) -> bool {
     }
 }
 
-pub struct SystemRunner;
+pub(crate) struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn binary_exists(&self, name: &str) -> bool {
@@ -71,67 +81,60 @@ impl CommandRunner for SystemRunner {
     }
 }
 
-fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, RunError> {
-    let started = Instant::now();
+fn spawn_piped(argv: &[String]) -> Result<Child, RunError> {
     let (program, args) = argv.split_first().expect("argv carries the program");
-    if timeout.is_some_and(|timeout| timeout.is_zero()) {
-        return Err(RunError::NotStarted(
-            "command deadline expired before launch".into(),
-        ));
-    }
-    let spawned = Command::new(program)
+    Command::new(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn();
-    let child = match spawned {
-        Ok(child) => child,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(RunError::BinaryNotFound(e.to_string()));
-        }
-        Err(e) => {
-            return Err(RunError::NotStarted(e.to_string()));
-        }
-    };
+        .spawn()
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                RunError::BinaryNotFound(error.to_string())
+            } else {
+                RunError::NotStarted(error.to_string())
+            }
+        })
+}
+
+fn decode(status: ExitStatus, stdout: &[u8], stderr: &[u8]) -> Result<String, RunError> {
+    if status.success() {
+        Ok(String::from_utf8_lossy(stdout).into_owned())
+    } else {
+        Err(RunError::Failed {
+            stderr: String::from_utf8_lossy(stderr).into_owned(),
+        })
+    }
+}
+
+fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, RunError> {
+    let started = Instant::now();
+    if timeout.is_some_and(|timeout| timeout.is_zero()) {
+        return Err(RunError::deadline_expired());
+    }
+    let child = spawn_piped(argv)?;
     if let Some(timeout) = timeout {
         return run_timed(child, timeout.saturating_sub(started.elapsed()));
     }
     let output = child.wait_with_output().map_err(|e| RunError::Failed {
         stderr: e.to_string(),
     })?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(RunError::Failed {
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        })
-    }
+    decode(output.status, &output.stdout, &output.stderr)
 }
 
 const COMMAND_CLEANUP_RESERVE: Duration = Duration::from_millis(250);
 
 fn run_process_until(argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
     let started = Instant::now();
-    let (program, args) = argv.split_first().expect("argv carries the program");
     let cutoff = deadline
         .checked_sub(COMMAND_CLEANUP_RESERVE)
         .filter(|cutoff| *cutoff > started)
         .ok_or_else(TimedRunError::before_launch)?;
-    let child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| TimedRunError {
-            source: if error.kind() == io::ErrorKind::NotFound {
-                RunError::BinaryNotFound(error.to_string())
-            } else {
-                RunError::NotStarted(error.to_string())
-            },
-            cleanup_diagnostics: Vec::new(),
-        })?;
+    let child = spawn_piped(argv).map_err(|source| TimedRunError {
+        source,
+        cleanup_diagnostics: Vec::new(),
+    })?;
     let mut owned = OwnedChild {
         child,
         reaped: false,
@@ -143,13 +146,7 @@ fn run_process_until(argv: &[String], deadline: Instant) -> Result<String, Timed
             if Instant::now() >= cutoff {
                 return Err(RunError::Timeout);
             }
-            if status.success() {
-                Ok(String::from_utf8_lossy(&stdout).into_owned())
-            } else {
-                Err(RunError::Failed {
-                    stderr: String::from_utf8_lossy(&stderr).into_owned(),
-                })
-            }
+            decode(status, &stdout, &stderr)
         },
     );
     result.map_err(|source| TimedRunError {
@@ -262,15 +259,7 @@ fn run_timed(child: Child, timeout: Duration) -> Result<String, RunError> {
     };
     let result = collect_timed(&mut owned, started, timeout);
     match result {
-        Ok((status, stdout, stderr)) => {
-            if status.success() {
-                Ok(String::from_utf8_lossy(&stdout).into_owned())
-            } else {
-                Err(RunError::Failed {
-                    stderr: String::from_utf8_lossy(&stderr).into_owned(),
-                })
-            }
-        }
+        Ok((status, stdout, stderr)) => decode(status, &stdout, &stderr),
         Err(mut primary) => {
             // collect_timed owns the read ends, so they have already closed.
             let mut diagnostics = Vec::new();
@@ -432,7 +421,7 @@ fn collect_timed(
     }
 }
 
-pub struct SystemProbe;
+pub(crate) struct SystemProbe;
 
 impl SpawnProbe for SystemProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
@@ -449,73 +438,99 @@ impl SpawnProbe for SystemProbe {
 }
 
 /// Read stdin to EOF as raw bytes.
-pub fn read_stdin() -> std::io::Result<Vec<u8>> {
+pub(crate) fn read_stdin() -> std::io::Result<Vec<u8>> {
     let mut buffer = Vec::new();
     std::io::stdin().read_to_end(&mut buffer)?;
     Ok(buffer)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    mod press_tests {
-        use super::*;
+pub(crate) mod test_support {
+    use std::io;
+    use std::ops::{Deref, DerefMut};
+    use std::path::Path;
+    use std::process::{Child, Command, ExitStatus, Stdio};
+    use std::time::{Duration, Instant};
 
-        #[test]
-        fn step5_press_absolute_runner_reserves_cleanup_and_reaps_the_actual_direct_child() {
-            let fixture = ProcessFixture::new();
-            let argv = vec![
-                "/bin/sh".into(),
-                "-c".into(),
-                "printf '%s' \"$$\" > \"$1/pid\"\nexec sleep 4".into(),
-                "cafleet-absolute-press-test".into(),
-                fixture.dir.path().to_str().unwrap().into(),
-            ];
-            let not_started =
-                SystemRunner.run_until(&argv, Instant::now() + Duration::from_millis(200));
-            let not_started = match not_started {
-                Ok(_) => panic!("insufficient cleanup reserve starts no process"),
-                Err(cause) => cause,
-            };
-            assert!(matches!(not_started.source, RunError::NotStarted(_)));
-            assert!(not_started.cleanup_diagnostics.is_empty());
-            assert!(!fixture.dir.path().join("pid").exists());
+    use crate::runtime::runner::ProcessIdentity;
 
-            let started = Instant::now();
-            let until = started + Duration::from_secs(2);
-            let result = SystemRunner.run_until(&argv, until);
-            let returned = Instant::now();
-            let observed = result
-                .as_ref()
-                .cloned()
-                .map_err(|cause| cause.source.clone());
-            fixture.assert_direct_child_reaped(&observed);
-            let cause = match result {
-                Ok(_) => panic!("the direct child outlives the collection budget"),
-                Err(cause) => cause,
-            };
-            assert!(
-                matches!(cause.source, RunError::Timeout),
-                "{:?}",
-                cause.source
-            );
-            assert!(
-                cause.cleanup_diagnostics.is_empty(),
-                "{:?}",
-                cause.cleanup_diagnostics
-            );
-            assert!(
-                returned >= until - Duration::from_millis(350),
-                "elapsed={:?}",
-                returned - started
-            );
-            assert!(
-                returned <= until - Duration::from_millis(150),
-                "elapsed={:?}",
-                returned - started
+    pub(crate) struct TestChild {
+        child: Child,
+        cleanup_deadline: Option<Instant>,
+    }
+    impl TestChild {
+        pub(crate) fn new(child: Child) -> Self {
+            Self {
+                child,
+                cleanup_deadline: None,
+            }
+        }
+        pub(crate) fn spawn(executable: &Path, arguments: &[String]) -> Self {
+            Self::new(
+                Command::new(executable)
+                    .args(arguments)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            )
+        }
+        pub(crate) fn identity(&self) -> ProcessIdentity {
+            ProcessIdentity::read(i64::from(self.child.id()))
+                .unwrap()
+                .expect("owned child generation")
+        }
+        pub(crate) fn poll_until(&mut self, deadline: Instant) -> io::Result<Option<ExitStatus>> {
+            loop {
+                if let Some(status) = self.child.try_wait()? {
+                    return Ok(Some(status));
+                }
+                if Instant::now() >= deadline {
+                    return Ok(None);
+                }
+                std::thread::sleep(
+                    Duration::from_millis(2)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+        }
+        pub(crate) fn terminate_until(&mut self, deadline: Instant) {
+            let deadline = self
+                .cleanup_deadline
+                .map_or(deadline, |original| original.min(deadline));
+            self.cleanup_deadline = Some(deadline);
+            if !matches!(self.child.try_wait(), Ok(None)) {
+                return;
+            }
+            drop(self.child.kill());
+            drop(self.poll_until(deadline));
+        }
+    }
+    impl Deref for TestChild {
+        type Target = Child;
+        fn deref(&self) -> &Child {
+            &self.child
+        }
+    }
+    impl DerefMut for TestChild {
+        fn deref_mut(&mut self) -> &mut Child {
+            &mut self.child
+        }
+    }
+    impl Drop for TestChild {
+        fn drop(&mut self) {
+            self.terminate_until(
+                self.cleanup_deadline
+                    .unwrap_or_else(|| Instant::now() + Duration::from_secs(2)),
             );
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
     use nix::errno::Errno;
     use nix::sys::wait::{WaitPidFlag, waitpid};
     use nix::unistd::Pid;
@@ -816,5 +831,87 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.to_string(), "original wait failure");
         assert_eq!(attempts, 1);
+    }
+
+    mod test_child {
+        use super::super::test_support::TestChild;
+        #[test]
+        fn owned_child_guard_cleans_up_when_identity_setup_unwinds() {
+            let mut identity = None;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let child = TestChild::new(
+                    std::process::Command::new("/bin/cat")
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .unwrap(),
+                );
+                identity =
+                    crate::runtime::runner::ProcessIdentity::read(i64::from(child.id())).unwrap();
+                panic!("owned identity setup fixture unwind");
+            }));
+            assert!(result.is_err());
+            assert!(
+                !identity
+                    .expect("owned child identity before intentional unwind")
+                    .matches()
+                    .unwrap()
+            );
+        }
+    }
+    #[test]
+    fn press_absolute_runner_reserves_cleanup_and_reaps_the_actual_direct_child() {
+        let fixture = ProcessFixture::new();
+        let argv = vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "printf '%s' \"$$\" > \"$1/pid\"\nexec sleep 4".into(),
+            "cafleet-absolute-press-test".into(),
+            fixture.dir.path().to_str().unwrap().into(),
+        ];
+        let not_started =
+            SystemRunner.run_until(&argv, Instant::now() + Duration::from_millis(200));
+        let not_started = match not_started {
+            Ok(_) => panic!("insufficient cleanup reserve starts no process"),
+            Err(cause) => cause,
+        };
+        assert!(matches!(not_started.source, RunError::NotStarted(_)));
+        assert!(not_started.cleanup_diagnostics.is_empty());
+        assert!(!fixture.dir.path().join("pid").exists());
+
+        let started = Instant::now();
+        let until = started + Duration::from_secs(2);
+        let result = SystemRunner.run_until(&argv, until);
+        let returned = Instant::now();
+        let observed = result
+            .as_ref()
+            .cloned()
+            .map_err(|cause| cause.source.clone());
+        fixture.assert_direct_child_reaped(&observed);
+        let cause = match result {
+            Ok(_) => panic!("the direct child outlives the collection budget"),
+            Err(cause) => cause,
+        };
+        assert!(
+            matches!(cause.source, RunError::Timeout),
+            "{:?}",
+            cause.source
+        );
+        assert!(
+            cause.cleanup_diagnostics.is_empty(),
+            "{:?}",
+            cause.cleanup_diagnostics
+        );
+        assert!(
+            returned >= until - Duration::from_millis(350),
+            "elapsed={:?}",
+            returned - started
+        );
+        assert!(
+            returned <= until - Duration::from_millis(150),
+            "elapsed={:?}",
+            returned - started
+        );
     }
 }

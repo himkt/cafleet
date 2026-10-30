@@ -1,16 +1,46 @@
 use serde_json::Value;
 
+use crate::config::Settings;
 use crate::error::CafleetError;
+use crate::multiplexer::AnyMultiplexer;
 use crate::output::format_json;
-pub use crate::runtime::resolve_mux;
+use crate::runtime::resolve_mux;
 use crate::runtime::system::read_stdin;
+
+pub(crate) fn available_mux(settings: &Settings) -> Result<AnyMultiplexer, CafleetError> {
+    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+    mux.ensure_available()
+        .map_err(|e| CafleetError::App(e.to_string()))?;
+    Ok(mux)
+}
+
+pub(crate) fn checked(
+    validate: fn(&str) -> Result<(), CafleetError>,
+) -> impl Fn(&str) -> Result<String, String> + Clone + Send + Sync + 'static {
+    move |value| {
+        validate(value).map_err(|cause| cause.to_string())?;
+        Ok(value.into())
+    }
+}
+
+pub(crate) fn nonblank(
+    message: &'static str,
+) -> impl Fn(&str) -> Result<String, String> + Clone + Send + Sync + 'static {
+    move |value| {
+        if value.trim().is_empty() {
+            Err(message.into())
+        } else {
+            Ok(value.into())
+        }
+    }
+}
 
 fn is_blank(text: &str) -> bool {
     text.chars()
         .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
-pub fn resolve_body(
+pub(crate) fn resolve_body(
     inline: Option<&str>,
     file: Option<&str>,
     flag: &str,
@@ -26,7 +56,7 @@ pub fn resolve_body(
     })
 }
 
-pub fn resolve_command_body(
+pub(crate) fn resolve_command_body(
     inline: Option<&str>,
     file: Option<&str>,
 ) -> Result<String, CafleetError> {
@@ -73,7 +103,7 @@ fn read_body(inline: Option<&str>, file: Option<&str>, flag: &str) -> Result<Str
     }
 }
 
-pub fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
+pub(crate) fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
     if json {
         println!("{}", format_json(payload));
     } else {

@@ -2,8 +2,6 @@
 
 Validate an existing design document through structured, fine-grained Q&A across multiple sessions. The Director (main agent) drives the conversation and writes annotations; an Analyzer member spawned via `cafleet member create` reads the document and returns the question list, then is torn down before the interview rounds begin. Discrepancies surface as inline `COMMENT(user-relay)` annotations in the design document. Multi-session splitting via `question.md` prevents context compaction for large interviews.
 
-Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there.
-
 ## Required reading
 
 Read these prerequisites in order before orchestration. Your `CODING AGENT:` identity selects your executing backend; a main session uses its own identity.
@@ -30,10 +28,6 @@ This workflow writes only `COMMENT(user-relay)` markers. Read [Payload exemption
 
 Interview-specific: place each `COMMENT(user-relay)` marker on its own line immediately before the section it refers to (e.g. above `### Retry Strategy`); markers persist until the create workflow's resume mode resolves them (reads each marker, applies the fix, removes it).
 
-## Prerequisites
-
-The Director MUST be running inside a tmux or herdr session and pass the gating `cafleet doctor` env-check before spawning the Analyzer, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
-
 ## Context Management Strategy
 
 Two mechanisms prevent context compaction:
@@ -41,27 +35,17 @@ Two mechanisms prevent context compaction:
 1. **Member offloading**: The Analyzer member performs the heavy document analysis (reading, reasoning, question generation) and returns only a compact numbered question list. The Director never reads the entire design document for question generation — it only reads it for resume-mode progress detection (Step 1) and for inserting COMMENT annotations (Step 4).
 2. **Multi-session splitting**: Each invocation covers a batch of sections. The Director tracks progress via `question.md` in the design document's directory, so subsequent invocations skip already-reviewed sections.
 
-## Shared spawn deltas
+## Analyzer spawn delta
 
-Render ordinary-member prompts from the required [shared frame](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton), with the per-role tables below. Supply absolute installed role and skill paths, the CAFleet load purpose `for communication with the Director`, and the workflow's team name. Every role and mode carries this poll-handling line verbatim:
-
-```text
-When you see cafleet message poll output with a message from the Director, act on those instructions.
-```
-
-The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow.
+Render the Analyzer prompt from the [shared frame](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the delta table in Step 2, the absolute installed role and skill paths and the CAFleet load purpose `for communication with the Director`. The Analyzer loads both `cafleet` and `cafleet-design-doc` and continues this assigned workflow.
 
 ## Process
 
 ### Step 0: Path Resolution & Doc Validation (Director)
 
-1. Apply the no-bypass write protocol and `<unset>` sentinel contract from the `cafleet` skill's `reference/base-dir.md` (§ Required reading above). Then canonicalize `$ARGUMENTS` and resolve the task-scoped BASE:
-
-   Read and apply [Guidelines File Layout](../reference/guidelines.md#file-layout) to normalize the task-folder path, then run [BASE Step 0](../../cafleet/reference/base-dir.md#step-0-task-scope-resolution) on that folder.
-
-   Branch on Step 0's outcome: when it **resolves**, set `${BASE}` to the resolved task folder, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `dir_path` to the **canonicalized** absolute task-folder path and `doc_path = dir_path / "design-doc.md"` (unless `$ARGUMENTS` already names `design-doc.md`, in which case use it verbatim and derive `dir_path = dirname(doc_path)`), and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet` skill's `reference/base-dir.md` § *The `<unset>` sentinel*.
+1. Normalize `$ARGUMENTS` per [Guidelines File Layout](../reference/guidelines.md#file-layout) and resolve BASE with [BASE Step 0](../../cafleet/reference/base-dir.md#step-0-task-scope-resolution). A resolved BASE is the task folder: `dir_path = ${BASE}` and `doc_path = ${BASE}/design-doc.md`. For `<unset>`, use the canonicalized absolute task folder as `dir_path` (or the supplied `design-doc.md` path as `doc_path`) and guard-skip audit writes.
 2. Read the design document at `doc_path`. If missing or empty, report the error and stop.
-3. Run `cafleet doctor`. If it reports a problem, surface its message and stop.
+3. Confirm the Director runs inside a tmux or herdr session, then run `cafleet doctor`. If either reports a problem, surface it and stop.
 
 ### Step 1: Progress Check (Director)
 
@@ -79,31 +63,13 @@ In resume mode where Step 2 IS run, parse the JSON array from the existing `inte
 
 **Skip this step entirely when `SKIP_ANALYZER=true`** (Step 1 found unanswered questions still in `question.md` from a prior invocation — the Director already has the question list).
 
-#### 2a. Register the current Director and capture the IDs
+#### 2a. Register and arm reception
 
-Follow the shared [Spawn Protocol](../../cafleet/reference/supervision.md#spawn-protocol). Register the calling session atomically and capture its literal IDs:
+Follow the [Spawn Protocol](../../cafleet/reference/supervision.md#spawn-protocol) to register the calling session with `cafleet fleet create --name "design-doc-interview-<slug>" --coding-agent <backend> --json`, then follow [Director wake](../../cafleet/reference/supervision.md#director-wake).
 
-```bash
-cafleet fleet create --name "design-doc-interview-<slug>" --coding-agent <backend> --json
-```
+#### 2b. Spawn the Analyzer
 
-Retain `fleet_id` and `director.member_id` for subsequent commands. Ordinary member creation can begin immediately.
-
-#### 2b. Arm native Director reception
-
-After Director registration, arm native reception before depending on member ready replies. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake) and the executing [backend recipe](../../cafleet/reference/coding-agents.md) to retain one receiver through dispatch and replies. On every received batch/wake run `cafleet message poll <director-member-id> --json`, reconcile replay, record deferred actions, ACK consumption and dispatch ready work. Inspect roster, panes and artifacts until delegated work resolves or explicit user handoff; consume Director pending IDs through broker reads. Preserve user decision gates and host continuation controls.
-
-#### 2c. Locate the Analyzer role file (path-by-reference)
-
-Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it through an available text reader on its first turn. Do NOT inline the role content (spawn prompt size limit — `skills/cafleet/roles/director.md` § *Spawn prompt size limit*).
-
-> **Spawn-prompt audit file**: the spawn below renders the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` and spawns from that file, per the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
-
-#### 2d. Spawn the Analyzer
-
-**Gate**: register the fleet before spawning the Analyzer; its own ready gates its assignment.
-
-Render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (two-stage rendering + brace rules at the skeleton):
+Render the Analyzer prompt by path reference to the absolute `<this skill>/roles/analyzer.md` with this delta:
 
 | Slot | Analyzer |
 |---|---|
@@ -111,9 +77,10 @@ Render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#can
 | role-file | `roles/analyzer.md` |
 | EXTRA SKILL LOADS | `cafleet-design-doc` (assigned role, format and coordination references) |
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT doc_path]` + `ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]` |
+| IMPORTANT / ROLE-CONSTRAINT LINES (verbatim) | `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
 | start cue (verbatim) | `Read the design document, generate a numbered question list per the role definition, send it to the Director via cafleet message send, then idle pending shutdown.` |
 
-Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c audit-file pattern (the four identity placeholders are rendered by the CLI at spawn), then spawn with `--file`:
+Write the rendered prompt to the audit file `${BASE}/.prompts/analyzer-<UTC-compact>.md`, then spawn with `--file`:
 
    ```bash
    cafleet member create --fleet-id <fleet-id> \
@@ -125,17 +92,17 @@ Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c aud
 
    Parse `member_id` from the JSON response and substitute it for `<analyzer-member-id>` in every subsequent command.
 
-#### 2e. Wait for the Analyzer's question list
+#### 2c. Wait for the Analyzer's question list
 
-Receive the Analyzer reply through the owned native receiver, then run `cafleet message poll <director-member-id> --json`. **The `--json` flag is required**: text-mode `cafleet message poll` truncates each message body to 200 codepoints + `…`, which would silently mangle the Analyzer's numbered question list — `--json` carries the complete body. Acknowledge with `cafleet message ack <message-id>`.
+Receive the Analyzer reply, then read it complete with `cafleet message poll <director-member-id> --json` and acknowledge it with `cafleet message ack <message-id>`.
 
-The Analyzer follows the read-only stdin branch in [Payload exemptions](../reference/coordination.md#payload-exemptions); a concrete unavailable transport is routed to the Director, and no delivery is inferred. The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format — receive the corrected reply through native reception and run `cafleet message poll <director-member-id> --json` again. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
+The Analyzer follows the read-only stdin branch in [Payload exemptions](../reference/coordination.md#payload-exemptions); a concrete unavailable transport is routed to the Director, and no delivery is inferred. The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format and read the corrected reply the same way. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 
-#### 2f. Tear down the Analyzer
+#### 2d. Tear down the Analyzer
 
 After reading and ACKing its complete question list, read [Shutdown](../../cafleet/reference/supervision.md#shutdown), delete the Analyzer, verify the root-only roster and deregister the fleet. The Director performs the remaining interview itself.
 
-#### 2g. Persist the question list to `question.md`
+#### 2e. Persist the question list to `question.md`
 
 - **Fresh start** (file does not exist): write `{dir_path}/question.md` per the § *`question.md` Format* below — `interview-progress` starts as an empty array `[]`, the Questions section is a verbatim copy of the Analyzer's full numbered list, and the Answers section is initially empty.
 
@@ -143,7 +110,7 @@ After reading and ACKing its complete question list, read [Shutdown](../../cafle
 
 ### Step 3: Interview Loop (Director)
 
-After persisting the question list (Step 2g) — or directly when `SKIP_ANALYZER=true` was set in Step 1 — the Director runs a deterministic round-counter loop.
+After persisting the question list (Step 2e) — or directly when `SKIP_ANALYZER=true` was set in Step 1 — the Director runs a deterministic round-counter loop.
 
 **Pre-loop setup:**
 
@@ -178,10 +145,10 @@ After persisting the question list (Step 2g) — or directly when `SKIP_ANALYZER
 
 ### Step 4: Annotate & Update Progress (Director)
 
-1. **Annotate discrepancies**: For each discrepancy found, add a `COMMENT(user-relay): ...` annotation inline in the design document, immediately before the relevant content (per § *COMMENT(user-relay) Marker*). Use `Edit` to insert each annotation.
+1. **Annotate discrepancies**: For each discrepancy found, add a `COMMENT(user-relay): ...` annotation inline in the design document, immediately before the relevant content (per § Coordination Protocol). Edit the document to insert each annotation.
 2. **Update progress in `question.md`**: Append the section headings reviewed in this invocation to the JSON array inside `<!-- interview-progress: [...] -->` in `question.md` (NOT in the design document).
 3. **If final session** (every section in the design document is now in the progress array): remove the `<!-- interview-progress: [...] -->` line from `question.md` entirely.
-4. **Verify**: Use `Grep` on the design document to confirm all intended COMMENT annotations were written.
+4. **Verify**: Search the design document to confirm all intended COMMENT annotations were written.
 
 ### Step 5: Session Report (Director)
 

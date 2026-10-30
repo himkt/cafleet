@@ -12,9 +12,9 @@ use crate::input::{Deadline, with_database_budget};
 use crate::multiplexer::{AnyMultiplexer, PressKeys};
 
 pub(crate) struct KeyAcknowledgment {
-    pub member_id: i64,
-    pub pane_id: String,
-    pub keys: Vec<String>,
+    pub(crate) member_id: i64,
+    pub(crate) pane_id: String,
+    pub(crate) keys: Vec<String>,
 }
 
 fn effect_error(member_id: i64, cause: CafleetError, started: bool) -> CafleetError {
@@ -127,7 +127,7 @@ pub(crate) fn press_member_with_mux(
 }
 
 #[cfg(test)]
-mod contract_tests {
+mod tests {
     use super::*;
     use crate::broker::records::Placement;
     use crate::config::Settings;
@@ -136,7 +136,7 @@ mod contract_tests {
     use crate::multiplexer::{
         AnyMultiplexer, CommandRunner, PressKeys, RunError, TimedRunError, TmuxMultiplexer,
     };
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
     use nix::sys::signal::{SigSet, Signal};
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -255,11 +255,10 @@ mod contract_tests {
     }
 
     fn settings(fixture: &Fixture) -> Settings {
-        Settings {
-            database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-            max_text_len: 1000,
-            multiplexer: Some("tmux".into()),
-        }
+        Settings::for_database(
+            std::path::Path::new(fixture.conn.path().unwrap()),
+            Some("tmux"),
+        )
     }
 
     fn setup(
@@ -370,7 +369,7 @@ mod contract_tests {
     }
 
     #[test]
-    fn step5_press_entry_uses_the_outer_wrapped_placement_and_held_lock_under_one_deadline() {
+    fn press_entry_uses_the_outer_wrapped_placement_and_held_lock_under_one_deadline() {
         let mut fixture = Fixture::new();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, probe, mux) = setup(&fixture, Mode::Success, until);
@@ -406,7 +405,7 @@ mod contract_tests {
     }
 
     #[test]
-    fn step5_press_entry_refuses_director_backend_mismatch_and_a_busy_shared_lock_before_probes() {
+    fn press_entry_refuses_director_backend_mismatch_and_a_busy_shared_lock_before_probes() {
         let mut fixture = Fixture::new();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, probe, mux) = setup(&fixture, Mode::Success, until);
@@ -480,7 +479,7 @@ mod contract_tests {
     }
 
     #[test]
-    fn step5_press_entry_rechecks_full_placement_and_original_expiry_after_actual_metadata() {
+    fn press_entry_rechecks_full_placement_and_original_expiry_after_actual_metadata() {
         for mode in [Mode::ChangePlacement, Mode::ExpireMetadata] {
             let mut fixture = Fixture::new();
             let until = Instant::now() + Duration::from_secs(2);
@@ -518,7 +517,7 @@ mod contract_tests {
     }
 
     #[test]
-    fn step5_press_entry_keeps_prelaunch_and_started_effects_distinct_with_cleanup_before_effect() {
+    fn press_entry_keeps_prelaunch_and_started_effects_distinct_with_cleanup_before_effect() {
         for mode in [Mode::NotStarted, Mode::StartedFailure] {
             let mut fixture = Fixture::new();
             let until = Instant::now() + Duration::from_secs(2);

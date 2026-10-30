@@ -3,7 +3,7 @@
 Review the tracked tree for prose and code that violates the affirmative-writing
 rules — prohibition piles lacking a positive spec, unpaired "never X" rules,
 negatively-phrased instructions, silent-fallback code — per
-`~/.claude/rules/affirmative-writing.md` and `.claude/rules/code-quality.md`,
+the host's Affirmative Writing rule and `.claude/rules/code-quality.md`,
 then apply the reviewer-approved rewrites. After a run, every touched surface
 states the desired behavior directly, with every constraint, contract detail,
 and live test assertion intact.
@@ -23,7 +23,7 @@ meaningless fallbacks, or make code fail fast.
 
 ## Required reading
 
-Read the umbrella [startup and shared orchestration](../SKILL.md#required-reading) once, then this complete workflow before scanning or reviewing. Read the shared [row format, KEEP guardrails and verdict flow](../reference/review-format.md). Read `~/.claude/rules/affirmative-writing.md` and `.claude/rules/code-quality.md`, including their legitimacy carve-outs. Use supplied session equivalents for absent optional host-rule files; route an essential unknown prerequisite to the Director before dependent work.
+Read the umbrella [startup and shared orchestration](../SKILL.md#required-reading) once, then this complete workflow before scanning or reviewing. Read the shared [row format, KEEP guardrails and verdict flow](../reference/review-format.md). Read the host's Affirmative Writing rule and `.claude/rules/code-quality.md`, including their legitimacy carve-outs. The reviewer also reads [documentation maintenance](../../../rules/documentation-maintenance.md) and the [backend-neutrality rule](../../../rules/coding-agent-overlay.md) before judging contract or backend-neutrality changes. Use supplied session equivalents for absent optional host-rule files; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Judgment mechanics
 
@@ -32,6 +32,56 @@ slice in full and proposes exact replacement text — a grep-only pass misses th
 structural findings that are the point of the run. Classify each finding P1 /
 P2 / P4 per [Finding classes](#finding-classes) and write apply-ready
 rows per the shared [`reference/review-format.md`](../reference/review-format.md).
+
+## Scanner obligations
+
+- **Read your whole slice.** Open every tracked file in your slice in full —
+  this is a judgment review; a grep-only pass misses the structural P1/P2
+  findings that are the point of the run.
+- **Propose apply-ready rows.** Classify each finding P1 / P2 / P4 per the
+  rubric and write the exact final replacement text per the shared row format.
+  Every P4 row carries the BEHAVIOR-AFFECTING tag, the invariant justification,
+  and the covering tests (or the explicit "uncovered" mark). Write your
+  findings to the `findings-<slice>.md` path named in your spawn prompt, under
+  `${BASE}`.
+- **Re-verify after apply.** Diff your slice and confirm it contains exactly the
+  approved rows, then report.
+- **Honor the invariants.** Every replacement preserves all constraints and
+  contract detail (invariant 1 — an approved P4 row is the sole behavior-change
+  exception), all test logic (invariant 2), and introduces no narration
+  (invariant 3).
+
+The run pointer is `findings`: report `complete (findings) — <one-line count by class>`
+for written findings and `complete (findings) — <files changed, +/− lines>` after
+the slice apply; a blocker marker sits at the row in your findings file.
+
+## Reviewer checks
+
+Your sole job is guarding an affirmative-writing enforcement run against **lost
+meaning, lost contract, and unjustified behavior change**. Per finding row:
+
+1. **Meaning preservation**: the proposed text carries every constraint,
+   condition, qualifier, and cross-reference of the original. A rewrite that
+   drops one is a defect.
+2. **Contract preservation**: SPEC.md contract detail, CLI examples, error
+   strings, IMPORTANT lines, spawn-skeleton lossless items, and backend-neutral
+   base/overlay separation survive verbatim in meaning.
+3. **Behavior (P4)**: every BEHAVIOR-AFFECTING row is individually justified —
+   the invariant is genuinely guaranteed, the fail-fast replacement is correct,
+   and the named test coverage exists and covers the site. Accept an
+   "uncovered" row only explicitly, as your recorded individual acceptance. A
+   P4 row whose absence-case is a legitimate expected state is a defect.
+4. **No new narration**: no proposed text introduces past-tense framing
+   (umbrella invariant 3, R1).
+5. **Legitimacy carve-outs**: a row that "fixes" a paired prohibition or a
+   correct default is a defect — those are compliant per the host's Affirmative
+   Writing rule.
+6. **Precision**: approve genuine affirmative rewrites; reject style-only churn
+   that changes words without improving affirmativeness.
+
+Write verdicts per the shared [`reference/review-format.md`](../reference/review-format.md)
+verdict flow. After apply, check the git diff against the approved rows and
+re-validate each P4 row's named coverage.
 
 ## Artifact: `findings.md`
 
@@ -61,7 +111,7 @@ confined to approved rows and each P4 row's named coverage holds.
 
 ## Legitimacy carve-outs (compliant, never findings)
 
-Per `affirmative-writing.md` § *What's legitimate* and `code-quality.md`:
+Per the host's Affirmative Writing rule (§ *What's legitimate*) and `code-quality.md`:
 
 - A **paired prohibition** — a strong "never X" standing next to its
   affirmative counterpart ("always use Y") — is compliant, not a P1/P2 finding.

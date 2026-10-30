@@ -64,22 +64,17 @@ pub(crate) fn runner_exit_status(native: Option<ChildExit>, complete: bool) -> R
     Ok(if !complete && status == 0 { 1 } else { status })
 }
 
-struct CancellationScopes {
-    identity: Option<usize>,
-    deadlines: Vec<Instant>,
-}
-
 thread_local! {
-    static CANCELLATION_SCOPES: std::cell::RefCell<CancellationScopes> = const {
-        std::cell::RefCell::new(CancellationScopes { identity: None, deadlines: Vec::new() })
-    };
+    /// One deadline per open scope. `with_database_budget`, which encloses every scope,
+    /// already pins the thread's scopes to one connection.
+    static CANCELLATION_DEADLINES: std::cell::RefCell<Vec<Instant>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 fn database_cancelled() -> bool {
-    CANCELLATION_SCOPES.with(|scopes| {
-        let scopes = scopes.borrow();
-        let until = scopes
-            .deadlines
+    CANCELLATION_DEADLINES.with(|deadlines| {
+        let deadlines = deadlines.borrow();
+        let until = deadlines
             .iter()
             .min()
             .expect("a progress handler has an owning scope");
@@ -89,7 +84,6 @@ fn database_cancelled() -> bool {
 
 struct CancellationScope<'a> {
     conn: &'a mut Connection,
-    identity: usize,
     until: Instant,
     stop: Option<std::sync::mpsc::Sender<()>>,
     watchdog: Option<std::thread::JoinHandle<()>>,
@@ -99,21 +93,9 @@ struct CancellationScope<'a> {
 impl<'a> CancellationScope<'a> {
     fn new(conn: &'a mut Connection) -> Result<Self> {
         let until = Deadline::inherited_or_new().instant();
-        let identity = std::ptr::from_ref(conn).addr();
-        CANCELLATION_SCOPES.with(|scopes| {
-            let mut scopes = scopes.borrow_mut();
-            if let Some(owner) = scopes.identity {
-                assert_eq!(
-                    owner, identity,
-                    "nested cancellation scopes use the same connection"
-                );
-            }
-            scopes.identity = Some(identity);
-            scopes.deadlines.push(until);
-        });
+        CANCELLATION_DEADLINES.with(|deadlines| deadlines.borrow_mut().push(until));
         let mut scope = Self {
             conn,
-            identity,
             until,
             stop: None,
             watchdog: None,
@@ -121,8 +103,7 @@ impl<'a> CancellationScope<'a> {
         };
         scope
             .conn
-            .progress_handler(1000, Some(database_cancelled))
-            .map_err(crate::broker::members::db_err)?;
+            .progress_handler(1000, Some(database_cancelled))?;
         let interrupt = scope.conn.get_interrupt_handle();
         let (stop, receive) = std::sync::mpsc::channel();
         scope.stop = Some(stop);
@@ -155,15 +136,10 @@ impl<'a> CancellationScope<'a> {
             .map(|worker| worker.join())
             .transpose()
             .map_err(|_| error("SQLite deadline watchdog panicked"));
-        let nested = CANCELLATION_SCOPES.with(|scopes| {
-            let mut scopes = scopes.borrow_mut();
-            assert_eq!(scopes.identity, Some(self.identity));
-            assert_eq!(scopes.deadlines.pop(), Some(self.until));
-            let nested = !scopes.deadlines.is_empty();
-            if !nested {
-                scopes.identity = None;
-            }
-            nested
+        let nested = CANCELLATION_DEADLINES.with(|deadlines| {
+            let mut deadlines = deadlines.borrow_mut();
+            assert_eq!(deadlines.pop(), Some(self.until));
+            !deadlines.is_empty()
         });
         self.active = false;
         let restored = if nested {
@@ -171,12 +147,8 @@ impl<'a> CancellationScope<'a> {
         } else {
             self.conn.progress_handler(0, None::<fn() -> bool>)
         }
-        .map_err(crate::broker::members::db_err);
-        match (watchdog, restored) {
-            (Ok(_), Ok(())) => Ok(()),
-            (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(cleanup.message())),
-            (Err(cause), _) | (_, Err(cause)) => Err(cause),
-        }
+        .map_err(crate::error::CafleetError::from);
+        CafleetError::merge_cleanup(watchdog.map(|_| ()), restored)
     }
 }
 
@@ -202,25 +174,42 @@ pub(crate) fn with_database_deadline<T>(
         let mut scope = CancellationScope::new(conn)?;
         let result = operation(scope.conn);
         let restored = scope.restore();
-        match (result, restored) {
-            (Ok(value), Ok(())) => {
-                deadline.remaining()?;
-                Ok(value)
-            }
-            (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(cleanup.message())),
-            (Err(cause), _) | (_, Err(cause)) => Err(cause),
-        }
+        let value = CafleetError::merge_cleanup(result, restored)?;
+        deadline.remaining()?;
+        Ok(value)
     })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ShutdownOutcome {
-    pub native_exit: Option<ChildExit>,
-    pub cleanup_state: CleanupState,
-    pub diagnostics: Vec<String>,
-    pub dropped_display_bytes: u64,
-    pub pending_event_frames: u64,
-    pub unsaved_observation_gap: u64,
+    pub(crate) native_exit: Option<ChildExit>,
+    pub(crate) cleanup_state: CleanupState,
+    pub(crate) diagnostics: Vec<String>,
+    pub(crate) dropped_display_bytes: u64,
+    pub(crate) pending_event_frames: u64,
+    pub(crate) unsaved_observation_gap: u64,
+}
+
+impl ShutdownOutcome {
+    /// An outcome whose cleanup is complete exactly when no diagnostic was recorded.
+    pub(crate) fn new(native_exit: Option<ChildExit>, diagnostics: Vec<String>) -> Self {
+        Self {
+            native_exit,
+            cleanup_state: if diagnostics.is_empty() {
+                CleanupState::Complete
+            } else {
+                CleanupState::Incomplete
+            },
+            diagnostics,
+            dropped_display_bytes: 0,
+            pending_event_frames: 0,
+            unsaved_observation_gap: 0,
+        }
+    }
+
+    pub(crate) fn complete(native_exit: Option<ChildExit>) -> Self {
+        Self::new(native_exit, Vec::new())
+    }
 }
 
 pub(crate) trait ShutdownHost {
@@ -230,12 +219,8 @@ pub(crate) trait ShutdownHost {
     fn drain_and_reap_until(&mut self, deadline: Instant) -> Result<Option<ChildExit>>;
     fn kill_verified_survivors(&mut self) -> Result<()>;
     fn close_pty(&mut self) -> Result<()>;
-    fn final_native_exit(&mut self) -> Result<Option<ChildExit>> {
-        Ok(None)
-    }
-    fn native_was_spawned(&self) -> bool {
-        true
-    }
+    fn final_native_exit(&mut self) -> Result<Option<ChildExit>>;
+    fn native_was_spawned(&self) -> bool;
     fn flush_display_until(&mut self, deadline: Instant) -> Result<u64>;
     fn finish_events_until(&mut self, deadline: Instant) -> Result<(u64, u64)>;
     fn restore_terminal(&mut self) -> Result<()>;
@@ -246,14 +231,7 @@ pub(crate) fn shutdown(
     clock: ShutdownClock,
     native: Option<ChildExit>,
 ) -> ShutdownOutcome {
-    let mut outcome = ShutdownOutcome {
-        native_exit: native,
-        cleanup_state: CleanupState::Complete,
-        diagnostics: Vec::new(),
-        dropped_display_bytes: 0,
-        pending_event_frames: 0,
-        unsaved_observation_gap: 0,
-    };
+    let mut outcome = ShutdownOutcome::complete(native);
     fn collect<T>(result: Result<T>, outcome: &mut ShutdownOutcome) -> Option<T> {
         match result {
             Ok(value) => Some(value),
@@ -263,37 +241,32 @@ pub(crate) fn shutdown(
             }
         }
     }
+    fn reconcile_exit(outcome: &mut ShutdownOutcome, exit: Option<ChildExit>, conflict: &str) {
+        let Some(exit) = exit else {
+            return;
+        };
+        match outcome.native_exit {
+            Some(recorded) if recorded != exit => outcome.diagnostics.push(conflict.into()),
+            Some(_) => {}
+            None => outcome.native_exit = Some(exit),
+        }
+    }
     host.gate_programmatic_input();
     collect(host.term_verified_descendants(), &mut outcome);
-    if let Some(exit) = collect(
+    let drained = collect(
         host.drain_and_reap_until(clock.child_deadline()),
         &mut outcome,
     )
-    .flatten()
-    {
-        if let Some(recorded) = outcome.native_exit {
-            if recorded != exit {
-                outcome
-                    .diagnostics
-                    .push("conflicting native exit status".into());
-            }
-        } else {
-            outcome.native_exit = Some(exit);
-        }
-    }
+    .flatten();
+    reconcile_exit(&mut outcome, drained, "conflicting native exit status");
     collect(host.kill_verified_survivors(), &mut outcome);
     collect(host.close_pty(), &mut outcome);
-    if let Some(exit) = collect(host.final_native_exit(), &mut outcome).flatten() {
-        if let Some(recorded) = outcome.native_exit {
-            if recorded != exit {
-                outcome
-                    .diagnostics
-                    .push("conflicting final native exit status".into());
-            }
-        } else {
-            outcome.native_exit = Some(exit);
-        }
-    }
+    let final_exit = collect(host.final_native_exit(), &mut outcome).flatten();
+    reconcile_exit(
+        &mut outcome,
+        final_exit,
+        "conflicting final native exit status",
+    );
     if let Some(dropped) = collect(
         host.flush_display_until(clock.display_deadline()),
         &mut outcome,
@@ -337,19 +310,40 @@ pub(crate) fn shutdown(
 }
 
 #[cfg(test)]
-mod shutdown_tests {
+pub(crate) mod test_support {
+    use crate::error::CafleetError;
+    use rusqlite::Connection;
+
+    /// A recursive sum that runs far past any test deadline unless the scope cancels it.
+    pub(crate) const SLOW_SUM: &str = "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter";
+    /// A recursive sum that crosses several progress-handler checks and totals 50005000.
+    pub(crate) const FAST_SUM: &str = "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10000) SELECT sum(x) FROM counter";
+
+    pub(crate) fn sum(conn: &Connection, sql: &str) -> Result<i64, CafleetError> {
+        conn.query_row(sql, [], |row| row.get(0))
+            .map_err(|cause| CafleetError::App(cause.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{FAST_SUM, SLOW_SUM, sum};
+    use super::*;
+    use crate::error::CafleetError;
+    use crate::runtime::runner::test_support::Fixture;
     use std::collections::BTreeSet;
     use std::result::Result;
     use std::time::{Duration, Instant};
-
-    use super::*;
-    use crate::error::CafleetError;
 
     #[test]
     fn runner_recovery_clock_clips_each_original_boundary_and_never_renews_time() {
         let start = Instant::now();
         for offset in [0, 1, 2, 3, 4, 9] {
             let until = start + Duration::from_secs(offset);
+            assert_eq!(
+                ShutdownClock::new(start).remaining_storage_at(until),
+                Duration::from_secs(4).saturating_sub(Duration::from_secs(offset))
+            );
             let clock = ShutdownClock::new(start).clipped(until);
             assert_eq!(
                 clock.child_deadline(),
@@ -448,6 +442,12 @@ mod shutdown_tests {
         }
         fn close_pty(&mut self) -> Result<(), CafleetError> {
             self.call("close")
+        }
+        fn final_native_exit(&mut self) -> Result<Option<ChildExit>, CafleetError> {
+            Ok(None)
+        }
+        fn native_was_spawned(&self) -> bool {
+            true
         }
         fn flush_display_until(&mut self, deadline: Instant) -> Result<u64, CafleetError> {
             self.deadlines.push(("display", deadline));
@@ -559,33 +559,6 @@ mod shutdown_tests {
         assert_eq!(host.now, start + Duration::from_secs(4));
         assert_eq!(outcome.native_exit, Some(ChildExit::Signal(15)));
     }
-}
-
-#[cfg(test)]
-mod lifecycle_tests {
-    use std::result::Result;
-    use std::time::{Duration, Instant};
-
-    use super::*;
-    use crate::error::CafleetError;
-    use crate::runtime::runner_tests::Fixture;
-
-    #[test]
-    fn runner_shutdown_clock_anchors_all_work_to_one_original_instant() {
-        let start = Instant::now();
-        let clock = ShutdownClock::new(start);
-        assert_eq!(clock.child_deadline(), start + Duration::from_secs(2));
-        assert_eq!(clock.display_deadline(), start + Duration::from_secs(3));
-        assert_eq!(clock.storage_deadline(), start + Duration::from_secs(4));
-        for elapsed in [0, 1, 2, 3, 4, 9] {
-            let now = start + Duration::from_secs(elapsed);
-            assert_eq!(
-                clock.remaining_storage_at(now),
-                Duration::from_secs(4).saturating_sub(Duration::from_secs(elapsed))
-            );
-            assert_eq!(clock.child_deadline(), start + Duration::from_secs(2));
-        }
-    }
 
     #[test]
     fn runner_exit_status_keeps_native_code_signal_and_cleanup_outcome_distinct() {
@@ -650,13 +623,11 @@ mod lifecycle_tests {
         let result = with_database_deadline(
             &mut fixture.conn,
             start + Duration::from_millis(80),
-            |conn| {
-                conn.query_row("WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter",[],|row|row.get::<_,i64>(0)).map_err(|error|CafleetError::App(error.to_string()))
-            },
+            |conn| sum(conn, SLOW_SUM),
         );
         assert!(result.is_err());
         assert!(start.elapsed() < Duration::from_millis(750));
-        assert_eq!(fixture.conn.query_row("WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10000) SELECT sum(x) FROM counter",[],|row|row.get::<_,i64>(0)).unwrap(),50005000);
+        assert_eq!(sum(&fixture.conn, FAST_SUM).unwrap(), 50005000);
         assert_eq!(
             fixture
                 .conn
@@ -686,12 +657,7 @@ mod lifecycle_tests {
     struct DeadlinePanic(u32);
 
     fn progress_checked_sum(conn: &Connection) -> Result<i64, CafleetError> {
-        conn.query_row(
-            "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10000) SELECT sum(x) FROM counter",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|cause| CafleetError::App(cause.to_string()))
+        sum(conn, FAST_SUM)
     }
 
     #[test]
@@ -762,42 +728,7 @@ mod lifecycle_tests {
 
     #[test]
     fn runner_database_deadline_review_inner_unwind_restores_the_live_outer_cancellation_scope() {
-        let mut fixture = Fixture::new();
-        let started = Instant::now();
-        let outer_until = started + Duration::from_millis(400);
-        let result = with_database_deadline(&mut fixture.conn, outer_until, |conn| {
-            let inner_until = Instant::now() + Duration::from_millis(40);
-            let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                with_database_deadline(conn, inner_until, |_| -> Result<(), CafleetError> {
-                    std::panic::panic_any(DeadlinePanic(195));
-                })
-            }));
-            let payload = match unwound {
-                Err(payload) => payload,
-                Ok(_) => panic!("the inner operation panic must propagate"),
-            };
-            assert_eq!(
-                payload.downcast_ref::<DeadlinePanic>(),
-                Some(&DeadlinePanic(195))
-            );
-            std::thread::sleep(
-                inner_until.saturating_duration_since(Instant::now()) + Duration::from_millis(20),
-            );
-            assert_eq!(progress_checked_sum(conn)?, 50005000);
-            conn.query_row(
-                "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|cause| CafleetError::App(cause.to_string()))
-        });
-        assert!(result.is_err());
-        assert!(
-            started.elapsed() >= Duration::from_millis(350),
-            "{result:?}"
-        );
-        assert!(started.elapsed() < Duration::from_millis(1250));
-        assert_eq!(progress_checked_sum(&fixture.conn).unwrap(), 50005000);
+        assert_retired_inner_scope_preserves_outer(InnerOutcome::Panic);
     }
 
     #[test]
@@ -807,12 +738,7 @@ mod lifecycle_tests {
         let outer_until = started + Duration::from_millis(100);
         let result = with_database_deadline(&mut fixture.conn, outer_until, |conn| {
             with_database_deadline(conn, started + Duration::from_secs(1), |conn| {
-                conn.query_row(
-                    "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-                .map_err(|cause| CafleetError::App(cause.to_string()))
+                sum(conn, SLOW_SUM)
             })
         });
         assert!(result.is_err());
@@ -821,36 +747,53 @@ mod lifecycle_tests {
         assert_eq!(progress_checked_sum(&fixture.conn).unwrap(), 50005000);
     }
 
-    fn assert_retired_inner_scope_preserves_outer(operation_fails: bool) {
+    enum InnerOutcome {
+        Success,
+        Error,
+        Panic,
+    }
+
+    /// The inner scope retires with `outcome`; the outer scope still cancels its slow query.
+    fn assert_retired_inner_scope_preserves_outer(outcome: InnerOutcome) {
         let mut fixture = Fixture::new();
         let started = Instant::now();
         let outer_until = started + Duration::from_millis(400);
         let result = with_database_deadline(&mut fixture.conn, outer_until, |conn| {
             let inner_until = Instant::now() + Duration::from_millis(40);
-            let inner = with_database_deadline(conn, inner_until, |_| {
-                if operation_fails {
-                    Err(CafleetError::Usage("fixture inner operation error".into()))
-                } else {
-                    Ok(7)
+            match outcome {
+                InnerOutcome::Success => {
+                    let inner = with_database_deadline(conn, inner_until, |_| Ok(7));
+                    assert_eq!(inner.unwrap(), 7);
                 }
-            });
-            if operation_fails {
-                let error = inner.unwrap_err();
-                assert_eq!(error.exit_code(), 2);
-                assert_eq!(error.message(), "fixture inner operation error");
-            } else {
-                assert_eq!(inner.unwrap(), 7);
+                InnerOutcome::Error => {
+                    let error = with_database_deadline(conn, inner_until, |_| -> Result<(), _> {
+                        Err(CafleetError::Usage("fixture inner operation error".into()))
+                    })
+                    .unwrap_err();
+                    assert_eq!(error.exit_code(), 2);
+                    assert_eq!(error.message(), "fixture inner operation error");
+                }
+                InnerOutcome::Panic => {
+                    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        with_database_deadline(conn, inner_until, |_| -> Result<(), CafleetError> {
+                            std::panic::panic_any(DeadlinePanic(195));
+                        })
+                    }));
+                    let payload = match unwound {
+                        Err(payload) => payload,
+                        Ok(_) => panic!("the inner operation panic must propagate"),
+                    };
+                    assert_eq!(
+                        payload.downcast_ref::<DeadlinePanic>(),
+                        Some(&DeadlinePanic(195))
+                    );
+                }
             }
             std::thread::sleep(
                 inner_until.saturating_duration_since(Instant::now()) + Duration::from_millis(20),
             );
             assert_eq!(progress_checked_sum(conn)?, 50005000);
-            conn.query_row(
-                "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|cause| CafleetError::App(cause.to_string()))
+            sum(conn, SLOW_SUM)
         });
         assert!(result.is_err());
         assert!(
@@ -863,11 +806,11 @@ mod lifecycle_tests {
 
     #[test]
     fn runner_database_deadline_review_inner_success_restores_the_live_outer_scope() {
-        assert_retired_inner_scope_preserves_outer(false);
+        assert_retired_inner_scope_preserves_outer(InnerOutcome::Success);
     }
 
     #[test]
     fn runner_database_deadline_review_inner_error_restores_the_live_outer_scope() {
-        assert_retired_inner_scope_preserves_outer(true);
+        assert_retired_inner_scope_preserves_outer(InnerOutcome::Error);
     }
 }

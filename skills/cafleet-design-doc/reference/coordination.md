@@ -12,15 +12,11 @@ Create and execute iterative coordination uses the verb/pointer schema. Exactly 
 | Interview Director/Analyzer exchange | Assignment, numbered question list and corrective replies | Analyzer remains read-only; Director persists questions and answers. |
 | Execute Verifier tool discovery | Verifier's initial tool-and-MCP inventory to Director | First substantive payload after ready; Phase 2 findings use ordinary paired markers. |
 
-Every producer and receiver retrieves the full body using `cafleet message poll <member-id> --json` or `cafleet message show <message-id> --json`, then ACKs the consumed delivery. Text previews and text polls truncate bodies; use complete JSON for questions, answers and inventories. Long or multiline bodies use `message send --file <path>` or `--file -`, preserving the exact payload.
+Retrieve and send these payloads complete under the cafleet skill's [Send and Poll rules](../../cafleet/SKILL.md#send-unicast) (`--json` reads, `--file` for long bodies), then ACK the consumed delivery.
 
 Fresh-Drafter clarification permits hidden BASE-rooted broker-payload artifacts before drafting; these contain questions, not design-document content. The substantive clarification gate remains: receive answers before creating or writing the design document. Apply the BASE write guards and explicit-output-path rules to payload files.
 
 The Analyzer's no-file-edit boundary remains intact. Send long Analyzer payloads with `message send --file -`, supplying stdin through the backend's supported execution tool to one isolated CAFleet invocation. This uses file input without a filesystem artifact. If that input mechanism is unavailable, route the concrete transport limitation to the Director through the existing permitted path, preserve the complete payload, and report delivery only from observed results. This is not permission to create a payload file or persist Analyzer state. Other read-only producers use this same transport branch when filesystem writes are outside their scope.
-
-## Core Principle
-
-`cafleet message send` is a poke, not a payload. Status hops travel as compact `<verb> (<pointer>)` lines on the broker; reasoning, findings, and item-by-item routing live as `COMMENT(role)` markers inside the design document (or, for source-anchored review findings, the source file). Anchorless meta-events (member crashed/restarted, generic acknowledgement, "still working") do NOT use a verb from the canonical list and do NOT touch the design doc.
 
 ## Verb Vocabulary
 
@@ -139,15 +135,11 @@ A member may need to communicate something that does not point at any heading, f
 - They MUST NOT match the `<verb> (<pointer>)` schema (no parentheses) and the Director MUST treat them as informational, not as work signals.
 - They do NOT add markers to the design doc.
 
-If a member finds themselves needing to send anchorless status updates frequently, that is a stall signal — the Director's stall-response ladder (per `skills/cafleet/SKILL.md` and the existing role files) still applies.
+If a member finds themselves needing to send anchorless status updates frequently, that is a stall signal — the Director's [stall-response ladder](../../cafleet/reference/supervision.md#stall-response) still applies.
 
 ## Finalize-Time Cleanup
 
-When the design doc moves to `Status: Approved` (the create workflow Step 6) or `Status: Complete` (the execute workflow Step 8):
-
-1. Issue markers (`COMMENT(role)` for `reviewer`, `director`, `drafter`, `programmer`, `tester`, `verifier`, `user-relay`) MUST already be resolved per `skills/cafleet-design-doc/reference/guidelines.md` § *Completeness Check* — the existing rule "No `COMMENT(` markers remain" stays.
-2. Status markers do not exist in the design doc by construction (split), so there is nothing to strip.
-3. `COMMENT(reviewer)` markers in source files are removed by the routed member as part of each fix commit; finalize-time validation only needs to confirm the design doc is marker-free.
+`COMMENT(reviewer)` markers in source files are removed by the routed member as part of each fix commit, so finalize-time validation only confirms the design doc is marker-free.
 
 ## Director Per-File Detail Recovery
 

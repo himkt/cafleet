@@ -29,27 +29,27 @@ impl Clock for SystemClock {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PendingPreview {
-    pub member_id: i64,
-    pub message_id: i64,
+    pub(crate) member_id: i64,
+    pub(crate) message_id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReceiveSnapshot {
-    pub messages: Vec<MessageRecord>,
-    pub pending: Vec<PendingPreview>,
+    pub(crate) messages: Vec<MessageRecord>,
+    pub(crate) pending: Vec<PendingPreview>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NotificationError {
-    pub member_id: i64,
-    pub message_id: i64,
-    pub error: String,
+    pub(crate) member_id: i64,
+    pub(crate) message_id: i64,
+    pub(crate) error: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttemptOutcome {
-    pub sent: Vec<i64>,
-    pub end: AttemptEnd,
+    pub(crate) sent: Vec<i64>,
+    pub(crate) end: AttemptEnd,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,11 +70,6 @@ impl AttemptOutcome {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WaitOutcome {
-    pub messages: Vec<MessageRecord>,
-}
-
 pub(crate) trait ReceiveIo {
     fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot, CafleetError>;
     fn attempt(
@@ -89,7 +84,7 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
     clock: &C,
     io: &mut I,
     timeout: Duration,
-) -> Result<WaitOutcome, CafleetError> {
+) -> Result<Vec<MessageRecord>, CafleetError> {
     let started = clock.now();
     let expires = started + timeout;
     let mut next_check = started;
@@ -156,27 +151,23 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                     )),
                     Err(error) => return Err(error),
                 };
-            match outcome.end {
-                AttemptEnd::Held | AttemptEnd::Drained | AttemptEnd::BudgetExhausted => {}
-                AttemptEnd::NoPending => {}
-                AttemptEnd::Failed(error) => {
-                    assert_eq!(
-                        error.member_id, member,
-                        "the owned attempt reports its selected member"
-                    );
-                    assert!(
-                        attempted.insert(error.message_id),
-                        "one invocation attempts each failed message at most once"
-                    );
-                    eprintln!("{}", error.error);
-                }
+            if let AttemptEnd::Failed(error) = outcome.end {
+                assert_eq!(
+                    error.member_id, member,
+                    "the owned attempt reports its selected member"
+                );
+                assert!(
+                    attempted.insert(error.message_id),
+                    "one invocation attempts each failed message at most once"
+                );
+                eprintln!("{}", error.error);
             }
             next_check = clock.now();
         } else {
             next_check = started + Duration::from_secs(interval + 1);
         }
     }
-    Ok(WaitOutcome { messages })
+    Ok(messages)
 }
 
 pub(crate) struct BrokerReceiver<'a> {
@@ -216,7 +207,7 @@ fn subject_fleet(
 impl ReceiveIo for BrokerReceiver<'_> {
     fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot, CafleetError> {
         let (snapshot, fleet) = crate::input::with_database_budget(self.conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(broker::members::db_err)?;
+            let tx = conn.transaction()?;
             let fleet = subject_fleet(&tx, self.member_id, self.fleet_id)?;
             let messages = broker::poll_messages(&tx, self.member_id)?;
             let pending = broker::panes::pending_previews(&tx, fleet, self.member_id)?
@@ -226,7 +217,7 @@ impl ReceiveIo for BrokerReceiver<'_> {
                     message_id,
                 })
                 .collect();
-            tx.commit().map_err(broker::members::db_err)?;
+            tx.commit()?;
             Ok((ReceiveSnapshot { messages, pending }, fleet))
         })?;
         self.fleet_id = Some(fleet);
@@ -242,7 +233,7 @@ impl ReceiveIo for BrokerReceiver<'_> {
         let fleet = crate::input::with_database_budget(self.conn, deadline, |conn| {
             subject_fleet(conn, self.member_id, self.fleet_id)
         })?;
-        crate::runtime::deliver_pending(
+        crate::delivery::deliver_pending(
             self.conn,
             self.settings,
             member_id,
@@ -254,25 +245,31 @@ impl ReceiveIo for BrokerReceiver<'_> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::broker::records::MessageStatus;
-    use std::cell::Cell;
+pub(crate) mod test_support {
+    use super::Clock;
+    use std::cell::{Cell, RefCell};
+    use std::time::{Duration, Instant};
 
-    struct TestClock {
+    pub(crate) struct TestClock {
         origin: Instant,
-        elapsed: Cell<Duration>,
+        pub(crate) elapsed: Cell<Duration>,
+        pub(crate) sleeps: RefCell<Vec<Duration>>,
     }
 
     impl TestClock {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
+            Self::starting_at(Instant::now())
+        }
+
+        pub(crate) fn starting_at(origin: Instant) -> Self {
             Self {
-                origin: Instant::now(),
+                origin,
                 elapsed: Cell::new(Duration::ZERO),
+                sleeps: RefCell::new(Vec::new()),
             }
         }
 
-        fn advance(&self, duration: Duration) {
+        pub(crate) fn advance(&self, duration: Duration) {
             self.elapsed.set(self.elapsed.get() + duration);
         }
     }
@@ -283,10 +280,18 @@ mod tests {
         }
 
         fn sleep(&self, duration: Duration) {
-            assert!(!duration.is_zero());
+            assert!(!duration.is_zero(), "idle checks advance the clock");
+            self.sleeps.borrow_mut().push(duration);
             self.advance(duration);
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::TestClock;
+    use super::*;
+    use std::cell::Cell;
 
     struct RecordingIo<C, A> {
         check: C,
@@ -326,15 +331,7 @@ mod tests {
     }
 
     fn message(id: i64) -> MessageRecord {
-        MessageRecord {
-            message_id: id,
-            from_member_id: 2,
-            to_member_id: 1,
-            created_at: "2026-10-25T01:00:00.000000+00:00".into(),
-            status: MessageStatus::InputRequired,
-            status_timestamp: "2026-10-25T01:00:00.000000+00:00".into(),
-            text: "雪\nfull reply".repeat(300),
-        }
+        MessageRecord::fixture(id, 2, 1, &"雪\nfull reply".repeat(300))
     }
 
     fn no_attempt(_: i64, _: Deadline, _: &BTreeSet<i64>) -> Result<AttemptOutcome, CafleetError> {
@@ -355,9 +352,7 @@ mod tests {
             attempt: no_attempt,
         };
         assert_eq!(
-            wait(&clock, &mut io, Duration::from_secs(30))
-                .unwrap()
-                .messages,
+            wait(&clock, &mut io, Duration::from_secs(30)).unwrap(),
             expected
         );
         assert_eq!(clock.elapsed.get(), Duration::ZERO);
@@ -377,7 +372,6 @@ mod tests {
         assert!(
             wait(&clock, &mut io, Duration::from_millis(6500))
                 .unwrap()
-                .messages
                 .is_empty()
         );
         assert_eq!(clock.elapsed.get(), Duration::from_millis(6500));
@@ -455,9 +449,7 @@ mod tests {
             },
         };
         assert_eq!(
-            wait(&clock, &mut io, Duration::from_secs(10))
-                .unwrap()
-                .messages,
+            wait(&clock, &mut io, Duration::from_secs(10)).unwrap(),
             vec![message(7)]
         );
         assert_eq!(clock.elapsed.get(), Duration::ZERO);
@@ -539,9 +531,7 @@ mod tests {
             attempt: no_attempt,
         };
         assert_eq!(
-            wait(&clock, &mut io, Duration::from_secs(3))
-                .unwrap()
-                .messages,
+            wait(&clock, &mut io, Duration::from_secs(3)).unwrap(),
             vec![message(3)]
         );
         assert_eq!(clock.elapsed.get(), Duration::from_secs(1));

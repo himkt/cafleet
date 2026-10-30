@@ -1,11 +1,11 @@
 use crate::broker::records::{
-    CreatedFleet, DeletedFleet, MemberActivity, MemberRecord, MessageRecord, Placement,
-    RegisteredMember,
+    CreatedFleet, DeletedFleet, FleetRecord, FleetSummary, MemberActivity, MemberRecord,
+    MessageRecord, Placement, RegisteredMember,
 };
 
 use super::truncate_text;
 
-pub fn format_message(message: &MessageRecord, limit: usize) -> String {
+pub(crate) fn format_message(message: &MessageRecord, limit: usize) -> String {
     let header = format!(
         "[{} | from:{} | {}]",
         message.message_id, message.from_member_id, message.status_timestamp
@@ -18,7 +18,7 @@ pub fn format_message(message: &MessageRecord, limit: usize) -> String {
     }
 }
 
-pub fn format_messages(messages: &[MessageRecord], limit: usize) -> String {
+pub(crate) fn format_messages(messages: &[MessageRecord], limit: usize) -> String {
     if messages.is_empty() {
         return "No messages found.".into();
     }
@@ -27,6 +27,93 @@ pub fn format_messages(messages: &[MessageRecord], limit: usize) -> String {
         .map(|message| format_message(message, limit))
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+pub(crate) fn format_message_sent(message: &MessageRecord, limit: usize) -> String {
+    format!("Message sent.\n{}", format_message(message, limit))
+}
+
+pub(crate) fn format_message_acknowledged(message: &MessageRecord, limit: usize) -> String {
+    format!("Message acknowledged.\n{}", format_message(message, limit))
+}
+
+pub(crate) fn format_message_wait(
+    member_id: i64,
+    messages: &[MessageRecord],
+    limit: usize,
+) -> String {
+    if messages.is_empty() {
+        format!("Timed out waiting for member {member_id}.")
+    } else {
+        format!(
+            "Messages available for member {member_id}.\n{}",
+            format_messages(messages, limit)
+        )
+    }
+}
+
+pub(crate) fn format_fleet_list(fleets: &[FleetSummary]) -> String {
+    if fleets.is_empty() {
+        return "No fleets found.".into();
+    }
+    let mut lines = vec!["FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT".into()];
+    for fleet in fleets {
+        let director = fleet.director_member_id.map(|id| id.to_string());
+        lines.push(format!(
+            "{} {} {} {} {}",
+            fleet.fleet_id,
+            director.as_deref().unwrap_or("-"),
+            fleet.name.as_deref().unwrap_or("-"),
+            fleet.member_count,
+            fleet.created_at
+        ));
+    }
+    lines.join("\n")
+}
+
+pub(crate) fn format_fleet_show(fleet: &FleetRecord) -> String {
+    let mut text = format!(
+        "fleet_id: {}\nname: {}\ncreated_at: {}",
+        fleet.fleet_id,
+        fleet.name.as_deref().unwrap_or("-"),
+        fleet.created_at
+    );
+    if let Some(deleted) = &fleet.deleted_at {
+        text.push_str(&format!("\ndeleted_at: {deleted}"));
+    }
+    text
+}
+
+pub(crate) fn format_member_delete(member_id: i64, pane_status: &str) -> String {
+    format!("Member deleted.\n  member_id: {member_id}\n  pane_id:   {pane_status}")
+}
+
+fn with_input_id(mut text: String, input_id: Option<i64>) -> String {
+    if let Some(id) = input_id {
+        text.push_str(&format!("\nInput: {id}"));
+    }
+    text
+}
+
+pub(crate) fn format_member_prompt(
+    text: &str,
+    name: &str,
+    pane: &str,
+    input_id: Option<i64>,
+) -> String {
+    with_input_id(
+        format!("Sent prompt {text:?} to member {name} ({pane})."),
+        input_id,
+    )
+}
+
+pub(crate) fn format_member_exec(member_id: i64, pane: &str, input_id: Option<i64>) -> String {
+    with_input_id(
+        format!(
+            "Dispatched native command to member {member_id} ({pane}). Inspect the pane for its result."
+        ),
+        input_id,
+    )
 }
 
 pub(crate) fn format_member_press(value: &crate::runtime::KeyAcknowledgment) -> String {
@@ -38,7 +125,7 @@ pub(crate) fn format_member_press(value: &crate::runtime::KeyAcknowledgment) -> 
     )
 }
 
-pub fn format_member_detail(member: &MemberRecord) -> String {
+pub(crate) fn format_member_detail(member: &MemberRecord) -> String {
     let mut text = format!(
         "{} {} {}",
         member.member_id,
@@ -52,11 +139,11 @@ pub fn format_member_detail(member: &MemberRecord) -> String {
     text
 }
 
-pub fn format_fleet_create(fleet: &CreatedFleet) -> String {
+pub(crate) fn format_fleet_create(fleet: &CreatedFleet) -> String {
     format!("{} director={}", fleet.fleet_id, fleet.director.member_id)
 }
 
-pub fn format_fleet_delete(deleted: &DeletedFleet) -> String {
+pub(crate) fn format_fleet_delete(deleted: &DeletedFleet) -> String {
     let mut lines = vec![format!(
         "Deleted fleet {}. Deregistered {} members.",
         deleted.fleet_id, deleted.deregistered_count
@@ -70,7 +157,7 @@ pub fn format_fleet_delete(deleted: &DeletedFleet) -> String {
     lines.join("\n")
 }
 
-pub fn format_member(member: &RegisteredMember, placement: &Placement) -> String {
+pub(crate) fn format_member(member: &RegisteredMember, placement: &Placement) -> String {
     let pane = placement.mux_pane_id.as_deref().unwrap_or("(pending)");
     format!(
         "{} {} backend={} pane={pane}",
@@ -91,7 +178,7 @@ fn format_idle(idle: Option<i64>) -> String {
     }
 }
 
-pub fn format_member_list(members: &[MemberActivity]) -> String {
+pub(crate) fn format_member_list(members: &[MemberActivity]) -> String {
     if members.is_empty() {
         return "0 members.".into();
     }

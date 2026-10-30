@@ -25,23 +25,15 @@ fn unsettled_health(health: &ObservationHealth) -> Option<String> {
     }
 }
 
-fn before_deadline(deadline: Instant) -> Result<()> {
-    if Instant::now() >= deadline {
-        Err(CafleetError::DeadlineExceeded)
-    } else {
-        Ok(())
-    }
-}
-
 struct DeadlineObserver<'a, O> {
     inner: &'a mut O,
     deadline: Instant,
 }
 impl<O: ScreenObserver> ScreenObserver for DeadlineObserver<'_, O> {
     fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()> {
-        before_deadline(self.deadline)?;
+        check_deadline(Instant::now(), self.deadline)?;
         self.inner.observe(screen)?;
-        before_deadline(self.deadline)
+        check_deadline(Instant::now(), self.deadline)
     }
 
     fn failures_are_fatal(&self) -> bool {
@@ -49,9 +41,9 @@ impl<O: ScreenObserver> ScreenObserver for DeadlineObserver<'_, O> {
     }
 
     fn parser_failure(&mut self) -> Result<()> {
-        before_deadline(self.deadline)?;
+        check_deadline(Instant::now(), self.deadline)?;
         self.inner.parser_failure()?;
-        before_deadline(self.deadline)
+        check_deadline(Instant::now(), self.deadline)
     }
 }
 
@@ -66,7 +58,7 @@ impl Transport {
     ) -> Result<InputDrain> {
         self.invalidate_input_drain();
         self.drain_blocker = None;
-        before_deadline(deadline)?;
+        check_deadline(Instant::now(), deadline)?;
         let mut remaining = DrainBudget {
             human: self.limits.bytes_per_tick,
             child: self.limits.bytes_per_tick,
@@ -74,7 +66,7 @@ impl Transport {
             display: self.limits.bytes_per_tick,
         };
         for _ in 0..ROUND_LIMIT {
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
             let human_read = if self.outer_eof {
                 AvailableRead::Skipped
             } else {
@@ -96,13 +88,13 @@ impl Transport {
                 AvailableRead::Eof => self.outer_eof = true,
                 _ => {}
             }
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
             if remaining.manual > 0 && !self.input.is_empty() {
                 let written = write_pending(&mut self.input, remaining.manual, |bytes| {
                     pty.try_write(bytes)
                 })?;
                 remaining.manual -= written;
-                before_deadline(deadline)?;
+                check_deadline(Instant::now(), deadline)?;
             }
             let child_read = self.read_drain_child(
                 pty,
@@ -121,20 +113,20 @@ impl Transport {
                 AvailableRead::Eof => self.child_eof = true,
                 _ => {}
             }
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
             if remaining.display > 0 && !self.display.is_empty() {
                 let written = write_pending(&mut self.display, remaining.display, |bytes| {
                     display.try_write(bytes)
                 })?;
                 remaining.display -= written;
-                before_deadline(deadline)?;
+                check_deadline(Instant::now(), deadline)?;
             }
             match display.try_flush() {
                 Ok(()) => {}
                 Err(cause) if cause.kind() == ErrorKind::WouldBlock => {}
                 Err(cause) => return Err(io_error(cause)),
             }
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
             let ended = if interrupted {
                 Some("terminal input interrupted")
             } else if self.outer_eof {
@@ -156,7 +148,7 @@ impl Transport {
                     return Ok(self.pending("observation incomplete".into()));
                 }
                 let health = observer.input_health();
-                before_deadline(deadline)?;
+                check_deadline(Instant::now(), deadline)?;
                 let Some(health) = health else {
                     return Ok(self.pending("observation health unavailable".into()));
                 };
@@ -164,7 +156,7 @@ impl Transport {
                     return Ok(self.pending(reason));
                 }
                 let output_seq = self.terminal.snapshot().screen_seq;
-                before_deadline(deadline)?;
+                check_deadline(Instant::now(), deadline)?;
                 self.input_drain = Some(DrainedInput {
                     instance: self.input_instance.clone(),
                     turn: self.input_turn,
@@ -210,11 +202,11 @@ impl Transport {
     ) -> Result<()> {
         let observation_complete_before = self.observation_complete;
         self.observation_complete = false;
-        before_deadline(deadline)?;
+        check_deadline(Instant::now(), deadline)?;
         #[cfg(test)]
         if let Some(hooks) = &self.observation_hooks {
             hooks.before(self.observation_phase, ObservationOperation::Parser)?;
-            before_deadline(deadline)?;
+            check_deadline(Instant::now(), deadline)?;
         }
         let mut bounded = DeadlineObserver {
             inner: observer,
@@ -223,7 +215,7 @@ impl Transport {
         match self.terminal.feed_observed_classified(bytes, &mut bounded) {
             Ok(()) => {
                 self.observation_complete = observation_complete_before;
-                before_deadline(deadline)
+                check_deadline(Instant::now(), deadline)
             }
             Err(TerminalObservationError::Observer(cause)) => Err(cause),
             Err(TerminalObservationError::Parser(cause)) => match bounded.parser_failure() {
@@ -242,9 +234,9 @@ mod tests {
     use super::*;
     use crate::broker::runtime as storage;
     use crate::coding_agent::ProfileCatalog;
-    use crate::runtime::runner::writer::contract_tests::support::Clock;
-    use crate::runtime::runner::writer::contract_tests::worker::{self, Hooks, Release};
-    use crate::runtime::runner::writer::contract_tests::{WriterFixture, transition};
+    use crate::runtime::runner::writer::test_support::{
+        Clock, Hooks, Release, WriterFixture, start, transition,
+    };
     use std::cell::{Cell, RefCell};
     use std::io::{self, ErrorKind};
     use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -526,7 +518,7 @@ mod tests {
             .unwrap();
             let hooks = Arc::new(Hooks::default());
             let release = Some(Release(hooks.clone()));
-            let mut writer = worker::start(&fixture, hooks.clone());
+            let mut writer = start(&fixture, hooks.clone());
             writer.set_deadline(until);
             Self {
                 fixture,
@@ -606,14 +598,8 @@ mod tests {
         let mut harness = Harness::new();
         let primary = catch_unwind(AssertUnwindSafe(|| body(&mut harness)));
         let cleanup = catch_unwind(AssertUnwindSafe(|| harness.finish()));
-        if let Err(primary) = primary {
-            if cleanup.is_err() {
-                eprintln!("input-drain fixture cleanup also failed; primary failure is retained");
-            }
-            resume_unwind(primary);
-        }
-        if let Err(cleanup) = cleanup {
-            resume_unwind(cleanup);
+        if let Err(panic) = primary.and(cleanup) {
+            resume_unwind(panic);
         }
     }
 
@@ -662,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d1_actual_quiet_round_seals_health_without_granting_composer_eligibility() {
+    fn drain_actual_quiet_round_seals_health_without_granting_composer_eligibility() {
         with_harness(|h| {
             let mut transport = transport(32, 32, 32);
             assert_eq!(transport.human_generation(), 0);
@@ -692,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d2_fragmented_reads_and_partial_writes_preserve_real_bytes_and_sequence() {
+    fn drain_fragmented_reads_and_partial_writes_preserve_real_bytes_and_sequence() {
         with_harness(|h| {
             h.control();
             let human_bytes = "literal 世界\r".as_bytes();
@@ -718,7 +704,7 @@ mod tests {
                 transport.snapshot().screen_seq,
                 u64::try_from(child_bytes.len()).unwrap()
             );
-            assert!(transport.snapshot().contents.contains("child"));
+            assert!(transport.snapshot().screen.contents().contains("child"));
             assert_eq!(transport.pending_input_bytes(), 0);
             assert_eq!(transport.pending_display_bytes(), 0);
             assert_eq!(h.observations.health_reads.get(), 1);
@@ -735,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d3_interrupted_reads_require_a_later_actual_same_round_wouldblock_pair() {
+    fn drain_interrupted_reads_require_a_later_actual_same_round_wouldblock_pair() {
         for human_interrupted in [true, false] {
             with_harness(|h| {
                 h.control();
@@ -760,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d4_eof_is_not_a_quiet_read_and_adds_no_manual_generation() {
+    fn drain_eof_is_not_a_quiet_read_and_adds_no_manual_generation() {
         for human_eof in [true, false] {
             with_harness(|h| {
                 h.control();
@@ -783,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d5_round_and_separate_byte_quotas_bound_continuously_readable_sources() {
+    fn drain_round_and_separate_byte_quotas_bound_continuously_readable_sources() {
         for (bytes, width, expected_reads, expected_bytes) in [(64, 1, 8, 8), (4, usize::MAX, 1, 4)]
         {
             with_harness(|h| {
@@ -837,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d6_full_manual_queue_supplies_no_read_proof_and_preserves_order_on_release() {
+    fn drain_full_manual_queue_supplies_no_read_proof_and_preserves_order_on_release() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(16, 4, 32);
@@ -868,7 +854,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d7_display_and_prefetched_child_pressure_require_real_later_drain() {
+    fn drain_display_and_prefetched_child_pressure_require_real_later_drain() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(16, 32, 4);
@@ -937,7 +923,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d8_absent_health_keeps_manual_observation_progress_without_a_proof() {
+    fn drain_absent_health_keeps_manual_observation_progress_without_a_proof() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(32, 32, 32);
@@ -965,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d9_actual_controller_gap_health_prevents_quiet_proof() {
+    fn drain_actual_controller_gap_health_prevents_quiet_proof() {
         with_harness(|h| {
             h.control();
             h.controller
@@ -990,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d10_real_pending_writer_commit_blocks_health_until_release_and_persistence() {
+    fn drain_real_pending_writer_commit_blocks_health_until_release_and_persistence() {
         with_harness(|h| {
             h.control();
             h.hooks.pause(WriterBoundary::Persist);
@@ -1044,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d11_tick_and_drain_keep_actual_human_counts_before_later_errors() {
+    fn drain_tick_and_drain_keep_actual_human_counts_before_later_errors() {
         for quiesce in [false, true] {
             for failure in ["pty", "child", "display", "flush", "observer", "zero"] {
                 with_harness(|h| {
@@ -1113,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d12_opaque_proof_is_single_use_and_diagnostic_copies_supply_no_authority() {
+    fn drain_opaque_proof_is_single_use_and_diagnostic_copies_supply_no_authority() {
         with_harness(|h| {
             let mut other = transport(32, 32, 32);
             let mut transport = transport(32, 32, 32);
@@ -1140,7 +1126,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d13_mutating_entrypoints_invalidate_before_success_or_later_failure() {
+    fn drain_mutating_entrypoints_invalidate_before_success_or_later_failure() {
         for operation in [
             "tick",
             "tick-error",
@@ -1258,8 +1244,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_d14_original_expiry_prevents_later_io_and_proof_while_retaining_completed_reads()
-    {
+    fn drain_original_expiry_prevents_later_io_and_proof_while_retaining_completed_reads() {
         with_harness(|h| {
             let mut transport = transport(32, 32, 32);
             h.seal(&mut transport);
@@ -1371,7 +1356,7 @@ mod tests {
             }
             self.records.borrow_mut().push(CallbackRecord {
                 sequence: screen.screen_seq,
-                contents: screen.contents.clone(),
+                contents: screen.screen.contents(),
                 entered,
                 returned: Instant::now(),
             });
@@ -1469,7 +1454,6 @@ mod tests {
             (after_tick, tick_proof),
             (after_resize, resize_proof),
         ];
-        eprintln!("observation-incomplete later quiet/tick/resize outcomes: {outcomes:?}");
         assert!(
             outcomes
                 .iter()
@@ -1479,7 +1463,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_delayed_positive_child_read_keeps_display_and_lifetime_fence() {
+    fn drain_incomplete_delayed_positive_child_read_keeps_display_and_lifetime_fence() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);
@@ -1504,7 +1488,7 @@ mod tests {
             assert_eq!(pty.reader.bytes, child_bytes);
             assert_eq!(transport.pending_display_bytes(), child_bytes.len());
             assert_eq!(transport.snapshot().screen_seq, 0);
-            assert_eq!(transport.snapshot().contents, "");
+            assert_eq!(transport.snapshot().screen.contents(), "");
             assert!(h.observations.screens.borrow().is_empty());
             assert_eq!(
                 *h.trace.borrow(),
@@ -1554,7 +1538,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_complete_control_observes_every_fragment_and_can_seal() {
+    fn drain_incomplete_complete_control_observes_every_fragment_and_can_seal() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);
@@ -1586,7 +1570,7 @@ mod tests {
             );
             assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(transport.pending_display_bytes(), 0);
-            assert_eq!(transport.snapshot().contents, "TAIL\nsuffix");
+            assert_eq!(transport.snapshot().screen.contents(), "TAIL\nsuffix");
             assert_eq!(transport.snapshot().screen_seq, 17);
             assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
             let observed = records.borrow();
@@ -1651,7 +1635,7 @@ mod tests {
             assert_eq!(output.flushes, 0);
             assert_eq!(h.observations.health_reads.get(), 0);
             assert_eq!(transport.snapshot().screen_seq, 5);
-            assert_eq!(transport.snapshot().contents, "head");
+            assert_eq!(transport.snapshot().screen.contents(), "head");
             assert_eq!(transport.snapshot().cursor_row, 0);
             assert_eq!(transport.snapshot().cursor_col, 0);
             assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
@@ -1694,17 +1678,17 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_mid_observer_expiry_preserves_prefix_and_lifetime_fence() {
+    fn drain_incomplete_mid_observer_expiry_preserves_prefix_and_lifetime_fence() {
         incomplete_callback_case(CallbackFault::Expire);
     }
 
     #[test]
-    fn step5_drain_incomplete_mid_observer_error_before_expiry_keeps_primary_and_fence() {
+    fn drain_incomplete_mid_observer_error_before_expiry_keeps_primary_and_fence() {
         incomplete_callback_case(CallbackFault::Fail);
     }
 
     #[test]
-    fn step5_drain_incomplete_mid_observer_error_after_expiry_keeps_primary_and_fence() {
+    fn drain_incomplete_mid_observer_error_after_expiry_keeps_primary_and_fence() {
         incomplete_callback_case(CallbackFault::ExpireAndFail);
     }
 
@@ -1750,7 +1734,7 @@ mod tests {
                 );
                 assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
                 assert_eq!(records.borrow().len(), 2);
-                assert_eq!(transport.snapshot().contents, "head");
+                assert_eq!(transport.snapshot().screen.contents(), "head");
                 assert!(output.bytes.is_empty() && output.offered.is_empty());
                 assert_eq!(
                     transport.pending_display_bytes(),
@@ -1773,7 +1757,7 @@ mod tests {
                 ));
                 assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
                 assert_eq!(records.borrow().len(), 6);
-                assert_eq!(transport.snapshot().contents, "TAIL\nsuffix");
+                assert_eq!(transport.snapshot().screen.contents(), "TAIL\nsuffix");
                 assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
                 assert_eq!(transport.pending_display_bytes(), 0);
                 17
@@ -1790,19 +1774,19 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_ordinary_fatal_observer_error_retains_chunk_and_fence() {
+    fn drain_incomplete_ordinary_fatal_observer_error_retains_chunk_and_fence() {
         incomplete_tick_case(true);
     }
 
     #[test]
-    fn step5_drain_incomplete_ordinary_nonfatal_observer_error_retains_reporting_and_fence() {
+    fn drain_incomplete_ordinary_nonfatal_observer_error_retains_reporting_and_fence() {
         incomplete_tick_case(false);
     }
 
     struct OneParserFailure(std::sync::atomic::AtomicBool);
 
     impl ObservationHooks for OneParserFailure {
-        fn before(&self, _: ObservationSite, operation: ObservationOperation) -> Result<()> {
+        fn before(&self, _: ObservationPhase, operation: ObservationOperation) -> Result<()> {
             if matches!(operation, ObservationOperation::Parser)
                 && self.0.swap(false, std::sync::atomic::Ordering::AcqRel)
             {
@@ -1816,7 +1800,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_ordinary_parser_fault_cannot_be_cleared_by_later_success() {
+    fn drain_incomplete_ordinary_parser_fault_cannot_be_cleared_by_later_success() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);
@@ -1849,7 +1833,7 @@ mod tests {
                 Some(ObservationFailure::Parser)
             ));
             assert_eq!(transport.snapshot().screen_seq, 0);
-            assert_eq!(transport.snapshot().contents, "");
+            assert_eq!(transport.snapshot().screen.contents(), "");
             assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(transport.human_generation(), 5);
             assert_incomplete_observation_stays_fenced(
@@ -1863,7 +1847,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_complete_observation_then_display_error_preserves_eligibility() {
+    fn drain_incomplete_complete_observation_then_display_error_preserves_eligibility() {
         for quiesce in [false, true] {
             for discard in [false, true] {
                 with_harness(|h| {
@@ -1899,7 +1883,7 @@ mod tests {
                     );
                     assert_eq!(transport.human_generation(), 5);
                     assert_eq!(transport.snapshot().screen_seq, 17);
-                    assert_eq!(transport.snapshot().contents, "TAIL\nsuffix");
+                    assert_eq!(transport.snapshot().screen.contents(), "TAIL\nsuffix");
                     assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
                     assert_eq!(transport.pending_display_bytes(), 17);
                     assert!(output.bytes.is_empty());
@@ -1934,7 +1918,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_prefetch_consumption_control_observes_once_and_can_seal() {
+    fn drain_incomplete_prefetch_consumption_control_observes_once_and_can_seal() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);
@@ -1961,7 +1945,7 @@ mod tests {
     }
 
     #[test]
-    fn step5_drain_incomplete_discarding_unobserved_prefetch_keeps_lifetime_fence() {
+    fn drain_incomplete_discarding_unobserved_prefetch_keeps_lifetime_fence() {
         with_harness(|h| {
             h.control();
             let mut transport = transport(64, 64, 64);

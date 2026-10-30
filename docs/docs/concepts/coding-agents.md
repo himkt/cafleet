@@ -10,8 +10,8 @@ placement's `coding_agent` column.
 | `opencode` | opencode.ai | Reads the cafleet skill files by absolute path |
 
 Plain `cafleet setup` installs assets for every supported backend
-in one run; `--coding-agent` narrows the selection — see
-[CLI options § cafleet setup](../spec/cli-options.md#cafleet-setup).
+in one run; `--coding-agent` narrows the selection. [Quickstart](../quickstart.md#configure)
+lists what setup installs for each backend and the configuration you add.
 
 The flag means slightly different things per command:
 
@@ -23,7 +23,7 @@ The flag means slightly different things per command:
   and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
 
-New members run through the CAFleet PTY runner with a declared detection-coverage state. Omitting `--permission-mode` selects the backend default: native automatic review for Claude (`auto`) and Codex (`approve-for-me`), and the `cafleet` preset for OpenCode; pass the flag only for another native mode the user asks for. Interactive native policies are eligible on every backend — OpenCode's through its `cafleet-ask` agent preset — with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Detector, composer and answer coverage are independent; unknown coverage holds generated input. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](member-permission-events.md) explains the workflow, and [Spawn argv](../spec/coding-agent-backends.md#spawn-argv) specifies child arguments and sandbox boundaries.
+New members run through the CAFleet PTY runner with a declared detection-coverage state. Omitting `--permission-mode` selects the backend's default policy, its native automatic review where the backend has one; pass the flag only for another native mode the user asks for. Interactive native policies are eligible on every backend — OpenCode's through its `cafleet-ask` agent preset — with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Detector, composer and answer coverage are independent; unknown coverage holds generated input. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](member-permission-events.md) explains the workflow, and the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
 
 ## cafleet usage from a member pane
 
@@ -31,37 +31,25 @@ The cafleet CLI works unchanged from any backend pane. Identity reaches a
 member through its spawn prompt: `cafleet member create` renders four identity
 placeholders to literals, so the member reads its ids as plain text lines
 (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on every
-command. Each placeholder and its label line is in
-[CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The member environment carries
+command. The [spawn-prompt substitution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#spawn-prompt-substitution)
+lists each placeholder and its label line. The member environment carries
 `CAFLEET_DATABASE_URL` and the selected backend's config-location variable
-when the creator sets it — see
-[CLI options § Member environment](../spec/cli-options.md#member-environment).
+when the creator sets it.
 Each backend honors a leading-`!` shell shortcut on the coding agent's input line,
-including opencode `mini`; backend-specific permission limits are in
-[Coding-agent backends](../spec/coding-agent-backends.md).
+including opencode `mini`; [backend capabilities](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities)
+compares their sandbox and shell-command posture.
 `cafleet member exec` submits a visible native command through a tested runner composer profile; explicitly unwrapped members retain Escape-first input. A member routes a
 command its harness does not run through the Director — see
-[Command routing](member-lifecycle.md#command-routing). For the full
-broker CLI reference, see [CLI options](../spec/cli-options.md).
+[Command routing](member-lifecycle.md#command-routing). The
+[CLI specification](https://github.com/himkt/cafleet/blob/main/SPEC.md#63-cli)
+is the full command reference.
 
-## One-shot command isolation {#one-shot-command-isolation}
+## One-shot command isolation
 
-Run every one-shot `cafleet` command as the only command of its shell-tool
-invocation, and run a sequence of CAFleet operations as separate shell-tool
-calls. This rule is backend-neutral and applies identically to `claude`,
-`codex`, and `opencode` panes.
-
-Keep each actual process explicit for the host's permission rules. Submit
-commands separated by a newline, `;`, `&&`, a pipe or shell `&` as individual
-invocations. Opencode's permission matching for compound shell lines is
-unverified; its [permission limits](../spec/coding-agent-backends.md#safety-floor-caveats)
-apply alongside command isolation.
-
-Leading `NAME=value` environment assignments immediately preceding the
-`cafleet` executable are allowed: they set the CAFleet process's environment
-without starting another process. Shell redirection does not authorize another
-process either; a command that needs a long body should use the positional
-argument or `--file <path>` rather than a pipe.
+Members and the Director run each `cafleet` command as the only command of its
+shell-tool invocation, so the host's single-command permission rules match it.
+A compound line can fall outside those rules and fail with a permission error,
+even when every command in it is allowed.
 
 ## Model choice
 
@@ -109,32 +97,29 @@ model. The installed Director policy owns evidence, handoff and selection;
 a user-pinned model requires an operator decision before replacement.
 
 `cafleet member create --model <string>` forwards the value to the backend's
-own model flag; omission uses that binary's default. Accepted formats and
-create-time validation are in
-[Model selection](../spec/coding-agent-backends.md#model-selection).
+own model flag; omission uses that binary's default. Claude and Codex pass any
+value through and let the binary reject unknown models, so a newly released
+model needs no CAFleet release. OpenCode requires the `<provider-id>/<model-id>`
+form, checked when the member is created. The
+[model selection contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#model-selection)
+has the exact format and error.
 
 ## Reasoning effort
 
 `cafleet member create --effort <level>` forwards a reasoning-effort level to
 the spawned backend binary. Unlike `--model`, the accepted level set is
 validated per backend at create time, before any registration or multiplexer
-side effect; omit the flag and the binary uses its own default. Per-backend
-accepted levels, forwarding forms, and rejection strings are in
-[Coding-agent backends § Reasoning effort](../spec/coding-agent-backends.md#reasoning-effort).
+side effect; omit the flag and the binary uses its own default. OpenCode has no
+reasoning-effort control, so omit the flag for OpenCode members. The
+[reasoning effort contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#reasoning-effort)
+lists each backend's levels and forwarding form.
 
-## Known asymmetries (intentional non-goals) {#known-asymmetries-intentional-non-goals}
+## Backend differences
 
-| Dimension | `claude` | `codex` | `opencode` |
-|---|---|---|---|
-| Reasoning effort | supported | supported | not supported |
-| Pane title | supported, via `--name` | not supported | not supported |
-| Sandbox isolation | not supported — the operator's allow list is the safety floor | supported — OS-level, kernel-enforced | not supported — a shell allowlist that denies or, under `cafleet-ask`, asks for every other command |
-
-`--effort` with the `opencode` backend exits 2 with
-`opencode does not support reasoning effort.` before any side effect. Because
-`codex` and `opencode` panes do not display the member name, the `pane_id`
-column of `cafleet member list` is ground truth for all three. Operators who
-need kernel-enforced isolation should use the `codex` backend.
+The backends differ in reasoning effort, pane titles and sandbox isolation;
+the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities)
+compares them. Because only claude panes display the member name, use the
+`pane_id` column of `cafleet member list` to locate a member's pane.
 
 ## Complete member prompts
 
@@ -142,4 +127,4 @@ Use the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) for
 
 ## Director wake
 
-Director reception uses the executing backend's native stdout tools, with one owned receiver and explicit ACK consumption. The installed CAFleet backend instructions own concrete recipes; a host satisfying the [Director requirements](../spec/coding-agent-backends.md#role-requirements) may use explicit manual broker reads when a verified adapter is unavailable and states that reception limit. Follow [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle), preserving host continuation controls and pending user decisions.
+The Director receives replies through its backend's native inbox tools; [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) explains reception, consumption and the manual fallback.

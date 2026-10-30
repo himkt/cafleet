@@ -6,13 +6,12 @@ use serde_json::json;
 
 use crate::coding_agent::{CodingAgent, SpawnProbe};
 use crate::config::Settings;
-use crate::config_dir::ResolvedDir;
 use crate::diagnosis::{self, SchemaState};
 use crate::error::CafleetError;
 use crate::runtime::system::SystemProbe;
 
 #[derive(Args)]
-pub struct DoctorArgs {
+pub(crate) struct DoctorArgs {
     /// Output in JSON format.
     #[arg(long)]
     json: bool,
@@ -35,8 +34,8 @@ impl Check {
     }
 }
 
-pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
-    let mux = super::helpers::resolve_mux(settings).and_then(|mux| {
+pub(crate) fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
+    let mux = crate::runtime::resolve_mux(settings).and_then(|mux| {
         mux.ensure_available()?;
         let context = mux.context_discovery()?;
         Ok(format!(
@@ -65,9 +64,7 @@ pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
                 .to_string(),
         ),
     });
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .map_err(|_| CafleetError::App("HOME is not set".into()));
+    let home = crate::config_dir::home_dir();
     checks.extend(agent_checks(
         conn.as_ref(),
         &schema,
@@ -79,14 +76,10 @@ pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
             .as_ref()
             .expect("compatible schema has an open connection");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut statement = conn
-            .prepare("SELECT run_id FROM member_runs ORDER BY run_id")
-            .map_err(crate::broker::members::db_err)?;
+        let mut statement = conn.prepare("SELECT run_id FROM member_runs ORDER BY run_id")?;
         let runs = statement
-            .query_map([], |row| row.get::<_, i64>(0))
-            .map_err(crate::broker::members::db_err)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(crate::broker::members::db_err)?;
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
         for run_id in runs {
             if std::time::Instant::now() >= deadline {
                 checks.push(Check::new(
@@ -175,18 +168,18 @@ fn agent_checks(
             Ok(path) => Check::new(
                 format!("{name}.configuration"),
                 "ok",
-                path.path.display().to_string(),
+                path.display().to_string(),
             ),
             Err(cause) => Check::new(format!("{name}.configuration"), "error", cause.to_string()),
         });
-        let available = probe.resolve_binary(agent.binary_name()).is_some();
+        let available = probe.resolve_binary(name).is_some();
         checks.push(Check::new(
             format!("{name}.executable"),
             if available { "ok" } else { "info" },
             if available {
-                format!("{} is on PATH", agent.binary_name())
+                format!("{name} is on PATH")
             } else {
-                format!("{} is optional and absent from PATH", agent.binary_name())
+                format!("{name} is optional and absent from PATH")
             },
         ));
         if *agent == CodingAgent::Opencode {
@@ -216,7 +209,7 @@ fn agent_checks(
                 install_check(
                     conn,
                     *agent,
-                    &paths.as_ref().expect("configuration succeeded").path,
+                    paths.as_ref().expect("configuration succeeded"),
                 )
             }
             _ => {
@@ -234,7 +227,7 @@ fn preset_check(
     agent: CodingAgent,
     mode: &str,
     is_default: bool,
-    paths: &Result<ResolvedDir, CafleetError>,
+    paths: &Result<PathBuf, CafleetError>,
     available: bool,
 ) -> Check {
     let name = agent.name();
@@ -252,7 +245,7 @@ fn preset_check(
         (_, false) => Check::new(check_name, "info", "unavailable: executable is absent"),
         (Ok(path), true) => {
             let preset = agent
-                .required_preset(&path.path, mode)
+                .required_preset(path, mode)
                 .expect("OpenCode has a required preset for every launch policy");
             match std::fs::read(&preset) {
                 Ok(_) => Check::new(check_name, "ok", preset.display().to_string()),
@@ -364,7 +357,7 @@ mod tests {
     #[test]
     fn healthy_database_distinguishes_absent_stale_current_and_failed_install_queries() {
         let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::broker::tests::migrated_conn(&home);
+        let mut conn = crate::db::test_support::migrated_conn(&home);
         let probe = Probe {
             home: home.path().into(),
             executable: true,
@@ -390,11 +383,18 @@ mod tests {
         let checks = agent_checks(Some(&conn), &schema, &probe, Ok(home.path()));
         assert_eq!(find(&checks, "claude.installation").status, "ok");
         assert_eq!(find(&checks, "codex.installation").status, "info");
-        assert_eq!(find(&checks, "opencode.installation").status, "info");
-        assert!(
-            find(&checks, "opencode.installation")
-                .detail
-                .starts_with("no installation recorded")
+        let base = home.path().join(".config/opencode");
+        let configuration = find(&checks, "opencode.configuration");
+        assert_eq!(configuration.status, "ok");
+        assert_eq!(configuration.detail, base.display().to_string());
+        let installation = find(&checks, "opencode.installation");
+        assert_eq!(installation.status, "info");
+        assert_eq!(
+            installation.detail,
+            format!(
+                "no installation recorded at {}; run 'cafleet setup --coding-agent opencode'",
+                base.display()
+            )
         );
         assert_eq!(find(&checks, "opencode.preset").status, "error");
         assert_eq!(find(&checks, "opencode.preset.cafleet-ask").status, "error");
@@ -413,182 +413,117 @@ mod tests {
         );
     }
 
-    fn preset_checks(checks: &[Check]) -> Vec<&Check> {
-        checks
-            .iter()
-            .filter(|check| check.name.starts_with("opencode.preset"))
-            .collect()
+    #[derive(Clone, Copy)]
+    enum PresetDetail {
+        Path,
+        ReadError,
+        Prefix(&'static str),
+        Exact(&'static str),
     }
 
     #[test]
-    fn opencode_preset_checks_follow_catalog_order_with_the_default_name_unsuffixed() {
-        let home = tempfile::tempdir().unwrap();
-        let probe = Probe {
-            home: home.path().into(),
-            executable: true,
-            invalid: None,
-        };
-        let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
-        let names = checks
-            .iter()
-            .map(|check| check.name.as_str())
-            .collect::<Vec<_>>();
-        let executable = names
-            .iter()
-            .position(|name| *name == "opencode.executable")
-            .unwrap();
-        assert_eq!(
-            names[executable + 1..executable + 4],
-            [
-                "opencode.preset",
-                "opencode.preset.cafleet-ask",
-                "opencode.installation"
-            ]
-        );
-        assert_eq!(preset_checks(&checks).len(), 2);
-    }
-
-    #[test]
-    fn opencode_installation_at_the_former_base_is_not_the_resolved_installation() {
-        let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::broker::tests::migrated_conn(&home);
-        let former = home.path().join(".opencode");
-        std::fs::create_dir_all(former.join("agents")).unwrap();
-        for preset in ["cafleet.md", "cafleet-ask.md"] {
-            std::fs::write(former.join("agents").join(preset), "former base").unwrap();
-        }
-        crate::broker::record_asset_install(
-            &mut conn,
-            "opencode",
-            &former.display().to_string(),
-            super::super::VERSION,
-        )
-        .unwrap();
-        let probe = Probe {
-            home: home.path().into(),
-            executable: true,
-            invalid: None,
-        };
-        let schema = SchemaState::Head {
-            version: crate::db::head_version(),
-        };
-        let checks = agent_checks(Some(&conn), &schema, &probe, Ok(home.path()));
-        let base = home.path().join(".config/opencode");
-        let configuration = find(&checks, "opencode.configuration");
-        assert_eq!(configuration.status, "ok");
-        assert_eq!(configuration.detail, base.display().to_string());
-        let installation = find(&checks, "opencode.installation");
-        assert_eq!(
-            installation.status, "info",
-            "a former-base row is never current"
-        );
-        assert_eq!(
-            installation.detail,
-            format!(
-                "no installation recorded at {}; run 'cafleet setup --coding-agent opencode'",
-                base.display()
-            )
-        );
-        for name in ["opencode.preset", "opencode.preset.cafleet-ask"] {
-            let check = find(&checks, name);
-            assert_eq!(check.status, "error", "{name} reads only the resolved base");
-            assert!(
-                check
-                    .detail
-                    .starts_with(&base.join("agents").display().to_string()),
-                "{}",
-                check.detail
-            );
-        }
-    }
-
-    #[test]
-    fn opencode_preset_checks_report_ok_with_each_installed_preset_path() {
-        let home = tempfile::tempdir().unwrap();
-        let agents = home.path().join(".config/opencode/agents");
-        std::fs::create_dir_all(&agents).unwrap();
-        std::fs::write(agents.join("cafleet.md"), "default").unwrap();
-        std::fs::write(agents.join("cafleet-ask.md"), "ask").unwrap();
-        let probe = Probe {
-            home: home.path().into(),
-            executable: true,
-            invalid: None,
-        };
-        let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
-        for (name, file) in [
-            ("opencode.preset", "cafleet.md"),
-            ("opencode.preset.cafleet-ask", "cafleet-ask.md"),
+    fn opencode_preset_checks_follow_catalog_order_and_report_each_preset_state() {
+        use PresetDetail::*;
+        const FILES: [&str; 2] = ["cafleet.md", "cafleet-ask.md"];
+        let configuration_failed = Prefix("unavailable: configuration failed: ");
+        let absent = Exact("unavailable: executable is absent");
+        for (valid, executable, installed, expected) in [
+            (
+                true,
+                true,
+                [false, false],
+                [("error", ReadError), ("error", ReadError)],
+            ),
+            (
+                true,
+                true,
+                [true, false],
+                [("ok", Path), ("error", ReadError)],
+            ),
+            (
+                true,
+                true,
+                [false, true],
+                [("error", ReadError), ("ok", Path)],
+            ),
+            (true, true, [true, true], [("ok", Path), ("ok", Path)]),
+            (
+                false,
+                true,
+                [true, true],
+                [
+                    ("info", configuration_failed),
+                    ("info", configuration_failed),
+                ],
+            ),
+            (
+                true,
+                false,
+                [true, true],
+                [("info", absent), ("info", absent)],
+            ),
         ] {
-            let check = find(&checks, name);
-            assert_eq!(check.status, "ok", "{name}");
-            assert_eq!(check.detail, agents.join(file).display().to_string());
-        }
-    }
-
-    #[test]
-    fn missing_cafleet_ask_preset_is_an_error_with_the_setup_remedy() {
-        let home = tempfile::tempdir().unwrap();
-        let agents = home.path().join(".config/opencode/agents");
-        std::fs::create_dir_all(&agents).unwrap();
-        std::fs::write(agents.join("cafleet.md"), "default").unwrap();
-        let probe = Probe {
-            home: home.path().into(),
-            executable: true,
-            invalid: None,
-        };
-        let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
-        assert_eq!(find(&checks, "opencode.preset").status, "ok");
-        let check = find(&checks, "opencode.preset.cafleet-ask");
-        assert_eq!(check.status, "error");
-        let cause = check
-            .detail
-            .strip_prefix(&format!("{}: ", agents.join("cafleet-ask.md").display()))
-            .and_then(|rest| rest.strip_suffix("; run 'cafleet setup --coding-agent opencode'"))
-            .unwrap_or_else(|| panic!("preset error detail: {}", check.detail));
-        assert!(!cause.is_empty());
-
-        std::fs::remove_file(agents.join("cafleet.md")).unwrap();
-        std::fs::write(agents.join("cafleet-ask.md"), "ask").unwrap();
-        let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
-        assert_eq!(find(&checks, "opencode.preset").status, "error");
-        assert!(
-            find(&checks, "opencode.preset")
-                .detail
-                .starts_with(&format!("{}: ", agents.join("cafleet.md").display()))
-        );
-        assert_eq!(find(&checks, "opencode.preset.cafleet-ask").status, "ok");
-    }
-
-    #[test]
-    fn opencode_preset_checks_are_info_when_configuration_fails_or_the_executable_is_absent() {
-        let home = tempfile::tempdir().unwrap();
-        let unconfigured = Probe {
-            home: home.path().into(),
-            executable: true,
-            invalid: Some("OPENCODE_CONFIG_DIR"),
-        };
-        let checks = agent_checks(None, &SchemaState::Missing, &unconfigured, Ok(home.path()));
-        assert_eq!(preset_checks(&checks).len(), 2);
-        for check in preset_checks(&checks) {
-            assert_eq!(check.status, "info", "{}", check.name);
-            assert!(
-                check
-                    .detail
-                    .starts_with("unavailable: configuration failed: "),
-                "{}",
-                check.detail
+            let context = format!("valid={valid} executable={executable} installed={installed:?}");
+            let home = tempfile::tempdir().unwrap();
+            let agents = home.path().join(".config/opencode/agents");
+            std::fs::create_dir_all(&agents).unwrap();
+            for (file, present) in FILES.iter().zip(installed) {
+                if present {
+                    std::fs::write(agents.join(file), "preset").unwrap();
+                }
+            }
+            let probe = Probe {
+                home: home.path().into(),
+                executable,
+                invalid: (!valid).then_some("OPENCODE_CONFIG_DIR"),
+            };
+            let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
+            let names = checks
+                .iter()
+                .map(|check| check.name.as_str())
+                .collect::<Vec<_>>();
+            let position = names
+                .iter()
+                .position(|name| *name == "opencode.executable")
+                .unwrap();
+            assert_eq!(
+                names[position + 1..position + 4],
+                [
+                    "opencode.preset",
+                    "opencode.preset.cafleet-ask",
+                    "opencode.installation"
+                ],
+                "{context}"
             );
+            for ((check, file), (status, detail)) in checks[position + 1..position + 3]
+                .iter()
+                .zip(FILES)
+                .zip(expected)
+            {
+                assert_eq!(check.status, status, "{context} {}", check.name);
+                let path = agents.join(file).display().to_string();
+                match detail {
+                    Path => assert_eq!(check.detail, path, "{context}"),
+                    ReadError => {
+                        let cause = check
+                            .detail
+                            .strip_prefix(&format!("{path}: "))
+                            .and_then(|rest| {
+                                rest.strip_suffix("; run 'cafleet setup --coding-agent opencode'")
+                            })
+                            .unwrap_or_else(|| panic!("{context}: {}", check.detail));
+                        assert!(!cause.is_empty(), "{context}");
+                    }
+                    Prefix(prefix) => {
+                        assert!(
+                            check.detail.starts_with(prefix),
+                            "{context}: {}",
+                            check.detail
+                        )
+                    }
+                    Exact(text) => assert_eq!(check.detail, text, "{context}"),
+                }
+            }
         }
-        let absent = Probe {
-            home: home.path().into(),
-            executable: false,
-            invalid: None,
-        };
-        let checks = agent_checks(None, &SchemaState::Missing, &absent, Ok(home.path()));
-        for check in preset_checks(&checks) {
-            assert_eq!(check.status, "info", "{}", check.name);
-            assert_eq!(check.detail, "unavailable: executable is absent");
-        }
-        assert_eq!(preset_checks(&checks).len(), 2);
     }
 }

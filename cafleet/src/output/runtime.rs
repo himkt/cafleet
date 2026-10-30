@@ -21,7 +21,7 @@ pub(crate) fn format_runtime_recovery(report: &crate::runtime::runner::RecoveryR
     text
 }
 
-pub fn format_runtime_snapshot(snapshot: &RuntimeSnapshot) -> String {
+pub(crate) fn format_runtime_snapshot(snapshot: &RuntimeSnapshot) -> String {
     let run = &snapshot.run;
     format!(
         "Runtime: run={} mode={} status={} coverage={} profile={} review={}",
@@ -38,7 +38,7 @@ pub fn format_runtime_snapshot(snapshot: &RuntimeSnapshot) -> String {
     )
 }
 
-pub fn format_runtime_event(view: &RuntimeEventView) -> String {
+pub(crate) fn format_runtime_event(view: &RuntimeEventView) -> String {
     let event = &view.event;
     let message = event
         .message_id
@@ -67,7 +67,7 @@ pub fn format_runtime_event(view: &RuntimeEventView) -> String {
     text
 }
 
-pub fn format_input_operation(input: &InputOperation) -> String {
+pub(crate) fn format_input_operation(input: &InputOperation) -> String {
     let mut text = format!(
         "Input: {} run={} kind={} state={} disposition={} message={}",
         input.input_id,
@@ -122,12 +122,7 @@ pub(crate) fn format_permission_inspection(
         .map(|value| value.as_str())
         .collect::<Vec<_>>()
         .join(",");
-    let visibility = match row.visibility {
-        crate::runtime::runner::Visibility::Visible => "visible",
-        crate::runtime::runner::Visibility::Obscured => "obscured",
-        crate::runtime::runner::Visibility::NotVisible => "not_visible",
-        crate::runtime::runner::Visibility::Unknown => "unknown",
-    };
+    let visibility = row.visibility.as_str();
     let mut text = format!(
         "Permission: interaction={} event={} member={} run={} epoch={} visibility={} answers={}\nRequest: token={} output_seq={} profile={} rule={}",
         row.interaction_id,

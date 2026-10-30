@@ -12,11 +12,11 @@ const OUTPUT_BYTES: u64 = 4096;
 const VERSION_TOKEN: &str = r"^v?[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$";
 
 pub(crate) struct NativeLaunchIdentity {
-    pub native_version: Option<String>,
-    pub profile_version: Option<String>,
-    pub profile_match: Option<ProfileMatch>,
-    pub coverage: Coverage,
-    pub warning: Option<String>,
+    pub(crate) native_version: Option<String>,
+    pub(crate) profile_version: Option<String>,
+    pub(crate) profile_match: Option<ProfileMatch>,
+    pub(crate) coverage: Coverage,
+    pub(crate) warning: Option<String>,
 }
 
 pub(crate) fn native_launch_identity(
@@ -76,9 +76,8 @@ impl CodingAgent {
         executable: &Path,
         deadline: Instant,
     ) -> Result<String, CafleetError> {
-        let fail = |detail: String| {
-            CafleetError::App(format!("{} --version {detail}", self.binary_name()))
-        };
+        let fail =
+            |detail: String| CafleetError::App(format!("{} --version {detail}", self.name()));
         let mut child = Command::new(executable)
             .arg("--version")
             .stdin(Stdio::null())
@@ -191,6 +190,165 @@ mod tests {
                 Err("printed no version token"),
                 "{line}"
             );
+        }
+    }
+
+    mod native_version_probe {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::PathBuf;
+
+        fn stub(dir: &Path, name: &str, body: &str) -> PathBuf {
+            let path = dir.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn probe(executable: &Path) -> Result<String, CafleetError> {
+            CodingAgent::Claude
+                .probe_native_version(executable, Instant::now() + Duration::from_secs(2))
+        }
+
+        #[test]
+        fn native_version_probe_records_the_single_version_token_of_a_version_only_invocation() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = stub(
+                dir.path(),
+                "native",
+                "[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nread -r ignored || true\nprintf '%s\\n' '2.1.302 (Claude Code)'\nprintf 'ignored\\n' >&2",
+            );
+            assert_eq!(probe(&path).unwrap(), "2.1.302");
+        }
+
+        #[test]
+        fn native_version_probe_rejects_failed_ambiguous_invalid_or_missing_versions() {
+            let dir = tempfile::tempdir().unwrap();
+            for (index, (case, body)) in [
+                ("nonzero exit", "printf '2.1.302\\n'; exit 1"),
+                (
+                    "version outside the first line",
+                    "printf 'Claude Code\\n2.1.302\\n'",
+                ),
+                ("empty output", "exit 0"),
+                ("non-UTF-8 output", "printf '2.1.302 \\377\\n'"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let path = stub(dir.path(), &format!("native-{index}"), body);
+                assert!(probe(&path).is_err(), "{case} must not yield a version");
+            }
+            assert!(
+                probe(&dir.path().join("absent")).is_err(),
+                "unstartable binary"
+            );
+        }
+
+        #[test]
+        fn native_version_probe_kills_and_reaps_a_probe_running_at_its_bound() {
+            let dir = tempfile::tempdir().unwrap();
+            let pid_file = dir.path().join("probe.pid");
+            let path = stub(
+                dir.path(),
+                "native",
+                &format!(
+                    "printf '%s' \"$$\" > '{}'\nexec /bin/sleep 30",
+                    pid_file.display()
+                ),
+            );
+            let start = Instant::now();
+            let result =
+                CodingAgent::Claude.probe_native_version(&path, start + Duration::from_millis(300));
+            assert!(result.is_err());
+            assert!(
+                start.elapsed() < Duration::from_secs(2),
+                "{:?}",
+                start.elapsed()
+            );
+            let pid: i32 = std::fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+            assert_eq!(
+                nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None),
+                Err(nix::errno::Errno::ESRCH),
+                "the timed-out probe is killed and reaped"
+            );
+        }
+
+        #[test]
+        fn native_launch_identity_selects_the_bundled_profile_or_records_unknown_with_a_warning() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            let tested =
+                native_launch_identity(CodingAgent::Claude, Ok("2.1.302".into()), &catalog);
+            assert_eq!(tested.native_version.as_deref(), Some("2.1.302"));
+            assert_eq!(
+                tested.profile_version,
+                catalog
+                    .capabilities(CodingAgent::Claude, Some("2.1.302"))
+                    .profile_version
+            );
+            assert!(tested.profile_version.is_some());
+            assert_eq!(tested.profile_match, Some(ProfileMatch::Exact));
+            assert_eq!(tested.coverage, Coverage::Tested);
+            assert_eq!(tested.warning, None);
+            let failed = native_launch_identity(
+                CodingAgent::Codex,
+                Err(CafleetError::App("probe exited with status 1".into())),
+                &catalog,
+            );
+            assert_eq!(failed.native_version, None);
+            assert_eq!(failed.profile_version, None);
+            assert_eq!(failed.profile_match, None);
+            assert_eq!(failed.coverage, Coverage::Unknown);
+            assert_eq!(
+                failed.warning.as_deref(),
+                Some(
+                    "Warning: native version unavailable for codex: probe exited with status 1; coverage unknown."
+                )
+            );
+        }
+
+        #[test]
+        fn native_launch_identity_runs_an_unprofiled_version_under_the_newest_bundled_profile() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for (backend, pinned, probes) in
+                crate::coding_agent::profiles::catalog::test_support::BUNDLED_PROBES
+            {
+                let profile = catalog
+                    .capabilities(backend, Some(pinned))
+                    .profile_version
+                    .expect("each backend bundles a profile for its pinned version");
+                for probe in probes {
+                    let identity = native_launch_identity(backend, Ok(probe.into()), &catalog);
+                    assert_eq!(identity.native_version.as_deref(), Some(probe));
+                    assert_eq!(identity.coverage, Coverage::Tested, "{backend:?} {probe}");
+                    assert_eq!(
+                        identity.warning,
+                        Some(format!(
+                            "Warning: no bundled profile for {} {probe}; using {profile} (profile_match=fallback).",
+                            backend.name()
+                        ))
+                    );
+                }
+                let exact_identity = native_launch_identity(backend, Ok(pinned.into()), &catalog);
+                assert_eq!(exact_identity.profile_match, Some(ProfileMatch::Exact));
+                assert_eq!(exact_identity.warning, None);
+            }
+        }
+
+        #[test]
+        fn native_launch_identity_without_any_profile_for_the_backend_records_unknown_silently() {
+            let catalog = ProfileCatalog::from_definitions(
+                &crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition(),
+            )
+            .unwrap();
+            for backend in [CodingAgent::Claude, CodingAgent::Opencode] {
+                let identity = native_launch_identity(backend, Ok("2.1.302".into()), &catalog);
+                assert_eq!(identity.native_version.as_deref(), Some("2.1.302"));
+                assert_eq!(identity.profile_version, None);
+                assert_eq!(identity.profile_match, None);
+                assert_eq!(identity.coverage, Coverage::Unknown);
+                assert_eq!(identity.warning, None);
+            }
         }
     }
 }

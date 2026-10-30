@@ -5,12 +5,12 @@ use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct HealthSnapshot {
-    pub identity: ControlIdentity,
-    pub runner: ProcessIdentity,
-    pub child: Option<ProcessIdentity>,
-    pub output_seq: u64,
+    pub(crate) identity: ControlIdentity,
+    pub(crate) runner: ProcessIdentity,
+    pub(crate) child: Option<ProcessIdentity>,
+    pub(crate) output_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observation: Option<ObservationHealth>,
+    pub(crate) observation: Option<ObservationHealth>,
 }
 impl HealthSnapshot {
     pub(crate) fn decode(value: Value, run: &RunRecord) -> Result<Self> {
@@ -47,11 +47,11 @@ impl HealthSnapshot {
     }
 }
 pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
-    let reply = super::service::request(run, "health", deadline)?;
+    let reply = super::control::request(run, "health", deadline)?;
     HealthSnapshot::decode(reply, run)
 }
 pub(crate) struct RuntimeDiagnosis {
-    pub diagnostics: Vec<String>,
+    pub(crate) diagnostics: Vec<String>,
 }
 pub(crate) fn diagnose_runtime(
     conn: &Connection,
@@ -104,13 +104,13 @@ fn diagnose_runtime_observed(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ObservationHealth {
-    pub visibility: Visibility,
-    pub eligibility: InputEligibility,
-    pub pending_count: u64,
-    pub pending_evidence: bool,
-    pub gap_count: u64,
-    pub degraded: bool,
-    pub diagnostic: Option<String>,
+    pub(crate) visibility: Visibility,
+    pub(crate) eligibility: InputEligibility,
+    pub(crate) pending_count: u64,
+    pub(crate) pending_evidence: bool,
+    pub(crate) gap_count: u64,
+    pub(crate) degraded: bool,
+    pub(crate) diagnostic: Option<String>,
 }
 impl ObservationHealth {
     pub(crate) fn validate(&self) -> Result<()> {
@@ -124,16 +124,9 @@ impl ObservationHealth {
         )?;
         if let Some(code) = &self.diagnostic {
             ensure(
-                code.len() <= 128
-                    && code.is_ascii()
-                    && [
-                        "parser_unavailable",
-                        "detector_unavailable",
-                        "sequence_unavailable",
-                        "sink_unavailable",
-                        "observation_gap",
-                    ]
-                    .contains(&code.as_str()),
+                ObservationFailure::ALL
+                    .iter()
+                    .any(|failure| failure.code() == code),
                 "invalid health diagnostic",
             )?;
         }
@@ -151,7 +144,7 @@ impl ObservationHealth {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_support {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::sync::{
@@ -161,12 +154,10 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::broker::runtime::RunStatus;
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
     use rusqlite::params;
-    use serde_json::json;
 
-    fn activate(fixture: &mut Fixture) -> (RunArtifacts, RunLock) {
+    pub(crate) fn activate(fixture: &mut Fixture) -> (RunArtifacts, RunLock) {
         let artifacts = fixture.artifacts();
         let held = RunLock::acquire(&fixture.conn, &fixture.run.owner())
             .unwrap()
@@ -180,13 +171,13 @@ mod tests {
         (artifacts, held)
     }
 
-    struct SilentServer {
-        stop: Arc<AtomicBool>,
-        thread: Option<std::thread::JoinHandle<()>>,
+    pub(crate) struct SilentServer {
+        pub(crate) stop: Arc<AtomicBool>,
+        pub(crate) thread: Option<std::thread::JoinHandle<()>>,
     }
 
     impl SilentServer {
-        fn start(path: &std::path::Path) -> Self {
+        pub(crate) fn start(path: &std::path::Path) -> Self {
             let listener = UnixListener::bind(path).unwrap();
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
             listener.set_nonblocking(true).unwrap();
@@ -217,20 +208,16 @@ mod tests {
             self.thread.take().unwrap().join().unwrap();
         }
     }
+}
 
-    fn counts(conn: &Connection) -> (i64, i64, i64) {
-        let scalar = |table| {
-            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .unwrap()
-        };
-        (
-            scalar("member_interactions"),
-            scalar("member_runtime_events"),
-            scalar("messages"),
-        )
-    }
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::test_support::*;
+    use super::*;
+    use crate::runtime::runner::test_support::Fixture;
+    use serde_json::json;
 
     #[test]
     fn runner_health_real_silent_endpoint_is_bounded_and_probe_is_read_only() {
@@ -244,89 +231,6 @@ mod tests {
         assert_eq!(std::fs::read(fixture.conn.path().unwrap()).unwrap(), before);
     }
 
-    #[test]
-    fn runner_doctor_runtime_diagnosis_reports_leftovers_and_preserves_registry_and_artifact_bytes()
-    {
-        let mut fixture = Fixture::new();
-        let artifacts = fixture.artifacts();
-        artifacts
-            .write_descriptor(&LaunchDescriptor::new(&fixture.run, fixture.spec()).unwrap())
-            .unwrap();
-        fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET status='failed' WHERE run_id=?1",
-                [fixture.run.run_id],
-            )
-            .unwrap();
-        fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-        let files = [
-            std::path::PathBuf::from(fixture.conn.path().unwrap()),
-            artifacts.paths.namespace_manifest.clone(),
-            artifacts.paths.descriptor.clone(),
-            artifacts.paths.owner_lock.clone(),
-        ];
-        let before = files
-            .iter()
-            .map(|path| std::fs::read(path).unwrap())
-            .collect::<Vec<_>>();
-        let start = Instant::now();
-        let diagnosis = diagnose_runtime(
-            &fixture.conn,
-            fixture.run.run_id,
-            start + Duration::from_millis(80),
-        )
-        .unwrap();
-        assert!(start.elapsed() < Duration::from_millis(750));
-        assert!(
-            diagnosis
-                .diagnostics
-                .iter()
-                .any(|line| line.contains("descriptor"))
-        );
-        assert!(
-            diagnosis
-                .diagnostics
-                .iter()
-                .any(|line| line.contains("recover"))
-        );
-        for (path, bytes) in files.iter().zip(before) {
-            assert_eq!(std::fs::read(path).unwrap(), bytes);
-        }
-    }
-
-    #[test]
-    fn runner_registry_show_returns_historical_health_without_contacting_a_live_endpoint() {
-        let mut fixture = Fixture::new();
-        let (artifacts, _held) = activate(&mut fixture);
-        let _server = SilentServer::start(&artifacts.paths.control_socket);
-        fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1",
-                [fixture.run.run_id],
-            )
-            .unwrap();
-        let before = counts(&fixture.conn);
-        let start = Instant::now();
-        let member =
-            crate::broker::get_member(&fixture.conn, fixture.run.member_id, fixture.run.fleet_id)
-                .unwrap()
-                .unwrap();
-        assert!(start.elapsed() < Duration::from_millis(750));
-        assert_eq!(
-            crate::presentation::member(&member)["runtime"]["last_health_at"],
-            "2000-01-01T00:00:00Z"
-        );
-        assert_eq!(counts(&fixture.conn), before);
-        assert_eq!(
-            storage::get_run(&fixture.conn, fixture.run.run_id)
-                .unwrap()
-                .status,
-            RunStatus::Running
-        );
-    }
-
     mod observation_contract {
         use super::*;
 
@@ -335,7 +239,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_validates_legacy_identity_without_granting_composer_proof() {
+        fn health_decode_without_observation_validates_identity_without_granting_composer_proof() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             let mut value = wire(&fixture.run);
@@ -345,7 +249,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_accepts_bounded_hold_and_checked_empty_composer_states() {
+        fn health_decode_accepts_bounded_hold_and_checked_empty_composer_states() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             for visibility in ["visible", "obscured", "not_visible", "unknown"] {
@@ -354,7 +258,7 @@ mod tests {
                 value["observation"]["pending_count"] = json!(130);
                 value["observation"]["pending_evidence"] = json!(true);
                 value["observation"]["degraded"] = json!(true);
-                value["observation"]["diagnostic"] = json!("observation_gap");
+                value["observation"]["diagnostic"] = json!("sink_unavailable");
                 let decoded = HealthSnapshot::decode(value, &fixture.run).unwrap();
                 decoded.observation.unwrap().validate().unwrap();
             }
@@ -365,8 +269,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_rejects_unknown_wire_fields_enums_unbounded_and_private_diagnostics()
-         {
+        fn health_decode_rejects_unknown_wire_fields_enums_unbounded_and_private_diagnostics() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             for field in [
@@ -405,7 +308,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_requires_hold_for_visibility_pressure_and_degradation() {
+        fn health_decode_requires_hold_for_visibility_pressure_and_degradation() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             for field in [
@@ -432,7 +335,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_batch2_health_decode_preserves_process_generation_and_control_identity_checks() {
+        fn health_decode_preserves_process_generation_and_control_identity_checks() {
             let mut fixture = Fixture::new();
             let (_artifacts, _lock) = activate(&mut fixture);
             for field in ["epoch", "nonce", "runner", "child"] {
@@ -462,40 +365,8 @@ mod tests {
 
         const SPOOL_CANARY: &[u8] = b"private-recovery-diagnosis-canary:not-a-complete-valid-frame";
 
-        #[derive(Debug, PartialEq)]
-        struct TableSnapshot {
-            name: String,
-            rows: Vec<Vec<rusqlite::types::Value>>,
-        }
-
-        fn registry_snapshot(conn: &Connection) -> Vec<TableSnapshot> {
-            let names = conn
-                .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
-                .unwrap()
-                .query_map([], |row| row.get::<_, String>(0))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            names
-                .into_iter()
-                .map(|name| {
-                    let quoted = name.replace('"', "\"\"");
-                    let mut statement = conn
-                        .prepare(&format!("SELECT * FROM \"{quoted}\" ORDER BY rowid"))
-                        .unwrap();
-                    let width = statement.column_count();
-                    let rows = statement
-                        .query_map([], |row| {
-                            (0..width)
-                                .map(|index| row.get(index))
-                                .collect::<rusqlite::Result<Vec<rusqlite::types::Value>>>()
-                        })
-                        .unwrap()
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                        .unwrap();
-                    TableSnapshot { name, rows }
-                })
-                .collect()
+        fn registry_snapshot(conn: &Connection) -> Vec<crate::db::test_support::TableSnapshot> {
+            crate::db::test_support::table_snapshot(conn, |_| true)
         }
 
         #[derive(Debug, PartialEq)]

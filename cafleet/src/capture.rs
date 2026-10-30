@@ -1,15 +1,14 @@
 //! Targeted capture content, timestamp and digest.
 use chrono::{DateTime, Utc};
-use sha2::{Digest, Sha256};
 use std::io::Write;
 
 use crate::{error::CafleetError, output, presentation, time};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CaptureSnapshot {
-    pub content: String,
-    pub captured_at: String,
-    pub content_sha256: String,
+    pub(crate) content: String,
+    pub(crate) captured_at: String,
+    pub(crate) content_sha256: String,
 }
 impl CaptureSnapshot {
     pub(crate) fn from_raw(raw: &str, ansi: bool, now: DateTime<Utc>) -> Self {
@@ -18,10 +17,7 @@ impl CaptureSnapshot {
         } else {
             output::strip_ansi(raw)
         };
-        let content_sha256 = Sha256::digest(content.as_bytes())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let content_sha256 = crate::digest::sha256_hex(content.as_bytes());
         Self {
             content,
             captured_at: time::format_utc(now),
@@ -31,10 +27,10 @@ impl CaptureSnapshot {
 }
 
 pub(crate) struct MemberCapture {
-    pub member_id: i64,
-    pub pane_id: String,
-    pub lines: i64,
-    pub snapshot: CaptureSnapshot,
+    pub(crate) member_id: i64,
+    pub(crate) pane_id: String,
+    pub(crate) lines: i64,
+    pub(crate) snapshot: CaptureSnapshot,
 }
 pub(crate) fn write_member_capture(
     out: &mut dyn Write,

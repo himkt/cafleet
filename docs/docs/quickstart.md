@@ -28,18 +28,17 @@ system:
 | Backend | Config file | Manual configuration | Installed by `cafleet setup` | Reference |
 |---|---|---|---|---|
 | `claude` (Claude Code) | `~/.claude/settings.json` | The permission profile below that matches the Director's mode | The skills | The sub-section below |
-| `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | [The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file) |
-| `opencode` | none | none required | The skills, plus the `cafleet` and `cafleet-ask` agent presets at `~/.config/opencode/agents/cafleet.md` and `~/.config/opencode/agents/cafleet-ask.md` | [Opencode](spec/coding-agent-backends.md#opencode) |
+| `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | The Codex sub-section below |
+| `opencode` | none | none required | The skills, plus the `cafleet` and `cafleet-ask` agent presets at `~/.config/opencode/agents/cafleet.md` and `~/.config/opencode/agents/cafleet-ask.md` | The OpenCode sub-section below |
 
 The paths above are defaults. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` relocate
-their skills and presets. `OPENCODE_CONFIG_DIR` relocates only the Opencode
-presets; its skills remain under `~/.config/opencode/skills`. See
-[Config-dir resolution](spec/cli-options.md#config-dir-resolution).
+their skills and presets. `OPENCODE_CONFIG_DIR` relocates only the OpenCode
+presets; its skills remain under `~/.config/opencode/skills`. The
+[config-dir resolution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#config-dir-resolution)
+specifies validation and every install target.
 Set the variable in the environment you run `cafleet setup` and
 `cafleet member create` from: `member create` forwards it to the member, so
 the member reads the configuration CAFleet installed into.
-Opencode also loads default home configuration alongside the relocated presets
-directory; same-name agent definitions can merge across these sources.
 
 The snippets below are the recommended starting points for the two backends
 that need one.
@@ -58,28 +57,48 @@ call.
 | Director session's permission mode | `auto` | Any other mode |
 | The Director's `cafleet` commands | Reviewed by the auto mode classifier | Pre-approved by `Bash(cafleet *)` |
 | A member's skill loads, skill-page reads, and file edits | Pre-approved by the entries both profiles share | Pre-approved by the entries both profiles share |
-| `cafleet member prompt` and `cafleet member exec` | Prompt the operator | Prompt the operator |
+| `cafleet member prompt`, `cafleet member exec` and `cafleet member press` | Prompt the operator | Prompt the operator |
 
-`cafleet member prompt` and `cafleet member exec` are under `ask` in both
-profiles because the first keystrokes arbitrary text into a member's pane and
-the second runs an arbitrary command there; the operator confirms each
-invocation.
+These three commands send explicit native input into a member's pane, so the
+operator confirms each invocation.
 
 A claude member needs no allow rule of its own for the broker commands:
-cafleet passes them on the member's spawn command line. A `deny` or `ask` rule
-that matches a broker command still blocks a member, and `cafleet doctor`
-reports it — see
-[Spawn-time allow rules](spec/coding-agent-backends.md#spawn-time-allow-rules).
+cafleet passes `Bash(cafleet message *)` on the member's spawn command line. A
+`deny` or `ask` rule that matches a broker command, the managed setting
+`allowManagedPermissionRulesOnly` or a blocking `PreToolUse` hook still stops
+a member.
 
-`Edit` and `Write` let members write files. They apply to every session that
-reads the settings file, your own included: each then edits files outside
-Claude Code's protected paths without a prompt or classifier review.
-[What each profile entry is for](spec/coding-agent-backends.md#claude-profile-entries)
-names the role that needs each entry and gives the path rule that confines
-this approval.
-[What members can run](spec/coding-agent-backends.md#claude-member-permissions)
-covers denied commands and the entries to add for your project's own task
-commands.
+| Entry | Profile | Needed by | Why |
+|---|---|---|---|
+| `Bash(cafleet *)` | Other modes | The Director | One pattern pre-approves every subcommand the Director runs |
+| `Skill(cafleet)`, `Skill(cafleet-design-doc)` | Both | The Director and every member | Each loads the installed skills through the Skill tool |
+| `Read(~/.claude/skills/**)` | Both | The Director and every member | Role and reference pages of an installed skill sit outside the working directory |
+| `Edit`, `Write` | Both | Every member that writes files | A matching entry pre-approves the member's edits; no entry covers a protected path such as `.git` or `.claude` |
+| The `member prompt`, `member exec` and `member press` prefixes under `ask` | Both | The Director | The operator confirms each dispatch |
+
+`Edit` and `Write` apply to every session that reads the settings file, your
+own included. To confine the approval, replace both with a path rule such as
+`Edit(~/work/**)`, which covers every file-editing tool. When
+`CLAUDE_CONFIG_DIR` relocates the config directory, write the `Read` entry
+against that directory's `skills/**`.
+
+A member whose shell command is denied or refused by auto mode asks its
+Director to run it, and each such `cafleet member exec` asks you to confirm.
+Add an allow entry for every project command members run as part of their
+work, such as `Bash(npm test *)`, so those commands run without routing.
+
+| Symptom | Cause | Resolution |
+|---|---|---|
+| A member reports a refused or denied shell command | Auto mode's classifier refused it, or a `deny` rule matched it | Add an allow entry for the command |
+| A member reports a refused or denied file edit | No `Edit` entry matches, or the path is protected | Add `Edit` and `Write` or widen the path rule; for a protected path, the Director makes the edit |
+| The Director is prompted for every `cafleet` command | The session runs in a non-auto mode with the auto mode profile | Switch the session to auto mode, or use the other-modes profile |
+| The classifier blocks a Director `cafleet` command | Auto mode judged the action outside the request | Add an allow pattern for that subcommand |
+| `defaultMode: "auto"` has no effect | It is set in a project or local settings file, or auto mode is unavailable for the organization or model | Move it to `~/.claude/settings.json`; when auto mode is unavailable, use the other-modes profile |
+
+Claude Code 2.1.302 in auto mode can show a `Teach auto mode about your
+environment?` dialog once per configuration directory, after a member's turn.
+Answer it once in an interactive session of that version that uses the
+members' configuration directory; `Don't show again` keeps it from returning.
 
 #### Auto mode {#auto-mode-profile}
 
@@ -96,7 +115,8 @@ commands.
     ],
     "ask": [
       "Bash(cafleet member prompt *)",
-      "Bash(cafleet member exec *)"
+      "Bash(cafleet member exec *)",
+      "Bash(cafleet member press *)"
     ]
   }
 }
@@ -122,15 +142,15 @@ file cannot select it.
     ],
     "ask": [
       "Bash(cafleet member prompt *)",
-      "Bash(cafleet member exec *)"
+      "Bash(cafleet member exec *)",
+      "Bash(cafleet member press *)"
     ]
   }
 }
 ```
 
-`Bash(cafleet *)` is the single allow-everything entry that the literal
-integer-id convention enables — one pattern covers every subcommand the
-Director runs, for every fleet.
+`Bash(cafleet *)` covers every subcommand the Director runs, for every fleet,
+because IDs are literal integer arguments.
 
 ### Codex
 
@@ -140,17 +160,60 @@ network_access = true
 writable_roots = ["/home/<you>/.local/share/cafleet"]
 ```
 
-`network_access = true` is required because cafleet's multiplexer backends
-(tmux and herdr) communicate over a local socket, which the Codex sandbox
-classifies as network access — without it cafleet commands fail with
-`Operation not permitted`. `writable_roots` grants write access to cafleet's
-default SQLite DB directory. For `writable_roots`, use the absolute directory obtained by resolving the selected database file against the invoking working directory, or use the default XDG location.
+`network_access = true` is required because tmux and herdr communicate over a
+local socket, which the Codex sandbox classifies as network access; without it
+cafleet commands fail with `Operation not permitted`. `writable_roots` grants
+write access to the directory of the selected database file, the default XDG
+location unless `CAFLEET_DATABASE_URL` selects another.
 
-The Codex rules for `cafleet` commands allow every subcommand while keeping
-`cafleet member prompt` and `cafleet member exec` prompting; the reference
-above covers their precedence and where operator customizations belong. A
-rules directory maintained without the installed file needs the
-[minimum rule set](spec/coding-agent-backends.md#minimum-rule-set).
+`cafleet setup` installs `~/.codex/rules/cafleet.rules`: it allows every
+`cafleet` command and keeps the Director-owned commands prompting. Codex
+applies the strictest decision across every `*.rules` file in that directory,
+and setup overwrites its own file on every install, so put your own rules in a
+separate file there. A rules directory maintained without the installed file,
+for example from a dotfiles repository, needs at least these rules:
+
+```text
+prefix_rule(
+    pattern = ["cafleet", "message"],
+    decision = "allow",
+    match = ["cafleet message poll 5", "cafleet message send --from-member-id 1 --to-member-id 2 ready"],
+    not_match = ["cafleet member list 1", "cafleet doctor"],
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "prompt"],
+    decision = "prompt",
+    justification = "cafleet member prompt keystrokes arbitrary text into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs an arbitrary shell command in a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "press"],
+    decision = "prompt",
+    justification = "cafleet member press sends explicit native keys to a member pane",
+)
+```
+
+That set is enough for members. Keep the installed file for a Director
+session: Codex has no classifier to review what the minimum set leaves
+unmatched.
+
+### OpenCode
+
+`cafleet setup` installs both agent presets; rerun it after upgrading CAFleet
+to refresh them. A member runs under the `cafleet` preset by default, which
+allows its listed commands and denies every other shell command without a
+prompt. Choose `--permission-mode cafleet-ask` for a member whose other shell
+commands should open a native permission form for the Director to answer.
+Neither preset is an OS-level sandbox: keep every loaded OpenCode configuration
+free of MCP servers, submit one shell command per invocation, and use the
+`codex` backend when you need kernel-enforced isolation.
 
 ### Trust the working directory
 
@@ -159,8 +222,15 @@ directory, and that first-run prompt stalls a freshly spawned member — it
 ignores every incoming message until the prompt is cleared. Trust the
 workspace in advance: launch your coding agent once in the working directory
 the member panes will run in and accept the prompt, or add a trust entry to
-the agent's configuration file (see your agent's reference page). Trust is
-granted per directory, so each git worktree needs its own approval.
+the agent's configuration file. For Codex, add the absolute workspace path to
+`~/.codex/config.toml`:
+
+```toml
+[projects."/abs/path/to/workspace"]
+trust_level = "trusted"
+```
+
+Trust is granted per directory, so each git worktree needs its own approval.
 
 ## Simple example — invoke from a coding agent
 
