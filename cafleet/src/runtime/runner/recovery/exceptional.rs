@@ -84,7 +84,7 @@ pub(super) fn reconcile(
             )?;
             run = storage::get_run(&tx, run.run_id)?;
             let evidence = storage::evidence::run_metadata(&run, "runtime-recovery", 0)?;
-            for (event_seq, (input_id, stage)) in (ceiling + 1..=reserved).zip(unpublished) {
+            for (event_seq, (input_id, stage, cause)) in (ceiling + 1..=reserved).zip(unpublished) {
                 let transition = ObservedTransition {
                     run_id: run.run_id,
                     event_seq,
@@ -94,7 +94,7 @@ pub(super) fn reconcile(
                     observed_at: crate::time::now_stamp(),
                     evidence_json: evidence.clone(),
                     close_reason: None,
-                    cause_json: Some(storage::input_delivery_result_cause(input_id, stage, None)),
+                    cause_json: Some(storage::input_delivery_result_cause(input_id, stage, cause)),
                 };
                 let (event, inserted) = storage::persist_transition_in_transaction(
                     &tx,
@@ -509,6 +509,14 @@ mod tests {
             persist_opening(&mut case);
             let queued = deferred_receipt(&case, "prompt:queued", None);
             let unpublished = deferred_receipt(&case, "prompt:unpublished", Some("runner_stopped"));
+            case.fixture
+                .conn
+                .execute(
+                    "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,deferred_at,defer_reason,delivery_method,uncertain_cause) VALUES(?1,'prompt:uncertain','prompt',?2,'uncertain',?3,?3,?3,'interaction_open','profile','runner_stopped')",
+                    rusqlite::params![case.fixture.run.run_id, "d".repeat(64), NOW],
+                )
+                .unwrap();
+            let uncertain = case.fixture.conn.last_insert_rowid();
             missing_lock(&mut case);
             let report = case.recover(&mut new_host()).unwrap();
             assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
@@ -524,11 +532,27 @@ mod tests {
                     .as_deref(),
                 Some("runner_stopped")
             );
-            for input_id in [queued, unpublished] {
+            for input_id in [queued, unpublished, uncertain] {
                 assert_eq!(result_events(&case, input_id), 1, "input {input_id}");
             }
+            let published_cause = |input_id: i64| -> Option<String> {
+                case.fixture
+                    .conn
+                    .query_row(
+                        "SELECT json_extract(payload_json,'$.cause.kind') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                        rusqlite::params![case.fixture.run.run_id, input_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(
+                published_cause(uncertain).as_deref(),
+                Some("runner_stopped")
+            );
+            assert_eq!(published_cause(queued), None);
+            assert_eq!(published_cause(unpublished), None);
             case.recover(&mut new_host()).unwrap();
-            for input_id in [queued, unpublished] {
+            for input_id in [queued, unpublished, uncertain] {
                 assert_eq!(
                     result_events(&case, input_id),
                     1,

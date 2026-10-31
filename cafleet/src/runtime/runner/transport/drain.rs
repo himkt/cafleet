@@ -67,6 +67,7 @@ impl Transport {
         };
         for _ in 0..ROUND_LIMIT {
             check_deadline(Instant::now(), deadline)?;
+            self.expire_reply_prefix();
             let human_read = if self.outer_eof {
                 AvailableRead::Skipped
             } else {
@@ -85,7 +86,7 @@ impl Transport {
                     remaining.human -= bytes.len();
                     self.retain_human(bytes);
                 }
-                AvailableRead::Eof => self.outer_eof = true,
+                AvailableRead::Eof => self.close_outer(),
                 _ => {}
             }
             check_deadline(Instant::now(), deadline)?;
@@ -144,6 +145,9 @@ impl Transport {
                 && self.input.is_empty()
                 && self.display.len() < self.limits.display_bytes
             {
+                if self.replies.pending() {
+                    return Ok(self.pending("terminal reply pending".into()));
+                }
                 if !self.observation_complete {
                     return Ok(self.pending("observation incomplete".into()));
                 }
@@ -231,6 +235,7 @@ impl Transport {
 
 #[cfg(test)]
 mod tests {
+    use super::super::replies::REPLY_PREFIX_BOUND;
     use super::*;
     use crate::broker::runtime as storage;
     use crate::coding_agent::ProfileCatalog;
@@ -1981,6 +1986,145 @@ mod tests {
                 b"",
                 0,
             );
+        });
+    }
+
+    #[test]
+    fn drain_complete_terminal_reply_seals_a_proof_without_manual_generation() {
+        with_harness(|h| {
+            h.control();
+            let reply = b"\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R";
+            let mut transport = transport(64, 64, 64);
+            let mut human = Reader::data(Site::Human, &h.trace, reply, 64);
+            let mut pty = Pty::new(&h.trace);
+            let mut output = Output::new(&h.trace);
+            let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until);
+            assert_eq!(
+                result.unwrap(),
+                InputDrain::Quiescent {
+                    human_generation: 0,
+                    output_seq: transport.snapshot().screen_seq,
+                }
+            );
+            assert_eq!(pty.bytes, reply, "the reply is forwarded unchanged");
+            assert!(transport.take_input_drain().is_some());
+        });
+    }
+
+    #[test]
+    fn drain_pending_reply_prefix_blocks_the_proof_with_terminal_reply_pending() {
+        with_harness(|h| {
+            h.control();
+            let mut transport = transport(64, 64, 64);
+            let mut human = Reader::data(Site::Human, &h.trace, b"\x1b[24;", 64);
+            let mut pty = Pty::new(&h.trace);
+            let mut output = Output::new(&h.trace);
+            let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until);
+            assert_pending(result, &mut transport);
+            assert_eq!(transport.drain_blocker(), Some("terminal reply pending"));
+            assert_eq!(pty.bytes, b"\x1b[24;", "the prefix is forwarded, not held");
+            assert_eq!(transport.pending_input_bytes(), 0);
+            assert_eq!(transport.human_generation(), 0);
+        });
+    }
+
+    #[test]
+    fn drain_completed_reply_prefix_seals_a_proof_with_unchanged_generation() {
+        with_harness(|h| {
+            h.control();
+            let mut transport = transport(64, 64, 64);
+            let mut human = Reader::data(Site::Human, &h.trace, b"\x1b[24;", 64);
+            let mut pty = Pty::new(&h.trace);
+            let mut output = Output::new(&h.trace);
+            let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until);
+            assert_pending(result, &mut transport);
+            human.steps.push_back(Read::Data(b"80R".to_vec()));
+            let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until);
+            assert_eq!(
+                result.unwrap(),
+                InputDrain::Quiescent {
+                    human_generation: 0,
+                    output_seq: transport.snapshot().screen_seq,
+                }
+            );
+            assert_eq!(transport.drain_blocker(), None);
+            assert_eq!(pty.bytes, b"\x1b[24;80R");
+            let proof = transport
+                .take_input_drain()
+                .expect("quiet drain seals a proof");
+            assert_eq!(proof.human_generation(), 0);
+            transport
+                .validate_observation_drain(&proof, h.until)
+                .unwrap();
+        });
+    }
+
+    #[test]
+    fn drain_proof_taken_before_a_reply_prefix_fails_validation_while_it_is_pending() {
+        with_harness(|h| {
+            h.control();
+            let mut transport = transport(64, 64, 64);
+            h.seal(&mut transport);
+            let proof = transport
+                .take_input_drain()
+                .expect("quiet drain seals a proof");
+            transport
+                .validate_observation_drain(&proof, h.until)
+                .unwrap();
+            let mut human = Reader::data(Site::Human, &h.trace, b"\x1b", 64);
+            let mut pty = Pty::new(&h.trace);
+            let mut output = Output::new(&h.trace);
+            transport
+                .tick(
+                    &mut human,
+                    &mut pty,
+                    &mut output,
+                    &mut h.controller.observer(&h.writer, &h.clock),
+                )
+                .unwrap();
+            assert_eq!(transport.human_generation(), 0);
+            assert!(
+                transport
+                    .validate_observation_drain(&proof, h.until)
+                    .is_err()
+            );
+            let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until);
+            assert_pending(result, &mut transport);
+            assert_eq!(transport.drain_blocker(), Some("terminal reply pending"));
+            assert!(
+                transport
+                    .validate_observation_drain(&proof, h.until)
+                    .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn drain_backdated_lone_escape_resolves_as_manual_on_the_next_drain() {
+        with_harness(|h| {
+            h.control();
+            let mut transport = transport(64, 64, 64);
+            let mut human = Reader::data(Site::Human, &h.trace, b"\x1b", 64);
+            let mut pty = Pty::new(&h.trace);
+            let mut output = Output::new(&h.trace);
+            let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until);
+            assert_pending(result, &mut transport);
+            assert_eq!(transport.drain_blocker(), Some("terminal reply pending"));
+            assert_eq!(transport.human_generation(), 0);
+            transport.backdate_reply_prefix(REPLY_PREFIX_BOUND);
+            let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until);
+            assert_eq!(
+                result.unwrap(),
+                InputDrain::Quiescent {
+                    human_generation: 1,
+                    output_seq: transport.snapshot().screen_seq,
+                }
+            );
+            assert_eq!(pty.bytes, b"\x1b");
+            let proof = transport
+                .take_input_drain()
+                .expect("quiet drain seals a proof");
+            assert_eq!(proof.human_generation(), 1);
         });
     }
 }

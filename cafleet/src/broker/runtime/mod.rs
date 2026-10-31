@@ -28,7 +28,9 @@ pub(crate) use inputs::{
     settle_lost_deferred, settle_lost_deferred_in_transaction, settle_zero_byte_deferred,
     unpublished_delivery_results, versioned_payload_digest,
 };
-pub(crate) use inputs::{find_input, get_input, record_input_state, settle_preview};
+pub(crate) use inputs::{
+    find_input, get_input, record_input_state, record_input_uncertain, settle_preview,
+};
 #[cfg(test)]
 pub(crate) use inputs::{reserve_input, settle_input};
 #[cfg(test)]

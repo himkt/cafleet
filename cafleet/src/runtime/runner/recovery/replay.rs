@@ -145,7 +145,7 @@ fn publish_delivery_results<S: OutboxIo>(
         })?;
         refresh(conn, result, until)?;
         let evidence = storage::evidence::run_metadata(&result.run, "runtime-recovery", 0)?;
-        for (event_seq, &(input_id, stage)) in sequences.zip(chunk) {
+        for (event_seq, &(input_id, stage, cause)) in sequences.zip(chunk) {
             let transition = ObservedTransition {
                 run_id: result.run.run_id,
                 event_seq,
@@ -155,7 +155,7 @@ fn publish_delivery_results<S: OutboxIo>(
                 observed_at: crate::time::now_stamp(),
                 evidence_json: evidence.clone(),
                 close_reason: None,
-                cause_json: Some(storage::input_delivery_result_cause(input_id, stage, None)),
+                cause_json: Some(storage::input_delivery_result_cause(input_id, stage, cause)),
             };
             outbox.append_recovery(conn, &transition, until)?;
             persist(conn, result, &transition, None, false, host, until)?;
@@ -468,12 +468,11 @@ mod tests {
             )
             .unwrap();
             assert_eq!(input.state, InputState::InProgress);
-            storage::record_input_state(
+            storage::record_input_uncertain(
                 &mut case.fixture.conn,
                 &owner,
                 input.input_id,
-                InputState::InProgress,
-                InputState::Uncertain,
+                storage::UncertainCause::WriteFailed,
             )
             .unwrap();
             let capability = AnswerCapability::fixture(
@@ -1639,6 +1638,122 @@ mod tests {
                         .is_empty()
                 );
             }
+        }
+    }
+
+    mod delivery_results {
+        use super::*;
+
+        fn uncertain_deferred(case: &Case, key: &str, cause: Option<&str>) -> i64 {
+            case.fixture
+                .conn
+                .execute(
+                    "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,deferred_at,defer_reason,delivery_method,uncertain_cause) VALUES(?1,?2,'prompt',?3,'uncertain',?4,?4,?4,'interaction_open','profile',?5)",
+                    rusqlite::params![case.fixture.run.run_id, key, "d".repeat(64), NOW, cause],
+                )
+                .unwrap();
+            case.fixture.conn.last_insert_rowid()
+        }
+
+        fn published_causes(case: &Case, input_id: i64) -> Vec<Option<Value>> {
+            case.fixture
+                .conn
+                .prepare(
+                    "SELECT json_extract(payload_json,'$.cause') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                )
+                .unwrap()
+                .query_map(
+                    rusqlite::params![case.fixture.run.run_id, input_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .unwrap()
+                .map(|text| text.unwrap().map(|text| serde_json::from_str(&text).unwrap()))
+                .collect()
+        }
+
+        #[test]
+        fn runner_recovery_replay_publishes_each_uncertain_result_with_its_receipt_cause() {
+            let mut case = Case::new();
+            case.seed(&[opening(&case.fixture.run, 1, 1)]);
+            let caused = uncertain_deferred(&case, "prompt:caused", Some("write_failed"));
+            let causeless = uncertain_deferred(&case, "prompt:causeless", None);
+            let report = case.recover(&mut new_host()).unwrap();
+            assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
+            assert_eq!(
+                published_causes(&case, caused),
+                vec![Some(json!({"kind":"write_failed"}))]
+            );
+            assert_eq!(published_causes(&case, causeless), vec![None]);
+            assert_eq!(events(&case).len(), report_events(&case));
+            case.recover(&mut new_host()).unwrap();
+            assert_eq!(published_causes(&case, caused).len(), 1, "published once");
+        }
+
+        #[test]
+        fn runner_recovery_replay_publishes_a_causeless_result_for_a_receipt_reconciled_before_publication()
+         {
+            for (disposition, status, stage) in [
+                ("submitted", "submitted", "submitted"),
+                ("not_submitted", "not_submitted", "zero_bytes"),
+            ] {
+                let mut case = Case::new();
+                case.seed(&[opening(&case.fixture.run, 1, 1)]);
+                let reconciled =
+                    uncertain_deferred(&case, "prompt:reconciled", Some("write_failed"));
+                case.fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET state='settled',disposition=?1,evidence_ref='audit:inspected' WHERE input_id=?2",
+                        rusqlite::params![disposition, reconciled],
+                    )
+                    .unwrap();
+                assert_eq!(
+                    storage::get_input(&case.fixture.conn, reconciled)
+                        .unwrap()
+                        .uncertain_cause,
+                    Some(storage::UncertainCause::WriteFailed),
+                    "{disposition}: reconciliation keeps the recorded cause"
+                );
+                let report = case.recover(&mut new_host()).unwrap();
+                assert!(
+                    matches!(report.outcome, RecoveryOutcome::Recovered),
+                    "{disposition}"
+                );
+                let published: Vec<(String, String, Option<String>)> = case
+                    .fixture
+                    .conn
+                    .prepare(
+                        "SELECT json_extract(payload_json,'$.delivery.status'),json_extract(payload_json,'$.stage'),json_extract(payload_json,'$.cause') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                    )
+                    .unwrap()
+                    .query_map(
+                        rusqlite::params![case.fixture.run.run_id, reconciled],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap();
+                assert_eq!(
+                    published,
+                    vec![(status.to_owned(), stage.to_owned(), None)],
+                    "{disposition}: a reconciled result publishes once without an uncertain cause"
+                );
+                assert_eq!(events(&case).len(), report_events(&case), "{disposition}");
+            }
+        }
+
+        fn report_events(case: &Case) -> usize {
+            usize::try_from(
+                case.fixture
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1",
+                        [case.fixture.run.run_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap(),
+            )
+            .unwrap()
         }
     }
 }

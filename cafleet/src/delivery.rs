@@ -1146,12 +1146,11 @@ mod tests {
                     InputState::Settled,
                 ] {
                     if state == InputState::Uncertain {
-                        storage::record_input_state(
+                        storage::record_input_uncertain(
                             &mut fixture.fixture.conn,
                             &run.owner(),
                             original.input_id,
-                            InputState::InProgress,
-                            state,
+                            storage::UncertainCause::WriteFailed,
                         )
                         .unwrap();
                     } else if state == InputState::Settled {

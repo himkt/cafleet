@@ -50,6 +50,12 @@ stored_enum!(InputState, "member_input_operations.state", {
 stored_enum!(InputDisposition, "member_input_operations.disposition", {
     Submitted => "submitted", NotSubmitted => "not_submitted", AbandonedUncertain => "abandoned_uncertain"
 });
+stored_enum!(UncertainCause, "member_input_operations.uncertain_cause", {
+    ManualInput => "manual_input", ManualAccountingFailed => "manual_accounting_failed",
+    InteractionCandidate => "interaction_candidate", InteractionOpen => "interaction_open",
+    ObserverUnavailable => "observer_unavailable", ShortWrite => "short_write",
+    WriteFailed => "write_failed", RunnerStopped => "runner_stopped"
+});
 
 impl RunStatus {
     pub(crate) fn terminal(self) -> bool {
@@ -242,6 +248,7 @@ pub(crate) struct InputOperation {
     pub(crate) deferred_at: Option<String>,
     pub(crate) defer_reason: Option<String>,
     pub(crate) payload_digest_version: i64,
+    pub(crate) uncertain_cause: Option<UncertainCause>,
 }
 
 stored_enum!(DeliveryStatus, "delivery.status", {

@@ -57,7 +57,7 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
         "created_at":row.created_at,"updated_at":row.updated_at,"message_id":row.message_id,
         "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response),
         "delivery":row.delivery().as_ref().map(crate::broker::runtime::DeliveryProjection::to_json),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
-        "payload_digest_version":row.payload_digest_version}})
+        "payload_digest_version":row.payload_digest_version,"uncertain_cause":row.uncertain_cause.map(|cause| cause.as_str())}})
 }
 
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
@@ -408,6 +408,7 @@ mod tests {
                     "deferred_at",
                     "defer_reason",
                     "payload_digest_version",
+                    "uncertain_cause",
                 ],
             );
             let audit = &output["input"]["permission_response"];
@@ -730,6 +731,7 @@ mod tests {
                     "deferred_at",
                     "defer_reason",
                     "payload_digest_version",
+                    "uncertain_cause",
                 ],
             );
             assert_eq!(output["input"]["permission_response"], Value::Null);
@@ -832,6 +834,48 @@ mod tests {
             assert!(
                 storage::get_input(&fixture.conn, queued_with_method.input_id).is_err(),
                 "a queued receipt with a selected method fails validation"
+            );
+        }
+
+        #[test]
+        fn input_presentation_reports_the_recorded_uncertain_cause_and_keeps_the_text_line() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let caused = fixture.input(&owner, "prompt:caused", InputKind::Prompt, None);
+            let caused = storage::record_input_uncertain(
+                &mut fixture.conn,
+                &owner,
+                caused.input_id,
+                UncertainCause::ManualInput,
+            )
+            .unwrap();
+            let output = crate::presentation::input_operation(&caused);
+            assert_eq!(output["input"]["uncertain_cause"], "manual_input");
+            assert_eq!(
+                crate::output::format_input_operation(&caused),
+                format!(
+                    "Input: {} run={} kind=prompt state=uncertain disposition=- message=-",
+                    caused.input_id, owner.run_id
+                )
+            );
+            let settled = storage::settle_input(
+                &mut fixture.conn,
+                &owner,
+                caused.input_id,
+                InputState::Uncertain,
+                InputDisposition::AbandonedUncertain,
+                "audit:inspected",
+            )
+            .unwrap();
+            assert_eq!(
+                crate::presentation::input_operation(&settled)["input"]["uncertain_cause"],
+                "manual_input",
+                "reconciliation keeps the recorded cause"
+            );
+            let plain = fixture.input(&owner, "prompt:plain", InputKind::Prompt, None);
+            assert_eq!(
+                crate::presentation::input_operation(&plain)["input"]["uncertain_cause"],
+                Value::Null
             );
         }
     }
