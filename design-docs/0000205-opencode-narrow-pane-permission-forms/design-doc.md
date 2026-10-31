@@ -1,7 +1,7 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
 **Status**: Approved
-**Progress**: 20/22 tasks complete
+**Progress**: 21/22 tasks complete
 **Last Updated**: 2026-11-01
 
 ## Overview
@@ -413,12 +413,33 @@ The executing fleet's installed CLI and its `cafleet_v8.db` stay untouched durin
 
 Each case sizes the member pane before the probe runs:
 
-1. Create the member with a spawn prompt that tells it to wait for the Director's next message before running `<case folder>/permission-probe <allow|deny>`.
-2. Resize the member pane to 57 columns. On tmux, run `tmux resize-pane -t <member pane> -x 57`. On herdr, read `herdr pane layout --pane <member pane>`, then run `herdr pane resize --pane <director pane> --direction right --amount <delta>`, with the signed ratio delta computed from the tab width so that the member's `rect.width` becomes 57.
-3. Confirm the width: tmux `tmux display-message -p -t <member pane> '#{pane_width}'` prints `57`; on herdr, the member's `rect.width` in a fresh `herdr pane layout` read is 57. Repeat step 2 until it holds.
+1. Create the member with a spawn prompt that tells it to wait for the Director's next message before running `<case folder>/permission-probe <allow|deny>`. On herdr, size the member column first (step 2) so the member starts at its final width.
+2. Size the member pane to a 57-column PTY. On tmux, run `tmux resize-pane -t <member pane> -x 57` after creation. On herdr, before creation, run `herdr pane resize --pane <director pane> --direction right --amount <delta>` with the signed ratio delta computed from the tab width so that the new member column's `rect.width` is 59; herdr's `rect.width` includes the two border cells.
+3. Confirm the width: tmux `tmux display-message -p -t <member pane> '#{pane_width}'` prints `57`; on herdr, the member's `rect.width` in a fresh `herdr pane layout` read is 59. Repeat step 2 until it holds.
 4. Send the Director message that starts the probe, then follow the case.
 
 Record the confirmed width output, the CAFleet commit, versions, latency and every unobserved case; a missing case fails acceptance.
+
+#### Acceptance evidence (2026-11-01, macOS)
+
+Release build of `08710230` (`mise //cafleet:build`, run as `cafleet/target/release/cafleet`) against the private database `/private/tmp/c205/a.db` (v9 baseline, head 1); OpenCode 2.1.4 (`opencode v2.1.4`, mini) with model `opencode-go/glm-5.3`, `--permission-mode cafleet-ask`, presets from a private `OPENCODE_CONFIG_DIR`; tmux 3.6a on a dedicated server (`-L c205`, 230x50) and herdr 0.9.5 in a dedicated tab. Members ran with `--event-evidence redacted` so that `operation` and `operation_rows` are reported; the first tmux allow run used the default `metadata` policy, which reports both as null. The case folders sit under the task folder, so the probe command wraps across three rows of the 57-column command box.
+
+| Case | Multiplexer | Width confirmation | Observed outcome |
+|---|---|---|---|
+| Director-auto allow | tmux | `#{pane_width}` printed `57` | `interaction_opened` rule `opencode-shell-permission` (split layout), `operation_rows` 3, operation `…/design-docs/\n0000205-opencode-narrow-pane-permission-forms/.\nverifier/cases/tmux-allow-2/permission-probe allow`, choices `Allow once`/`Reject`, the multi-row review instruction, evidence keys without a profile identifier; `permission respond` `accepted`/`submitted`; `allow.executed` created; `interaction_closed` `not_visible` (rule `opencode-idle-composer`); the member reported the result |
+| Director-auto deny | tmux | `#{pane_width}` printed `57` | The same opening with `operation_rows` 3; three-stage deny `accepted`/`submitted`; no marker; `Step interrupted` and the idle composer; `interaction_closed` `not_visible` |
+| Director-auto allow | herdr | Member `rect.width` 59 in a fresh `herdr pane layout` (57-column PTY) | The same split-layout opening with `operation_rows` 3; `accepted`/`submitted`; `allow.executed` created; `interaction_closed` `not_visible`; the member reported the result |
+| Director-auto deny | herdr | Member `rect.width` 59 (57-column PTY) | The same opening; three-stage deny `accepted`/`submitted`; no marker; `Step interrupted` and the idle composer; `interaction_closed` `not_visible` |
+
+Detection-to-inbox latency (event `observed_at` to inbox `created_at`) was 14–26 ms. `permission inspect` reported `answer_capability` `tested`, `supported_decisions` `allow,deny` and `answer_rule_id` null (allow and deny use different answer rules); each response audit recorded its actual rule (`opencode-shell-allow-once` for allow). Deleted members produced `runner_exited` (native exit 130).
+
+Observed outside the required cases:
+
+- herdr, member pane resized after spawn (the step-2 procedure): before the resize the composer was clean; immediately after `herdr pane resize`, OpenCode printed `[Keymap] Error in event match resolver … Invalid key name: key name cannot be empty` with a colour-reply fragment (`4;76;rgb:5f5f/d7d7/0000…`) in its composer, the form region filled with the error text and no `interaction_opened` fired. Reproduced twice; tmux resizes were unaffected. The herdr cases above therefore sized the column before spawn, so the member started at its final width.
+- herdr `rect.width` includes the pane border: `rect.width` 57 gave a 55-column PTY, which renders the compact layout.
+- herdr, 57-column PTY with a command needing four rows (`…/cases/herdr-allow-2/permission-probe allow`): the box showed three rows and a `▀` thumb with `allow` hidden; no `interaction_opened` fired within 180 s and input stayed held, matching § Clipped commands.
+- `opencode-go/glm-5.3` sometimes started the probe in its first turn, before the Director's start message; the form was still detected and answered through `permission respond`.
+- A setup with a private `OPENCODE_CONFIG_DIR` installs presets there but writes the skills to the fixed `~/.config/opencode/skills`.
 
 ### Limits
 
@@ -429,6 +450,7 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 | A form taller than `max_rows` or the pane | No request matches; the form is answered manually |
 | A command row that begins with whitespace after the continuation margin, such as an indented line of a multi-line command | The anchored capture fails, no request matches, and the form is answered manually |
 | A resize while the form is open | A new request generation, and a new episode when the command's row breaks move; an earlier token stops validating |
+| Resizing a running OpenCode member pane on herdr | OpenCode can receive a fragment of a terminal colour reply as keys (`Invalid key name`), after which no request matches; size the herdr pane before creating the member. The runner's handling of that reply is a separate change. |
 | Upgrading from `cafleet_v8.db` | Fleets, messages and runtime history stay in the v8 file and are not shown by the new CLI |
 
 ### Documentation targets
@@ -499,7 +521,7 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 ### Step 8: Accept natively
 
-- [ ] Run Director-auto allow and deny at 57 columns on tmux and on herdr with the release build and a private database, sizing and confirming the member pane per § Acceptance and recording the evidence there. <!-- completed: -->
+- [x] Run Director-auto allow and deny at 57 columns on tmux and on herdr with the release build and a private database, sizing and confirming the member pane per § Acceptance and recording the evidence there. <!-- completed: 2026-11-01T03:47 -->
 
 ### Step 9: Validate the shipping surfaces
 
