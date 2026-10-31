@@ -1,7 +1,7 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
 **Status**: Approved
-**Progress**: 0/22 tasks complete
+**Progress**: 2/22 tasks complete
 **Last Updated**: 2026-11-01
 
 ## Overview
@@ -385,8 +385,8 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 ### Step 1: Document the narrow layout and extract options
 
-- [ ] Document `margin_rows` and `row_trailer` in the `SPEC.md` operation-extract contract, and the split layout, the supported-width rule and the limits in `SPEC.md` §6.7 and §6.9; `W_split`, `W_min` and the pinned patterns follow in Step 4. <!-- completed: -->
-- [ ] Update the opencode deny note in `skills/cafleet/reference/coding-agents.md`. <!-- completed: -->
+- [x] Document `margin_rows` and `row_trailer` in the `SPEC.md` operation-extract contract, and the split layout, the supported-width rule and the limits in `SPEC.md` §6.7 and §6.9; `W_split`, `W_min` and the pinned patterns follow in Step 4. <!-- completed: 2026-11-01T00:47 -->
+- [x] Update the opencode deny note in `skills/cafleet/reference/coding-agents.md`. <!-- completed: 2026-11-01T00:47 -->
 
 ### Step 2: Document the identifier removal and the v9 format
 
@@ -416,7 +416,7 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 - [ ] Rewrite the tests that set or assert a profile identifier to the identifier-free shapes in § Output and record contracts, and add the shape, respond-binding and identifier-free invariant tests in § Tests. <!-- completed: -->
 - [ ] Remove `profile_version` from `bundled.json` and every surface in § Profile identity after removal, replace the three runtime invariants with their identifier-free forms, and remove the identifier comparison in § Respond-time binding. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
+- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck` once Step 7's v9 baseline has landed, because the v8 head keeps `answer_profile_version` NOT NULL. <!-- completed: -->
 
 ### Step 7: Start the v9 format family
 

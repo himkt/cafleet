@@ -1825,7 +1825,8 @@ runtime detects it, notifies the Director with an `interaction_opened` event,
 and the Director answers it through `cafleet permission respond`; the member
 continues from the result OpenCode returns. The OpenCode 2.1.4 profile's answer
 plans and continuation behavior are in §6.9 *Bundled profiles and native screen
-fixtures*. A command that wraps in the form and a reason the user wants to give
+fixtures*. A form in a pane too narrow to show its choices on one row, a
+command clipped by the form's command box and a reason the user wants to give
 are answered manually on the native surface. Under `cafleet`, a permission popup in an opencode pane is a
 regression escape: the Director captures the pane and escalates, and the
 allowlist is extended only by operator decision.
@@ -2083,7 +2084,7 @@ Profile `opencode-2.1.4-cafleet-ask-1`, with `min_version` `2.1.4`, applies to O
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | Rule `opencode-shell-permission`: the shell permission form on the primary screen, from its `△ Permission required` heading to its `⇆ select  enter confirm  esc reject` control line within 24 rows, with the single-line `$ ` operation, the focused choice and the `Allow once` and `Reject` choices |
+| Detection | `tested` | Rule `opencode-shell-permission`: the shell permission form on the primary screen, in its wide or split layout, from its `△ Permission required` heading to its `⇆ select  enter confirm  esc reject` control line, with the `$ ` operation over one or more displayed rows, the focused choice and the `Allow once` and `Reject` choices |
 | Allow answer | `tested` | One gated stage: byte `0d` (Enter) while `Allow once` is focused, as `allow-once` |
 | Deny answer | `tested` | Three gated stages: `68` (`h`) while `Allow once` is focused, `0d` while `Reject` is focused, then `0d` on the empty rejection-reason dialog, as `deny-once` |
 | Empty-composer observation | `tested` | The idle `┃` composer line with the terminal cursor immediately after the prefix; a verified non-interaction boundary |
@@ -2092,7 +2093,23 @@ Profile `opencode-2.1.4-cafleet-ask-1`, with `min_version` `2.1.4`, applies to O
 
 The form offers no focus-independent key: `h`/`l` cycle the focus, Enter selects the focused option and Escape rejects. Focus starts on `Allow once`, and `h` from there wraps to the last option, `Reject`, in both the three-option (`Allow once` / `Always allow` / `Reject`) and the two-option layout. The form marks the focused option by cell background only, so the `focus` matcher uses `focus_style: "background"` (§ Focused-choice resolution). In the captures the focused label sits on rgb(250,178,131) and the other labels on the row background rgb(30,30,30), but the rule compares backgrounds rather than these colours. `Always allow`, which approves persistently, has no choice entry or answer plan, so a focus on it satisfies no gate.
 
-The choices share the control line's row. `mini` hides the cursor while a form or dialog shows, and its recorded position varies, including the pending-wrap position on the row below the form. Both OpenCode permission rules therefore match with cursor `any` and rely on their heading and control-line anchors.
+`mini` lays out the form itself, so its row breaks are hard rows rather than terminal soft wraps, and the layout depends on the pane width:
+
+| Layout | Choice row | Control line | Detection |
+|---|---|---|---|
+| Wide | `   Allow once   Always allow   Reject`, followed on the same row by the control line | Shares the choice row | Supported |
+| Split | The three choices on one row | `  ⇆ select  enter confirm  esc reject` on its own row below the choice row | Supported |
+| Broken | The choices wrap or truncate | Any | Unsupported: no request matches and the form is answered manually |
+
+`W_split` is the widest pane width that uses the split layout, and `W_min` is the narrowest width that still renders the three choices on one row; the supported range is every width at or above `W_min`. The two-option layout (`Allow once` / `Reject`) follows the same rule. One request rule matches both supported layouts. Its `focus` matcher matches the choice row with or without the trailing control line, and its `deny` matcher accepts a choice row that ends at `Reject`. Its region matcher `controls` requires either the wide choice-and-control row to end the region, or the split control row to end it with the choice row as the last non-blank row above it. The split control row carries no label and takes no part in focus resolution.
+
+The focus matcher's full capture is part of the request identity, and the two layouts capture different text. A resize across `W_split` therefore starts a new request generation, as a focus change does: an earlier request token stops validating, and a response in flight fails before its next byte, or ends `uncertain` once a byte was written.
+
+The operation matcher is region-scoped. It captures from after `  $ ` on the first command row through each following row that starts with the continuation margin and then a non-space character, and its extraction removes the continuation margin from the following rows and the scrollbar glyph `█` beside the command box from every row (§ Operation extraction). The capture is anchored at both ends: after the last captured row, only rows that are blank or hold only `█` may precede the choice row, and any other row fails the match. The `operation` evidence reports the displayed rows joined with `\n` and `operation_rows` equals the displayed row count; a one-row command extracts the same text with `operation_rows` 1. The semantic fingerprint keeps the row breaks, so a resize that moves a row break closes the episode and opens a new one.
+
+A command taller than the form's command box can scroll inside the box and hide rows. A clipped command matches no request, so the Director never approves a command it cannot read in full; a form taller than the rule's `max_rows` or the pane matches no request either.
+
+`mini` hides the cursor while a form or dialog shows, and its recorded position varies, including the pending-wrap position on the row below the form. Both OpenCode permission rules therefore match with cursor `any` and rely on their heading and control-line anchors.
 
 | Stage | Bytes | Gate | Native effect |
 |---|---|---|---|
@@ -2101,7 +2118,7 @@ The choices share the control line's row. `mini` hides the cursor while a form o
 | Deny 2 | `0d` | Focus `deny-once` | Selects `Reject`; OpenCode opens the rejection-reason dialog and keeps the request pending |
 | Deny 3 | `0d` | Screen `opencode-reject-reason` | Submits an empty reason; OpenCode rejects the request without running it |
 
-The continuation rule `opencode-reject-reason` (§ Continuation screens) continues `opencode-shell-permission` after `deny-once`. It matches the `△ Reject permission` dialog with its `Tell OpenCode what to do differently` prompt and the `enter confirm  esc cancel` control line. It recognises an empty reason by the textarea span on the control-line row equalling the placeholder `Tell OpenCode what to do differently` exactly; typed text replaces the placeholder and fails the gate. CAFleet never types a reason and never sends Escape to the dialog.
+The continuation rule `opencode-reject-reason` (§ Continuation screens) continues `opencode-shell-permission` after `deny-once`. It matches the `△ Reject permission` dialog with its `Tell OpenCode what to do differently` prompt and the `enter confirm  esc cancel` control line. In the wide layout the textarea shares the control line's row; in the split layout the control line moves to its own row and the textarea row reads the same text as the prompt row above it. One region matcher `empty_reason` requires the prompt row, then the placeholder `Tell OpenCode what to do differently` either sharing the control-line row or on the last non-blank row above a control-only row, so it recognises an empty reason in both layouts. Typed text replaces the placeholder and fails the gate. CAFleet never types a reason and never sends Escape to the dialog.
 
 The native captures showed this decision evidence:
 
@@ -2112,9 +2129,15 @@ The native captures showed this decision evidence:
 
 These lines are decision evidence for the Director's continuation check, not bundled rules. Because an answered form or dialog leaves no transcript text, the false-positive guard rests on the live-region anchors. The fixtures are native 36x120 captures with only row 35 masked; the visible default public model name and context-usage counter are neither account, plan nor path text. The OpenCode limits apply as follows:
 
-- A command that wraps in the form yields no detection, so the request is answered manually.
-- Non-shell permissions never ask under the `cafleet-ask` preset.
-- A typed reason identical to the placeholder cannot be told from an empty textarea, but such typing is human input, which fails the deny stage-3 gate inside a response.
+| Limit | Behavior |
+|---|---|
+| A pane narrower than `W_min` | The choices break, no request matches, input stays held and the form is answered manually |
+| A command clipped by the command box | No request matches; the form is answered manually |
+| A form taller than `max_rows` or the pane | No request matches; the form is answered manually |
+| A command row that begins with whitespace after the continuation margin, such as an indented line of a multi-line command | The anchored capture fails, no request matches, and the form is answered manually |
+| A resize while the form is open | A new request generation, and a new episode when the command's row breaks move; an earlier token stops validating |
+| A non-shell permission | Never asks under the `cafleet-ask` preset |
+| A typed reason identical to the placeholder | Cannot be told from an empty textarea; such typing is human input, which fails the deny stage-3 gate inside a response |
 
 A native screen fixture records one captured terminal screen with exactly these fields, of which only `cell_backgrounds` is optional:
 
@@ -2146,6 +2169,27 @@ The bundled catalog fails to load unless each bundled fixture satisfies all of t
 A synthetic fixture, an undeclared alteration or a digest mismatch therefore rejects the bundled catalog. Synthetic fixtures remain available to explicitly selected test catalogs.
 
 A rule's cursor condition treats a pending-wrap cursor as standing on the last cell of its row, both in fixtures and on live screens. A region spanning the full width therefore counts a cursor at column `cols` on one of its rows as inside the region.
+
+##### Operation extraction
+
+A rule's `extract.operation` names the matcher and the named capture that supply the operation, plus optional row-processing keys:
+
+| Key | Values | Behavior |
+|---|---|---|
+| `matcher_id`, `capture` | A declared matcher and one of its named captures | Required; the captured text, whose rows are separated by `\n` when the matcher is region-scoped |
+| `row_margin` | A non-empty single-row string | The margin removed from the rows `margin_rows` selects; a selected row without it fails the match |
+| `margin_rows` | `all` (default) or `continuation` | `all` selects every captured row. `continuation` exempts the first row, whose prefix the matcher already consumed. |
+| `row_trailer` | A non-empty single-row literal without leading or trailing whitespace | A captured row that ends with the trailer, ignoring trailing whitespace, loses the trailer and the whitespace before it; every other row is unchanged at this step |
+
+Catalog loading fails for an unknown key, an empty or multi-row `row_margin`, a `margin_rows` value other than `all` or `continuation`, `margin_rows` declared without `row_margin`, and an empty, multi-row or whitespace-bearing `row_trailer`.
+
+A request or question rule processes each captured row in this order:
+
+1. Remove the trailer when `row_trailer` is declared.
+2. Remove `row_margin` from each row `margin_rows` selects.
+3. Remove trailing whitespace.
+
+The operation evidence joins the processed rows with `\n`, and `operation_rows` is their count. The margin-then-trim order keeps a whitespace-only margined row, such as a blank line inside a multi-line Claude command, a match. A rule without `row_margin` and `row_trailer` reports the captured text unchanged. An annotation rule reports its captured rows as displayed, continuation margins included, and uses `row_margin` only to normalize its fingerprint (§ Annotation detection).
 
 ##### Executable native plans
 
