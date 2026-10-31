@@ -1,6 +1,6 @@
 # Member capture keeps CRLF-terminated rows
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 7/7 tasks complete
 **Last Updated**: 2026-10-31
 
@@ -10,11 +10,11 @@ On herdr, plain-mode `cafleet member capture` blanks every row except an untermi
 
 ## Success Criteria
 
-- [ ] Plain-mode `member capture` on herdr returns every windowed row's text; a CRLF terminator is a line ending, not an overwrite.
-- [ ] CR-redraw defrag is unchanged for interior carriage returns: `one\rONE` → `ONE`, `a\rb\rc` → `c`, `\x1b[2Kspinner\rdone` → `done`.
-- [ ] `--ansi` output stays the byte-for-byte windowed raw capture (still CRLF on herdr), with `content_sha256` hashing those bytes.
-- [ ] `SPEC.md` § "`strip_ansi` regex and CR-defrag" states the trailing-CR rule.
-- [ ] `mise //cafleet:test` and `mise //cafleet:lint` pass with the new test cases in `render.rs`, `herdr.rs` and `capture.rs`.
+- [x] Plain-mode `member capture` on herdr returns every windowed row's text; a CRLF terminator is a line ending, not an overwrite.
+- [x] CR-redraw defrag is unchanged for interior carriage returns: `one\rONE` → `ONE`, `a\rb\rc` → `c`, `\x1b[2Kspinner\rdone` → `done`.
+- [x] `--ansi` output stays the byte-for-byte windowed raw capture (still CRLF on herdr), with `content_sha256` hashing those bytes.
+- [x] `SPEC.md` § "`strip_ansi` regex and CR-defrag" states the trailing-CR rule.
+- [x] `mise //cafleet:test` and `mise //cafleet:lint` pass with the new test cases in `render.rs`, `herdr.rs` and `capture.rs`.
 
 ---
 
@@ -128,3 +128,4 @@ The herdr test pins the windowing half of the herdr path and passes before the f
 |------|---------|
 | 2026-10-31 | Initial draft |
 | 2026-10-31 | Approved after Reviewer approval and user authorization |
+| 2026-10-31 | Implemented and reviewed; Status set to Complete |
