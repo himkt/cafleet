@@ -105,6 +105,8 @@ The two-option layout (`Allow once` / `Reject`) follows the same rule because th
 
 The `focus` matcher still resolves the focused choice from cell backgrounds. Its labels come from the line-scoped `allow` and `deny` matchers, as catalog validation requires. The split control row carries no label, so it takes no part in focus resolution.
 
+The row background is the background that covers more than half of the choice line's cells; when no background does, no choice resolves and no gate holds. A label is focused when every cell of it differs from the row background. This replaces the shipped left-edge rule, which reads column 0: the compact layout has no left margin, its highlight covers the focused label plus one cell on each side, and at 36 columns a focused `Reject` reaches the last column, so neither edge carries the row background. The rule still compares backgrounds rather than theme colours, and only `focus_style: "background"` matchers, all OpenCode, use it. `SPEC.md` § Focused-choice resolution states it in Step 5.
+
 The focus matcher's full capture is part of the request identity. The layouts capture different text, so a resize across `W_split` or `W_compact` starts a new request generation, as a focus change does today. An earlier request token stops validating, and a response in flight fails before its next byte (`uncertain` once a byte was written). This is the shipped behavior; a synthetic test covers it.
 
 ### Compact rules
