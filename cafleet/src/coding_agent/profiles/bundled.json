@@ -447,6 +447,76 @@
       "cols": 200,
       "source_ref": "native/claude-2.1.308-auto-tip-padded-question-1.json",
       "sha256": "e6b51216c0268f087f1e5e099b3e3a79db81c60b608af2a1397f3ff6afafd6b3"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.309-read-outside-permission-1.json",
+      "sha256": "57140e177adee172772af135f17d0f8d140fc9e39d01a22050cb7f1b19b1a1d0"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-long-path-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.309-read-outside-long-path-1.json",
+      "sha256": "c4a0b8274155486efb55b22bf477e9ca8c7d91ca6ac26dbba166358b3e195a0d"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.309-read-outside-allow-pre-stage-1.json",
+      "sha256": "fc09e94381e9800c976d71cf4b89d2b063610ba85d1bbc38999e02451e548a8f"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.309-read-outside-deny-pre-stage-1.json",
+      "sha256": "4448a5d1892e5b1aebe26b5857d30ffd3b20aa3e807c797744dd467d77113766"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-allow-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.309-read-outside-allow-continuation-1.json",
+      "sha256": "438876805e07fb5f850093e1cb7d7f21409aaa8629e7b3d1ca8cca300cd9e3da"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-deny-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.309-read-outside-deny-continuation-1.json",
+      "sha256": "b5f5526aa001aa77a1c2cbfc89015b70d8707f252a0bb391469841b94eefea52"
+    },
+    {
+      "id": "claude-2.1.309-edit-outside-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.309-edit-outside-permission-1.json",
+      "sha256": "4cfaa138afcbf83b9ea77a6a2746548e0b5e812a01bc84ad93a6939021603932"
     }
   ],
   "profiles": [

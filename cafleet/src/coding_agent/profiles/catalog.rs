@@ -945,6 +945,13 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = bundled![
     "opencode-2.1.4-exec-typed-literal-1",
     "opencode-2.1.4-exec-post-submit-1",
     "claude-2.1.308-auto-tip-padded-question-1",
+    "claude-2.1.309-read-outside-permission-1",
+    "claude-2.1.309-read-outside-long-path-1",
+    "claude-2.1.309-read-outside-allow-pre-stage-1",
+    "claude-2.1.309-read-outside-deny-pre-stage-1",
+    "claude-2.1.309-read-outside-allow-continuation-1",
+    "claude-2.1.309-read-outside-deny-continuation-1",
+    "claude-2.1.309-edit-outside-permission-1",
 ];
 
 fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {
