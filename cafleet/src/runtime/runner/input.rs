@@ -4760,7 +4760,6 @@ mod tests {
             fn staged_fallback_for_unknown_coverage_uses_the_missing_plan_reason() {
                 let profile = HostProfile {
                     backend: CodingAgent::Claude,
-                    profile_version: None,
                     ..HostProfile::metadata()
                 };
                 with_profile_host(catalog(), fallback_program(b""), profile, |host| {
@@ -7282,7 +7281,6 @@ mod tests {
             pub(super) const LITERAL: &str = "ordinary fixture λ";
             pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
             pub(super) const VERSION: &str = "0.0.1-synthetic";
-            const PROFILE: &str = "synthetic-profile-1";
 
             pub(in crate::runtime::runner::input) fn catalog_definition() -> serde_json::Value {
                 let mut value =
@@ -7381,7 +7379,6 @@ mod tests {
                 pub(crate) event_evidence: &'static str,
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'static str,
-                pub(crate) profile_version: Option<&'static str>,
                 pub(crate) size: TerminalSize,
                 pub(crate) screen: Vec<u8>,
             }
@@ -7395,7 +7392,6 @@ mod tests {
                         event_evidence,
                         backend: crate::coding_agent::CodingAgent::Codex,
                         native_version: VERSION,
-                        profile_version: Some(PROFILE),
                         size: TerminalSize { rows: 24, cols: 80 },
                         screen: SCREEN.to_vec(),
                     }
@@ -7598,7 +7594,6 @@ mod tests {
             pub(in crate::runtime::runner::input) struct RunSelection {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'static str,
-                pub(crate) profile_version: Option<&'static str>,
                 pub(crate) event_evidence: &'static str,
             }
 
@@ -7644,7 +7639,7 @@ mod tests {
                         let selected =
                             catalog.capabilities(selection.backend, Some(selection.native_version));
                         let coverage = selected.detection;
-                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,coverage=?4,event_evidence=?5 WHERE run_id=?6",rusqlite::params![selection.backend.name(),selection.native_version,selection.profile_version,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
+                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,coverage=?3,event_evidence=?4 WHERE run_id=?5",rusqlite::params![selection.backend.name(),selection.native_version,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
                         fixture
                             .conn
                             .execute(
@@ -7792,11 +7787,13 @@ mod tests {
                         event_evidence,
                         backend,
                         native_version,
-                        profile_version,
                         size,
                         screen,
                     } = profile;
                     let catalog = catalog();
+                    let composer_selected =
+                        catalog.capabilities(backend, Some(native_version)).composer
+                            == storage::Coverage::Tested;
                     let RunnerFixture {
                         mut fixture,
                         artifacts,
@@ -7812,7 +7809,6 @@ mod tests {
                         Some(RunSelection {
                             backend,
                             native_version,
-                            profile_version,
                             event_evidence,
                         }),
                         size,
@@ -7872,7 +7868,7 @@ mod tests {
                         child,
                     };
                     host.drain();
-                    if profile_version.is_some() {
+                    if composer_selected {
                         assert!(matches!(
                             host.controller.health(&host.writer).eligibility,
                             InputEligibility::ComposerEmpty
@@ -8184,7 +8180,6 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Claude,
                     native_version,
-                    profile_version: Some("claude-2.1.302-auto-1"),
                     size: crate::runtime::runner::TerminalSize {
                         rows: 36,
                         cols: 120,
@@ -8210,7 +8205,6 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Opencode,
                     native_version: "2.1.4",
-                    profile_version: Some("opencode-2.1.4-cafleet-ask-1"),
                     size: crate::runtime::runner::TerminalSize {
                         rows: 36,
                         cols: 120,
@@ -8363,7 +8357,7 @@ mod tests {
                 moved.observed.output_seq += 1;
                 assert!(current.same_request(&moved), "output_seq stays unbound");
                 type Mutation<'a> = (&'a str, Box<dyn Fn(&mut CurrentRequest) + 'a>);
-                let mutations: [Mutation; 16] = [
+                let mutations: [Mutation; 15] = [
                     (
                         "request_generation",
                         Box::new(|r| r.observed.request_generation += 1),
@@ -8383,10 +8377,6 @@ mod tests {
                     (
                         "native_version",
                         Box::new(|r| r.observed.native_version.push('x')),
-                    ),
-                    (
-                        "detector_profile_version",
-                        Box::new(|r| r.observed.detector_profile_version.push('x')),
                     ),
                     (
                         "request_rule_id",
@@ -8488,10 +8478,6 @@ mod tests {
                 );
                 assert_eq!(value.visibility, Visibility::Visible);
                 assert_eq!(value.answer_capability, Coverage::Tested);
-                assert_eq!(
-                    value.answer_profile_version.as_deref(),
-                    Some("synthetic-profile-1")
-                );
                 assert!(
                     value.answer_rule_id.is_none(),
                     "distinct Allow/Deny rules have no unique common rule"
@@ -8919,7 +8905,6 @@ mod tests {
                 (&m.mode_evidence_ref, &m.decision_evidence_ref),
                 (&input.mode_evidence_ref, &input.decision_evidence_ref)
             );
-            assert_eq!(m.answer_profile_version, "synthetic-profile-1");
             assert_eq!(m.answer_rule_id, rule);
             assert_eq!(
                 receipt
@@ -10822,7 +10807,6 @@ mod tests {
                         decision_source: input.decision_source,
                         mode_evidence_ref: input.mode_evidence_ref.clone(),
                         decision_evidence_ref: input.decision_evidence_ref.clone(),
-                        answer_profile_version: cap.profile_version().into(),
                         answer_rule_id: cap.answer_rule_id().into(),
                     },
                 };

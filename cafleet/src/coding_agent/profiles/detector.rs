@@ -1198,7 +1198,7 @@ mod tests {
             .unwrap();
         assert_eq!(reused.kind, observation.kind);
         assert_eq!(reused.rule_id, observation.rule_id);
-        assert_eq!(reused.profile_version, observation.profile_version);
+        assert!(reused.fingerprint == observation.fingerprint);
         assert_eq!(
             reused.raw_evidence["operation"],
             observation.raw_evidence["operation"]
@@ -1208,7 +1208,8 @@ mod tests {
             .observe(&screen)
             .unwrap();
         assert_eq!(below.kind, ObservationKind::Unknown);
-        assert_eq!(below.profile_version, None);
+        assert_eq!(below.match_evidence, MatchEvidence::Absent);
+        assert!(below.fingerprint.is_none());
         let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
             .observe(&screen)
             .unwrap();
@@ -1285,10 +1286,7 @@ mod tests {
             "{operation}"
         );
         assert_eq!(observation.rule_id, "claude-bash-permission");
-        assert_eq!(
-            observation.profile_version.as_deref(),
-            Some("claude-2.1.302-auto-1")
-        );
+        assert_eq!(observation.raw_evidence["native_version"], CLAUDE_VERSION);
         assert_eq!(observation.raw_evidence["operation"], operation);
         assert_eq!(
             observation.raw_evidence["operation_rows"],
@@ -1843,13 +1841,14 @@ mod tests {
             .unwrap();
         assert_eq!(reused.kind, observation.kind);
         assert_eq!(reused.rule_id, observation.rule_id);
-        assert_eq!(reused.profile_version, observation.profile_version);
+        assert!(reused.fingerprint == observation.fingerprint);
         assert_eq!(reused.raw_evidence["native_version"], "0.164.0");
         let below = Detector::new(&catalog, CodingAgent::Codex, Some("0.162.0"))
             .observe(&screen)
             .unwrap();
         assert_eq!(below.kind, ObservationKind::Unknown);
-        assert_eq!(below.profile_version, None);
+        assert_eq!(below.match_evidence, MatchEvidence::Absent);
+        assert!(below.fingerprint.is_none());
         let unprobed = Detector::new(&catalog, CodingAgent::Codex, None)
             .observe(&screen)
             .unwrap();
@@ -2490,7 +2489,7 @@ mod tests {
         let screen = terminal(&lines("write disposable.txt"), 80, false).snapshot();
         let value = observation(&definitions(), &screen);
         assert_permission(&value);
-        assert_eq!(value.profile_version.as_deref(), Some(PROFILE));
+        assert_eq!(value.raw_evidence["native_version"], VERSION);
         assert_eq!(value.rule_id, RULE);
         assert_eq!(value.output_seq, screen.screen_seq);
         let region = value.matched_region.unwrap();
@@ -2648,15 +2647,112 @@ mod tests {
         let changed = permission("write another-disposable.txt");
         assert!(value.fingerprint != changed.fingerprint);
         let mut definition = definitions();
-        definition["profiles"][0]["profile_version"] = json!("synthetic-profile-2");
+        definition["profiles"][0]["min_version"] = json!("0.0.0-synthetic");
         assert!(
             value.fingerprint
-                != observation(
+                == observation(
                     &definition,
                     &terminal(&lines("write disposable.txt"), 80, false).snapshot()
                 )
-                .fingerprint
+                .fingerprint,
+            "the selected profile's boundary is not part of the request identity"
         );
+    }
+
+    #[test]
+    fn runtime_detector_semantic_fingerprint_is_backend_class_operation_and_choices() {
+        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
+        let screen = terminal(&lines("write disposable.txt"), 80, false).snapshot();
+        let at_boundary = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
+            .observe(&screen)
+            .unwrap();
+        let later = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.2-synthetic"))
+            .observe(&screen)
+            .unwrap();
+        assert_permission(&later);
+        assert_eq!(later.raw_evidence["native_version"], "0.0.2-synthetic");
+        assert!(
+            at_boundary.fingerprint == later.fingerprint,
+            "a later native version on the same profile keeps the request identity"
+        );
+        let changed = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.2-synthetic"))
+            .observe(&terminal(&lines("write another-disposable.txt"), 80, false).snapshot())
+            .unwrap();
+        assert!(at_boundary.fingerprint != changed.fingerprint);
+    }
+
+    #[test]
+    fn runtime_detector_fingerprints_carry_no_profile_element_across_profile_boundaries() {
+        let catalog = ProfileCatalog::from_definitions(&thresholds(&[
+            ("first", "1.0.0"),
+            ("second", "2.0.0"),
+        ]))
+        .unwrap();
+        let mut rows = vec![
+            "Live footer".to_owned(),
+            "Refused: write outside.txt".to_owned(),
+            "Refusal end".to_owned(),
+        ];
+        rows.extend(lines("write disposable.txt"));
+        let screen = terminal(&rows, 80, false).snapshot();
+        let [first, second] = ["1.4.2", "3.1.4"].map(|run| {
+            Detector::new(&catalog, CodingAgent::Codex, Some(run))
+                .observe(&screen)
+                .unwrap()
+        });
+        for observed in [&first, &second] {
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert!(observed.fingerprint.is_some());
+            assert_eq!(observed.annotations.len(), 1);
+        }
+        assert!(
+            first.fingerprint == second.fingerprint,
+            "the permission request keeps its identity across profile boundaries"
+        );
+        assert!(
+            first.annotations[0].fingerprint == second.annotations[0].fingerprint,
+            "the annotation keeps its identity across profile boundaries"
+        );
+    }
+
+    #[test]
+    fn runtime_detector_raw_evidence_names_the_backend_and_native_version_only() {
+        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
+        let screen = terminal(&lines("write disposable.txt"), 80, false).snapshot();
+        for version in [Some(VERSION), None] {
+            let observed = Detector::new(&catalog, CodingAgent::Codex, version)
+                .observe(&screen)
+                .unwrap();
+            let keys = observed
+                .raw_evidence
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(
+                keys,
+                std::collections::BTreeSet::from([
+                    "backend",
+                    "choices",
+                    "excerpt",
+                    "native_request_id",
+                    "native_version",
+                    "operation",
+                    "operation_rows",
+                    "rule_id",
+                    "screen_seq",
+                    "sensitive",
+                    "truncated",
+                ]),
+                "{version:?}"
+            );
+            assert_eq!(observed.raw_evidence["backend"], "codex");
+            assert_eq!(observed.raw_evidence["native_version"], json!(version));
+        }
     }
 
     #[test]
@@ -2812,7 +2908,6 @@ mod tests {
             .unwrap();
         assert!(matches!(value.kind, ObservationKind::Unknown));
         assert!(matches!(value.match_evidence, MatchEvidence::Absent));
-        assert!(value.profile_version.is_none());
         assert!(value.fingerprint.is_none());
     }
 

@@ -398,10 +398,9 @@ mod tests {
         assert_eq!(first["evidence_policy"], "metadata");
     }
 
-    const EVIDENCE_KEYS: [&str; 13] = [
+    const EVIDENCE_KEYS: [&str; 12] = [
         "backend",
         "native_version",
-        "profile_version",
         "rule_id",
         "screen_seq",
         "truncated",

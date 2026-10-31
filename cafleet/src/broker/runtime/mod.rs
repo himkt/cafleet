@@ -510,7 +510,6 @@ pub(crate) mod test_support {
                 ]),
                 event_evidence: EventEvidence::Metadata,
                 native_version: Some("0.163.0".into()),
-                profile_version: None,
                 coverage: Coverage::Unknown,
                 owner_pid: i64::from(std::process::id()),
                 owner_start_identity: "fixture-start-identity".into(),
@@ -578,7 +577,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn raw_evidence(text: &str) -> Value {
         json!({
-            "backend":"codex","native_version":"0.163.0","profile_version":"fixture-v1",
+            "backend":"codex","native_version":"0.163.0",
             "rule_id":"native-tool-permission","screen_seq":120,
             "operation":format!("run {text}"),"operation_rows":1,"choices":[format!("allow {text}"),"deny"],
             "native_request_id":format!("native-{text}"),"excerpt":format!("request {text}"),
@@ -701,7 +700,6 @@ pub(crate) mod test_support {
         AnswerCapability::fixture(
             CodingAgent::Codex,
             "0.163.0",
-            "answer-fixture-v1",
             "native-tool-permission",
             "single-request-choice",
             decision,
@@ -713,7 +711,12 @@ pub(crate) mod test_support {
     impl ResponseFixture {
         pub(crate) fn new() -> Self {
             let mut base = Fixture::new();
-            base.conn.execute("UPDATE member_runs SET coverage='tested',profile_version='fixture-v1' WHERE run_id=?1",[base.run.run_id]).unwrap();
+            base.conn
+                .execute(
+                    "UPDATE member_runs SET coverage='tested' WHERE run_id=?1",
+                    [base.run.run_id],
+                )
+                .unwrap();
             let owner = base.activate();
             let event = base.open(&owner);
             let request = NewPermissionResponse {
@@ -729,7 +732,6 @@ pub(crate) mod test_support {
                     decision_source: DecisionSource::DirectorAuto,
                     mode_evidence_ref: "fixture:host-mode".into(),
                     decision_evidence_ref: "fixture:decision".into(),
-                    answer_profile_version: "answer-fixture-v1".into(),
                     answer_rule_id: "single-request-choice".into(),
                 },
             };
@@ -812,7 +814,7 @@ pub(crate) mod test_support {
         use super::*;
         pub(crate) fn annotation_raw(rule: &str, operation: Option<&str>) -> Value {
             json!({
-                "backend":"codex","native_version":"0.163.0","profile_version":"fixture-v1",
+                "backend":"codex","native_version":"0.163.0",
                 "rule_id":rule,"screen_seq":140,
                 "operation":operation,"operation_rows":operation.map(|text| text.split('\n').count()),
                 "choices":null,"native_request_id":null,

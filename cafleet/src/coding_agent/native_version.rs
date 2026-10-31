@@ -334,8 +334,11 @@ mod tests {
                     let identity = launched(backend, version, &catalog);
                     assert_eq!(identity.native_version.as_deref(), Some(version));
                     assert_eq!(
-                        identity.profile_version.as_deref(),
-                        Some(boundary.profile_version),
+                        catalog
+                            .capabilities(backend, Some(version))
+                            .min_version
+                            .as_deref(),
+                        Some(boundary.min_version),
                         "{backend:?} {version}"
                     );
                     assert_eq!(identity.coverage, Coverage::Tested, "{backend:?} {version}");
@@ -393,7 +396,6 @@ mod tests {
             )
             .unwrap_or_else(|error| panic!("a failed probe still launches: {}", error.message()));
             assert_eq!(failed.native_version, None);
-            assert_eq!(failed.profile_version, None);
             assert_eq!(failed.coverage, Coverage::Unknown);
             assert_eq!(
                 failed.warning.as_deref(),
@@ -410,7 +412,6 @@ mod tests {
             for backend in [CodingAgent::Claude, CodingAgent::Opencode] {
                 let identity = launched(backend, "2.1.302", &catalog);
                 assert_eq!(identity.native_version.as_deref(), Some("2.1.302"));
-                assert_eq!(identity.profile_version, None);
                 assert_eq!(identity.coverage, Coverage::Unknown);
                 assert_eq!(identity.warning, None);
             }

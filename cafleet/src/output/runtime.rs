@@ -155,3 +155,33 @@ pub(crate) fn format_permission_inspection(
     }
     text
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::runtime::runner::input_protocol_test_support::inspection;
+
+    #[test]
+    fn permission_inspection_text_names_the_token_sequence_and_answer_rule() {
+        let token = "a".repeat(64);
+        assert_eq!(
+            super::format_permission_inspection(&inspection()),
+            format!(
+                "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=allow,deny\nRequest: token={token} output_seq=5 rule=opencode-shell-allow-enter\nMissing evidence: arguments,cwd"
+            )
+        );
+    }
+
+    #[test]
+    fn permission_inspection_text_marks_an_unsupported_request_with_dashes_and_its_reason() {
+        let mut unsupported = inspection();
+        unsupported.answer_rule_id = None;
+        unsupported.request_token = None;
+        unsupported.supported_decisions = Vec::new();
+        unsupported.capability_reason = Some("native profile unavailable".into());
+        unsupported.missing_evidence = Vec::new();
+        assert_eq!(
+            super::format_permission_inspection(&unsupported),
+            "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=-\nRequest: token=- output_seq=5 rule=-\nCapability: native profile unavailable"
+        );
+    }
+}

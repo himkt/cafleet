@@ -2286,7 +2286,7 @@ pub(crate) mod native_capture {
                     ProcessIdentity::current().unwrap(),
                 )
                 .unwrap();
-                fixture.conn.execute("UPDATE member_runs SET runner_pid=owner_pid,runner_start_identity=owner_start_identity,native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='tested',event_evidence=?1 WHERE run_id=?2",rusqlite::params![policy["mode"].as_str().unwrap(),fixture.run.run_id]).unwrap();
+                fixture.conn.execute("UPDATE member_runs SET runner_pid=owner_pid,runner_start_identity=owner_start_identity,native_version='0.0.1-synthetic',coverage='tested',event_evidence=?1 WHERE run_id=?2",rusqlite::params![policy["mode"].as_str().unwrap(),fixture.run.run_id]).unwrap();
                 fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 let executable = fixture._dir.path().join("owned-synthetic-process");
                 private_write(&executable,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; *) printf '%s\\n' \"$line\" ;; esac; done\n");
@@ -2512,6 +2512,28 @@ pub(crate) mod native_capture {
         use crate::broker::runtime::{self as storage, *};
         use crate::digest::sha256_hex;
         use crate::runtime::runner::service::test_support::*;
+
+        #[test]
+        fn capture_run_identity_compares_backend_and_native_version_without_a_profile_label() {
+            let fixture = crate::runtime::runner::test_support::Fixture::new();
+            let seed = fixture.run.clone();
+            assert!(same_capture_run(&seed, &seed.clone()));
+            let mut later = seed.clone();
+            later.native_version = Some("0.164.0".into());
+            assert!(!same_capture_run(&seed, &later));
+            let mut unprobed = seed.clone();
+            unprobed.native_version = None;
+            assert!(!same_capture_run(&seed, &unprobed));
+            let mut other = seed.clone();
+            other.backend = "claude".into();
+            assert!(!same_capture_run(&seed, &other));
+            let mut recovered = seed.clone();
+            recovered.coverage = Coverage::Tested;
+            assert!(
+                same_capture_run(&seed, &recovered),
+                "coverage follows the selection that backend and native version already determine"
+            );
+        }
 
         mod collection {
             use super::*;
@@ -3333,9 +3355,8 @@ pub(crate) mod native_capture {
                         .fixture
                         .conn
                         .execute(
-                            "UPDATE member_runs SET profile_version=?1,coverage=?2 WHERE run_id=?3",
+                            "UPDATE member_runs SET coverage=?1 WHERE run_id=?2",
                             rusqlite::params![
-                                selected.profile_version,
                                 selected.detection.as_str(),
                                 fixture.fixture.run.run_id
                             ],
@@ -3486,8 +3507,8 @@ pub(crate) mod native_capture {
                     let result = value(&lease);
                     assert_eq!(result["source"]["producer"]["catalog_origin"], origin);
                     assert_eq!(
-                        result["source"]["profile_version"],
-                        json!(fixture.fixture.run.profile_version)
+                        result["source"]["native_version"],
+                        json!(fixture.fixture.run.native_version)
                     );
                     assert_eq!(
                         result["source"]["permission_argv"],
@@ -8119,7 +8140,7 @@ pub(crate) mod test_support {
                 .unwrap()
                 .into(),
         ));
-        fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+        fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         let script = fixture._dir.path().join("owned-observation-process");
         private_write(&script,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\n/usr/bin/touch \"$CAFLEET_REVIEW_NATIVE_START\"\nprintf 'review-native-ready\\n'\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; form*) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write %s.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: ' \"$line\" ;; transient) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write transient.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: \\033[2J\\033[Hworking' ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done\n");
@@ -8226,15 +8247,20 @@ mod tests {
             let reused = crate::coding_agent::ProfileCatalog::bundled()
                 .unwrap()
                 .capabilities(crate::coding_agent::CodingAgent::Codex, Some("0.164.0"));
-            let reused_profile = reused.profile_version.unwrap();
-            for (profile, expected) in [(Some(reused_profile), 0), (None, 1)] {
-                let selected = profile.clone();
+            assert_eq!(reused.min_version.as_deref(), Some("0.163.0"));
+            assert_eq!(reused.detection, storage::Coverage::Tested);
+            for (native, coverage, expected) in [
+                (Some("0.164.0"), storage::Coverage::Tested, 0),
+                (None, storage::Coverage::Unknown, 1),
+            ] {
                 let mut fixture = ServiceFixture::configured(false, move |fixture, _| {
-                    if let Some(selected) = &selected {
-                        fixture.conn.execute("UPDATE member_runs SET native_version='0.164.0',profile_version=?1,coverage='tested' WHERE run_id=?2",rusqlite::params![selected,fixture.run.run_id]).unwrap();
-                    } else {
-                        fixture.conn.execute("UPDATE member_runs SET native_version=NULL,profile_version=NULL,coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
-                    }
+                    fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_runs SET native_version=?1,coverage=?2 WHERE run_id=?3",
+                            rusqlite::params![native, coverage.as_str(), fixture.run.run_id],
+                        )
+                        .unwrap();
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 });
                 fixture.start_running();
@@ -8244,11 +8270,12 @@ mod tests {
                 }
                 fixture.finish();
                 let count:i64=fixture.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='coverage_unknown'",[fixture.fixture.run.run_id],|row|row.get(0)).unwrap();
-                assert_eq!(count, expected, "{profile:?}");
+                assert_eq!(count, expected, "{native:?}");
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                assert_eq!(run.profile_version, profile, "{profile:?}");
-                if profile.is_none() {
+                assert_eq!(run.native_version.as_deref(), native, "{native:?}");
+                assert_eq!(run.coverage, coverage, "{native:?}");
+                if native.is_none() {
                     assert_eq!(run.resolved_mode, "approve-for-me");
                     assert!(run.effective_policy_json.is_none());
                 }
@@ -8325,6 +8352,64 @@ mod tests {
             }
         }
     }
+    mod observer_initialization {
+        use super::super::*;
+        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
+        use crate::runtime::runner::test_support::Fixture;
+        use std::sync::Arc;
+
+        fn initialize(native_version: Option<&str>, coverage: storage::Coverage) -> Result<()> {
+            let mut fixture = Fixture::new();
+            let lock = Arc::new(
+                RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                    .unwrap()
+                    .unwrap(),
+            );
+            lock.transfer_to_runner(
+                &mut fixture.conn,
+                &fixture.run.owner(),
+                ProcessIdentity::current().unwrap(),
+            )
+            .unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET native_version=?1,coverage=?2 WHERE run_id=?3",
+                    rusqlite::params![native_version, coverage.as_str(), fixture.run.run_id],
+                )
+                .unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let initial =
+                storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let catalog =
+                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+            ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata(), initial)
+                .map(|_| ())
+        }
+
+        #[test]
+        fn observer_initialization_requires_the_selected_detection_coverage() {
+            for (native_version, coverage, accepted) in [
+                (Some("0.0.1-synthetic"), storage::Coverage::Tested, true),
+                (Some("0.0.2-synthetic"), storage::Coverage::Tested, true),
+                (Some("0.0.1-synthetic"), storage::Coverage::Unknown, false),
+                (Some("0.0.0-below"), storage::Coverage::Tested, false),
+                (Some("0.0.0-below"), storage::Coverage::Unknown, true),
+                (None, storage::Coverage::Tested, false),
+                (None, storage::Coverage::Unknown, true),
+            ] {
+                let result = initialize(native_version, coverage);
+                assert_eq!(
+                    result.is_ok(),
+                    accepted,
+                    "{native_version:?} {coverage:?}: {:?}",
+                    result.err().map(|error| error.message().to_string())
+                );
+            }
+        }
+    }
+
     mod inspection_tests {
         use super::super::*;
         use crate::runtime::runner::test_support::Fixture;
@@ -8354,7 +8439,7 @@ mod tests {
             .unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog =
                 ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();

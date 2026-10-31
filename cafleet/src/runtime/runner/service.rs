@@ -2093,7 +2093,7 @@ pub(crate) mod test_support {
             } else {
                 "unknown"
             };
-            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage=?2 WHERE run_id=?1",rusqlite::params![fixture.run.run_id, coverage]).unwrap();
+            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',coverage=?2 WHERE run_id=?1",rusqlite::params![fixture.run.run_id, coverage]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let config = fixture._dir.path().join("service-input-native.json");
             private_write(
@@ -2634,12 +2634,8 @@ pub(crate) mod test_support {
             fixture
                 .conn
                 .execute(
-                    "UPDATE member_runs SET profile_version=?1,coverage=?2 WHERE run_id=?3",
-                    rusqlite::params![
-                        bundled.profile_version,
-                        bundled.detection.as_str(),
-                        fixture.run.run_id
-                    ],
+                    "UPDATE member_runs SET coverage=?1 WHERE run_id=?2",
+                    rusqlite::params![bundled.detection.as_str(), fixture.run.run_id],
                 )
                 .unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();

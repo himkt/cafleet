@@ -1012,7 +1012,13 @@ mod tests {
         impl RefreshFixture {
             fn new() -> Self {
                 let mut fixture = Fixture::new();
-                fixture.conn.execute("UPDATE member_runs SET profile_version='fixture-v1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET coverage='tested' WHERE run_id=?1",
+                        [fixture.run.run_id],
+                    )
+                    .unwrap();
                 let owner = fixture.activate();
                 let event = fixture.open(&owner);
                 let update = InteractionEvidenceUpdate {
@@ -1227,7 +1233,6 @@ mod tests {
             );
             spec.runtime_path.push_str("-other");
             spec.launch_nonce = "b".repeat(64);
-            spec.profile_version = Some("fixture-v1".into());
             spec.coverage = Coverage::Tested;
             let other = storage::create_run(&mut fixture.fixture.conn, &spec).unwrap();
             fixture.fixture.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2 WHERE run_id=?1",[other.run_id]).unwrap();
@@ -1250,9 +1255,9 @@ mod tests {
         }
 
         #[test]
-        fn runtime_refresh_validates_evidence_sequence_digest_policy_backend_and_profile() {
+        fn runtime_refresh_validates_evidence_sequence_digest_policy_backend_and_native_version() {
             for field in [
-                "shape", "sequence", "digest", "policy", "backend", "profile", "native", "raw",
+                "shape", "sequence", "digest", "policy", "backend", "native", "raw",
             ] {
                 let mut fixture = RefreshFixture::new();
                 match field {
@@ -1278,7 +1283,6 @@ mod tests {
                         raw["screen_seq"] = json!(121);
                         let key = match other {
                             "backend" => "backend",
-                            "profile" => "profile_version",
                             _ => "native_version",
                         };
                         raw[key] = json!("other");

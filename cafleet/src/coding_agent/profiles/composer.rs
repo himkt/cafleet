@@ -122,7 +122,7 @@ pub(crate) mod test_support {
     use super::*;
     use crate::broker::runtime::Coverage;
     use crate::coding_agent::profiles::catalog::test_support::{
-        FIXTURE, PROFILE, VERSION, simple_definition,
+        FIXTURE, VERSION, simple_definition,
     };
     use serde_json::{Value, json};
     pub(crate) const EMPTY: &str = "synthetic-composer_empty";
@@ -192,7 +192,6 @@ pub(crate) mod test_support {
     pub(crate) fn metadata(plan: &ComposerPlan, fixtures: &[String]) {
         assert_eq!(plan.backend(), CodingAgent::Codex);
         assert_eq!(plan.native_version(), VERSION);
-        assert_eq!(plan.profile_version(), PROFILE);
         assert_eq!(plan.rule_ids(), &[DRAFT.to_owned(), EMPTY.to_owned()]);
         assert_eq!(plan.fixture_ids(), fixtures);
     }

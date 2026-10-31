@@ -1,7 +1,7 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
 **Status**: Approved
-**Progress**: 5/22 tasks complete
+**Progress**: 6/22 tasks complete
 **Last Updated**: 2026-11-01
 
 ## Overview
@@ -241,7 +241,7 @@ Three runtime invariants compare the identifier today. Each keeps an identifier-
 | Invariant | Today | After removal |
 |---|---|---|
 | Observer initialization (`observation.rs`, `observer profile/coverage mismatch`) | The catalog's selection for the run's backend and native version has the run's `profile_version` and its detection coverage equals the run's `coverage` | The selection's detection coverage equals the run's `coverage`. A `tested` coverage therefore still requires a selected profile, and a probe failure (null native version) still requires `unknown`. |
-| Inspection reply (`input_client.rs`) | The reply's and its evidence's `profile_version` equal the run's; a `tested` reply's `answer_profile_version` equals the run's `profile_version` | The reply's and its evidence's backend and native version equal the run's. A `tested` reply requires a non-null run `native_version`, a non-null, non-blank `answer_rule_id` of at most 256 bytes, a token, a non-empty decision set, a visible permission request and no capability reason. |
+| Inspection reply (`input_client.rs`) | The reply's and its evidence's `profile_version` equal the run's; a `tested` reply's `answer_profile_version` equals the run's `profile_version` | The reply's and its evidence's backend and native version equal the run's. A `tested` reply requires a non-null run `native_version`, a token, a non-empty decision set, a visible permission request and no capability reason. Its `answer_rule_id` stays nullable, as shipped: the runner reports it only when every supported decision shares one rule, and a present value is non-blank and at most 256 bytes. |
 | Capture-run identity (`same_capture_run`, `observation.rs`) | Run fields including `profile_version` are equal | The same fields without `profile_version`; backend and native version already determine the selection |
 
 ### Respond-time binding
@@ -414,7 +414,7 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 ### Step 6: Remove the profile identifier
 
-- [ ] Rewrite the tests that set or assert a profile identifier to the identifier-free shapes in § Output and record contracts, and add the shape, respond-binding and identifier-free invariant tests in § Tests. <!-- completed: -->
+- [x] Rewrite the tests that set or assert a profile identifier to the identifier-free shapes in § Output and record contracts, and add the shape, respond-binding and identifier-free invariant tests in § Tests. <!-- completed: 2026-11-01T01:13 -->
 - [ ] Remove `profile_version` from `bundled.json` and every surface in § Profile identity after removal, replace the three runtime invariants with their identifier-free forms, and remove the identifier comparison in § Respond-time binding. <!-- completed: -->
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck` once Step 7's v9 baseline has landed, because the v8 head keeps `answer_profile_version` NOT NULL. <!-- completed: -->
 

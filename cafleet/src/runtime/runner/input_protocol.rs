@@ -961,6 +961,26 @@ pub(in crate::runtime::runner) fn encode_input_reply(
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use serde_json::json;
+
+    /// A tested, visible permission inspection with every identity field set.
+    pub(crate) fn inspection() -> PermissionInspection {
+        serde_json::from_value(json!({
+            "event_id":11,"message_id":14,"member_id":3,"fleet_id":2,"director_member_id":1,
+            "run_id":7,"owner_epoch":2,"interaction_id":12,"episode_seq":1,
+            "classification":"permission_request","visibility":"visible",
+            "backend":"opencode","native_version":"2.1.4","answer_rule_id":"opencode-shell-allow-enter",
+            "answer_capability":"tested","capability_reason":null,"supported_decisions":["allow","deny"],
+            "request_token":"a".repeat(64),"output_seq":5,"evidence":{"rule_id":"opencode-shell-permission"},
+            "missing_evidence":["arguments","cwd"]
+        }))
+        .expect("the fixture inspection matches the reply shape")
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::runtime::runner::test_support::Fixture;
@@ -1042,14 +1062,14 @@ mod tests {
         fn inspection(&self, supported: bool) -> Value {
             let run = &self.fixture.run;
             let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({
-                "backend":"codex","native_version":run.native_version,"profile_version":null,"rule_id":"fixture-wire-evidence","screen_seq":2,
+                "backend":"codex","native_version":run.native_version,"rule_id":"fixture-wire-evidence","screen_seq":2,
                 "operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
             })).unwrap();
             json!({"event_id":11,"message_id":14,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,
                 "run_id":run.run_id,"owner_epoch":run.owner_epoch,"interaction_id":12,"episode_seq":1,
                 "classification":if supported {json!("permission_request")} else {Value::Null},"visibility":if supported {"visible"} else {"unknown"},
-                "backend":"codex","native_version":run.native_version,"profile_version":if supported {json!("fixture-detector")} else {Value::Null},
-                "answer_profile_version":if supported {json!("fixture-answer")} else {Value::Null},"answer_rule_id":if supported {json!("fixture-rule")} else {Value::Null},
+                "backend":"codex","native_version":run.native_version,
+                "answer_rule_id":if supported {json!("fixture-rule")} else {Value::Null},
                 "answer_capability":if supported {"tested"} else {"unknown"},"capability_reason":if supported {Value::Null} else {json!("fixture unsupported")},
                 "supported_decisions":if supported {json!(["allow","deny"])} else {json!([])},"request_token":if supported {json!("a".repeat(64))} else {Value::Null},
                 "output_seq":2,"evidence":evidence,
@@ -1616,14 +1636,6 @@ mod tests {
             assert_eq!(actual.backend, "codex");
             assert_eq!(actual.native_version, case.fixture.run.native_version);
             assert_eq!(
-                actual.profile_version.as_deref(),
-                payload["profile_version"].as_str()
-            );
-            assert_eq!(
-                actual.answer_profile_version.as_deref(),
-                payload["answer_profile_version"].as_str()
-            );
-            assert_eq!(
                 actual.answer_rule_id.as_deref(),
                 payload["answer_rule_id"].as_str()
             );
@@ -2036,7 +2048,7 @@ mod tests {
             let encoded = encode_input_reply(Ok(&actual)).unwrap();
             assert_frame(&encoded, &expected);
             if request["kind"] == "permission_inspect" {
-                assert_eq!(result_keys(&encoded, "request"),"event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,profile_version,answer_profile_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence".split(',').collect::<Vec<_>>());
+                assert_eq!(result_keys(&encoded, "request"),"event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence".split(',').collect::<Vec<_>>());
             }
             if request["kind"] == "permission_respond" {
                 assert_eq!(result_keys(&encoded, "response"),"status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,decision_source,stage,output_seq,reason".split(',').collect::<Vec<_>>());
