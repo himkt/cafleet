@@ -1,6 +1,6 @@
 # Backend Evaluation Requirements by Role
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 17/17 tasks complete
 **Last Updated**: 2026-10-31
 
@@ -273,3 +273,4 @@ The CLI is unchanged: `fleet create --coding-agent` still accepts every backend.
 | 2026-10-31 | Initial draft |
 | 2026-10-31 | Review round 1: version probe moved to Bundled support; final texts and shipped-sentence dispositions per home; per-requirement-group version rule; Member evidence cites live runner acceptance (OpenCode herdr-only, judged sufficient); flip check restates the bar; ineligible-Director behavior; concepts rewording; Placement split into per-file edit lists |
 | 2026-10-31 | Approved by the user |
+| 2026-10-31 | Implemented; implementation review moved the replay-fixture requirement in `docs/docs/contributing.md` from the Permission detection row to the prose beneath the evidence table so it covers every claimed capability |
