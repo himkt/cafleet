@@ -22,7 +22,7 @@ impl Settings {
                         "HOME is not set; cannot derive the default database path".to_string(),
                     )
                 })?;
-                format!("sqlite:///{home}/.local/share/cafleet/cafleet_v8.db")
+                format!("sqlite:///{home}/.local/share/cafleet/cafleet_v9.db")
             }
         };
         let max_text_len = match lookup("CAFLEET_MAX_TEXT_LEN") {

@@ -74,7 +74,7 @@ pub(crate) enum MatchEvidence {
 pub(crate) struct SemanticFingerprint {
     parts: Vec<SemanticPart>,
 }
-type SemanticPart = (String, String, String, Option<String>, Vec<String>);
+type SemanticPart = (String, String, Option<String>, Vec<String>);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScreenRegion {
@@ -86,7 +86,6 @@ pub(crate) struct ScreenRegion {
 #[derive(Clone)]
 pub(crate) struct ScreenObservation {
     pub(crate) kind: ObservationKind,
-    pub(crate) profile_version: Option<String>,
     pub(crate) rule_id: String,
     pub(crate) match_evidence: MatchEvidence,
     pub(crate) matched_region: Option<ScreenRegion>,
@@ -102,7 +101,6 @@ pub(crate) struct ScreenObservation {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct AnnotationFingerprint {
     backend: String,
-    profile_version: String,
     rule_id: String,
     shown: String,
 }
@@ -576,7 +574,6 @@ impl Detector {
                     kind: matched.rule.kind,
                     fingerprint: AnnotationFingerprint {
                         backend: self.backend.name().into(),
-                        profile_version: profile.version.clone(),
                         rule_id: matched.rule.id.clone(),
                         shown: normalized_shown(
                             matched.operation.as_deref().unwrap_or(&matched.excerpt),
@@ -597,14 +594,12 @@ impl Detector {
         blocks
     }
     pub(crate) fn observe(&self, screen: &ScreenSnapshot) -> Result<ScreenObservation> {
-        let profile_version = self.profile.as_ref().map(|p| p.version.clone());
         let mut observation = ScreenObservation {
             kind: ObservationKind::Unknown,
-            profile_version: profile_version.clone(),
             rule_id: "unmatched-screen".into(),
             match_evidence: MatchEvidence::Absent,
             matched_region: None,
-            raw_evidence: json!({"backend":self.backend.name(),"native_version":self.version,"profile_version":profile_version,"rule_id":"unmatched-screen","screen_seq":screen.screen_seq,"operation":null,"operation_rows":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}),
+            raw_evidence: json!({"backend":self.backend.name(),"native_version":self.version,"rule_id":"unmatched-screen","screen_seq":screen.screen_seq,"operation":null,"operation_rows":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}),
             fingerprint: None,
             verified_noninteraction: false,
             native_correlation: None,
@@ -653,7 +648,6 @@ impl Detector {
             .map(|m| {
                 (
                     self.backend.name().into(),
-                    profile.version.clone(),
                     m.rule.kind.name().into(),
                     m.operation.clone(),
                     m.choices.clone(),

@@ -116,7 +116,6 @@ fn validate_metadata(metadata: &PermissionResponseMetadata) -> Result<(), Caflee
             "nonblank reference of 1-2048 UTF-8 bytes without controls required",
         )?;
     }
-    nonblank(&metadata.answer_profile_version, "answer_profile_version")?;
     nonblank(&metadata.answer_rule_id, "answer_rule_id")
 }
 
@@ -130,7 +129,7 @@ pub(crate) fn permission_response_digest(
         "interaction_id":metadata.interaction_id,"event_id":metadata.event_id,"director_member_id":metadata.director_member_id,
         "request_token":metadata.request_token,"decision":metadata.decision,"director_mode":metadata.director_mode,
         "decision_source":metadata.decision_source,"mode_evidence_ref":metadata.mode_evidence_ref,
-        "decision_evidence_ref":metadata.decision_evidence_ref,"answer_profile_version":metadata.answer_profile_version,"answer_rule_id":metadata.answer_rule_id});
+        "decision_evidence_ref":metadata.decision_evidence_ref,"answer_rule_id":metadata.answer_rule_id});
     Ok(crate::digest::sha256_hex(
         crate::digest::canonical_json(&object).as_bytes(),
     ))
@@ -150,7 +149,6 @@ fn map_response(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionResponseR
             decision_source: row.get("decision_source")?,
             mode_evidence_ref: row.get("mode_evidence_ref")?,
             decision_evidence_ref: row.get("decision_evidence_ref")?,
-            answer_profile_version: row.get("answer_profile_version")?,
             answer_rule_id: row.get("answer_rule_id")?,
         },
         decided_at: row.get("decided_at")?,
@@ -362,7 +360,7 @@ pub(crate) fn reserve_permission_response(
         let now = now_stamp();
         tx.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,?2,'permission_response',?3,'in_progress',?4,?4)",params![run.run_id,request.operation_key,digest,now])?;
         let input_id = tx.last_insert_rowid();
-        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.decision.as_str(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_profile_version,metadata.answer_rule_id,now])?;
+        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.decision.as_str(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_rule_id,now])?;
         tx.execute(
             "INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)",
             params![metadata.interaction_id, input_id],
@@ -449,7 +447,6 @@ fn validate_current_capability(
     require(
         cap.backend().name() == run.backend
             && Some(cap.native_version()) == run.native_version.as_deref()
-            && cap.profile_version() == metadata.answer_profile_version
             && cap.answer_rule_id() == metadata.answer_rule_id
             && cap.request_rule_id()
                 == event.event.payload_json["evidence"]["rule_id"]

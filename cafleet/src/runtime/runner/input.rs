@@ -733,7 +733,6 @@ impl InputCoordinator {
                     self.current_request = None;
                 }
                 let mut supported_decisions = Vec::new();
-                let mut answer_profile_version = None;
                 let mut answer_rule_id = None;
                 let mut request_token = None;
                 let blocker = self.permission_blocker(observation);
@@ -775,7 +774,6 @@ impl InputCoordinator {
                             .as_ref()
                             .expect("matched current request retained");
                         let first = current.observed.answer_matches[0].plan().capability();
-                        answer_profile_version = Some(first.profile_version().to_owned());
                         if current.observed.answer_matches.iter().all(|m| {
                             m.plan().capability().answer_rule_id() == first.answer_rule_id()
                         }) {
@@ -807,8 +805,6 @@ impl InputCoordinator {
                         visibility: observation.status().visibility,
                         backend: self.run.backend.clone(),
                         native_version: self.run.native_version.clone(),
-                        profile_version: self.run.profile_version.clone(),
-                        answer_profile_version,
                         answer_rule_id,
                         answer_capability: if request_token.is_some() {
                             storage::Coverage::Tested
@@ -1283,7 +1279,6 @@ impl InputCoordinator {
                         decision_source: input.decision_source,
                         mode_evidence_ref: input.mode_evidence_ref.clone(),
                         decision_evidence_ref: input.decision_evidence_ref.clone(),
-                        answer_profile_version: cap.profile_version().into(),
                         answer_rule_id: cap.answer_rule_id().into(),
                     },
                 },
@@ -1442,8 +1437,7 @@ impl InputCoordinator {
             stable_run_identity(&current) == stable_run_identity(&self.run)
                 && current.status == RunStatus::Running
                 && current.owner_kind == OwnerKind::Runner
-                && current.native_version == self.run.native_version
-                && current.profile_version == self.run.profile_version,
+                && current.native_version == self.run.native_version,
             "input coordinator current run changed",
         )?;
         ensure(
@@ -2097,7 +2091,6 @@ impl InputCoordinator {
                 ensure(
                     plan.backend() == backend
                         && plan.native_version() == native
-                        && Some(plan.profile_version()) == self.run.profile_version.as_deref()
                         && !plan.rule_ids().is_empty()
                         && !plan.fixture_ids().is_empty(),
                     "composer plan provenance changed",
@@ -2229,7 +2222,6 @@ impl InputCoordinator {
         )?;
         if stable_run_identity(&current) != stable_run_identity(&self.run)
             || current.native_version != self.run.native_version
-            || current.profile_version != self.run.profile_version
         {
             return Ok(Some("target_changed"));
         }

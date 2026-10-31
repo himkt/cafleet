@@ -34,7 +34,6 @@ pub(super) struct ComposerSubmission {
 pub(crate) struct ComposerPlan {
     backend: CodingAgent,
     native_version: String,
-    profile_version: String,
     rule_ids: Vec<String>,
     fixture_ids: Vec<String>,
     operation: ComposerOperation,
@@ -49,10 +48,6 @@ impl ComposerPlan {
 
     pub(crate) fn native_version(&self) -> &str {
         &self.native_version
-    }
-
-    pub(crate) fn profile_version(&self) -> &str {
-        &self.profile_version
     }
 
     pub(crate) fn rule_ids(&self) -> &[String] {
@@ -107,7 +102,6 @@ impl ProfileCatalog {
         Some(ComposerPlan {
             backend,
             native_version: native_version.into(),
-            profile_version: profile.version.clone(),
             rule_ids: observation.rules.clone(),
             fixture_ids: submission.fixture_ids.clone(),
             operation,

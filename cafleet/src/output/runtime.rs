@@ -123,7 +123,7 @@ pub(crate) fn format_permission_inspection(
         .join(",");
     let visibility = row.visibility.as_str();
     let mut text = format!(
-        "Permission: interaction={} event={} member={} run={} epoch={} visibility={} answers={}\nRequest: token={} output_seq={} profile={} rule={}",
+        "Permission: interaction={} event={} member={} run={} epoch={} visibility={} answers={}\nRequest: token={} output_seq={} rule={}",
         row.interaction_id,
         row.event_id,
         row.member_id,
@@ -137,7 +137,6 @@ pub(crate) fn format_permission_inspection(
         },
         row.request_token.as_deref().unwrap_or("-"),
         row.output_seq,
-        row.answer_profile_version.as_deref().unwrap_or("-"),
         row.answer_rule_id.as_deref().unwrap_or("-")
     );
     if let Some(reason) = &row.capability_reason {

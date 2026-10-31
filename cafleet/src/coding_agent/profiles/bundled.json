@@ -523,7 +523,6 @@
     {
       "backend": "claude",
       "min_version": "2.1.302",
-      "profile_version": "claude-2.1.302-auto-1",
       "rules": [
         {
           "id": "claude-bash-permission",
@@ -968,7 +967,6 @@
     {
       "backend": "codex",
       "min_version": "0.163.0",
-      "profile_version": "codex-0.163.0-approve-for-me-1",
       "rules": [
         {
           "id": "codex-exec-approval",
@@ -1151,7 +1149,6 @@
     {
       "backend": "opencode",
       "min_version": "2.1.4",
-      "profile_version": "opencode-2.1.4-cafleet-ask-1",
       "rules": [
         {
           "id": "opencode-shell-permission",

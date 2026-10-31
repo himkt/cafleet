@@ -241,7 +241,6 @@ pub(super) struct Profile {
     pub(crate) backend: CodingAgent,
     pub(crate) min_version: NativeVersion,
     pub(crate) min_version_text: String,
-    pub(crate) version: String,
     pub(crate) rules: Vec<Rule>,
     pub(crate) detection: Option<Capability>,
     pub(crate) composer: Option<Capability>,
@@ -276,7 +275,6 @@ impl Profile {
             capability: AnswerCapability {
                 backend: self.backend,
                 native_version: version.into(),
-                profile_version: self.version.clone(),
                 request_rule_id: request.into(),
                 answer_rule_id: answer.id.clone(),
                 decision,
@@ -299,7 +297,8 @@ pub(crate) struct NativeCapabilities {
     pub(crate) backend: CodingAgent,
     #[cfg(test)]
     pub(crate) native_version: Option<String>,
-    pub(crate) profile_version: Option<String>,
+    #[cfg(test)]
+    pub(crate) min_version: Option<String>,
     pub(crate) detection: Coverage,
     #[cfg(test)]
     pub(crate) composer: Coverage,
@@ -1163,16 +1162,7 @@ impl ProfileCatalog {
         }
         let mut headers = Vec::new();
         for v in array(&root["profiles"])? {
-            let m = object(
-                v,
-                &[
-                    "backend",
-                    "min_version",
-                    "profile_version",
-                    "rules",
-                    "capabilities",
-                ],
-            )?;
+            let m = object(v, &["backend", "min_version", "rules", "capabilities"])?;
             headers.push((m, backend(&m["backend"])?, semver(&m["min_version"])?));
         }
         for (index, (_, backend, min)) in headers.iter().enumerate() {
@@ -1196,7 +1186,6 @@ impl ProfileCatalog {
                     .map(|(_, _, threshold)| threshold)
                     .min_by(|a, b| a.precedence(b)),
             };
-            let version = text(&m["profile_version"])?;
             let rules = array(&m["rules"])?
                 .iter()
                 .map(compile_rule)
@@ -1342,7 +1331,6 @@ impl ProfileCatalog {
                 backend,
                 min_version: min_version.clone(),
                 min_version_text: text(&m["min_version"])?,
-                version,
                 rules,
                 detection,
                 composer,
@@ -1395,7 +1383,8 @@ impl ProfileCatalog {
             backend,
             #[cfg(test)]
             native_version: version.map(str::to_owned),
-            profile_version: profile.map(|p| p.version.clone()),
+            #[cfg(test)]
+            min_version: profile.map(|p| p.min_version_text.clone()),
             detection: if profile.is_some_and(|p| p.detection.is_some()) {
                 Coverage::Tested
             } else {

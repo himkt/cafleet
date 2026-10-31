@@ -365,8 +365,7 @@ pub(crate) fn validate_submission_target(
         stable_run_identity(&current) == stable_run_identity(expected)
             && current.status == RunStatus::Running
             && current.owner_kind == OwnerKind::Runner
-            && current.native_version == expected.native_version
-            && current.profile_version == expected.profile_version,
+            && current.native_version == expected.native_version,
         "submission run identity changed",
     )?;
     ensure(
@@ -958,7 +957,6 @@ fn metadata(
         decision_source: input.decision_source,
         mode_evidence_ref: input.mode_evidence_ref.clone(),
         decision_evidence_ref: input.decision_evidence_ref.clone(),
-        answer_profile_version: audit.metadata.answer_profile_version.clone(),
         answer_rule_id: audit.metadata.answer_rule_id.clone(),
     }
 }
@@ -1306,14 +1304,12 @@ fn inspect_permission_with_host(
             reply.message_id == original.event.message_id.expect("validated inbox message")
                 && reply.episode_seq == interaction.episode_seq
                 && reply.backend == run.backend
-                && reply.native_version == run.native_version
-                && reply.profile_version == run.profile_version,
+                && reply.native_version == run.native_version,
             "permission inspection reply identity mismatch",
         )?;
         ensure(
             reply.evidence["backend"].as_str() == Some(run.backend.as_str())
                 && reply.evidence["native_version"].as_str() == run.native_version.as_deref()
-                && reply.evidence["profile_version"].as_str() == run.profile_version.as_deref()
                 && reply.evidence["screen_seq"].as_u64() == Some(reply.output_seq),
             "permission inspection evidence identity mismatch",
         )?;
@@ -1328,9 +1324,9 @@ fn inspect_permission_with_host(
         )?;
         match reply.answer_capability {
             Coverage::Tested => ensure(
-                reply.request_token.is_some()
+                run.native_version.is_some()
+                    && reply.request_token.is_some()
                     && !reply.supported_decisions.is_empty()
-                    && reply.answer_profile_version == run.profile_version
                     && reply.classification == Some(InteractionClass::PermissionRequest)
                     && reply.visibility == Visibility::Visible
                     && reply.capability_reason.is_none(),
@@ -1346,13 +1342,10 @@ fn inspect_permission_with_host(
                 "permission inspection unavailable fields disagree",
             )?,
         }
-        for value in [&reply.answer_profile_version, &reply.answer_rule_id]
-            .into_iter()
-            .flatten()
-        {
+        if let Some(rule) = &reply.answer_rule_id {
             ensure(
-                !value.trim().is_empty() && value.len() <= 256,
-                "permission inspection profile identity is invalid",
+                !rule.trim().is_empty() && rule.len() <= 256,
+                "permission inspection answer rule is invalid",
             )?;
         }
         deadline.remaining()?;

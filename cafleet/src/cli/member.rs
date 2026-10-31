@@ -469,7 +469,6 @@ fn create(
             .expect("string argv serializes"),
         event_evidence,
         native_version: native.native_version,
-        profile_version: native.profile_version,
         coverage: native.coverage,
     };
     let mut host = runner::NativeLaunchHost::new(&mux, &context);

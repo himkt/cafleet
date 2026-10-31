@@ -24,7 +24,6 @@ impl NativeVersion {
 
 pub(crate) struct NativeLaunchIdentity {
     pub(crate) native_version: Option<String>,
-    pub(crate) profile_version: Option<String>,
     pub(crate) coverage: Coverage,
     pub(crate) warning: Option<String>,
 }
@@ -45,14 +44,12 @@ pub(crate) fn native_launch_identity(
             let capabilities = catalog.capabilities(backend, Some(&version));
             Ok(NativeLaunchIdentity {
                 native_version: Some(version),
-                profile_version: capabilities.profile_version,
                 coverage: capabilities.detection,
                 warning: None,
             })
         }
         Err(cause) => Ok(NativeLaunchIdentity {
             native_version: None,
-            profile_version: None,
             coverage: Coverage::Unknown,
             warning: Some(format!(
                 "Warning: native version unavailable for {}: {}; coverage unknown.",

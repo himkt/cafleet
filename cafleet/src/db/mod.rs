@@ -67,7 +67,7 @@ pub(crate) fn head_version() -> u32 {
         .0
 }
 
-pub(crate) const APPLICATION_ID: i64 = 1128351288;
+pub(crate) const APPLICATION_ID: i64 = 1128351289;
 
 fn metadata_rows(
     conn: &Connection,

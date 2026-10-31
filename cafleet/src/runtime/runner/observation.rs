@@ -166,7 +166,6 @@ pub(crate) struct ObservedRequest {
     pub(super) episode_seq: i64,
     pub(super) classification: storage::InteractionClass,
     pub(super) native_version: String,
-    pub(super) detector_profile_version: String,
     pub(super) request_rule_id: String,
     pub(super) semantic: SemanticFingerprint,
     pub(super) choices: Vec<String>,
@@ -179,7 +178,6 @@ impl ObservedRequest {
         self.episode_seq == other.episode_seq
             && self.classification == other.classification
             && self.native_version == other.native_version
-            && self.detector_profile_version == other.detector_profile_version
             && self.request_rule_id == other.request_rule_id
             && self.semantic == other.semantic
             && self.choices == other.choices
@@ -247,9 +245,8 @@ impl ObservationController {
             .ok_or_else(|| error("unknown observer backend"))?;
         let capabilities = catalog.capabilities(backend, run.native_version.as_deref());
         ensure(
-            capabilities.profile_version == run.profile_version
-                && capabilities.detection == run.coverage,
-            "observer profile/coverage mismatch",
+            capabilities.detection == run.coverage,
+            "observer coverage mismatch",
         )?;
         let mut pool = EventSequencePool::default();
         pool.supply(initial)?;
@@ -365,9 +362,6 @@ impl ObservationController {
             let Some(version) = &self.run.native_version else {
                 return Ok(None);
             };
-            let Some(profile_version) = &observed.profile_version else {
-                return Ok(None);
-            };
             let backend = crate::coding_agent::coding_agent(&self.run.backend)
                 .expect("validated observer backend");
             let mut answer_matches = Vec::new();
@@ -391,7 +385,6 @@ impl ObservationController {
                 episode_seq,
                 classification,
                 native_version: version.clone(),
-                detector_profile_version: profile_version.clone(),
                 request_rule_id: observed.rule_id.clone(),
                 semantic: first.semantic().clone(),
                 choices: first.choices().to_vec(),
@@ -654,7 +647,6 @@ impl ObservationController {
                 && run.database_identity_json == self.run.database_identity_json
                 && run.backend == self.run.backend
                 && run.native_version == self.run.native_version
-                && run.profile_version == self.run.profile_version
                 && run.status == RunStatus::Running
                 && run.child_pid.is_some()
                 && run.child_start_identity.is_some()
@@ -721,18 +713,13 @@ impl ObservationController {
                 return Ok(None);
             }
         }
-        let value = match self.detector.observe(screen) {
-            Ok(value) => value,
+        match self.detector.observe(screen) {
+            Ok(value) => Ok(Some(value)),
             Err(_) => {
                 self.gap(ObservationFailure::Detector, now)?;
-                return Ok(None);
+                Ok(None)
             }
-        };
-        ensure(
-            value.profile_version == self.run.profile_version,
-            "observed profile changed within run",
-        )?;
-        Ok(Some(value))
+        }
     }
     fn observe_screen(
         &mut self,
@@ -1443,7 +1430,6 @@ pub(crate) mod native_capture {
             && left.director_member_id == right.director_member_id
             && left.backend == right.backend
             && left.native_version == right.native_version
-            && left.profile_version == right.profile_version
             && left.requested_mode == right.requested_mode
             && left.resolved_mode == right.resolved_mode
             && left.mode_source == right.mode_source
@@ -1665,7 +1651,7 @@ pub(crate) mod native_capture {
                 state.clock_kind = clock.kind();
             }
             self.source = Some(
-                json!({"database_identity_json":run.database_identity_json,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"runner":{"pid":run.owner_pid,"start_identity":run.owner_start_identity},"child":null,"backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,"requested_mode":run.requested_mode,"resolved_mode":run.resolved_mode,"mode_source":run.mode_source,"permission_argv":run.permission_argv_json,"executable":native,"cwd":spawn.cwd,"environment_evidence_ref":producer.value["environment_evidence_ref"],"placement":crate::presentation::placement(placement),"producer":producer.value,"clock":{"kind":if clock.kind()==ObservationClockKind::Real{"real"}else{"deterministic"},"monotonic_api":"std::time::Instant","utc_api":"chrono::Utc::now","origin":{"phase":"prepared","observed_at":origin.observed_at}}}),
+                json!({"database_identity_json":run.database_identity_json,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"runner":{"pid":run.owner_pid,"start_identity":run.owner_start_identity},"child":null,"backend":run.backend,"native_version":run.native_version,"requested_mode":run.requested_mode,"resolved_mode":run.resolved_mode,"mode_source":run.mode_source,"permission_argv":run.permission_argv_json,"executable":native,"cwd":spawn.cwd,"environment_evidence_ref":producer.value["environment_evidence_ref"],"placement":crate::presentation::placement(placement),"producer":producer.value,"clock":{"kind":if clock.kind()==ObservationClockKind::Real{"real"}else{"deterministic"},"monotonic_api":"std::time::Instant","utc_api":"chrono::Utc::now","origin":{"phase":"prepared","observed_at":origin.observed_at}}}),
             );
             self.producer_ref = Some(producer.reference.to_string_lossy().into_owned());
             self.origin = Some(origin);
@@ -7891,7 +7877,6 @@ pub(crate) mod native_capture {
                     permission_argv_json: json!(policy.permission_argv),
                     event_evidence: storage::EventEvidence::Redacted,
                     native_version: Some(case.native_version.clone()),
-                    profile_version: capabilities.profile_version,
                     coverage: capabilities.detection,
                 };
                 let member = PendingMemberSpec {

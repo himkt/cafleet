@@ -22,7 +22,6 @@ pub(crate) struct RunSettings {
     pub(crate) permission_argv_json: Value,
     pub(crate) event_evidence: EventEvidence,
     pub(crate) native_version: Option<String>,
-    pub(crate) profile_version: Option<String>,
     pub(crate) coverage: Coverage,
 }
 pub(crate) struct PendingRegistration {
@@ -73,7 +72,6 @@ pub(super) fn register_pending_run(
                 permission_argv_json: settings.permission_argv_json.clone(),
                 event_evidence: settings.event_evidence,
                 native_version: settings.native_version.clone(),
-                profile_version: settings.profile_version.clone(),
                 coverage: settings.coverage,
                 owner_pid: settings.creator.pid,
                 owner_start_identity: settings.creator.start_identity.clone(),

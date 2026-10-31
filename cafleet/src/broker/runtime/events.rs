@@ -933,12 +933,11 @@ pub(crate) fn update_interaction_evidence(
             require(
                 value["screen_seq"].as_u64() == Some(update.output_seq)
                     && value["backend"] == run.backend
-                    && value["profile_version"] == json!(run.profile_version)
                     && value["native_version"] == json!(run.native_version)
                     && (run.event_evidence == EventEvidence::Redacted
                         || value["evidence_policy"] == "metadata"),
                 "evidence_json",
-                "refresh evidence does not match current run/profile/policy/sequence",
+                "refresh evidence does not match current run/version/policy/sequence",
             )?;
             let maximum = latest_event_seq(conn, run.run_id)?;
             require(

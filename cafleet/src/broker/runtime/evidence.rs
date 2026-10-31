@@ -71,7 +71,6 @@ impl EvidencePolicy {
         for key in [
             "backend",
             "native_version",
-            "profile_version",
             "rule_id",
             "screen_seq",
             "truncated",
@@ -265,7 +264,7 @@ pub(crate) fn run_metadata(
     screen_seq: u64,
 ) -> Result<Value, CafleetError> {
     EvidencePolicy::metadata().apply(&json!({
-        "backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,
+        "backend":run.backend,"native_version":run.native_version,
         "rule_id":rule_id,"screen_seq":screen_seq,"operation":null,"choices":null,"native_request_id":null,
         "excerpt":null,"truncated":false,"sensitive":false
     }))
@@ -285,15 +284,13 @@ pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
             "bounded evidence identity required",
         )?;
     }
-    for field in ["native_version", "profile_version"] {
-        require(
-            object.get(field).is_some_and(|value| {
-                value.is_null() || value.as_str().is_some_and(|text| text.len() <= 256)
-            }),
-            field,
-            "nullable bounded string required",
-        )?;
-    }
+    require(
+        object.get("native_version").is_some_and(|value| {
+            value.is_null() || value.as_str().is_some_and(|text| text.len() <= 256)
+        }),
+        "native_version",
+        "nullable bounded string required",
+    )?;
     require(
         object.get("screen_seq").and_then(Value::as_u64).is_some(),
         "screen_seq",
@@ -321,7 +318,6 @@ pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
     let allowed = [
         "backend",
         "native_version",
-        "profile_version",
         "rule_id",
         "screen_seq",
         "truncated",
