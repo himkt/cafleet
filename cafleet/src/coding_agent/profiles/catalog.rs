@@ -5594,6 +5594,8 @@ mod tests {
         const OPENCODE_VERSION: &str = "2.1.4";
         const PERMISSION_RULE: &str = "opencode-shell-permission";
         const REASON_RULE: &str = "opencode-reject-reason";
+        const COMPACT_RULE: &str = "opencode-shell-permission-compact";
+        const COMPACT_REASON_RULE: &str = "opencode-reject-reason-compact";
         const IDLE_RULE: &str = "opencode-idle-composer";
         const PERMISSION_FIXTURE: &str = "opencode-2.1.4-ask-permission-1";
         const ALLOW_FIXTURE: &str = "opencode-2.1.4-allow-pre-stage-1";
@@ -5750,8 +5752,14 @@ mod tests {
             let capabilities = &profile(&definitions)["capabilities"];
             assert_eq!(profile(&definitions)["min_version"], OPENCODE_VERSION);
             assert_eq!(
-                capabilities["detection"]["rule_ids"],
-                json!([PERMISSION_RULE])
+                capabilities["detection"]["rule_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|id| id.as_str().unwrap())
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from([PERMISSION_RULE, COMPACT_RULE]),
+                "detection lists both request rules"
             );
             assert_eq!(
                 capabilities["detection"]["fixture_ids"],
@@ -5839,7 +5847,7 @@ mod tests {
         }
 
         #[test]
-        fn bundled_opencode_form_rule_matches_both_supported_layouts() {
+        fn bundled_opencode_form_rule_matches_the_wide_and_split_layouts() {
             let definitions = definitions();
             let form = rule(&definitions, PERMISSION_RULE);
             assert_eq!(
@@ -5850,10 +5858,8 @@ mod tests {
                 form["region"]["end_pattern"],
                 "  ⇆ select  enter confirm  esc reject\\s*$"
             );
-            let focus = matcher(form, "focus");
-            assert_eq!(focus["scope"], "line");
             assert_eq!(
-                focus["pattern"],
+                matcher(form, "focus")["pattern"],
                 "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$"
             );
             assert_eq!(
@@ -5864,8 +5870,16 @@ mod tests {
                 matcher(form, "deny")["pattern"],
                 "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
             );
-            assert_eq!(matcher(form, "controls")["scope"], "region");
-            assert_eq!(matcher(form, "operation")["scope"], "region");
+            for (id, scope) in [
+                ("focus", "line"),
+                ("allow", "line"),
+                ("deny", "line"),
+                ("controls", "region"),
+                ("operation", "region"),
+            ] {
+                assert_eq!(matcher(form, id)["scope"], scope, "{id}");
+            }
+            assert_eq!(matcher(form, "focus")["focus_style"], "background");
             let operation = &form["extract"]["operation"];
             assert_eq!(operation["matcher_id"], "operation");
             assert_eq!(operation["margin_rows"], "continuation");
@@ -5890,10 +5904,109 @@ mod tests {
                 .collect::<BTreeSet<_>>();
             assert_eq!(ids, BTreeSet::from(["empty_reason", "heading"]));
             assert_eq!(matcher(reason, "empty_reason")["scope"], "region");
+        }
+
+        #[test]
+        fn bundled_opencode_compact_rules_mirror_the_wide_and_split_rules_without_a_margin() {
+            let definitions = definitions();
+            let form = rule(&definitions, PERMISSION_RULE);
+            let compact = rule(&definitions, COMPACT_RULE);
+            for key in ["observation", "sensitive", "verified_noninteraction"] {
+                assert_eq!(compact[key], form[key], "{key}");
+            }
+            assert_eq!(compact["region"]["screen"], form["region"]["screen"]);
+            assert_eq!(compact["region"]["cursor"], form["region"]["cursor"]);
+            assert!(compact["region"]["max_rows"].as_u64().unwrap() >= 24);
+            assert_eq!(compact["extract"]["choices"], form["extract"]["choices"]);
+            assert_eq!(compact["extract"]["native_request_id"], Value::Null);
+            for (id, scope) in [
+                ("focus", "line"),
+                ("allow", "line"),
+                ("deny", "line"),
+                ("operation", "region"),
+            ] {
+                assert_eq!(matcher(compact, id)["scope"], scope, "{id}");
+            }
+            assert_eq!(matcher(compact, "focus")["focus_style"], "background");
+            let operation = &compact["extract"]["operation"];
+            assert_eq!(operation["matcher_id"], "operation");
+            assert_eq!(operation["row_trailer"], "█");
+            assert!(operation.get("row_margin").is_none());
+            assert!(operation.get("margin_rows").is_none());
+            let reason = rule(&definitions, COMPACT_REASON_RULE);
+            assert_eq!(reason["observation"], "permission_continuation");
+            assert_eq!(reason["continues_rule_id"], COMPACT_RULE);
+            assert_eq!(reason["continues_choice_id"], "deny-once");
             assert_eq!(
-                reason["region"]["end_pattern"],
-                "  enter confirm  esc cancel\\s*$"
+                reason["extract"],
+                json!({"operation":null,"choices":[],"native_request_id":null})
             );
+            assert_eq!(matcher(reason, "empty_reason")["scope"], "region");
+        }
+
+        #[test]
+        fn bundled_opencode_compact_answers_repeat_the_measured_stages_on_the_compact_rules() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for (decision, choice, stages) in [
+                (
+                    PermissionDecision::Allow,
+                    "allow-once",
+                    vec![(vec![0x0d], Some("allow-once"), None)],
+                ),
+                (
+                    PermissionDecision::Deny,
+                    "deny-once",
+                    vec![
+                        (vec![0x68], Some("allow-once"), None),
+                        (vec![0x0d], Some("deny-once"), None),
+                        (vec![0x0d], None, Some(COMPACT_REASON_RULE)),
+                    ],
+                ),
+            ] {
+                let plan = catalog
+                    .answer_plan(
+                        CodingAgent::Opencode,
+                        OPENCODE_VERSION,
+                        COMPACT_RULE,
+                        decision,
+                    )
+                    .unwrap_or_else(|| panic!("compact {decision:?} plan"));
+                assert_eq!(plan.choice_id(), choice);
+                assert_eq!(plan.focus_matcher_id(), "focus");
+                assert_eq!(
+                    plan.stages()
+                        .iter()
+                        .map(|stage| (
+                            stage.bytes().to_vec(),
+                            stage.required_focus_choice_id(),
+                            stage.required_screen_rule_id(),
+                        ))
+                        .collect::<Vec<_>>(),
+                    stages,
+                    "{decision:?}"
+                );
+                for stage in plan.stages() {
+                    assert_eq!(stage.required_rule_id(), COMPACT_RULE);
+                    assert_eq!(stage.required_choice_id(), choice);
+                }
+                let capability = plan.capability();
+                assert_eq!(capability.request_rule_id(), COMPACT_RULE);
+                assert_eq!(capability.decision(), decision);
+                assert!(!capability.fixture_ids().is_empty());
+                let wide = plan_for(PERMISSION_RULE, decision);
+                assert_ne!(
+                    capability.answer_rule_id(),
+                    wide.capability().answer_rule_id(),
+                    "each request rule has its own answer entry"
+                );
+            }
+        }
+
+        fn plan_for(request: &str, decision: PermissionDecision) -> AnswerPlan {
+            ProfileCatalog::bundled()
+                .unwrap()
+                .answer_plan(CodingAgent::Opencode, OPENCODE_VERSION, request, decision)
+                .unwrap()
         }
 
         #[test]

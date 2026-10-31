@@ -3328,7 +3328,7 @@ mod tests {
                     let padding = cols - CHOICES.chars().count() - CONTROLS.chars().count() - 3;
                     rows.push(format!("{CHOICES}{}{CONTROLS}   ", " ".repeat(padding)));
                 }
-                Layout::Split => rows.extend([CHOICES.to_owned(), controls]),
+                Layout::Split => rows.extend([CHOICES.to_owned(), String::new(), controls]),
                 Layout::Broken => rows.extend([
                     "   Allow once   Always allow".to_owned(),
                     "   Reject".to_owned(),
@@ -3541,6 +3541,186 @@ mod tests {
                     "{case}"
                 );
                 assert_ne!(observed.rule_id, REASON_RULE, "{case}");
+            }
+        }
+
+        const COMPACT_RULE: &str = "opencode-shell-permission-compact";
+        const COMPACT_CHOICES: &str = " Allow once   Always allow   Reject";
+        const COMPACT_CONTROLS: &str = "pgup/pgdn scroll";
+
+        enum Compact {
+            SharedControls,
+            OwnControls,
+            Broken,
+            NoControls,
+        }
+
+        /// A compact command-box row: `text` at column 0 and the scrollbar column at the right
+        /// edge, as the 36-, 52- and 55-column captures show it.
+        fn compact_boxed(cols: usize, text: &str) -> String {
+            let width = cols - 1;
+            assert!(text.chars().count() <= width, "{text:?} fits the box");
+            format!("{text:<width$}█")
+        }
+
+        fn compact_rows(cols: usize, command: &[&str], layout: Compact) -> Vec<String> {
+            let mut rows = vec![
+                "△ Permission required".to_owned(),
+                compact_boxed(cols, "# Shell command"),
+                compact_boxed(cols, &format!("$ {}", command[0])),
+            ];
+            rows.extend(command[1..].iter().map(|row| compact_boxed(cols, row)));
+            rows.extend((0..3).map(|_| compact_boxed(cols, "")));
+            match layout {
+                Compact::SharedControls => {
+                    let padding = cols - COMPACT_CHOICES.chars().count() - COMPACT_CONTROLS.len();
+                    rows.push(format!(
+                        "{COMPACT_CHOICES}{}{COMPACT_CONTROLS}",
+                        " ".repeat(padding)
+                    ));
+                }
+                Compact::OwnControls => {
+                    rows.extend([COMPACT_CHOICES.to_owned(), COMPACT_CONTROLS.to_owned()])
+                }
+                Compact::Broken => rows.extend([
+                    " Allow once   Always allow".to_owned(),
+                    " Reject".to_owned(),
+                    COMPACT_CONTROLS.to_owned(),
+                ]),
+                Compact::NoControls => rows.push(COMPACT_CHOICES.to_owned()),
+            }
+            rows
+        }
+
+        fn compact(cols: usize, command: &[&str], layout: Compact) -> ScreenSnapshot {
+            paint(cols, &compact_rows(cols, command, layout))
+        }
+
+        fn assert_compact_request(observed: &ScreenObservation, operation: &str) {
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert_eq!(observed.rule_id, COMPACT_RULE);
+            assert_eq!(observed.match_evidence, MatchEvidence::Complete);
+            assert_eq!(observed.raw_evidence["operation"], operation);
+            assert_eq!(
+                observed.raw_evidence["operation_rows"],
+                operation.split('\n').count()
+            );
+            assert_eq!(
+                observed.raw_evidence["choices"],
+                json!(["Allow once", "Reject"])
+            );
+            assert!(observed.fingerprint.is_some());
+        }
+
+        #[test]
+        fn opencode_compact_layout_reports_every_displayed_command_row() {
+            for (cols, command, layout) in [
+                (
+                    55,
+                    [
+                        "/tmp/cafleet-194/opencode-survey-055/permission-",
+                        "probe allow",
+                    ],
+                    Compact::SharedControls,
+                ),
+                (
+                    52,
+                    [
+                        "/tmp/cafleet-194/opencode-survey-052/permission-",
+                        "probe allow",
+                    ],
+                    Compact::OwnControls,
+                ),
+                (
+                    36,
+                    [
+                        "/tmp/cafleet-194/opencode-survey-",
+                        "036/permission-probe allow",
+                    ],
+                    Compact::OwnControls,
+                ),
+            ] {
+                assert_compact_request(
+                    &observe(&compact(cols, &command, layout)),
+                    &command.join("\n"),
+                );
+            }
+            assert_compact_request(
+                &observe(&compact(
+                    55,
+                    &["/tmp/x/permission-probe allow"],
+                    Compact::SharedControls,
+                )),
+                "/tmp/x/permission-probe allow",
+            );
+        }
+
+        #[test]
+        fn opencode_compact_forms_outside_the_layout_yield_no_request() {
+            let command = [
+                "/tmp/cafleet-194/opencode-survey-",
+                "036/permission-probe allow",
+            ];
+            let mut stray = compact_rows(36, &command, Compact::OwnControls);
+            stray.insert(5, compact_boxed(36, "stray text"));
+            let mut headless = compact_rows(36, &command, Compact::OwnControls);
+            headless[0] = String::new();
+            let mut margined = compact_rows(36, &command, Compact::OwnControls);
+            margined[0] = "  △ Permission required".to_owned();
+            for (case, screen) in [
+                (
+                    "broken layout",
+                    compact(35, &["/tmp/x/permission-probe allow"], Compact::Broken),
+                ),
+                (
+                    "no control text",
+                    compact(36, &command, Compact::NoControls),
+                ),
+                (
+                    "a continuation row beginning with a space",
+                    compact(
+                        36,
+                        &["/tmp/cafleet-194/opencode-survey-", " 036/permission-probe"],
+                        Compact::OwnControls,
+                    ),
+                ),
+                ("a row after the box end", paint(36, &stray)),
+                ("form text outside a live region", paint(36, &headless)),
+                ("a wide/split heading margin", paint(36, &margined)),
+            ] {
+                assert_no_request(&observe(&screen), case);
+            }
+        }
+
+        #[test]
+        fn opencode_exactly_one_request_rule_matches_each_supported_layout() {
+            for (case, screen, rule) in [
+                (
+                    "wide",
+                    form(120, &["/tmp/x/permission-probe allow"], Layout::Wide),
+                    PERMISSION_RULE,
+                ),
+                (
+                    "split",
+                    form(57, &wrapped(), Layout::Split),
+                    PERMISSION_RULE,
+                ),
+                (
+                    "compact",
+                    compact(
+                        55,
+                        &["/tmp/x/permission-probe allow"],
+                        Compact::SharedControls,
+                    ),
+                    COMPACT_RULE,
+                ),
+            ] {
+                let observed = observe(&screen);
+                assert_eq!(observed.rule_id, rule, "{case}");
+                assert_eq!(observed.match_evidence, MatchEvidence::Complete, "{case}");
             }
         }
     }

@@ -1813,8 +1813,7 @@ mod tests {
             interaction_id,
             director_member_id: run.director_member_id,
         };
-        type Tamper = Box<dyn FnMut(&mut PermissionInspection)>;
-        let mut inspect = |tamper: Option<Tamper>| {
+        let mut inspect = |tamper: Option<InspectionTamper>| {
             let mut host = SocketHost::new(&settings, &placement, outer);
             host.tamper_inspection = tamper;
             let result = inspect_permission_with_host(
@@ -1844,7 +1843,7 @@ mod tests {
             shared_rule.answer_rule_id.as_deref(),
             Some("inspection-shared-plan")
         );
-        let tampers: Vec<(&str, Tamper)> = vec![
+        let tampers: Vec<(&str, InspectionTamper)> = vec![
             ("backend", Box::new(|reply| reply.backend = "claude".into())),
             (
                 "native version",
@@ -3186,6 +3185,8 @@ mod tests {
         Disconnected,
     }
 
+    type InspectionTamper = Box<dyn FnMut(&mut PermissionInspection)>;
+
     struct SocketHost {
         settings: Settings,
         placement: Placement,
@@ -3200,7 +3201,7 @@ mod tests {
         expire_retirement: bool,
         wrong_query_id: Option<i64>,
         skip_reconcile: bool,
-        tamper_inspection: Option<Box<dyn FnMut(&mut PermissionInspection)>>,
+        tamper_inspection: Option<InspectionTamper>,
     }
 
     fn service_target(fixture: &ServiceFixture) -> (Settings, RunRecord, Placement) {

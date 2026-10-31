@@ -2516,7 +2516,8 @@ pub(crate) mod native_capture {
         #[test]
         fn capture_run_identity_compares_backend_and_native_version_without_a_profile_label() {
             let fixture = crate::runtime::runner::test_support::Fixture::new();
-            let seed = fixture.run.clone();
+            let mut seed = fixture.run.clone();
+            seed.native_version = Some("0.163.0".into());
             assert!(same_capture_run(&seed, &seed.clone()));
             let mut later = seed.clone();
             later.native_version = Some("0.164.0".into());
@@ -8360,6 +8361,7 @@ mod tests {
 
         fn initialize(native_version: Option<&str>, coverage: storage::Coverage) -> Result<()> {
             let mut fixture = Fixture::new();
+            let _artifacts = fixture.artifacts();
             let lock = Arc::new(
                 RunLock::acquire(&fixture.conn, &fixture.run.owner())
                     .unwrap()

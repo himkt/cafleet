@@ -295,12 +295,14 @@ mod tests {
                     pid_file.display()
                 ),
             );
+            // A stub launch can take about half a second on a macOS host, so the bound leaves the
+            // stub time to record its pid and reach its sleep before the probe times out.
+            let bound = Duration::from_secs(2);
             let start = Instant::now();
-            let result =
-                CodingAgent::Claude.probe_native_version(&path, start + Duration::from_millis(300));
+            let result = CodingAgent::Claude.probe_native_version(&path, start + bound);
             assert!(result.is_err());
             assert!(
-                start.elapsed() < Duration::from_secs(2),
+                start.elapsed() < bound + Duration::from_secs(1),
                 "{:?}",
                 start.elapsed()
             );
