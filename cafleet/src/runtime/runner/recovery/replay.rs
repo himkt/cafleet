@@ -1452,7 +1452,7 @@ mod tests {
                         .unwrap();
                 }
                 let before = identity(&case.artifacts.paths.descriptor);
-                let result = case.recover(&mut new_host());
+                let result = recover_released(&mut case);
                 incomplete(&case, result);
                 assert_eq!(identity(&case.artifacts.paths.descriptor), before);
             }
