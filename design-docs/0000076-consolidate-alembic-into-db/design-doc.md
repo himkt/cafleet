@@ -93,7 +93,7 @@ A repo-wide sweep (excluding `design-docs/`, which is the historical record and 
 
 > `cafleet/src/cafleet/cli.py:186` contains the prose comment "the bundled ``alembic.ini``" — a description, not a path. No change.
 >
-> **Site #4 is dead code.** `cafleet/tests/_helpers.py` (`_make_alembic_cfg`, `_now_iso`) is imported by no test — its callers were deleted in design 0000061, which deferred pruning the orphaned helpers to a follow-up sweep. The `files("cafleet") / "alembic.ini"` lookup lives inside the uncalled `_make_alembic_cfg`, so it never executes under `mise //cafleet:test`. **Decision (minimal scope, per user Q1 "out of scope beyond move + reference updates" and Q6 "retarget `_helpers.py:11`"): keep the file and retarget the lookup to `cafleet.db`** so the Step-4 removal sweep finds zero stale `files("cafleet")` lookups; the 0000061 dead-code pruning stays out of scope for this relocation. The retargeted lookup is dead-but-correct — it is not test-covered.
+> **Site #4 is dead code.** `cafleet/tests/_helpers.py` (`_make_alembic_cfg`, `_now_iso`) is imported by no test — its callers were deleted in design 0000203, which deferred pruning the orphaned helpers to a follow-up sweep. The `files("cafleet") / "alembic.ini"` lookup lives inside the uncalled `_make_alembic_cfg`, so it never executes under `mise //cafleet:test`. **Decision (minimal scope, per user Q1 "out of scope beyond move + reference updates" and Q6 "retarget `_helpers.py:11`"): keep the file and retarget the lookup to `cafleet.db`** so the Step-4 removal sweep finds zero stale `files("cafleet")` lookups; the 0000203 dead-code pruning stays out of scope for this relocation. The retargeted lookup is dead-but-correct — it is not test-covered.
 
 ### Atomicity
 

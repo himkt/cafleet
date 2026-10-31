@@ -24,7 +24,7 @@ Two unrelated directories share the name `token_budget`:
 
 1. **Repo-root `tests/token_budget/`** — an orphaned manual-measurement stub (`__init__.py`, `scenarios/__init__.py`, `scenarios/idle_3_member_baseline_stub.py`). It is a `__main__` script run by hand (`uv run python tests/token_budget/scenarios/idle_3_member_baseline_stub.py`), never collected by CI: `mise //cafleet:test` runs pytest from the `cafleet/` package directory, so it only discovers `cafleet/tests/` and never the repo-root `tests/`. The stub writes `tests/token_budget/measurement_results.md`, which is untracked and read by nothing. Its own docstring calls it a "deferred stub" — a Step 0 artifact for design `0000049-token-reduction` (now Complete). Repo-root `tests/` contains nothing else, so it becomes empty.
 
-2. **Package `cafleet/tests/token_budget/`** — the real pytest suite (`__init__.py`, `test_envelope_size.py`, `test_skill_size.py`, `test_spawn_prompt_size.py`), 12 tests total. These are self-contained byte / line / ratio budget assertions with no dependency on the stub. They were classified "off-limits / load-bearing" by design `0000061-test-suite-cleanup`, and `test_envelope_size.py` was last modified by design `0000071-cli-ux-cleanup`.
+2. **Package `cafleet/tests/token_budget/`** — the real pytest suite (`__init__.py`, `test_envelope_size.py`, `test_skill_size.py`, `test_spawn_prompt_size.py`), 12 tests total. These are self-contained byte / line / ratio budget assertions with no dependency on the stub. They were classified "off-limits / load-bearing" by design `0000203-test-suite-cleanup`, and `test_envelope_size.py` was last modified by design `0000071-cli-ux-cleanup`.
 
 ### What the guards protect, and why this is eyes-open
 
@@ -36,7 +36,7 @@ The package suite is the only automated guardrail preventing silent inflation of
 | Core skill file size (≤ 350 lines / ≤ 25 KB, reference-split intact) | `skills/cafleet/SKILL.md` + `skills/cafleet/reference/*.md` | `test_skill_size.py` (4) |
 | Member spawn prompt size (≤ 420 chars / ≤ 4 lines after substitution) | `cli._MEMBER_PROMPT_TEMPLATE` | `test_spawn_prompt_size.py` (4) |
 
-Designs `0000049-token-reduction`, `0000061-test-suite-cleanup`, and `0000071-cli-ux-cleanup` established and maintained these guards. Design `0000073` deliberately removes them. The Director presented the tradeoff (loss of the byte / line / ratio guards) to the operator, who chose to remove everything anyway. This is recorded here as a deliberate decision, not an oversight. Future drift in envelope, spawn-prompt, or skill-file size will no longer fail at PR time; that risk is accepted.
+Designs `0000049-token-reduction`, `0000203-test-suite-cleanup`, and `0000071-cli-ux-cleanup` established and maintained these guards. Design `0000073` deliberately removes them. The Director presented the tradeoff (loss of the byte / line / ratio guards) to the operator, who chose to remove everything anyway. This is recorded here as a deliberate decision, not an oversight. Future drift in envelope, spawn-prompt, or skill-file size will no longer fail at PR time; that risk is accepted.
 
 ---
 
@@ -64,7 +64,7 @@ In `docs/concepts/token-reduction.md`, remove only the closing paragraph that de
 
 ### What stays (per `~/.claude/rules/removal.md`)
 
-- No design docs are touched. Per `~/.claude/rules/removal.md`, every design doc is part of the canonical historical record. Of the pre-0000073 docs, only `0000049-token-reduction`, `0000061-test-suite-cleanup`, and `0000071-cli-ux-cleanup` reference the token-budget tests; those three established and maintained the guards this change removes. (This doc and its prompt artifacts naturally contain `token_budget`, which is why the residual-reference check in Step 4 excludes `design-docs/`.)
+- No design docs are touched. Per `~/.claude/rules/removal.md`, every design doc is part of the canonical historical record. Of the pre-0000073 docs, only `0000049-token-reduction`, `0000203-test-suite-cleanup`, and `0000071-cli-ux-cleanup` reference the token-budget tests; those three established and maintained the guards this change removes. (This doc and its prompt artifacts naturally contain `token_budget`, which is why the residual-reference check in Step 4 excludes `design-docs/`.)
 - This design doc records the removal and its accepted tradeoff.
 - Git history and the git log.
 
