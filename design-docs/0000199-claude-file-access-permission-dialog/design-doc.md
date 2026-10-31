@@ -1,7 +1,7 @@
 # Claude File-Access Permission Dialog and Multi-Line herdr Capture
 
 **Status**: Approved
-**Progress**: 9/23 tasks complete
+**Progress**: 23/23 tasks complete
 **Last Updated**: 2026-10-31
 
 ## Overview
@@ -10,12 +10,12 @@ The bundled Claude profile detects Claude Code's "Read outside the working direc
 
 ## Success Criteria
 
-- [ ] On Claude Code 2.1.309 under the runner, the "Read outside the working directories" dialog yields a `permission_request` observation from profile `claude-2.1.302-auto-1`, an `interaction_opened` event with `kind=review_permission_request`, and a non-null `runtime.current_interaction_id` in `member show --json`.
-- [ ] Previews, `member prompt` and `member exec` sent while the dialog is open are queued with zero bytes and drain after it closes.
-- [ ] `permission respond` with allow sends exactly byte `34` (digit `4`, `Yes, but ask again next time`) and with deny exactly byte `33` (digit `3`, `No, and ask again next time`). No answer plan, `permission respond` or queued preview, `member prompt` or `member exec` input sends `1`, `2`, Enter or Tab to the dialog; explicit `member press` keys remain the Director's manual choice. If the native capture shows that a digit does not select its choice directly, the rule ships detection-only and both answers stay manual.
-- [ ] Each of Edit, Write, Glob and Grep is probed against a path outside the working directory; a dialog with its own "… outside the working directories" literals is detected (with answer plans when its digit check passes), and every tool that produced no such dialog is a documented limit.
-- [ ] `cafleet member capture <id> --lines N` on herdr returns every drawn line of the open dialog, not only the last one, for every herdr pane. Its plain output equals, line by line after trimming trailing whitespace, `herdr pane read <pane> --format text --source recent-unwrapped --lines <N+1000>` after the same visually-blank-tail trim and last-N window. `--ansi` output keeps the raw bytes, including CRLF.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` pass, and live acceptance passes on both tmux and herdr.
+- [x] On Claude Code 2.1.309 under the runner, the "Read outside the working directories" dialog yields a `permission_request` observation from profile `claude-2.1.302-auto-1`, an `interaction_opened` event with `kind=review_permission_request`, and a non-null `runtime.current_interaction_id` in `member show --json`.
+- [x] Previews, `member prompt` and `member exec` sent while the dialog is open are queued with zero bytes and drain after it closes.
+- [x] `permission respond` with allow sends exactly byte `34` (digit `4`, `Yes, but ask again next time`) and with deny exactly byte `33` (digit `3`, `No, and ask again next time`). No answer plan, `permission respond` or queued preview, `member prompt` or `member exec` input sends `1`, `2`, Enter or Tab to the dialog; explicit `member press` keys remain the Director's manual choice. If the native capture shows that a digit does not select its choice directly, the rule ships detection-only and both answers stay manual.
+- [x] Each of Edit, Write, Glob and Grep is probed against a path outside the working directory; a dialog with its own "… outside the working directories" literals is detected (with answer plans when its digit check passes), and every tool that produced no such dialog is a documented limit.
+- [x] `cafleet member capture <id> --lines N` on herdr returns every drawn line of the open dialog, not only the last one, for every herdr pane. Its plain output equals, line by line after trimming trailing whitespace, `herdr pane read <pane> --format text --source recent-unwrapped --lines <N+1000>` after the same visually-blank-tail trim and last-N window. `--ansi` output keeps the raw bytes, including CRLF.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` pass, and live acceptance passes on both tmux and herdr. Met with the recorded exceptions: tests pass at `--test-threads 8` (default-thread timing failures predate this change) and tmux live acceptance was waived by the user.
 
 ---
 
@@ -251,8 +251,11 @@ Unchanged. The Director consumes `interaction_opened`, verifies it with `event s
 | Panes narrower than 120 columns | Only 120-column renderings are claimed; a narrower rendering whose rows differ from the pinned literals is `unknown`, input stays on the existing fallback rules, and the dialog is answered on the native surface |
 | Persistent choices 1 and 2 | Never selected by CAFleet; a user who wants them answers on the native surface |
 | `Tab to amend` | Not offered by CAFleet |
+| Panes too short to show the heading row | The region has no start row, so the frame is `unknown` until a resize redraws the dialog in full; observed in live acceptance on herdr |
 | Probe-set tools that produced no dialog, and tools outside the probe set | No rule; an outside-working-directory dialog from them is an `unknown` frame with no event, answered on the native surface |
 | Digit check failure for a dialog | That rule is detection-only; both of its answers are manual |
+
+COMMENT(programmer): Observation for the once-per-configuration finding: none of the Step 1 private configurations recorded `hasSeenAutoModeOutsideReadPrompt` — the cells, allow and deny cases all show the same 29 changed key paths, and none names it. Each case stopped the native child with SIGTERM (exit 143) about 5 s after the answer, so Claude may write the flag only at a later point or on a graceful exit. The documented wording relies on your live observation only; please confirm whether the flag appears after the dialog is shown or only after it is answered, if the wording should say which.
 
 ### Documentation targets
 
@@ -273,9 +276,6 @@ Unchanged. The Director consumes `interaction_opened`, verifies it with `event s
 
 ### Step 1: Capture native evidence
 
-COMMENT(programmer): Step 1 outcomes are in § Execution record > Step 1 native captures: both digit checks passed, no sibling dialog has its own literals (Edit reused the Read dialog; Write, Glob and Grep produced none), so the Read rule ships with allow `34` / deny `33` and no sibling rule. The seven fixtures are staged under `.capture/fixtures/` in this folder (not yet in `cafleet/src/coding_agent/profiles/native/`, which is Step 4), and the operator harness is `.capture/native_driver.py`; decide whether either is committed. Driver fixes found while running: Claude writes the seed `settings.json` with mode 0644 (I set it to 0600 in the seed), the 2.1.309 policy catalog rejects an explicit `auto`, so file-tool cases launch under the omitted default and assert it resolves to `auto`, and a post-shutdown tmux race now waits for the pane to settle. A full parallel `mise //cafleet:test` run failed 13 tests in `deletion`, `runner::health`, `runner::input`, `runner::input_client`, `runner::recovery` and `observation::tests::controller_tests`; each passes in isolation and the `recovery` group passes serially (137 tests), so these look load-dependent and outside the test-only driver change.
-
-
 - [x] Extend the native-capture driver in `cafleet/src/runtime/runner/observation.rs` per § Native capture procedure: the file-tool binding, outside-directory setup and validation, the file-tool prompt branch, the private `CLAUDE_CONFIG_DIR` copied from the seed, the persistent-setting check, the private-configuration teardown, and the Read and sibling `cells` cases in `APPROVED_CASES`. <!-- completed: 2026-10-31T01:44 -->
 - [x] Build the seed configuration per § Native capture procedure and confirm a second launch shows neither onboarding nor the auto-mode startup dialog. <!-- completed: 2026-10-31T01:44 -->
 - [x] Run `claude-read-outside-cells-001` and `claude-read-outside-long-001` on Claude Code 2.1.309; pin every matcher literal and `region.screen`, `region.cursor` and `region.max_rows` per § Detection rule `claude-read-outside-permission`, and confirm one logical line per matched row. Report `blocked` if no Read dialog appears. <!-- completed: 2026-10-31T01:44 -->
@@ -285,9 +285,9 @@ COMMENT(programmer): Step 1 outcomes are in § Execution record > Step 1 native 
 
 ### Step 2: Update documentation
 
-- [ ] Update `SPEC.md` § Bundled profiles and native screen fixtures and § `member capture` per § Documentation targets, with the literals pinned in Step 1. <!-- completed: -->
-- [ ] Update `docs/docs/concepts/member-permission-events.md`. <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/cli.md` and `skills/cafleet/reference/coding-agents.md` (claude notes). <!-- completed: -->
+- [x] Update `SPEC.md` § Bundled profiles and native screen fixtures and § `member capture` per § Documentation targets, with the literals pinned in Step 1. <!-- completed: 2026-10-31T01:48 -->
+- [x] Update `docs/docs/concepts/member-permission-events.md`. <!-- completed: 2026-10-31T01:48 -->
+- [x] Update `skills/cafleet/reference/cli.md` and `skills/cafleet/reference/coding-agents.md` (claude notes). <!-- completed: 2026-10-31T01:48 -->
 
 ### Step 3: Fix capture line endings
 
@@ -297,20 +297,20 @@ COMMENT(programmer): Step 1 outcomes are in § Execution record > Step 1 native 
 
 ### Step 4: Add the profile rule
 
-- [ ] Add the Step 1 fixtures to `cafleet/src/coding_agent/profiles/native/`, their entries and digests to `bundled.json`, and their ids to the embedded fixture table in `catalog.rs`. <!-- completed: -->
-- [ ] Write catalog tests in `catalog.rs`: each new fixture classifies with its expected rule (dialogs as `permission_request` from `claude-read-outside-permission`, continuations as the idle composer or their observed class); complete match evidence, the extracted operation (single-row and multi-row with `operation_rows`) and the two single-request choice labels; and the existing classification rows unchanged. <!-- completed: -->
-- [ ] Write answer-plan tests: allow resolves to one ungated stage `4` and deny to one ungated stage `3` for `claude-read-outside-permission` under profile `claude-2.1.302-auto-1`, each sibling rule resolves to its reviewed digits, and no plan selects a persistent choice; a rule whose digit check failed has no answer plan. <!-- completed: -->
-- [ ] Write detector tests in `detector.rs`: trailing repaint padding keeps the request identity, a quoted dialog in the transcript outside a live region and the idle composer produce no request. <!-- completed: -->
-- [ ] Add `claude-read-outside-permission` and each captured sibling rule, with the answer plans whose digit checks passed, to `claude-2.1.302-auto-1` in `bundled.json`. <!-- completed: -->
-- [ ] Add a test in `cafleet/src/runtime/runner/input.rs` `mod tests`: replaying `claude-2.1.309-read-outside-permission-1` queues a profile preview with zero bytes, and replaying `claude-2.1.302-auto-idle-composer-1` afterwards drains it once. <!-- completed: -->
+- [x] Add the Step 1 fixtures to `cafleet/src/coding_agent/profiles/native/`, their entries and digests to `bundled.json`, and their ids to the embedded fixture table in `catalog.rs`. <!-- completed: 2026-10-31T01:46 -->
+- [x] Write catalog tests in `catalog.rs`: each new fixture classifies with its expected rule (dialogs as `permission_request` from `claude-read-outside-permission`, continuations as the idle composer or their observed class); complete match evidence, the extracted operation (single-row and multi-row with `operation_rows`) and the two single-request choice labels; and the existing classification rows unchanged. <!-- completed: 2026-10-31T01:54 -->
+- [x] Write answer-plan tests: allow resolves to one ungated stage `4` and deny to one ungated stage `3` for `claude-read-outside-permission` under profile `claude-2.1.302-auto-1`, each sibling rule resolves to its reviewed digits, and no plan selects a persistent choice; a rule whose digit check failed has no answer plan. <!-- completed: 2026-10-31T01:54 -->
+- [x] Write detector tests in `detector.rs`: trailing repaint padding keeps the request identity, a quoted dialog in the transcript outside a live region and the idle composer produce no request. <!-- completed: 2026-10-31T01:54 -->
+- [x] Add `claude-read-outside-permission` and each captured sibling rule, with the answer plans whose digit checks passed, to `claude-2.1.302-auto-1` in `bundled.json`. <!-- completed: 2026-10-31T02:02 -->
+- [x] Add a test in `cafleet/src/runtime/runner/input.rs` `mod tests`: replaying `claude-2.1.309-read-outside-permission-1` queues a profile preview with zero bytes, and replaying `claude-2.1.302-auto-idle-composer-1` afterwards drains it once. <!-- completed: 2026-10-31T01:54 -->
 
 ### Step 5: Validate and accept
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`. <!-- completed: -->
-- [ ] On tmux and on herdr, with the release build and a disposable Claude Code 2.1.309 `auto` member reading an outside file: confirm `interaction_opened` with `review_permission_request`, a non-null `current_interaction_id`, a preview sent during the dialog queued and delivered once after closure, Director-auto allow (read performed, `interaction_closed`, continuation) and Director-auto deny (no read, closure, continuation) on fresh dialogs. <!-- completed: -->
-- [ ] On one multiplexer, answer a fresh dialog manually on the native surface and confirm a later `permission respond` with the earlier token is refused before any byte. <!-- completed: -->
-- [ ] On herdr, confirm `cafleet member capture <id> --lines 40` shows every line of the open dialog, matches the § Success Criteria comparison against `herdr pane read <pane> --format text --source recent-unwrapped --lines 1040`, and that `--ansi` still emits the raw bytes. <!-- completed: -->
-- [ ] Record versions, geometry, latencies, outcomes and every unobserved case in an Execution record section of this document and as limits in `SPEC.md`. <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`. <!-- completed: 2026-10-31T02:06 -->
+- [x] On tmux and on herdr, with the release build and a disposable Claude Code 2.1.309 `auto` member reading an outside file: confirm `interaction_opened` with `review_permission_request`, a non-null `current_interaction_id`, a preview sent during the dialog queued and delivered once after closure, Director-auto allow (read performed, `interaction_closed`, continuation) and Director-auto deny (no read, closure, continuation) on fresh dialogs. Herdr passed; the user waived tmux after the dialog stopped appearing in auto (see Execution record). <!-- completed: 2026-10-31T03:05 -->
+- [x] On one multiplexer, answer a fresh dialog manually on the native surface and confirm a later `permission respond` with the earlier token is refused before any byte. <!-- completed: 2026-10-31T03:05 -->
+- [x] On herdr, confirm `cafleet member capture <id> --lines 40` shows every line of the open dialog, matches the § Success Criteria comparison against `herdr pane read <pane> --format text --source recent-unwrapped --lines 1040`, and that `--ansi` still emits the raw bytes. <!-- completed: 2026-10-31T03:05 -->
+- [x] Record versions, geometry, latencies, outcomes and every unobserved case in an Execution record section of this document and as limits in `SPEC.md`. <!-- completed: 2026-10-31T03:05 -->
 
 ---
 
@@ -333,6 +333,23 @@ Captured 2026-10-31 on Linux with Claude Code 2.1.309 (mise `aqua-anthropics-cla
 The pinned values equal the § Detection rule starting point: `region.screen` `alternate`, `region.cursor` `inside`, `region.max_rows` `24`. Every heading, question and choice row is one logical line at 120 columns. No sibling dialog has its own literals, so no sibling rule or sibling answer case was added; Write, Glob and Grep are documented limits, and the Edit capture is a further detection fixture of the Read rule.
 
 Fixtures: the dialog and pre-stage fixtures come from the exporter's complete capture pair (second sample); the continuation fixtures come from a `tmux capture-pane` of the runner pane 5 s after closure, with `screen_seq` set to the runner's output sequence at stop. Masking review: rows 0–11 (banner with model and plan, and the prompt) are masked in every fixture; the remaining rows hold only `/tmp/cafleet-194` paths and native text.
+
+### Step 5 validation and live acceptance
+
+Run 2026-10-31 with the release build of commit `73ba45a2` (`mise //cafleet:build`), Claude Code 2.1.309, model Haiku 5.5, the omitted `auto` policy, and the operator's Claude configuration. Each member read `/tmp/cafleet-199-accept/probe.txt` from the worktree cwd.
+
+| Check | Outcome |
+|---|---|
+| `mise //cafleet:lint`, `//cafleet:typecheck`, `//docs:build` | Pass |
+| `mise //cafleet:test` | 1377 pass with `--test-threads 8`. At the default thread count on this 64-core host under load (average 45), 30 timing/deadline tests fail; the base commit `2b881b23` fails 17 of the same kind under the same conditions, so the failures predate this change |
+| herdr detection (members 18, 19, 20; pane width 166) | `interaction_opened` with rule `claude-read-outside-permission` and `review_permission_request`, `current_interaction_id` set, `event show` linked within about 4 s of the dialog |
+| herdr preview during the dialog | `message send` reported `queued` with `interaction_open`; input 49 settled `submitted` by `profile` after the allow closed the dialog, delivered once |
+| herdr Director-auto allow | `permission respond` accepted (input 50); the member reported `cafleet-199-accept-probe`; `interaction_closed`; composer returned |
+| herdr Director-auto deny | `permission respond` accepted (input 51); the member reported the refusal and no content; `interaction_closed`; composer returned |
+| herdr manual answer | `member press 20 3` closed the dialog; `permission respond` with the earlier token failed `permission inspection current event/interaction/message mismatch` before any byte, and the composer stayed empty |
+| herdr capture | `member capture --lines 40` showed every dialog line and matched `herdr pane read --format text --source recent-unwrapped --lines 1040` after trimming trailing whitespace; `--ansi --json` kept the raw `\r\n` |
+| herdr short pane | With three member panes open, member 20's pane hid the heading row and no event was published; after two panes closed, the redraw showed the full dialog and `interaction_opened` followed |
+| tmux (private database, member 2) | Not observed: Claude read the file without a dialog. The operator configuration now holds `hasSeenAutoModeOutsideReadPrompt: true`, so in `auto` Claude shows this dialog once per configuration. The digits `4` and `3` on tmux rest on the Step 1 driver cases, which ran under the runner on a dedicated tmux server |
 
 ---
 
