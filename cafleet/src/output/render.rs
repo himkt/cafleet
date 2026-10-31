@@ -15,8 +15,10 @@ pub(crate) fn strip_ansi(text: &str) -> String {
     cleaned
         .split('\n')
         .map(|line| {
-            let line = line.strip_suffix('\r').unwrap_or(line);
-            line.rsplit('\r').next().expect("rsplit yields a segment")
+            line.trim_end_matches('\r')
+                .rsplit('\r')
+                .next()
+                .expect("rsplit yields a segment")
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -49,16 +51,12 @@ mod tests {
             ("a\rb\rc", "c"),
             ("\x1b[2Kspinner\rdone", "done"),
             ("\x1b]0;title\x07 done", "\x1b]0;title\x07 done"),
-            ("text\r\nnext", "text\nnext"),
-            ("text\r\n", "text\n"),
-            ("old\rnew\r\nnext", "new\nnext"),
-            ("first\r\nold\rnew", "first\nnew"),
-            ("\r\n", "\n"),
-            ("a\r\n\r\nb", "a\n\nb"),
-            (
-                "\x1b[1m Allow this read?\x1b[0m\r\n ❯ 1. Yes\r\n   2. No\r\n Esc to cancel",
-                " Allow this read?\n ❯ 1. Yes\n   2. No\n Esc to cancel",
-            ),
+            ("one\r\ntwo\r\nthree", "one\ntwo\nthree"),
+            ("row1\r\nrow2\r", "row1\nrow2"),
+            ("row\r", "row"),
+            ("row\r\r\n", "row\n"),
+            ("spin\rDONE\r\nnext", "DONE\nnext"),
+            ("kept\x1b[0m\r\n", "kept\n"),
         ] {
             assert_eq!(strip_ansi(raw), expected);
         }

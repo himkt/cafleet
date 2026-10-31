@@ -794,7 +794,7 @@ Missing member/placement and native process errors retain their existing primary
 positional `MEMBER_ID` names the target member.
 
 - `--lines`: Number of trailing lines to capture (default: **20**).
-- `--ansi`: Preserve ANSI escapes in the raw capture. The default strips ANSI escapes, treats a carriage return directly before a line feed as part of the line ending, and cleans the remaining carriage-return redraws.
+- `--ansi`: Preserve ANSI escapes in the raw capture. The default strips ANSI escapes and cleans carriage-return redraws.
 
 Output shapes are in §6.3 Output shapes; target resolution is
 shared with the `member` keystroke verbs — see
@@ -814,13 +814,13 @@ capture prints content without adding a newline.
 
 Member create preserves ordered `member_id,name,registered_at,placement` and appends `runtime`; member show preserves ordered `member_id,name,description,status,registered_at,kind,placement` and appends `runtime`. An explicitly unwrapped member has `runtime: null`. The runtime object has ordered keys `run_id,resolved_mode,status,reachability,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity,effective_policy`, preserving stored nullability. `effective_policy` is the stored effective policy record (§6.9 Effective policy record) or null. `unresolved_input_ids` lists the run's inputs in `in_progress`, `accepted` or `uncertain`, plus `ready` inputs carrying deferred metadata, in input-ID order; an accepted input needs no reconciliation and stays listed until a settlement records its disposition, a deferred ready input stays listed while the runner owns it in its queue, and `in_progress` and `uncertain` inputs need Director reconciliation. These are registry reads and make no live-health claim.
 
-Wrapped create/show preserves its existing text row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE review=STATE`, where `STATE` is the effective policy's `automatic_review` value, `-` when absent. `event show` uses the same runtime object and line. Prompt/exec/send JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The existing submitted-success lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable` or `idle_timeout`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy` or `earlier_input` and states that the runner will retry. A queued result also points to `cafleet input show INPUT_ID --json` for the eventual result. An uncertain error retains its existing exit category and includes known receipt identity in the cause as `input_id=INPUT_ID` together with the selected method; run/interaction context accompanies held/rejected input.
+Wrapped create/show preserves its existing text row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE review=STATE`, where `STATE` is the effective policy's `automatic_review` value, `-` when absent. `event show` uses the same runtime object and line. Prompt/exec/send JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The existing submitted-success lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable` or `idle_timeout`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy` or `earlier_input` and states that the runner will retry. A queued result also points to `cafleet input show INPUT_ID --json` for the eventual result. An uncertain error retains its existing exit category, names the receipt's recorded `uncertain_cause` and the selected method, as in `exec delivery to member 110 is uncertain: manual_input (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
 
 #### Runtime event and input commands
 
 `cafleet event show EVENT_ID [--json]` returns ordered `event,notification_state,message_id,archive_reason,run,interaction`. The event is the complete versioned runtime payload (§6.9 Persistence, notification and read interfaces), run is the current runtime summary, and nullable interaction contains the stored interaction fields in the interaction field order below. Text is `Event: EVENT_ID run=RUN_ID seq=EVENT_SEQ kind=KIND notification=STATE message=MESSAGE_ID` followed by the runtime summary line and `Interaction: INTERACTION_ID classification=CLASS closed_at=TIMESTAMP close_reason=REASON` when linked. Unavailable optional text values render `-`.
 
-`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,payload_digest_version`. The nullable audit object and additional text line follow the permission contract (§6.3 Permission-response audit output). `delivery` is the ordered `status,method,reason` projection of the stored receipt (§6.9 Delivery reporting), or null for a permission response; `deferred_at` and `defer_reason` are null together unless the runner queued the input. Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
+`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,payload_digest_version,uncertain_cause`. The nullable audit object and additional text line follow the permission contract (§6.3 Permission-response audit output). `delivery` is the ordered `status,method,reason` projection of the stored receipt (§6.9 Delivery reporting), or null for a permission response; `deferred_at` and `defer_reason` are null together unless the runner queued the input. `uncertain_cause` is the cause the runner recorded when the input became `uncertain` (§6.9 Uncertain cause), retained through settlement, or null when no cause was recorded. Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
 
 Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the receipt contract (§6.9 Input arbitration and the original native answer). Require a nonempty evidence reference, synchronize with the current owner before CAS settlement and preserve uncertainty while an active writer cannot be ruled out. A settled ordinary receipt with the same disposition returns its original row and evidence reference before live work; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One original five-second budget covers the pane wait, current-owner synchronization, supplied-connection SQL and socket exchange. If the writer is unreachable, use the receipt-only exclusive ownership contract (§6.9 Input arbitration and the original native answer), preserving the fixed placement state, any original pane guard, the original identity-matching run lock and lifecycle history; unavailable proof retains uncertainty. Ordinary member recovery keeps its completed-terminal no-work behavior.
 
@@ -884,7 +884,7 @@ Historical response projection uses only the durable row and immutable audit. Re
 | `settled/not_submitted` or `settled/abandoned_uncertain` | `rejected/zero_bytes` with a consumed-key reason; preserve the original disposition and claim. |
 | `ready` | The separate exact-metadata live-validation path; retain its original epoch/token binding. |
 
-For a consumed key, `zero_bytes` describes this retry only and supplies no zero-byte evidence about the original attempt. A prior abandoned-uncertain claim remains possibly transmitted. This projection reads retained history even after current owner/interaction eligibility is lost.
+An uncertain reply, live or retained, reports the receipt's recorded `uncertain_cause` (§6.9 Uncertain cause) as `reason`; a receipt without a recorded cause, such as an `in_progress` row left by runner loss, reports `prior transmission remains uncertain`. For a consumed key, `zero_bytes` describes this retry only and supplies no zero-byte evidence about the original attempt. A prior abandoned-uncertain claim remains possibly transmitted. This projection reads retained history even after current owner/interaction eligibility is lost.
 
 
 Response text is:
@@ -913,6 +913,7 @@ A new attempt against a blocked current request fails before any receipt, audit,
 | `outer terminal closed` | The outer terminal reached end of input. |
 | `native output closed` | The native child's output reached end of file. |
 | `terminal output still arriving` | The drain's bounded rounds ended before human and child input were quiet. |
+| `terminal reply pending` | An outer-terminal reply prefix awaits completion within its 100 ms classification bound. |
 | `permission request is not visible` | The request is obscured, closed or not observed as visible. |
 | `permission request is not the current interaction` | Input eligibility is not held for the current permission interaction. |
 
@@ -1031,9 +1032,12 @@ The CSI regex is exactly `\x1b\[[0-?]*[ -/]*[@-~]`: ESC, `[`, any run of
 parameter bytes (`0x30`–`0x3F`), any run of intermediate bytes (`0x20`–`0x2F`),
 then one final byte (`0x40`–`0x7E`). This matches **CSI sequences only** — OSC,
 DCS, and single-character escapes are deliberately **not** stripped. After
-stripping CSI matches, split on `\n` and, per line, keep only the substring after
-the **last** `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps only
-`NEW`), then re-join with `\n`. An empty/falsy input returns unchanged.
+stripping CSI matches, split on `\n` and, per line, trim the trailing run of
+`\r` — a carriage return with nothing written after it, such as the CR of a CRLF
+row terminator, overwrites nothing — then keep only the substring after the
+**last** remaining `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps only
+`NEW`, and a CRLF-terminated `row\r\n` keeps `row`), then re-join with `\n`. An
+empty/falsy input returns unchanged.
 
 
 #### Formatter helper semantics
@@ -2180,13 +2184,13 @@ The settle interval is 500 milliseconds on the monotonic clock, matching the pan
 
 1. Revalidate the run, active placement, observer and interaction state, then durably reserve the input before any child byte.
 2. Write the operation prefix plus the unchanged literal UTF-8 as the literal stage.
-3. Continue servicing child output, manual input and control traffic while a 500-millisecond monotonic timer runs from completion of the literal stage.
-4. Revalidate identity, interaction state and absence of intervening human input, then write the separately measured submit-key stage.
+3. Continue servicing child output, outer-terminal input and control traffic while a 500-millisecond monotonic timer runs from completion of the literal stage.
+4. Revalidate identity, interaction state and absence of intervening manual input (terminal replies excluded, § Terminal reply classification), then write the separately measured submit-key stage.
 5. Record accepted submission only after the entire submit-key stage is written.
 
-The runner stores the literal and submit-key stages separately in memory. Ordinary output redraw caused by the literal is expected, so the literal's own nonempty composer leaves the pending submit stage valid. A candidate or new interaction, human input, an ownership or placement change or observer failure stops the remaining stages.
+The runner stores the literal and submit-key stages separately in memory. Ordinary output redraw caused by the literal is expected, so the literal's own nonempty composer leaves the pending submit stage valid. A candidate or new interaction, manual input, an ownership or placement change or observer failure stops the remaining stages; terminal replies forwarded during the settle leave the submit stage valid.
 
-A positive short write, a failure after any child byte, or a timer-stage cancellation after a positive write produces `uncertain` with the input ID and last stage; an Escape byte counts as a side effect. A zero-byte transient write may retry only after fresh validation, and an uncertain operation is reconciled before any new attempt. The inclusive 65536-byte encoded input limit and the control-frame limit apply unchanged.
+A positive short write, a failure after any child byte, or a timer-stage cancellation after a positive write produces `uncertain` with the input ID and last stage; an Escape byte counts as a side effect. The receipt records its `uncertain_cause` (§ Uncertain cause). A zero-byte transient write may retry only after fresh validation, and an uncertain operation is reconciled before any new attempt. The inclusive 65536-byte encoded input limit and the control-frame limit apply unchanged.
 
 #### Runner boundary and creation transaction
 
@@ -2241,9 +2245,9 @@ Forward outer-terminal input so that a burst spanning several reads reaches the 
 | Write | The tick then writes the whole queue to the PTY master in one write; unaccepted bytes stay queued, in order, for the next tick |
 | EOF | Bytes read before EOF are forwarded before outer EOF is reported |
 | Pacing | A tick that moved input bytes, by reading outer bytes or writing a positive count to the PTY master, is followed immediately by the next tick; every other tick, including one whose queued input the master did not accept, keeps the loop's idle sleep |
-| Framing | None: bytes pass unchanged and in order, with no escape-sequence parsing, holding or timeout |
+| Framing | None: forwarded bytes pass unchanged and in order, with no holding or timeout. Manual-input accounting classifies the same bytes separately (§ Terminal reply classification) |
 
-Every read advances the manual-input generation by its byte count, as specified for manual input.
+Only bytes classified as manual input advance the manual-input generation; a complete terminal reply is forwarded but leaves the generation unchanged (§ Terminal reply classification).
 
 The PTY-reader path updates terminal state before publishing the same bytes to display and passes immutable observations to the classifier. Track cursor/cell state, primary/alternate screens, OSC title and a monotonic output sequence. Keep scrollback out of live-prompt matching. Terminal queries and replies continue through the terminal transport, and parser callbacks must not synthesize a second reply to a query already handled by the outer terminal.
 
@@ -2271,6 +2275,75 @@ The creator precreates `owner.lock`, records its device/inode and runtime-direct
 Normal recovery acquires the identity-matching lock before a CAS epoch takeover. Every event mutation validates complete database identity, owner kind and epoch; input additionally validates its ownership/lock identities immediately before child writes. A delayed live runner retaining the original lock prevents normal takeover. The missing-path branch also requires verified original-owner termination before fencing; missing files alone establish no exclusive ownership or safe input. Every takeover records the recovering process identity and advances the epoch, rejecting stale writes/input.
 
 Only the current lock/epoch owner allocates event sequences. Confirmed loss and its events are produced by the explicit recovery procedure below after exclusive takeover, ordered after complete outbox replay. Concurrent reconcilers contend for the same lock and CAS rather than allocating competing loss events. PID/start identity assists child reconciliation; it never substitutes for ownership. There is no unattended restart or approval/command replay.
+
+##### Terminal reply classification
+
+The runner classifies every positive outer-terminal read for manual-input accounting only. Each read byte is queued for the PTY immediately, unchanged and in order; classification holds, reorders, drops and synthesizes no byte and retains only parse state and a pending byte count. `human_generation` is the cumulative count of bytes resolved as manual input. The staged settle check, drain proofs, permission-response authority and `member press` accounting all use that one count, so a terminal reply affects none of them. Tick pacing still counts every byte read.
+
+Every byte resolves exactly once: as manual input (counted), as part of a complete terminal reply (not counted) or as pending inside a possible reply prefix. A sequence is a terminal reply only when it is complete and matches one allowlist row. All bytes are 7-bit; `ESC` is `0x1b`, `CSI` is `ESC [`, `ST` is `ESC \` and `BEL` is `0x07`, and spaces in the byte forms are for readability only. Two productions are shared by every row:
+
+- `Pd`: one or more ASCII digits (`0x30`–`0x39`).
+- `L(min,max)`: between `min` and `max` `Pd` values joined by single `;` bytes, with no empty parameter. `L(1,3)` matches `8`, `8;24` and `8;24;80`, and rejects the empty string, `8;` and `;24`.
+
+| Reply | Byte forms | Notes |
+|---|---|---|
+| Cursor position report | `CSI L(2,2) R`, `CSI ? L(2,3) R` | Collides with modified F3; accepted as a reply |
+| Device status | `CSI 0 n`, `CSI 3 n`, `CSI ? L(1,4) n` | The `?` form covers private status reports such as the color-scheme report `CSI ? 997 ; 1 n` |
+| Device attributes | `CSI ? L(1,32) c`, `CSI > L(1,4) c` | Primary and secondary; the tertiary reply is a DCS |
+| Mode report (DECRPM) | `CSI ? L(2,2) $ y`, `CSI L(2,2) $ y` | — |
+| Window report | `CSI L(1,3) t` | Single-parameter state reports (`CSI 1 t`, `CSI 2 t`) and size reports (`CSI 8 ; 24 ; 80 t`) |
+| Kitty keyboard flags | `CSI ? L(1,1) u` | `CSI L(1,3) u` without `?` is a key event and stays manual |
+| Focus | `CSI I`, `CSI O` | No parameters or intermediates |
+| OSC reply | `ESC ]` body `BEL`, or `ESC ]` body `ST` | Any body of at most 4096 bytes |
+| DCS reply | `ESC P` body `ST` | XTVERSION, XTGETTCAP, DECRQSS and tertiary device-attribute replies |
+| APC reply | `ESC _` body `ST` | Kitty graphics-protocol query responses, with the DCS termination rules |
+
+Every other input counts as manual input:
+
+| Input | Classification |
+|---|---|
+| Printable text, UTF-8, C0 controls (Enter, Tab, Ctrl-keys), DEL | Manual immediately |
+| Any CSI outside the allowlist: arrow/function keys, `CSI L(1,2) ~`, kitty key events `CSI L(1,3) u` | Manual on its final byte |
+| Mouse reports: SGR `CSI < … M` / `CSI < … m`, X10 `CSI M Cb Cx Cy` | Manual, because they are human pointer input even when no composer text changes |
+| Bracketed paste `CSI 200 ~` … `CSI 201 ~`, including every byte between the markers | Manual, even when the pasted body contains allowlisted forms |
+| SS3 `ESC O x` and Alt-modified `ESC x` for any `x` other than `[`, `]`, `P`, `_` | Manual once the second byte arrives |
+| SOS `ESC X` and PM `ESC ^` strings | Manual through the Alt-modified row; terminals send no SOS/PM replies |
+| 8-bit C1 bytes (`0x9b`, `0x9d`, `0x90`, `0x9f`) | Manual, as ordinary bytes in UTF-8 mode |
+| A CSI whose parameter and intermediate bytes exceed 64 | Manual at the byte that exceeds the limit |
+| An OSC, DCS or APC body that exceeds 4096 bytes | Manual at the byte that exceeds the limit, so a larger reply such as an OSC 52 clipboard read counts as manual |
+
+The classifier is in exactly one state: ground, escape (after `ESC`), CSI, string body (OSC, DCS or APC), string escape (after `ESC` inside a body) or paste.
+
+| State | Valid continuation bytes | Completes on |
+|---|---|---|
+| Escape | `[` → CSI; `]`, `P`, `_` → string body | — |
+| CSI | Parameter bytes `0x30`–`0x3F`, then intermediate bytes `0x20`–`0x2F` | A final byte `0x40`–`0x7E`; the complete sequence is a reply when it matches an allowlist row, otherwise manual |
+| String body | `0x20`–`0x7E` and bytes `≥ 0x80`; `BEL` for OSC only; `ESC` → string escape | `BEL` (OSC only) |
+| String escape | `\` | `\` (ST) |
+
+Any byte that is not a valid continuation for the current state resolves every pending byte as manual. That byte is then classified again from ground: an `ESC` starts a new sequence, and any other byte counts as manual.
+
+| Input | Resolution |
+|---|---|
+| `ESC [ 1 ; ESC [ I` | `ESC [ 1 ;` is 4 manual bytes; `ESC [ I` is a focus reply |
+| `ESC ESC [ I` (Alt-Escape or a stray Escape before a reply) | The first `ESC` is 1 manual byte; `ESC [ I` is a focus reply |
+| A C0 control (including CAN `0x18` and SUB `0x1a`), DEL or a byte `≥ 0x80` inside a pending CSI | The pending bytes and that byte count as manual |
+| `BEL` inside a DCS or APC body | The pending bytes and the `BEL` count as manual |
+| `ESC` inside a string body followed by any byte other than `\` | The pending bytes up to and including that `ESC` count as manual, and the following byte is classified again from ground |
+| An `ESC x` key where `x` is not a valid escape continuation | Both bytes count as manual |
+
+The paste state follows a manual `CSI 200 ~`: every byte counts as manual, and `CSI 201 ~` counts as manual and returns to ground. A sequence split across reads stays pending across reads, within one tick or across ticks.
+
+A pending prefix resolves as manual input once 100 milliseconds pass since its last byte:
+
+- The runner resolves expired prefixes at the start of each tick's outer read and at the start of every drain round, before reading, and advances `human_generation` by the resolved manual count.
+- While a prefix is pending, the transport is not quiescent: a drain returns `Pending` with blocker `terminal reply pending`, an earlier drain proof fails validation with `input transport is no longer quiescent`, and no programmatic stage, permission answer or deferred write proceeds.
+- Outer EOF resolves a pending prefix as manual before EOF is reported.
+- A lone Escape key is pending for at most 100 milliseconds and then counts as manual, so a staged delivery whose settle sees that key stops with `manual_input` once the bound resolves it.
+- The bound runs inside the active attempt's five-second deadline and adds no deadline of its own.
+- Each new byte of a prefix restarts the bound; the 64-byte CSI and 4096-byte string body limits cap how long a continuously fed prefix stays pending.
+
+Human input whose bytes exactly equal an allowlisted reply and arrive within the bound counts as a reply. The realistic member of this accepted collision class is a modified F3 key (`CSI 1 ; Pmod R`), which matches the cursor-position-report form. The other members need an exact multi-key sequence typed within 100 milliseconds: Alt-`[` then `I`/`O` (a focus report), Alt-`]` … Ctrl-G (an OSC reply), and Alt-Shift-P or Alt-`_` … Alt-`\` (a DCS or APC reply). A colliding key still reaches the child unchanged; it only fails to interrupt a staged delivery or revoke automatic authority.
 
 #### Classification and episode identity
 
@@ -2377,14 +2450,14 @@ The member's routed refusal evidence remains the record in each case.
 
 #### Persistence, notification and read interfaces
 
-The `cafleet_v8.db` format preserves its application identity and existing rows through contiguous embedded migrations. V4 establishes runtime records, V5 adds the permission-response audit/claim relationships specified below, V6 adds the automatic review event kinds, and V7 adds ordinary-delivery receipt metadata, payload digest versions and the deferred-result event kind (§ V6 storage, § V7 storage). The singleton `runtime_database_identity(singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1), instance_id TEXT NOT NULL)` has a random 128-bit hex instance ID initialized once during migration. Runtime records have these fields:
+The `cafleet_v8.db` format preserves its application identity and existing rows through contiguous embedded migrations. V4 establishes runtime records, V5 adds the permission-response audit/claim relationships specified below, V6 adds the automatic review event kinds, V7 adds ordinary-delivery receipt metadata, payload digest versions and the deferred-result event kind, and V8 adds the uncertain cause of input receipts (§ V6 storage, § V7 storage, § V8 storage). The singleton `runtime_database_identity(singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1), instance_id TEXT NOT NULL)` has a random 128-bit hex instance ID initialized once during migration. Runtime records have these fields:
 
 | Table | Required fields and constraints |
 |---|---|
 | `member_runs` | `run_id INTEGER PRIMARY KEY AUTOINCREMENT`; member/fleet/Director foreign keys; backend, launch nonce, canonical runtime path, requested/resolved mode, mode source, permission argv JSON, native version, profile version, coverage, status and lifecycle/health timestamps; nullable runner/child PID plus verified start identity and exit code/signal. At most one nonterminal run per member. |
 | `member_interactions` | `interaction_id INTEGER PRIMARY KEY AUTOINCREMENT`, `run_id` foreign key, `episode_seq`, classification, post-policy evidence digest, opened timestamp, nullable closed timestamp/reason, and latest bounded evidence JSON. Unique `(run_id, episode_seq)` and at most one unclosed interaction per run. |
 | `member_runtime_events` | `event_id INTEGER PRIMARY KEY AUTOINCREMENT`, `run_id` foreign key, positive `event_seq`, nullable interaction foreign key, `kind`, observed/committed timestamps, versioned payload JSON, notification state and nullable unique `message_id` foreign key. Unique `(run_id, event_seq)` supports idempotent retries. |
-| `member_input_operations` | `input_id INTEGER PRIMARY KEY AUTOINCREMENT`, run foreign key, unique `(run_id, operation_key)`, kind, payload digest, nullable message foreign key, durable receipt/settlement state, payload digest version, ordinary delivery method/reason and deferred metadata, and timestamps. Retain settled rows as replay-rejection records for the run's lifetime. |
+| `member_input_operations` | `input_id INTEGER PRIMARY KEY AUTOINCREMENT`, run foreign key, unique `(run_id, operation_key)`, kind, payload digest, nullable message foreign key, durable receipt/settlement state, payload digest version, ordinary delivery method/reason, deferred metadata, uncertain cause and timestamps. Retain settled rows as replay-rejection records for the run's lifetime. |
 | `member_permission_responses` | Immutable required decision/provenance fields keyed by the input ID, with event/interaction/Director foreign keys. |
 | `member_permission_response_claims` | Interaction primary key and unique input reference, retaining one possibly transmitted answer per episode. |
 
@@ -2398,7 +2471,7 @@ The table below fixes names/types beyond the primary-key fields above. Use `INTE
 | Run lifecycle/ownership | Required `owner_epoch INTEGER` starts at 1, `owner_kind TEXT` is `creator`, `runner` or `reconciler`, `owner_pid INTEGER`, `owner_start_identity TEXT`, `reachability TEXT` is `reachable` or `suspect`, `cleanup_state TEXT` is `complete` or `incomplete`, `event_seq_reserved_through INTEGER` starts at zero, and `observation_gap_count INTEGER` starts at zero. Nullable `runtime_dir_identity_json`, `run_lock_identity_json`, `runner_pid`, `runner_start_identity`, `child_pid`, `child_start_identity`, `started_at`, `last_health_at`, `ended_at`, `exit_code`, `exit_signal`, `cleanup_diagnostics_json`, `recovery_origin_status`; the latter preserves the original lifecycle status while recovering. |
 | Interaction | Required `run_id`, `episode_seq`, `classification`, `evidence_digest`, `opened_at`, `evidence_json`; nullable `closed_at`, `close_reason`. `classification` is an interactive class from the classification table; both closure fields are null together or present together. |
 | Runtime event | Required `run_id`, `event_seq`, `kind`, `observed_at`, `committed_at`, `payload_json`, `notification_state`; nullable `interaction_id`, `message_id`, `archive_reason`. `notification_state=inbox` requires a message and null archive reason; `archived` requires no message and a closure reason. |
-| Input operation | Required `run_id`, `operation_key TEXT`, `kind TEXT` (`preview`, `prompt`, `exec`, `permission_response`), `payload_digest TEXT`, `payload_digest_version INTEGER` (`1` or `2`; `2` only for preview), `state TEXT` (`ready`, `in_progress`, `accepted`, `uncertain`, `settled`), `created_at`, `updated_at`; nullable `message_id`, `disposition TEXT`, `evidence_ref TEXT`, `delivery_method TEXT` (`profile` or `fallback`), `delivery_reason TEXT`, `deferred_at TEXT`, `defer_reason TEXT`. `ready` certifies a zero-byte attempt, and a ready row with deferred metadata is a runner-queued ordinary input; `deferred_at` and `defer_reason` are present together and only for ordinary input kinds; settled disposition is `submitted`, `not_submitted` or `abandoned_uncertain`, and preview kind requires its original message ID. Permission responses additionally require the audit and episode-claim relationships specified below. |
+| Input operation | Required `run_id`, `operation_key TEXT`, `kind TEXT` (`preview`, `prompt`, `exec`, `permission_response`), `payload_digest TEXT`, `payload_digest_version INTEGER` (`1` or `2`; `2` only for preview), `state TEXT` (`ready`, `in_progress`, `accepted`, `uncertain`, `settled`), `created_at`, `updated_at`; nullable `message_id`, `disposition TEXT`, `evidence_ref TEXT`, `delivery_method TEXT` (`profile` or `fallback`), `delivery_reason TEXT`, `deferred_at TEXT`, `defer_reason TEXT`, `uncertain_cause TEXT`. `ready` certifies a zero-byte attempt, and a ready row with deferred metadata is a runner-queued ordinary input; `deferred_at` and `defer_reason` are present together and only for ordinary input kinds; `uncertain_cause` is a value from § Uncertain cause and is present only in `uncertain` or `settled` state; settled disposition is `submitted`, `not_submitted` or `abandoned_uncertain`, and preview kind requires its original message ID. Permission responses additionally require the audit and episode-claim relationships specified below. |
 
 Store process-start identities as platform-specific tokens in `TEXT`. JSON fields validate as objects except `permission_argv_json` and `cleanup_diagnostics_json`, which are arrays. New event payloads carry `schema_version=2`; readers validate v1 and v2 explicitly and return existing records and their associated message bytes unchanged on replay. `event_evidence` is `metadata` or `redacted`. `cleanup_state` begins `incomplete` and becomes complete only after successful shutdown cleanup, so a live/crashed run makes no prior completion claim.
 
@@ -2510,7 +2583,7 @@ The runner emits one `input_delivery_result` event to the run's Director for a d
 | `source` | `runner_lifecycle` |
 | `native_request_id`, `decision_outcome` | `null`, `"unknown"` |
 | `evidence` | The run's ordered evidence object with null screen-derived fields |
-| `cause` | Present only for an uncertain result, carrying the existing diagnostic cause without overwriting the method-selection reason |
+| `cause` | `{"kind":UNCERTAIN_CAUSE}`, present only for an uncertain result whose receipt records an `uncertain_cause` (§ Uncertain cause), and absent otherwise. Every publisher derives it from the durable receipt, and readers require it to match that receipt |
 | `input_id` | The deferred input's ID |
 | `message_id` | The preview's message ID, or null for explicit prompt/exec input |
 | `delivery` | The ordered `status,method,reason` projection of the stored receipt (§ Delivery reporting) |
@@ -2559,6 +2632,10 @@ V6 widens the `member_runtime_events.kind` CHECK to the event kinds listed above
 ##### V7 storage
 
 V7 drops `member_runs.profile_match` with its column-local CHECK, adds the ordinary-delivery and digest-version columns to `member_input_operations`, and widens the runtime-event kind CHECK with `input_delivery_result` (§8 *V7 minimum-version delivery migration*). It preserves the application and instance identities, every row and sequence, every foreign key and the audit relationships, rebuilding the event, permission-response and claim tables in the V6 dependency order. Existing input rows receive `payload_digest_version=1` with unchanged digest bytes and null delivery/deferred metadata, because those facts were not recorded.
+
+##### V8 storage
+
+V8 adds the nullable `member_input_operations.uncertain_cause` column in place, with a column-local CHECK restricting it to the § Uncertain cause values and to `uncertain` or `settled` rows (§8 *V8 uncertain cause migration*). It needs no table rebuild and preserves the application and instance identities, every row, ID, sequence, foreign key and audit relationship. Existing input rows receive a null cause, because the cause was not recorded.
 
 #### CLI presentation contract
 
@@ -2638,7 +2715,7 @@ At the service, also cap new-operation admission to five seconds from the first 
 
 ##### Bounded input draining
 
-Before a programmatic input attempt, drain actual human and child input through the existing manual queue, terminal parser, ordered observer and outer display. A drain returns either `Pending` or `Quiescent` with the actual cumulative `human_generation` and terminal `output_seq`. Quiescence describes transport and observation health; the input coordinator separately validates composer/request eligibility, ownership, reservation and the original deadline before a write.
+Before a programmatic input attempt, drain actual human and child input through the existing manual queue, terminal parser, ordered observer and outer display. A drain returns either `Pending` or `Quiescent` with the actual cumulative `human_generation`, the count of bytes classified as manual input (§ Terminal reply classification), and terminal `output_seq`. Quiescence describes transport and observation health; the input coordinator separately validates composer/request eligibility, ownership, reservation and the original deadline before a write.
 
 Each call executes at most eight rounds under the original deadline. A round attempts at most one human read, one manual-queue PTY write, one child read, one display-queue write and one display flush, in that order. Skip an operation only for unavailable capacity or remaining quota, an empty queue or previously observed stream `EOF`. Let B be the positive configured `bytes_per_tick`; each actual read buffer is bounded by the minimum of 16384 bytes, the remaining stream quota and available queue capacity.
 
@@ -2652,15 +2729,15 @@ Each call executes at most eight rounds under the original deadline. A round att
 | Final observation-health samples | One sample, taken only for a candidate completed quiet round. |
 | Rounds | Eight; unresolved work returns `Pending`. |
 
-`Quiescent` requires both actual reads to return `WouldBlock` in the same completed round, an empty manual queue, consumed deferred child bytes, successful parser/observer processing and positive free display capacity. The final health sample must be present, nondegraded, have `pending_count=0` and `pending_evidence=false`. An absent health adapter supplies no proof; a healthy `Hold(Unknown)` state may establish physical quiescence while remaining ineligible for programmatic input. The eighth round may certify these actual facts; quota exhaustion, skipped reads, `Interrupted`, `EOF`, outstanding manual bytes or display pressure supply `Pending` instead. A continuously readable source terminates at the round or byte bound. Deferred child bytes precede subsequent reads and consume the same child quota.
+`Quiescent` requires both actual reads to return `WouldBlock` in the same completed round, an empty manual queue, consumed deferred child bytes, successful parser/observer processing and positive free display capacity. The final health sample must be present, nondegraded, have `pending_count=0` and `pending_evidence=false`. An absent health adapter supplies no proof; a healthy `Hold(Unknown)` state may establish physical quiescence while remaining ineligible for programmatic input. `Quiescent` also requires no pending terminal-reply prefix: each round first resolves expired prefixes, and a round that would otherwise certify quiescence while a prefix is pending returns `Pending` with blocker `terminal reply pending` and installs no proof. The eighth round may certify these actual facts; quota exhaustion, skipped reads, `Interrupted`, `EOF`, outstanding manual bytes, a pending reply prefix or display pressure supply `Pending` instead. A continuously readable source terminates at the round or byte bound. Deferred child bytes precede subsequent reads and consume the same child quota.
 
-Count every actual positive human read immediately with checked cumulative unsigned 64-bit arithmetic, in both ordinary progress and input draining. Retain those counts and literal queued bytes when later PTY, child, display, parser or observer work fails. The service delivers the observed before/after count delta to manual-input invalidation on both successful and failed progress before propagating any error; a simultaneous notification failure accompanies the primary error. Actual nonrecoverable errors propagate, and a zero-length write retains the existing no-progress error. `Interrupted` requires a later fresh read pair; `EOF` records the stream state and leaves shutdown handling to the normal service path.
+Classify every actual positive human read immediately and count its manual bytes with checked cumulative unsigned 64-bit arithmetic, in both ordinary progress and input draining. Retain those counts and literal queued bytes when later PTY, child, display, parser or observer work fails. The service delivers the observed before/after count delta to manual-input invalidation on both successful and failed progress before propagating any error; a simultaneous notification failure accompanies the primary error. Actual nonrecoverable errors propagate, and a zero-length write retains the existing no-progress error. `Interrupted` requires a later fresh read pair; `EOF` records the stream state and leaves shutdown handling to the normal service path.
 
 Clear stored drain proof at entry, then check the original deadline before I/O and before each endpoint/callback. Recheck after completed work, retaining the actual bytes/counts from successful completed I/O before reporting expiry. In-memory bookkeeping and observation of a completed read may finish after expiry; an observed expiration permits no later endpoint call or proof installation. Synchronous I/O and callbacks have no preemption guarantee, so finite work bounds and clock checks supply no hard syscall or callback latency cap. Every call retains the original deadline and performs no internal sleep or deadline renewal.
 
 Retain every completed child read for display and preserve the exact prefix processed by the terminal parser and ordered observer. If a positive child chunk fails to complete that observation, retain an observation-incomplete fence for the `Transport` lifetime. Subsequent drains continue bounded manual and display progress and return `Pending` without proof, including when later health is healthy or the caller supplies a new deadline. Ordinary progress, resize and display flushing retain the fence. Fully completed observation remains complete when only a later deadline or display operation fails. Partly processed chunks are neither replayed nor treated as observed suffixes; the runtime exposes no repair/reset operation for this fence.
 
-Only a successful final check installs an opaque, single-use proof bound to its transport instance, drain turn and actual health/generation/sequence facts. The visible result fields describe evidence and grant no write authority. Taking the stored proof consumes it once. Ordinary progress, resize, prefetch, display mutation/discard and a new drain invalidate it before their validation or I/O, including later error paths; pure generation/snapshot reads preserve it. A new transport begins with generation 0 and no proof. Programmatic writing consumes actual coordinator-owned authority rather than a caller-constructed result.
+Only a successful final check installs an opaque, single-use proof bound to its transport instance, drain turn and actual health/generation/sequence facts. The visible result fields describe evidence and grant no write authority. Taking the stored proof consumes it once, and validating it while a terminal-reply prefix is pending fails with `input transport is no longer quiescent`. Ordinary progress, resize, prefetch, display mutation/discard and a new drain invalidate it before their validation or I/O, including later error paths; pure generation/snapshot reads preserve it. A new transport begins with generation 0 and no proof. Programmatic writing consumes actual coordinator-owned authority rather than a caller-constructed result.
 
 ##### Durable input receipts and settlement
 
@@ -2771,7 +2848,7 @@ Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` wi
 | `submitted` | Complete literal and submit stages were written | Exit 0; send has `notification_sent=true`, exec has `dispatched=true` |
 | `queued` | The runner accepted durable zero-byte deferred work | Exit 0; send has `notification_sent=false`, exec has `dispatched=false`; the input ID and reason are returned |
 | `held` | No queue acceptance or write, due to unavailable health, ownership or storage | Send preserves its committed message and prints the reason; explicit prompt/exec exits 1 with the existing delivery context |
-| `uncertain` | Some stage may have written; reconciliation is required | Existing error categories, input identity and stage diagnostics, including the selected method |
+| `uncertain` | Some stage may have written; reconciliation is required | Existing error categories, input identity and stage diagnostics, including the recorded `uncertain_cause` (§ Uncertain cause) and the selected method |
 | `not_submitted` | Work was cancelled with established zero-byte evidence | Visible through input inspection and, for deferred work, its result event |
 | `not_applicable` | A self-send or root-Director target uses broker consumption without automatic pane delivery | Send retains `notification_sent=false`, null method and input ID, and no warning |
 
@@ -2815,11 +2892,30 @@ An ordinary receipt whose method and reason were never recorded, including pre-V
 
 An asynchronous completion leaves the originating CLI output unchanged. The runner persists the actual method in the input receipt, `input show` exposes it, and the first submitted, not-submitted or uncertain result of a deferred input emits one `input_delivery_result` event (§ Input delivery result event).
 
+###### Uncertain cause
+
+Every runner transition of an input from `in_progress` to `uncertain` records exactly one `uncertain_cause` in the same update, and storage refuses that transition without a cause. The cause attributes the uncertainty; it is separate from `delivery_reason`, which keeps the selection reason unchanged after a positive write.
+
+| Value | Recorded when |
+|---|---|
+| `manual_accounting_failed` | Manual-input accounting failed when a staged stage stops |
+| `manual_input` | The manual-input generation changed since the literal stage when a staged stage stops |
+| `interaction_candidate` | A staged stage stops on a blocking interaction whose eligibility is held as a candidate |
+| `interaction_open` | A staged stage stops on any other blocking interaction: a visible or obscured interaction, an interaction hold or a retained transition |
+| `observer_unavailable` | A staged stage stops because the observer is unavailable, has a gap or reported an observation diagnostic |
+| `short_write` | A programmatic write returned a positive count smaller than its stage |
+| `write_failed` | The attempt failed after a possible child byte: a PTY write error, a post-write checkpoint, manual-accounting or deadline failure, a failed deferred attempt or a failed permission-response attempt |
+| `runner_stopped` | Runner shutdown ended an active deferred attempt that may have written a child byte |
+
+At the settle check before a staged submit, the first matching row among the first five, in table order, wins; accounting failure comes first because the generation comparison is unreliable once accounting failed. A stage that stops on an interaction after an earlier stage wrote records `interaction_candidate` or `interaction_open` by the same candidate test. A partial or unknown write outcome records `short_write` for a positive short count and `write_failed` otherwise.
+
+Settlement and reconciliation preserve the recorded cause. Inputs that never became uncertain, inputs recorded before V8 and `in_progress` inputs left by runner loss have a null cause. `input show` and `input reconcile` report the cause, an uncertain submission reply carries it as `reason`, and an uncertain `input_delivery_result` event carries it as `cause`.
+
 ##### Explicit manual key input
 
 An explicitly authorized `member press` sends only its requested ordered keys through the member's outer multiplexer pane under the shared pane lock and selected-context/deadline contract (§6.5 Explicit key dispatch). It appends no Escape or Enter. This manual path remains available during observer degradation or a programmatic composer hold and follows the separate CLI acknowledgment/error contract (§6.3 `member press`).
 
-The runner counts actual positive outer-terminal reads, retains their generation before any later I/O error and accounts each new delta once on both successful and failed transport steps before subsequent automatic advancement. Observed manual input invalidates automatic authority through the retained generation; a key argument or backend acknowledgment supplies no byte count, drain proof or permission receipt. Press changes no durable input/response row. Native approval/denial/cancellation and actual continuation remain independently observed outcomes under the existing Director/user policy.
+The runner counts the manual bytes of actual positive outer-terminal reads, excluding complete terminal replies (§ Terminal reply classification), retains their generation before any later I/O error and accounts each new delta once on both successful and failed transport steps before subsequent automatic advancement. Observed manual input invalidates automatic authority through the retained generation; a key argument or backend acknowledgment supplies no byte count, drain proof or permission receipt. Press changes no durable input/response row. Native approval/denial/cancellation and actual continuation remain independently observed outcomes under the existing Director/user policy.
 
 #### Request-bound permission responses
 
@@ -2838,7 +2934,7 @@ cafleet permission respond INTERACTION_ID --event-id EVENT_ID --from-member-id D
 
 Require positive IDs/epoch, nonempty operation keys and bounded nonblank references. `director-auto` requires mode `auto`; source `user` records a user decision in any mode. Validate the active pinned Director/fleet/member relationships. `inspect` verifies the current durable event/message/interaction association, retains the genuine concrete pane lock, probes the pinned owner and resolves unread output/manual progress under the original deadline clipped to any inherited SQL bound. Current authority comes from the actual parsed screen, a complete single-request choice/focus match and the stable tracked episode. Observation freshness is checked independently of ordinary composer eligibility; inspection sends zero programmatic child bytes and creates no receipt, audit or claim. Return current identities/visibility/classification, selected detector/answer-profile metadata, supported decisions/capability reason, post-policy evidence, missing-evidence indications and an opaque token. Unsupported or blocked capability is an explicit result, and incomplete observation supplies no token.
 
-The runner issues one current random token bound in memory to the complete database/run/nonce/epoch, interaction/episode, native version, live operation/choice/focus identity, manual-input generation and full immutable decision-to-plan set, including every selected profile, rule and stage identity. A checked invalidation generation records the first incompatible candidate/request, obscurity, observation gap/degradation or incomplete observation, even when the original display returns before inspection. Positive actual manual input, shutdown and ownership loss also revoke authority; arithmetic or randomness failure returns an explicit error. Repeated compatible inspections reuse the token. A tested equivalent redraw/resize preserves it only when the exact profile proves unchanged semantic/choice/focus and plan identity; output sequence alone is evidence rather than revocation. Healthy transient queue pressure defers authority without rebinding the token. The random value is independent of hidden-text hashes and authorization; a revoked token requires fresh inspection and decision reconciliation.
+The runner issues one current random token bound in memory to the complete database/run/nonce/epoch, interaction/episode, native version, live operation/choice/focus identity, manual-input generation and full immutable decision-to-plan set, including every selected profile, rule and stage identity. A checked invalidation generation records the first incompatible candidate/request, obscurity, observation gap/degradation or incomplete observation, even when the original display returns before inspection. Positive actual manual input (bytes classified as manual; terminal replies excluded, § Terminal reply classification), shutdown and ownership loss also revoke authority; arithmetic or randomness failure returns an explicit error. Repeated compatible inspections reuse the token. A tested equivalent redraw/resize preserves it only when the exact profile proves unchanged semantic/choice/focus and plan identity; output sequence alone is evidence rather than revocation. Healthy transient queue pressure defers authority without rebinding the token. The random value is independent of hidden-text hashes and authorization; a revoked token requires fresh inspection and decision reconciliation.
 
 A cursor transit is the one incompatible frame that leaves the generation unchanged. It is a frame that yields no current request while a request is current, is not a verified non-interaction, and keeps every row of the current request's matched live region identical in text to the frame that established the request; typically the native CLI moves the cursor outside the form to redraw another part of the screen. During a transit the request is not current, so inspection returns no token and a response is blocked. A following frame with the same request restores it under the unchanged generation and token. A changed region row, a different request fingerprint, closure, `interaction_obscured`, an observation gap, child exit and positive manual input still invalidate immediately.
 
@@ -2849,7 +2945,7 @@ The next stage waits for its gate within the responding invocation's deadline, a
 - a focus on any other option;
 - a screen other than the expected continuation after a stage that opens one;
 - the episode closing before the final stage;
-- any other identity change, human input or a degraded observation;
+- any other identity change, manual input or a degraded observation;
 - the deadline expiring.
 
 Inspection exposes the selected current post-policy evidence independently of private request/match/plan state. Missing facts follow the permission inspection projection (§6.3 Permission commands); neither operation text nor private plan eligibility substitutes for a disclosed structured fact. A proved `single_request` choice establishes answer eligibility independently of whether public evidence states the choice scope. Keep transient raw semantics, focus and plan bytes in memory; inspection preserves the existing evidence schema and persists no token or pre-policy digest.
@@ -3286,9 +3382,24 @@ CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','i
 
 Every other column, constraint, index and foreign key of the rebuilt tables is unchanged. The derived chain guard and schema-shape guard pass at head V7.
 
+### V8 uncertain cause migration
+
+The contiguous V8 migration `V8__uncertain_cause.sql` preserves V7 rows, IDs, sequences, foreign keys and audit relationships, and the application and instance identities. It adds the uncertain-cause column to `member_input_operations` in place, and existing rows receive null:
+
+```sql
+ALTER TABLE member_input_operations ADD COLUMN uncertain_cause TEXT
+  CHECK(uncertain_cause IS NULL
+     OR (uncertain_cause IN ('manual_input','manual_accounting_failed','interaction_candidate',
+                             'interaction_open','observer_unavailable','short_write','write_failed',
+                             'runner_stopped')
+         AND state IN ('uncertain','settled')));
+```
+
+No table is rebuilt. The derived chain guard and schema-shape guard pass at head V8.
+
 ## 9. Testing strategy
 
-Exercise current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; for explicitly unwrapped members, Escape-first argv order and oldest-first drains with one Escape per lock hold; minimum-version profile selection, staged profile submission with its settle interval, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, ACK races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; backend/multiplexer smoke coverage; links, embedding and release builds. Preserve general timed pipe draining and owned-child cleanup coverage.
+Exercise current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; for explicitly unwrapped members, Escape-first argv order and oldest-first drains with one Escape per lock hold; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, uncertain-cause recording at every runner uncertain transition, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, ACK races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; backend/multiplexer smoke coverage; links, embedding and release builds. Preserve general timed pipe draining and owned-child cleanup coverage.
 
 ## 10. CLI command checklist
 

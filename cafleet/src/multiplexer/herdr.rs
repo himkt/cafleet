@@ -814,19 +814,17 @@ mod tests {
     }
 
     #[test]
-    fn capture_pane_keeps_crlf_lines_and_trims_a_blank_crlf_tail() {
+    fn capture_pane_keeps_crlf_rows_and_drops_the_crlf_blank_tail() {
         let runner = FakeRunner::with_binary("herdr");
         runner.respond(Ok(
-            "scrollback\r\n Read outside\r\n\x1b[1m ❯ 1. Yes\x1b[0m\r\n Esc to cancel\r\n\r\n  \r\n"
-                .to_string(),
+            "scrollback\r\nprompt> ls\r\nstatus bar\r\n\r\n \r\n".to_string()
         ));
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         assert_eq!(
-            mux.capture_pane("w1:p2", 3).unwrap(),
-            " Read outside\r\n\x1b[1m ❯ 1. Yes\x1b[0m\r\n Esc to cancel\r",
-            "the window keeps the last 3 drawn lines with their raw CRLF bytes"
+            mux.capture_pane("w1:p2", 2).unwrap(),
+            "prompt> ls\r\nstatus bar\r"
         );
-        assert_styled_read(&runner, "w1:p2", "1003");
+        assert_styled_read(&runner, "w1:p2", "1002");
     }
 
     #[test]

@@ -327,6 +327,21 @@ fn ordinary_blocker(status: &super::ObservationStatus) -> Option<OrdinaryBlocker
     None
 }
 
+fn interaction_cause(status: &super::ObservationStatus) -> storage::UncertainCause {
+    if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
+        storage::UncertainCause::InteractionCandidate
+    } else {
+        storage::UncertainCause::InteractionOpen
+    }
+}
+
+fn blocker_cause(status: &super::ObservationStatus) -> Option<storage::UncertainCause> {
+    ordinary_blocker(status).map(|blocker| match blocker {
+        OrdinaryBlocker::Interaction => interaction_cause(status),
+        OrdinaryBlocker::ObserverUnavailable => storage::UncertainCause::ObserverUnavailable,
+    })
+}
+
 fn fallback_stages(prefix: &[u8], literal: &str) -> Result<Arc<[Arc<[u8]>]>> {
     let size = prefix
         .len()
@@ -825,7 +840,12 @@ impl InputCoordinator {
             self.pending = None;
             let mut conn = crate::db::connect(&self.database_url)?;
             if written {
-                self.record_deferred_uncertain(&mut conn, id, deadline)?;
+                self.record_deferred_uncertain(
+                    &mut conn,
+                    id,
+                    storage::UncertainCause::RunnerStopped,
+                    deadline,
+                )?;
             } else {
                 let operation = with_database_deadline(&mut conn, deadline, |conn| {
                     storage::settle_zero_byte_deferred(
@@ -1941,13 +1961,7 @@ impl InputCoordinator {
                         "observer_unavailable",
                     ))));
                 }
-                Some(OrdinaryBlocker::Interaction) => Some(
-                    if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
-                        "interaction_candidate"
-                    } else {
-                        "interaction_open"
-                    },
-                ),
+                Some(OrdinaryBlocker::Interaction) => Some(interaction_cause(&status).as_str()),
                 None if self.pending.is_some()
                     || !self.queue.is_empty()
                     || self.finalization.is_some()
@@ -2136,12 +2150,25 @@ impl InputCoordinator {
                 .is_some_and(|composer| composer.deferred.is_some())
     }
 
-    fn publish_result(observation: &ObservationController, input_id: i64, stage: SubmissionStage) {
+    fn publish_result(
+        observation: &ObservationController,
+        input_id: i64,
+        stage: SubmissionStage,
+        uncertain_cause: Option<storage::UncertainCause>,
+    ) {
         observation.publish_delivery_result(storage::input_delivery_result_cause(
             input_id,
             stage.as_str(),
-            None,
+            uncertain_cause,
         ));
+    }
+
+    fn retained_uncertain_cause(&self, input_id: i64) -> Option<storage::UncertainCause> {
+        self.operations
+            .get(&input_id)
+            .expect("a published input retains its receipt")
+            .operation
+            .uncertain_cause
     }
 
     /// Settles queued or attempted zero-byte work as not submitted and publishes its result. When
@@ -2181,7 +2208,7 @@ impl InputCoordinator {
             retained.operation = operation;
             retained.attempt_available = false;
         }
-        Self::publish_result(observation, input_id, SubmissionStage::ZeroBytes);
+        Self::publish_result(observation, input_id, SubmissionStage::ZeroBytes, None);
         Ok(())
     }
 
@@ -2558,13 +2585,7 @@ impl InputCoordinator {
         }
         let status = observation.status();
         let defer_reason = match ordinary_blocker(&status) {
-            Some(OrdinaryBlocker::Interaction) => {
-                if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
-                    "interaction_candidate"
-                } else {
-                    "interaction_open"
-                }
-            }
+            Some(OrdinaryBlocker::Interaction) => interaction_cause(&status).as_str(),
             None if composer.requires_empty_composer() && !Self::composer_eligible(observation) => {
                 "composer_busy"
             }
@@ -2632,7 +2653,12 @@ impl InputCoordinator {
         {
             return self.settle_accepted_preview(conn, observation, operation.input_id, stage);
         }
-        Self::publish_result(observation, operation.input_id, stage);
+        Self::publish_result(
+            observation,
+            operation.input_id,
+            stage,
+            operation.uncertain_cause,
+        );
         Ok(())
     }
 
@@ -2650,7 +2676,7 @@ impl InputCoordinator {
         }) {
             Ok(settled) => {
                 self.operations.remove(&settled.input_id);
-                Self::publish_result(observation, input_id, stage);
+                Self::publish_result(observation, input_id, stage, None);
                 Ok(())
             }
             Err(cause) if storage_failure(&cause) => {
@@ -3180,15 +3206,24 @@ impl InputCoordinator {
                 if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer.as_ref())
                     && let Some(settle_until) = composer.settle_until
                 {
-                    let interrupted = composer.manual_generation != Some(self.manual_generation)
-                        || self.manual_accounting_failed
-                        || ordinary_blocker(&observation.status()).is_some();
-                    if interrupted {
+                    let interruption = if self.manual_accounting_failed {
+                        Some(storage::UncertainCause::ManualAccountingFailed)
+                    } else if composer.manual_generation != Some(self.manual_generation) {
+                        Some(storage::UncertainCause::ManualInput)
+                    } else {
+                        blocker_cause(&observation.status())
+                    };
+                    if let Some(cause) = interruption {
                         terminal_bookkeeping = true;
                         let deferred = composer.deferred.is_some();
-                        let reply = self.stop_composer_stages(conn, run, id, effective)?;
+                        let reply = self.stop_composer_stages(conn, run, id, effective, cause)?;
                         if deferred {
-                            Self::publish_result(observation, id, SubmissionStage::Partial);
+                            Self::publish_result(
+                                observation,
+                                id,
+                                SubmissionStage::Partial,
+                                self.retained_uncertain_cause(id),
+                            );
                             return Ok(None);
                         }
                         return Ok(Some(reply));
@@ -3210,18 +3245,30 @@ impl InputCoordinator {
                 self.checkpoint(id, InputBoundary::BeforeWrite, effective)?;
                 return Ok(None);
             }
+            let status = observation.status();
             if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer.as_ref())
                 && composer.written_stages > 0
                 && matches!(
-                    ordinary_blocker(&observation.status()),
+                    ordinary_blocker(&status),
                     Some(OrdinaryBlocker::Interaction)
                 )
             {
                 terminal_bookkeeping = true;
                 let deferred = composer.deferred.is_some();
-                let reply = self.stop_composer_stages(conn, run, id, effective)?;
+                let reply = self.stop_composer_stages(
+                    conn,
+                    run,
+                    id,
+                    effective,
+                    interaction_cause(&status),
+                )?;
                 if deferred {
-                    Self::publish_result(observation, id, SubmissionStage::Partial);
+                    Self::publish_result(
+                        observation,
+                        id,
+                        SubmissionStage::Partial,
+                        self.retained_uncertain_cause(id),
+                    );
                     return Ok(None);
                 }
                 return Ok(Some(reply));
@@ -3330,20 +3377,31 @@ impl InputCoordinator {
                     .phase = InputPhase::AwaitBeforeWrite;
                 return Ok(None);
             }
-            let retained = self
+            let stage = self
                 .operations
                 .get(&id)
-                .expect("actual input outcome retained");
-            let next = match retained.stage {
-                SubmissionStage::Submitted => storage::InputState::Accepted,
-                SubmissionStage::Partial | SubmissionStage::Unknown => {
-                    storage::InputState::Uncertain
-                }
-                SubmissionStage::ZeroBytes => storage::InputState::Ready,
+                .expect("actual input outcome retained")
+                .stage;
+            let uncertain_cause = if matches!(&write, Ok(ProgrammaticWrite::Partial { .. })) {
+                storage::UncertainCause::ShortWrite
+            } else {
+                storage::UncertainCause::WriteFailed
             };
             terminal_bookkeeping = true;
             let persisted = with_database_deadline(conn, effective, |conn| {
                 self.validate_live(conn, run)?;
+                let next = match stage {
+                    SubmissionStage::Submitted => storage::InputState::Accepted,
+                    SubmissionStage::ZeroBytes => storage::InputState::Ready,
+                    SubmissionStage::Partial | SubmissionStage::Unknown => {
+                        return storage::record_input_uncertain(
+                            conn,
+                            &self.run.owner(),
+                            id,
+                            uncertain_cause,
+                        );
+                    }
+                };
                 storage::record_input_state(
                     conn,
                     &self.run.owner(),
@@ -3424,18 +3482,13 @@ impl InputCoordinator {
         &mut self,
         conn: &mut Connection,
         id: i64,
+        cause: storage::UncertainCause,
         deadline: Instant,
     ) -> Result<storage::InputOperation> {
         let current = with_database_deadline(conn, deadline, |conn| storage::get_input(conn, id))?;
         let operation = if current.state == storage::InputState::InProgress {
             with_database_deadline(conn, deadline, |conn| {
-                storage::record_input_state(
-                    conn,
-                    &self.run.owner(),
-                    id,
-                    storage::InputState::InProgress,
-                    storage::InputState::Uncertain,
-                )
+                storage::record_input_uncertain(conn, &self.run.owner(), id, cause)
             })?
         } else {
             current
@@ -3464,9 +3517,14 @@ impl InputCoordinator {
             return;
         }
         self.pending = None;
-        match self.record_deferred_uncertain(conn, id, Instant::now() + DEFERRED_FINALIZATION) {
+        match self.record_deferred_uncertain(
+            conn,
+            id,
+            storage::UncertainCause::WriteFailed,
+            Instant::now() + DEFERRED_FINALIZATION,
+        ) {
             Ok(operation) if operation.state == storage::InputState::Uncertain => {
-                Self::publish_result(observation, id, stage);
+                Self::publish_result(observation, id, stage, operation.uncertain_cause);
             }
             Ok(operation) => {
                 if let Err(cause) = self.finish_deferred(conn, observation, &operation) {
@@ -3489,21 +3547,18 @@ impl InputCoordinator {
         run: &RunRecord,
         id: i64,
         effective: Instant,
+        cause: storage::UncertainCause,
     ) -> Result<InputControlReply> {
         let pending = self.pending.as_mut().expect("staged composer input");
         pending.phase = InputPhase::Blocked;
         if let Some(composer) = pending.composer.as_mut() {
             composer.pane = None;
         }
+        // Recording uncertainty writes no child byte, so the input fences, which only withhold
+        // write authority, must not keep the stop's cause from being persisted.
         let operation = with_database_deadline(conn, effective, |conn| {
-            self.validate_live(conn, run)?;
-            storage::record_input_state(
-                conn,
-                &self.run.owner(),
-                id,
-                storage::InputState::InProgress,
-                storage::InputState::Uncertain,
-            )
+            self.validate_live_run(conn, run)?;
+            storage::record_input_uncertain(conn, &self.run.owner(), id, cause)
         })?;
         let retained = self.operations.get_mut(&id).expect("staged input retained");
         retained.operation = operation.clone();
@@ -3540,23 +3595,28 @@ impl InputCoordinator {
         if retained.operation.state != storage::InputState::InProgress {
             return source;
         }
-        let next = if retained.stage == SubmissionStage::ZeroBytes {
-            storage::InputState::Ready
-        } else {
-            storage::InputState::Uncertain
-        };
+        let zero_bytes = retained.stage == SubmissionStage::ZeroBytes;
         let Ok(effective) = self.effective_deadline(conn, deadline) else {
             return source;
         };
         let persisted = with_database_deadline(conn, effective, |conn| {
             self.validate_live(conn, run)?;
-            storage::record_input_state(
-                conn,
-                &self.run.owner(),
-                id,
-                storage::InputState::InProgress,
-                next,
-            )
+            if zero_bytes {
+                storage::record_input_state(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    storage::InputState::InProgress,
+                    storage::InputState::Ready,
+                )
+            } else {
+                storage::record_input_uncertain(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    storage::UncertainCause::WriteFailed,
+                )
+            }
         });
         match persisted {
             Ok(operation) => {
@@ -4121,10 +4181,13 @@ mod tests {
                 let point = h.coordinator.retained_checkpoint(id).unwrap();
                 assert!(matches!(point.stage, SubmissionStage::Partial));
                 assert_eq!(point.written_bytes, 3);
-                assert!(matches!(
-                    storage::get_input(&h.fixture.conn, id).unwrap().state,
-                    storage::InputState::Uncertain
-                ));
+                let stored = storage::get_input(&h.fixture.conn, id).unwrap();
+                assert!(matches!(stored.state, storage::InputState::Uncertain));
+                assert_eq!(
+                    stored.uncertain_cause,
+                    Some(storage::UncertainCause::ShortWrite)
+                );
+                assert_eq!(reply.reason.as_deref(), Some("short_write"));
                 h.drain();
                 assert!(h.advance().is_none());
                 assert!(h.pty.program.is_empty());
@@ -4145,6 +4208,36 @@ mod tests {
                     .clone();
                 assert_eq!(after.count, 3);
                 assert_eq!(after.seq, point.output_seq);
+            });
+        }
+
+        #[test]
+        fn prompt_failed_write_after_a_possible_byte_records_write_failed() {
+            with_host(|h| {
+                let id = h.arm("prompt:fixture-failed");
+                h.pty.failure = Some(io::ErrorKind::BrokenPipe);
+                h.drain();
+                let Err(failure) = h.try_advance() else {
+                    panic!("an actual PTY write failure surfaces");
+                };
+                assert!(
+                    failure
+                        .source
+                        .message()
+                        .contains("injected PTY write failure"),
+                    "{failure:?}"
+                );
+                let stored = storage::get_input(&h.fixture.conn, id).unwrap();
+                assert_eq!(stored.state, storage::InputState::Uncertain);
+                assert_eq!(
+                    stored.uncertain_cause,
+                    Some(storage::UncertainCause::WriteFailed)
+                );
+                h.pty.failure = None;
+                let repeat = h.request("prompt:fixture-failed");
+                let replay = submitted(h.handle(repeat).unwrap().expect("retained key lookup"));
+                assert_eq!(replay.status, SubmissionStatus::Uncertain);
+                assert_eq!(replay.reason.as_deref(), Some("write_failed"));
             });
         }
 
@@ -4738,10 +4831,13 @@ mod tests {
                     assert_eq!(reply.stage, SubmissionStage::Partial);
                     assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
                     let id = reply.input_id.unwrap();
+                    let stored = storage::get_input(&host.fixture.conn, id).unwrap();
+                    assert_eq!(stored.state, storage::InputState::Uncertain);
                     assert_eq!(
-                        storage::get_input(&host.fixture.conn, id).unwrap().state,
-                        storage::InputState::Uncertain
+                        stored.uncertain_cause,
+                        Some(storage::UncertainCause::ManualInput)
                     );
+                    assert_eq!(reply.reason.as_deref(), Some("manual_input"));
                     assert_eq!(
                         delivery_selection(host, id),
                         (Some("profile".into()), None),
@@ -4872,6 +4968,280 @@ mod tests {
                     assert_eq!(host.pty.program, vec![encoded()]);
                 });
             }
+
+            mod uncertain_cause {
+                use super::*;
+
+                const FOCUS_REPLY: &[u8] = b"\x1b[I";
+                const CURSOR_REPORT: &[u8] = b"\x1b[24;80R";
+                const OSC_REPLY: &[u8] = b"\x1b]11;rgb:0000/0000/0000\x1b\\";
+
+                fn stored(host: &Host, reply: &SubmissionResult) -> storage::InputOperation {
+                    storage::get_input(
+                        &host.fixture.conn,
+                        reply.input_id.expect("an attempted input has a receipt"),
+                    )
+                    .unwrap()
+                }
+
+                fn assert_stopped_with(
+                    host: &Host,
+                    reply: &SubmissionResult,
+                    cause: storage::UncertainCause,
+                ) {
+                    assert_eq!(reply.status, SubmissionStatus::Uncertain, "{cause:?}");
+                    assert_eq!(reply.stage, SubmissionStage::Partial, "{cause:?}");
+                    assert_eq!(reply.reason.as_deref(), Some(cause.as_str()));
+                    let row = stored(host, reply);
+                    assert_eq!(row.state, storage::InputState::Uncertain);
+                    assert_eq!(row.uncertain_cause, Some(cause));
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![LITERAL.as_bytes().to_vec()],
+                        "no submit byte follows a stopped stage"
+                    );
+                }
+
+                fn quiesce_once(host: &mut Host) -> InputDrain {
+                    host.coordinator
+                        .progress_with_manual(&mut host.transport, |transport| {
+                            transport.quiesce_for_input(
+                                &mut host.human,
+                                &mut host.pty,
+                                &mut host.output,
+                                &mut host
+                                    .controller
+                                    .observer(&host.writer, &RealObservationClock),
+                                host.until,
+                            )
+                        })
+                        .unwrap()
+                }
+
+                fn until_armed(host: &mut Host) {
+                    std::thread::sleep(SETTLE + Duration::from_millis(50));
+                    while host.pending_snapshot().4 != InputPhase::Armed {
+                        assert!(Instant::now() < host.until, "the submit stage arms");
+                        host.drain();
+                        assert!(host.advance().is_none());
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
+                }
+
+                fn candidate_form(host: &mut Host) {
+                    host.show(
+                        crate::coding_agent::profiles::catalog::test_support::inspection_fixture_form(
+                            "write candidate.txt",
+                            "synthetic-only",
+                        ),
+                    );
+                    assert_eq!(
+                        host.controller.health(&host.writer).eligibility,
+                        InputEligibility::Hold(GateReason::Candidate)
+                    );
+                }
+
+                fn with_interaction_host(body: impl FnOnce(&mut Host)) {
+                    with_profile_host(
+                        permission_catalog(),
+                        encoded(),
+                        HostProfile::metadata(),
+                        body,
+                    );
+                }
+
+                #[test]
+                fn staged_terminal_replies_during_the_settle_still_write_the_submit_key() {
+                    for terminal_reply in [FOCUS_REPLY, CURSOR_REPORT, OSC_REPLY] {
+                        with_host(|host| {
+                            until_literal_written(host, prompt_request(host, "prompt:reply"));
+                            host.human.bytes.extend(terminal_reply);
+                            host.drain();
+                            assert_eq!(
+                                host.human.consumed,
+                                terminal_reply.len(),
+                                "the reply is read during the settle"
+                            );
+                            let reply = finish_after_interruption(host);
+                            assert_eq!(
+                                reply.status,
+                                SubmissionStatus::Accepted,
+                                "{terminal_reply:?}"
+                            );
+                            assert_eq!(reply.stage, SubmissionStage::Submitted);
+                            assert_eq!(
+                                host.pty.stage_bytes(),
+                                vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                            );
+                            assert_eq!(
+                                host.pty.manual, terminal_reply,
+                                "the reply reaches the child unchanged"
+                            );
+                            let forwarded = host
+                                .pty
+                                .offers
+                                .iter()
+                                .position(|offer| offer.as_slice() == terminal_reply)
+                                .expect("the reply is forwarded");
+                            let submit = host
+                                .pty
+                                .offers
+                                .iter()
+                                .position(|offer| offer.as_slice() == b"~")
+                                .expect("the submit key is written");
+                            assert!(forwarded < submit, "the reply precedes the submit key");
+                            let row = stored(host, &reply);
+                            assert_eq!(row.state, storage::InputState::Accepted);
+                            assert_eq!(row.uncertain_cause, None);
+                        });
+                    }
+                }
+
+                #[test]
+                fn staged_lone_escape_during_the_settle_stops_with_manual_input_at_its_bound() {
+                    with_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:lone-escape"));
+                        let generation = host.transport.human_generation();
+                        host.human.bytes.extend(b"\x1b");
+                        assert_eq!(quiesce_once(host), InputDrain::Pending);
+                        assert_eq!(host.human.consumed, 1, "the Escape key is read");
+                        assert_eq!(
+                            host.transport.drain_blocker(),
+                            Some("terminal reply pending")
+                        );
+                        assert_eq!(host.transport.human_generation(), generation);
+                        host.transport.backdate_reply_prefix(
+                            crate::runtime::runner::transport::REPLY_PREFIX_BOUND,
+                        );
+                        host.drain();
+                        assert_eq!(host.transport.human_generation(), generation + 1);
+                        let reply = finish_after_interruption(host);
+                        assert_stopped_with(host, &reply, storage::UncertainCause::ManualInput);
+                        assert_eq!(host.pty.manual, b"\x1b");
+                    });
+                }
+
+                #[test]
+                fn staged_failed_manual_accounting_outranks_the_generation_change() {
+                    with_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:accounting"));
+                        host.coordinator.manual_generation = u64::MAX;
+                        assert!(host.coordinator.observe_manual(1).is_err());
+                        assert!(host.coordinator.manual_accounting_failed);
+                        let reply = submitted(
+                            host.advance()
+                                .expect("the settle check stops the remaining stages"),
+                        );
+                        assert_stopped_with(
+                            host,
+                            &reply,
+                            storage::UncertainCause::ManualAccountingFailed,
+                        );
+                    });
+                }
+
+                #[test]
+                fn staged_keystroke_outranks_a_candidate_interaction() {
+                    with_interaction_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:key-first"));
+                        host.human.bytes.extend(b"h");
+                        candidate_form(host);
+                        let reply = submitted(
+                            host.advance()
+                                .expect("the settle check stops the remaining stages"),
+                        );
+                        assert_stopped_with(host, &reply, storage::UncertainCause::ManualInput);
+                    });
+                }
+
+                #[test]
+                fn staged_candidate_during_the_settle_records_interaction_candidate() {
+                    with_interaction_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:candidate"));
+                        candidate_form(host);
+                        let reply = submitted(
+                            host.advance()
+                                .expect("the settle check stops the remaining stages"),
+                        );
+                        assert_stopped_with(
+                            host,
+                            &reply,
+                            storage::UncertainCause::InteractionCandidate,
+                        );
+                    });
+                }
+
+                #[test]
+                fn staged_open_interaction_during_the_settle_records_interaction_open() {
+                    with_interaction_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:open"));
+                        super::super::super::permission_inspection_contracts::stable_form(host);
+                        let reply = submitted(
+                            host.advance()
+                                .expect("the settle check stops the remaining stages"),
+                        );
+                        assert_stopped_with(host, &reply, storage::UncertainCause::InteractionOpen);
+                    });
+                }
+
+                #[test]
+                fn staged_observer_outage_during_the_settle_records_observer_unavailable() {
+                    with_interaction_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:outage"));
+                        let reply = loop {
+                            assert!(Instant::now() < host.until, "the outage stops the stage");
+                            host.controller
+                                .observer_failed(
+                                    crate::runtime::runner::observation::ObservationFailure::Detector,
+                                    &RealObservationClock,
+                                )
+                                .unwrap();
+                            if let Some(reply) = host.advance() {
+                                break submitted(reply);
+                            }
+                            std::thread::sleep(Duration::from_millis(5));
+                        };
+                        assert_stopped_with(
+                            host,
+                            &reply,
+                            storage::UncertainCause::ObserverUnavailable,
+                        );
+                    });
+                }
+
+                #[test]
+                fn staged_open_interaction_after_the_settle_records_interaction_open() {
+                    with_interaction_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:armed-open"));
+                        until_armed(host);
+                        super::super::super::permission_inspection_contracts::stable_form(host);
+                        let reply = submitted(
+                            host.advance()
+                                .expect("the armed stage stops on the interaction"),
+                        );
+                        assert_stopped_with(host, &reply, storage::UncertainCause::InteractionOpen);
+                    });
+                }
+
+                #[test]
+                fn staged_candidate_after_the_settle_records_interaction_candidate() {
+                    with_interaction_host(|host| {
+                        until_literal_written(host, prompt_request(host, "prompt:armed-candidate"));
+                        until_armed(host);
+                        candidate_form(host);
+                        let reply = submitted(
+                            host.advance()
+                                .expect("the armed stage stops on the interaction"),
+                        );
+                        assert_stopped_with(
+                            host,
+                            &reply,
+                            storage::UncertainCause::InteractionCandidate,
+                        );
+                    });
+                }
+            }
         }
 
         mod deferred_queue {
@@ -4951,6 +5321,18 @@ mod tests {
                         |row| row.get(0),
                     )
                     .unwrap()
+            }
+
+            fn result_cause(host: &Host, input_id: i64) -> Option<serde_json::Value> {
+                host.fixture
+                    .conn
+                    .query_row(
+                        "SELECT json_extract(payload_json,'$.cause') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                        rusqlite::params![host.fixture.run.run_id, input_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .unwrap()
+                    .map(|text| serde_json::from_str(&text).unwrap())
             }
 
             fn assert_not_submitted(host: &Host, input_id: i64, reason: &str) {
@@ -5441,10 +5823,25 @@ mod tests {
                             }
                             std::thread::sleep(Duration::from_millis(5));
                         }
+                        if case == "write_failure" {
+                            assert_eq!(
+                                row(host, first).uncertain_cause,
+                                Some(storage::UncertainCause::WriteFailed),
+                                "a failed deferred attempt records write_failed"
+                            );
+                        }
                         host.pty.failure = None;
                         turns_until(host, |host| result_events(host, first) > 0);
                         super::composer_busy::hold_turns(host);
                         assert_eq!(result_events(host, first), 1, "{case}");
+                        let recorded = row(host, first)
+                            .uncertain_cause
+                            .expect("a live uncertain result records its cause");
+                        assert_eq!(
+                            result_cause(host, first),
+                            Some(serde_json::json!({ "kind": recorded.as_str() })),
+                            "{case}: the published cause is the receipt's"
+                        );
                         assert_eq!(row(host, next).state, storage::InputState::Ready, "{case}");
                         reconcile(host, first);
                         turns_until(host, |host| settled(host, next));
@@ -5747,12 +6144,15 @@ mod tests {
             fn shut_down(host: &mut Host) -> Vec<i64> {
                 host.coordinator.finish_pending_attempt();
                 let settled = host.coordinator.fence(host.until).unwrap();
-                for input_id in &settled {
+                for (input_id, stage, cause) in storage::unpublished_delivery_results(
+                    &host.fixture.conn,
+                    host.fixture.run.run_id,
+                )
+                .unwrap()
+                {
                     host.controller
                         .publish_delivery_result(storage::input_delivery_result_cause(
-                            *input_id,
-                            SubmissionStage::ZeroBytes.as_str(),
-                            None,
+                            input_id, stage, cause,
                         ));
                 }
                 host.drain();
@@ -5782,8 +6182,18 @@ mod tests {
                         let input = row(host, id);
                         if written {
                             assert_eq!(input.state, storage::InputState::Uncertain);
+                            assert_eq!(
+                                input.uncertain_cause,
+                                Some(storage::UncertainCause::RunnerStopped),
+                                "fence records runner_stopped for a written deferred attempt"
+                            );
+                            assert_eq!(
+                                result_cause(host, id),
+                                Some(serde_json::json!({"kind": "runner_stopped"}))
+                            );
                         } else {
                             assert_not_submitted(host, id, "runner_stopped");
+                            assert_eq!(result_cause(host, id), None);
                         }
                         assert_eq!(result_events(host, id), 1, "written={written}");
                     });
@@ -10676,6 +11086,53 @@ mod tests {
         }
 
         #[test]
+        fn permission_response_failure_after_its_first_stage_records_write_failed() {
+            with_inspection(|h, _, _| {
+                let (_, input, id) = admitted(h, "response:failed-after-stage");
+                first_stage(h, id);
+                form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-other");
+                let Err(failure) = h.try_advance() else {
+                    panic!("a changed focus fails the positive attempt");
+                };
+                assert_eq!(failure.input_id, Some(id));
+                let receipt = audit(h, id, &input, "inspection-allow-plan");
+                assert_eq!(receipt.input.state, storage::InputState::Uncertain);
+                assert_eq!(
+                    receipt.input.uncertain_cause,
+                    Some(storage::UncertainCause::WriteFailed)
+                );
+                assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+            });
+        }
+
+        #[test]
+        fn permission_response_failed_later_stage_write_records_write_failed() {
+            with_inspection(|h, _, _| {
+                let (_, input, id) = admitted(h, "response:failed-later-write");
+                first_stage(h, id);
+                arm_stage(h, 2);
+                h.pty.failure = Some(io::ErrorKind::BrokenPipe);
+                h.drain();
+                let Err(failure) = h.try_advance() else {
+                    panic!("an actual PTY write failure surfaces");
+                };
+                assert!(
+                    failure
+                        .source
+                        .message()
+                        .contains("injected PTY write failure"),
+                    "{failure:?}"
+                );
+                let receipt = audit(h, id, &input, "inspection-allow-plan");
+                assert_eq!(receipt.input.state, storage::InputState::Uncertain);
+                assert_eq!(
+                    receipt.input.uncertain_cause,
+                    Some(storage::UncertainCause::WriteFailed)
+                );
+            });
+        }
+
+        #[test]
         fn permission_response_positive_short_later_stage_keeps_cumulative_uncertainty_without_tail()
          {
             let mut definition = inspection_fixture_definition();
@@ -12107,12 +12564,11 @@ mod tests {
                     },
                 )
                 .unwrap();
-                storage::record_input_state(
+                storage::record_input_uncertain(
                     &mut h.fixture.conn,
                     &run.owner(),
                     preview.input_id,
-                    storage::InputState::InProgress,
-                    storage::InputState::Uncertain,
+                    storage::UncertainCause::WriteFailed,
                 )
                 .unwrap();
                 let preview = storage::settle_input(

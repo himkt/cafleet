@@ -360,3 +360,4 @@ Run 2026-10-31 with the release build of commit `73ba45a2` (`mise //cafleet:buil
 | 2026-10-31 | Review round 2: the private Claude configuration is copied from a natively built seed holding only the credential and Claude's own `.claude.json`; a startup dialog in a case stops it with no bytes; a per-case persistent-setting check against the cells baseline; teardown removes each private configuration and the seed |
 | 2026-10-31 | Approved by the Reviewer and the user |
 | 2026-10-31 | Implemented: Read rule and single-request answers, CRLF capture fix, short-pane and outside-read-flag limits, live acceptance on herdr (tmux waived by the user) |
+| 2026-10-31 | Merged main: renumbered from 0000199 to 0000202; the capture line-ending fix ships as design 0000199-member-capture-crlf, whose `strip_ansi` trims every trailing carriage return, so its implementation, tests and wording replace § Capture line endings and the Step 3 changes |

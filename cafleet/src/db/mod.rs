@@ -2317,6 +2317,409 @@ mod tests {
             }
         }
 
+        mod uncertain_cause_migration {
+            use rusqlite::types::Value;
+
+            use super::*;
+
+            const UNCERTAIN_CAUSES: [&str; 8] = [
+                "manual_input",
+                "manual_accounting_failed",
+                "interaction_candidate",
+                "interaction_open",
+                "observer_unavailable",
+                "short_write",
+                "write_failed",
+                "runner_stopped",
+            ];
+
+            fn columns(conn: &Connection, table: &str) -> Vec<String> {
+                conn.prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
+                    .unwrap()
+                    .query_map([table], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap()
+            }
+
+            type Snapshot = Vec<(String, String, Vec<Vec<Value>>)>;
+
+            fn snapshot(conn: &Connection) -> Snapshot {
+                let tables = conn
+                    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name != 'refinery_schema_history' ORDER BY name")
+                    .unwrap()
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                tables
+                    .into_iter()
+                    .map(|table| {
+                        let selected = columns(conn, &table).join(",");
+                        let rows =
+                            table_rows(conn, &format!("SELECT {selected} FROM {table} ORDER BY 1"));
+                        (table, selected, rows)
+                    })
+                    .collect()
+            }
+
+            fn insert_input(
+                fixture: &Fixture,
+                run: i64,
+                key: &str,
+                state: &str,
+                extra: &[(&str, Value)],
+            ) -> rusqlite::Result<i64> {
+                let names = extra
+                    .iter()
+                    .map(|(name, _)| format!(",{name}"))
+                    .collect::<String>();
+                let slots = (0..extra.len())
+                    .map(|index| format!(",?{}", index + 6))
+                    .collect::<String>();
+                let mut values: Vec<Value> = vec![
+                    Value::Integer(run),
+                    Value::Text(key.into()),
+                    Value::Text("d".repeat(64)),
+                    Value::Text(state.into()),
+                    Value::Text(NOW.into()),
+                ];
+                values.extend(extra.iter().map(|(_, value)| value.clone()));
+                fixture.conn.execute(
+                    &format!(
+                        "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at{names})
+                         VALUES(?1,?2,'prompt',?3,?4,?5,?5{slots})"
+                    ),
+                    rusqlite::params_from_iter(values),
+                )?;
+                Ok(fixture.conn.last_insert_rowid())
+            }
+
+            fn text(value: &str) -> Value {
+                Value::Text(value.into())
+            }
+
+            fn set_cause(fixture: &Fixture, input: i64, cause: &str) -> rusqlite::Result<usize> {
+                fixture.conn.execute(
+                    "UPDATE member_input_operations SET uncertain_cause=?1 WHERE input_id=?2",
+                    params![cause, input],
+                )
+            }
+
+            fn assert_check_rejects<T: std::fmt::Debug>(
+                fixture: &Fixture,
+                result: rusqlite::Result<T>,
+                context: &str,
+            ) {
+                match result {
+                    Err(rusqlite::Error::SqliteFailure(code, _)) => assert_eq!(
+                        code.extended_code,
+                        rusqlite::ffi::SQLITE_CONSTRAINT_CHECK,
+                        "{context}"
+                    ),
+                    other => panic!("expected a CHECK violation for {context}: {other:?}"),
+                }
+                assert!(fixture.conn.is_autocommit(), "{context}");
+            }
+
+            struct Seeded {
+                run: i64,
+                input_high_water: i64,
+            }
+
+            fn seed_v7(fixture: &mut Fixture) -> Seeded {
+                let run = fixture.run("running").unwrap();
+                for state in ["ready", "in_progress", "accepted", "uncertain"] {
+                    insert_input(
+                        fixture,
+                        run,
+                        &format!("prompt:{state}"),
+                        state,
+                        &[("delivery_method", text("profile"))],
+                    )
+                    .unwrap();
+                }
+                insert_input(
+                    fixture,
+                    run,
+                    "prompt:settled",
+                    "settled",
+                    &[("disposition", text("abandoned_uncertain"))],
+                )
+                .unwrap();
+                insert_input(
+                    fixture,
+                    run,
+                    "prompt:queued",
+                    "ready",
+                    &[
+                        ("deferred_at", text(NOW)),
+                        ("defer_reason", text("interaction_open")),
+                    ],
+                )
+                .unwrap();
+                let message = crate::broker::send_message(
+                    &mut fixture.conn,
+                    fixture.director,
+                    fixture.member,
+                    "preview body 世界",
+                )
+                .unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,payload_digest_version) VALUES(?1,?2,'preview',?3,'uncertain',?4,?4,?5,2)",
+                        params![
+                            run,
+                            format!("preview:{run}:{}", message.message_id),
+                            "d".repeat(64),
+                            NOW,
+                            message.message_id
+                        ],
+                    )
+                    .unwrap();
+                let deleted =
+                    insert_input(fixture, run, "deleted:high-water", "ready", &[]).unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "DELETE FROM member_input_operations WHERE input_id=?1",
+                        [deleted],
+                    )
+                    .unwrap();
+                assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+                Seeded {
+                    run,
+                    input_high_water: deleted,
+                }
+            }
+
+            #[test]
+            fn runtime_v8_uncertain_cause_is_the_contiguous_successor_to_v7() {
+                let chain = crate::db::migration_chain();
+                assert!(
+                    chain.contains(&(8, "uncertain_cause".to_string())),
+                    "{chain:?}"
+                );
+                assert!(crate::db::head_version() >= 8);
+
+                let mut fixture = Fixture::at_version(7);
+                let seeded = seed_v7(&mut fixture);
+                assert!(
+                    !columns(&fixture.conn, "member_input_operations")
+                        .contains(&"uncertain_cause".to_owned())
+                );
+                let before = snapshot(&fixture.conn);
+                let sequences = table_rows(
+                    &fixture.conn,
+                    "SELECT name,seq FROM sqlite_sequence ORDER BY name",
+                );
+                let identity = table_rows(&fixture.conn, "SELECT * FROM runtime_database_identity");
+                crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+
+                assert_eq!(
+                    columns(&fixture.conn, "member_input_operations")
+                        .last()
+                        .map(String::as_str),
+                    Some("uncertain_cause"),
+                    "the cause column is appended to the input table"
+                );
+                for (table, selected, rows) in &before {
+                    assert_eq!(
+                        table_rows(
+                            &fixture.conn,
+                            &format!("SELECT {selected} FROM {table} ORDER BY 1")
+                        ),
+                        *rows,
+                        "{table}"
+                    );
+                }
+                assert_eq!(
+                    table_rows(
+                        &fixture.conn,
+                        "SELECT COUNT(*),COUNT(uncertain_cause) FROM member_input_operations"
+                    ),
+                    vec![vec![Value::Integer(7), Value::Integer(0)]],
+                    "every existing receipt keeps a null cause"
+                );
+                assert_eq!(
+                    table_rows(
+                        &fixture.conn,
+                        "SELECT name,seq FROM sqlite_sequence ORDER BY name"
+                    ),
+                    sequences
+                );
+                assert_eq!(
+                    table_rows(&fixture.conn, "SELECT * FROM runtime_database_identity"),
+                    identity
+                );
+                assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+                assert_eq!(
+                    table_rows(&fixture.conn, "PRAGMA integrity_check"),
+                    vec![vec![Value::Text("ok".into())]]
+                );
+                assert_eq!(
+                    fixture.input(seeded.run, "after-upgrade").unwrap(),
+                    seeded.input_high_water + 1,
+                    "input ids are never reused"
+                );
+                let upgraded_uncertain = fixture
+                    .conn
+                    .query_row(
+                        "SELECT input_id FROM member_input_operations WHERE operation_key='prompt:uncertain'",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap();
+                set_cause(&fixture, upgraded_uncertain, "manual_input").unwrap();
+                crate::diagnosis::classify_schema(&fixture.conn, crate::db::head_version())
+                    .require_current()
+                    .unwrap();
+            }
+
+            #[test]
+            fn runtime_v8_uncertain_cause_accepts_the_domain_on_uncertain_and_settled_rows() {
+                let fixture = Fixture::new();
+                let run = fixture.run("running").unwrap();
+                for cause in UNCERTAIN_CAUSES {
+                    insert_input(
+                        &fixture,
+                        run,
+                        &format!("uncertain:{cause}"),
+                        "uncertain",
+                        &[("uncertain_cause", text(cause))],
+                    )
+                    .unwrap_or_else(|error| panic!("{cause}: {error}"));
+                    insert_input(
+                        &fixture,
+                        run,
+                        &format!("settled:{cause}"),
+                        "settled",
+                        &[
+                            ("disposition", text("abandoned_uncertain")),
+                            ("uncertain_cause", text(cause)),
+                        ],
+                    )
+                    .unwrap_or_else(|error| panic!("settled {cause}: {error}"));
+                }
+                let causeless = insert_input(&fixture, run, "uncertain:null", "uncertain", &[])
+                    .expect("an uncertain row may record no cause");
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET state='settled',disposition='submitted' WHERE operation_key='uncertain:write_failed'",
+                        [],
+                    )
+                    .expect("settlement keeps the recorded cause");
+                assert_eq!(
+                    table_rows(
+                        &fixture.conn,
+                        "SELECT uncertain_cause FROM member_input_operations WHERE operation_key='uncertain:write_failed'"
+                    ),
+                    vec![vec![text("write_failed")]]
+                );
+                assert_eq!(
+                    table_rows(
+                        &fixture.conn,
+                        &format!(
+                            "SELECT uncertain_cause FROM member_input_operations WHERE input_id={causeless}"
+                        )
+                    ),
+                    vec![vec![Value::Null]]
+                );
+                for cause in UNCERTAIN_CAUSES {
+                    let parsed = crate::broker::runtime::UncertainCause::try_from(cause)
+                        .unwrap_or_else(|error| panic!("{cause}: {error}"));
+                    assert_eq!(parsed.as_str(), cause);
+                }
+                assert!(
+                    crate::broker::runtime::UncertainCause::try_from("terminal_reply").is_err()
+                );
+            }
+
+            #[test]
+            fn runtime_v8_uncertain_cause_rejects_unknown_values_and_causes_on_other_states() {
+                let fixture = Fixture::new();
+                let run = fixture.run("running").unwrap();
+                assert_check_rejects(
+                    &fixture,
+                    insert_input(
+                        &fixture,
+                        run,
+                        "bad:unknown",
+                        "uncertain",
+                        &[("uncertain_cause", text("terminal_reply"))],
+                    ),
+                    "unknown cause",
+                );
+                assert_check_rejects(
+                    &fixture,
+                    insert_input(
+                        &fixture,
+                        run,
+                        "bad:empty",
+                        "uncertain",
+                        &[("uncertain_cause", text(""))],
+                    ),
+                    "empty cause",
+                );
+                for state in ["ready", "in_progress", "accepted"] {
+                    assert_check_rejects(
+                        &fixture,
+                        insert_input(
+                            &fixture,
+                            run,
+                            &format!("bad:{state}"),
+                            state,
+                            &[("uncertain_cause", text("manual_input"))],
+                        ),
+                        state,
+                    );
+                    let row = insert_input(&fixture, run, &format!("ok:{state}"), state, &[])
+                        .unwrap_or_else(|error| panic!("{state}: {error}"));
+                    assert_check_rejects(
+                        &fixture,
+                        set_cause(&fixture, row, "manual_input"),
+                        &format!("update {state}"),
+                    );
+                }
+                let uncertain = insert_input(
+                    &fixture,
+                    run,
+                    "uncertain:caused",
+                    "uncertain",
+                    &[("uncertain_cause", text("short_write"))],
+                )
+                .unwrap();
+                assert_check_rejects(
+                    &fixture,
+                    fixture.conn.execute(
+                        "UPDATE member_input_operations SET state='in_progress' WHERE input_id=?1",
+                        [uncertain],
+                    ),
+                    "a caused row cannot return to in_progress",
+                );
+                assert_check_rejects(
+                    &fixture,
+                    set_cause(&fixture, uncertain, "unknown"),
+                    "unknown cause update",
+                );
+            }
+
+            #[test]
+            fn runtime_v8_head_guard_refuses_a_v7_shape_recorded_as_v8() {
+                let fixture = Fixture::at_version(7);
+                fixture
+                    .conn
+                    .execute(
+                        "INSERT INTO refinery_schema_history(version,name,applied_on,checksum) VALUES(8,'uncertain_cause','2026-10-31T00:00:00Z','1')",
+                        [],
+                    )
+                    .unwrap();
+                assert!(!crate::db::schema_matches_version(&fixture.conn, 8).unwrap());
+            }
+        }
+
         const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
 
         struct Fixture {
@@ -2492,7 +2895,7 @@ mod tests {
                 ),
                 (
                     "member_input_operations",
-                    "input_id run_id operation_key kind payload_digest state created_at updated_at message_id disposition evidence_ref delivery_method delivery_reason deferred_at defer_reason payload_digest_version",
+                    "input_id run_id operation_key kind payload_digest state created_at updated_at message_id disposition evidence_ref delivery_method delivery_reason deferred_at defer_reason payload_digest_version uncertain_cause",
                 ),
             ] {
                 let actual = fixture

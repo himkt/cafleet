@@ -244,15 +244,21 @@ pub(super) fn durable_outcome(
         (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
             Some((SubmissionStatus::Accepted, SubmissionStage::Submitted, None))
         }
-        (InputState::InProgress | InputState::Uncertain, _) => {
-            Some((SubmissionStatus::Uncertain, SubmissionStage::Unknown, None))
-        }
+        (InputState::InProgress | InputState::Uncertain, _) => Some((
+            SubmissionStatus::Uncertain,
+            SubmissionStage::Unknown,
+            uncertain_reason(input),
+        )),
         (InputState::Settled, _) => Some((
             SubmissionStatus::Rejected,
             SubmissionStage::ZeroBytes,
             Some("input operation key is consumed".into()),
         )),
     }
+}
+
+fn uncertain_reason(input: &InputOperation) -> Option<String> {
+    input.uncertain_cause.map(|cause| cause.as_str().to_owned())
 }
 
 fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
@@ -317,6 +323,7 @@ fn validate_reply_against_durable(
                 }
                 SubmissionStatus::Uncertain => {
                     matches!(input.state, InputState::InProgress | InputState::Uncertain)
+                        && reply.reason == uncertain_reason(input)
                 }
                 SubmissionStatus::Held | SubmissionStatus::Rejected => {
                     reply.stage == SubmissionStage::ZeroBytes
@@ -966,7 +973,10 @@ pub(super) fn projection(
         InputState::InProgress | InputState::Uncertain => (
             SubmissionStatus::Uncertain,
             SubmissionStage::Unknown,
-            Some("prior transmission remains uncertain".into()),
+            Some(
+                uncertain_reason(&input)
+                    .unwrap_or_else(|| "prior transmission remains uncertain".into()),
+            ),
         ),
         InputState::Settled => match input
             .disposition
@@ -1514,17 +1524,22 @@ pub(crate) mod test_support {
             let input_id = receipt.input.input_id;
             match state {
                 Retained::InProgress => {}
-                Retained::Accepted | Retained::Uncertain => {
+                Retained::Accepted => {
                     storage::record_input_state(
                         &mut fixture.conn,
                         &owner,
                         input_id,
                         InputState::InProgress,
-                        if matches!(state, Retained::Accepted) {
-                            InputState::Accepted
-                        } else {
-                            InputState::Uncertain
-                        },
+                        InputState::Accepted,
+                    )
+                    .unwrap();
+                }
+                Retained::Uncertain => {
+                    storage::record_input_uncertain(
+                        &mut fixture.conn,
+                        &owner,
+                        input_id,
+                        storage::UncertainCause::WriteFailed,
                     )
                     .unwrap();
                 }
@@ -3799,6 +3814,14 @@ mod tests {
                     "fixture:external-history",
                 )
                 .unwrap();
+            } else if state == InputState::Uncertain {
+                storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    row.input_id,
+                    storage::UncertainCause::WriteFailed,
+                )
+                .unwrap();
             } else if state != InputState::InProgress {
                 storage::record_input_state(
                     &mut fixture.conn,
@@ -5117,6 +5140,16 @@ mod tests {
                             SubmissionStatus::Uncertain
                         ));
                         assert!(matches!(result.submission.stage, SubmissionStage::Unknown));
+                        let expected = if matches!(state, Retained::Uncertain) {
+                            "write_failed"
+                        } else {
+                            "prior transmission remains uncertain"
+                        };
+                        assert_eq!(
+                            result.submission.reason.as_deref(),
+                            Some(expected),
+                            "a recorded cause is the reason; a cause-less receipt keeps the fixed string"
+                        );
                     }
                     Retained::NotSubmitted | Retained::Abandoned => {
                         assert!(matches!(
@@ -6101,6 +6134,137 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    mod uncertain_reason {
+        use super::*;
+        use crate::broker::runtime::test_support::Fixture as StorageFixture;
+        use crate::runtime::runner::input_client::test_support::{Case, Retained};
+
+        const MESSAGES: [&str; 4] = ["identity", "contradiction", "missing", "unmatched"];
+
+        fn uncertain(cause: Option<storage::UncertainCause>) -> storage::InputOperation {
+            let mut fixture = StorageFixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(&owner, "prompt:reason", InputKind::Prompt, None);
+            match cause {
+                Some(cause) => storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    cause,
+                )
+                .unwrap(),
+                None => input,
+            }
+        }
+
+        fn reply(input: &storage::InputOperation, reason: Option<&str>) -> SubmissionResult {
+            SubmissionResult {
+                status: SubmissionStatus::Uncertain,
+                input_id: Some(input.input_id),
+                stage: SubmissionStage::Unknown,
+                output_seq: None,
+                reason: reason.map(str::to_owned),
+                delivery: input.delivery(),
+            }
+        }
+
+        #[test]
+        fn durable_outcome_reports_the_recorded_cause_as_the_uncertain_reason() {
+            for cause in [
+                storage::UncertainCause::ManualInput,
+                storage::UncertainCause::ShortWrite,
+                storage::UncertainCause::WriteFailed,
+                storage::UncertainCause::RunnerStopped,
+            ] {
+                let input = uncertain(Some(cause));
+                assert_eq!(
+                    durable_outcome(&input),
+                    Some((
+                        SubmissionStatus::Uncertain,
+                        SubmissionStage::Unknown,
+                        Some(cause.as_str().to_owned())
+                    ))
+                );
+            }
+        }
+
+        #[test]
+        fn durable_outcome_reports_no_reason_for_a_causeless_in_progress_receipt() {
+            let input = uncertain(None);
+            assert_eq!(input.state, InputState::InProgress);
+            assert_eq!(
+                durable_outcome(&input),
+                Some((SubmissionStatus::Uncertain, SubmissionStage::Unknown, None))
+            );
+        }
+
+        #[test]
+        fn uncertain_reply_must_carry_the_receipt_cause() {
+            let input = uncertain(Some(storage::UncertainCause::ManualInput));
+            validate_reply_against_durable(
+                &reply(&input, Some("manual_input")),
+                Some(&input),
+                MESSAGES,
+            )
+            .unwrap();
+            for wrong in [None, Some("write_failed"), Some("manual input")] {
+                let error =
+                    validate_reply_against_durable(&reply(&input, wrong), Some(&input), MESSAGES)
+                        .unwrap_err();
+                assert!(
+                    error.message().contains("contradiction"),
+                    "{wrong:?}: {}",
+                    error.message()
+                );
+            }
+        }
+
+        #[test]
+        fn uncertain_reply_for_a_causeless_receipt_carries_no_reason() {
+            let input = uncertain(None);
+            validate_reply_against_durable(&reply(&input, None), Some(&input), MESSAGES).unwrap();
+            let error = validate_reply_against_durable(
+                &reply(&input, Some("manual_input")),
+                Some(&input),
+                MESSAGES,
+            )
+            .unwrap_err();
+            assert!(
+                error.message().contains("contradiction"),
+                "{}",
+                error.message()
+            );
+        }
+
+        #[test]
+        fn live_and_repeated_permission_replies_report_the_same_recorded_cause() {
+            let case = Case::new(Retained::Uncertain);
+            let receipt =
+                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+            assert_eq!(
+                receipt.input.uncertain_cause,
+                Some(storage::UncertainCause::WriteFailed)
+            );
+            let (_, _, live) = durable_outcome(&receipt.input).expect("uncertain outcome");
+            let repeated = projection(&case.fixture.run, receipt).unwrap();
+            assert_eq!(live.as_deref(), Some("write_failed"));
+            assert_eq!(repeated.submission.reason, live);
+        }
+
+        #[test]
+        fn repeated_permission_reply_for_a_causeless_receipt_keeps_the_fixed_reason() {
+            let case = Case::new(Retained::InProgress);
+            let receipt =
+                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+            assert_eq!(receipt.input.uncertain_cause, None);
+            let repeated = projection(&case.fixture.run, receipt).unwrap();
+            assert_eq!(
+                repeated.submission.reason.as_deref(),
+                Some("prior transmission remains uncertain")
+            );
         }
     }
 }

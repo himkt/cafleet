@@ -28,7 +28,7 @@ The listener produces stdout records under the [Director receive lifecycle](codi
 
 Candidate detection immediately queues previews and explicit prompt/exec with zero bytes, including zero Escape bytes, until the interaction closes. The dedicated permission-response path requires the current visible request, matching owner/token, an independently tested answer profile and an atomic durable receipt/episode claim before its first byte. It sends only the selected single-request allow/deny plan. Human terminal input continues independently of event storage.
 
-The request token is a random identity fence. A changed request, human input, obscuring, degraded observation or ownership loss invalidates it. Reinspect and reconcile the decision when a concrete command becomes stale. The runner exposes no arbitrary key injection or persistent/session-wide permission change.
+The request token is a random identity fence. A changed request, human input (keystrokes, pastes and mouse input, but not the outer terminal's automatic replies such as cursor-position or focus reports), obscuring, degraded observation or ownership loss invalidates it. Reinspect and reconcile the decision when a concrete command becomes stale. The runner exposes no arbitrary key injection or persistent/session-wide permission change.
 
 A durable input receipt records answer submission separately from authorization and native outcome. Inspect `input show INPUT_ID --json` after uncertainty; the Director synchronizes any `input reconcile` disposition with the owner. A different operation key cannot bypass an episode's possibly submitted response. The [request-bound response contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#request-bound-permission-responses) owns privacy, replay protection and the screen-interface race limit.
 
@@ -45,7 +45,9 @@ The runner chooses how each preview, `member prompt` and `member exec` reaches a
 | Measured submission plan, but a draft or a composer state the runner cannot classify | Queued with no bytes until the composer empties, then delivered by profile; delivered by fallback after 3 minutes | `null` while queued, then `profile` or `fallback` |
 | No submission plan | Escape, settle, text, settle, Enter | `fallback` |
 
-Delivery fallback can interrupt work, mix text with a draft, or dismiss a native prompt the runner did not detect; its previews therefore carry the Escape-dismissal clause. Command output reports the status, method and reason of each delivery, and `input show INPUT_ID --json` reports a queued input's eventual result. The [delivery reporting contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#delivery-reporting) owns exact statuses and reasons.
+During the settle before the submit key, the runner distinguishes human input from the outer terminal's automatic replies. Terminal replies and focus reports pass to the native CLI and leave profile delivery intact, so the submit key is still written. Human input during the settle stops the remaining stages, and the delivery becomes uncertain.
+
+Delivery fallback can interrupt work, mix text with a draft, or dismiss a native prompt the runner did not detect; its previews therefore carry the Escape-dismissal clause. Command output reports the status, method and reason of each delivery, and `input show INPUT_ID --json` reports a queued input's eventual result. For an uncertain delivery, `input show INPUT_ID --json` also reports the recorded `uncertain_cause`, such as `manual_input` or `short_write`, so the Director can attribute the outcome before reconciling it. The [delivery reporting contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#delivery-reporting) owns exact statuses and reasons.
 
 ## Inspect and recover
 

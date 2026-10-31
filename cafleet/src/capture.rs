@@ -80,6 +80,18 @@ mod tests {
         );
     }
     #[test]
+    fn snapshot_treats_crlf_row_terminators_as_line_endings() {
+        let snapshot = CaptureSnapshot::from_raw("old\r\x1b[31m雪\x1b[0m\r\n緑\r", false, now());
+        assert_eq!(
+            snapshot,
+            CaptureSnapshot {
+                content: "雪\n緑".into(),
+                captured_at: WHEN.into(),
+                content_sha256: PLAIN_HASH.into()
+            }
+        );
+    }
+    #[test]
     fn snapshot_ansi_preserves_every_raw_byte_and_hashes_that_content() {
         let raw = "old\r\x1b[31m雪\x1b[0m\nold\r緑";
         let snapshot = CaptureSnapshot::from_raw(raw, true, now());
@@ -88,24 +100,6 @@ mod tests {
         assert_eq!(
             snapshot.content_sha256,
             "b9bd2b04f3d96774f4916e31055b70707a34e21a07fb96125c9214df2b1ad191"
-        );
-    }
-    #[test]
-    fn snapshot_keeps_every_crlf_terminated_line_and_ansi_keeps_the_raw_bytes() {
-        let raw = " Read outside\r\n\x1b[2m ❯ 1. Yes\x1b[0m\r\n   4. Once\r\n\r\n Esc to cancel";
-        let plain = CaptureSnapshot::from_raw(raw, false, now());
-        let expected = " Read outside\n ❯ 1. Yes\n   4. Once\n\n Esc to cancel";
-        assert_eq!(plain.content, expected);
-        assert_eq!(
-            plain.content_sha256,
-            crate::digest::sha256_hex(expected.as_bytes())
-        );
-
-        let styled = CaptureSnapshot::from_raw(raw, true, now());
-        assert_eq!(styled.content, raw);
-        assert_eq!(
-            styled.content_sha256,
-            crate::digest::sha256_hex(raw.as_bytes())
         );
     }
     #[test]
