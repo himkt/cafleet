@@ -1,7 +1,7 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
 **Status**: Approved
-**Progress**: 6/22 tasks complete
+**Progress**: 7/22 tasks complete
 **Last Updated**: 2026-11-01
 
 ## Overview
@@ -420,7 +420,7 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 ### Step 7: Start the v9 format family
 
-- [ ] Write the config default, baseline-shape and v8-rejection tests in § Tests, and apply the version-dependent test changes in § Database format `cafleet_v9.db` (successor and post-V3 tests deleted, the repeated-migration and `legacy_opening` tests rewritten against the baseline, the diagnosis test on `APPLICATION_ID`). <!-- completed: -->
+- [x] Write the config default, baseline-shape and v8-rejection tests in § Tests, and apply the version-dependent test changes in § Database format `cafleet_v9.db` (successor and post-V3 tests deleted, the repeated-migration and `legacy_opening` tests rewritten against the baseline, the diagnosis test on `APPLICATION_ID`). <!-- completed: 2026-11-01T01:17 -->
 - [ ] Replace `cafleet/migrations/V1__baseline.sql` through `V8__uncertain_cause.sql` with the v9 `V1__baseline.sql`, set `APPLICATION_ID` to `1128351289` and the default URL to `cafleet_v9.db`. <!-- completed: -->
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
 

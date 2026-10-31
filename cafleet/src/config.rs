@@ -70,12 +70,14 @@ mod tests {
     }
 
     #[test]
-    fn default_database_url_points_at_expanded_home_cafleet_v8() {
+    fn default_database_url_points_at_expanded_home_cafleet_v9() {
         let s = Settings::from_lookup(|_| None).unwrap();
-        assert!(s.database_url.starts_with("sqlite:///"));
-        assert!(
-            s.database_url
-                .ends_with("/.local/share/cafleet/cafleet_v8.db")
+        assert_eq!(
+            s.database_url,
+            format!(
+                "sqlite:///{}/.local/share/cafleet/cafleet_v9.db",
+                std::env::var("HOME").unwrap()
+            )
         );
         assert!(
             !s.database_url.contains('~'),
