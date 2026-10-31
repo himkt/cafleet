@@ -1,7 +1,7 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
 **Status**: Approved
-**Progress**: 11/22 tasks complete
+**Progress**: 12/22 tasks complete
 **Last Updated**: 2026-11-01
 
 ## Overview
@@ -473,7 +473,7 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 ### Step 4: Document the measured profile
 
-- [ ] Record `W_split`, `W_min`, the pinned patterns and the narrow fixtures in `SPEC.md` §6.9 and the opencode section of `skills/cafleet/reference/coding-agents.md`. <!-- completed: -->
+- [x] Record `W_split`, `W_min`, the pinned patterns and the narrow fixtures in `SPEC.md` §6.9 and the opencode section of `skills/cafleet/reference/coding-agents.md`. <!-- completed: 2026-11-01T02:24 -->
 
 ### Step 5: Implement narrow detection
 

@@ -2084,7 +2084,7 @@ The OpenCode profile from `2.1.4` applies to OpenCode `mini` under either OpenCo
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | Rule `opencode-shell-permission`: the shell permission form on the primary screen, in its wide or split layout, from its `△ Permission required` heading to its `⇆ select  enter confirm  esc reject` control line, with the `$ ` operation over one or more displayed rows, the focused choice and the `Allow once` and `Reject` choices |
+| Detection | `tested` | Rules `opencode-shell-permission` (wide and split layouts, ending at the `⇆ select  enter confirm  esc reject` control line) and `opencode-shell-permission-compact` (compact layout, ending at `pgup/pgdn scroll`): the shell permission form on the primary screen from its `△ Permission required` heading, with the `$ ` operation over one or more displayed rows shown in full, the focused choice and the `Allow once` and `Reject` choices |
 | Allow answer | `tested` | One gated stage: byte `0d` (Enter) while `Allow once` is focused, as `allow-once` |
 | Deny answer | `tested` | Three gated stages: `68` (`h`) while `Allow once` is focused, `0d` while `Reject` is focused, then `0d` on the empty rejection-reason dialog, as `deny-once` |
 | Empty-composer observation | `tested` | The idle `┃` composer line with the terminal cursor immediately after the prefix; a verified non-interaction boundary |
@@ -2095,30 +2095,59 @@ The form offers no focus-independent key: `h`/`l` cycle the focus, Enter selects
 
 `mini` lays out the form itself, so its row breaks are hard rows rather than terminal soft wraps, and the layout depends on the pane width:
 
-| Layout | Choice row | Control line | Detection |
-|---|---|---|---|
-| Wide | `   Allow once   Always allow   Reject`, followed on the same row by the control line | Shares the choice row | Supported |
-| Split | The three choices on one row | `  ⇆ select  enter confirm  esc reject` on its own row below the choice row | Supported |
-| Broken | The choices wrap or truncate | Any | Unsupported: no request matches and the form is answered manually |
+| Layout | Widths (36 rows) | Choice row | Control text | Request rule |
+|---|---|---|---|---|
+| Wide | 77 and above | `   Allow once   Always allow   Reject`, followed on the same row by the control line | `⇆ select  enter confirm  esc reject`, sharing the choice row | `opencode-shell-permission` |
+| Split | 56–76 | The three choices on one row, with the wide margins | `  ⇆ select  enter confirm  esc reject` on its own row below the choice row | `opencode-shell-permission` |
+| Compact | 36–55 | ` Allow once   Always allow   Reject` with a one-space margin; the heading, `# Shell command` and `$ ` rows start at column 0 | `pgup/pgdn scroll`, sharing the choice row at 53–55 columns and on its own row at 36–52 | `opencode-shell-permission-compact` |
+| Broken | 35 and below | The choices wrap (`Reject` moves to its own row) | Any | None: no request matches and the form is answered manually |
 
-`W_split` is the widest pane width that uses the split layout, and `W_min` is the narrowest width that still renders the three choices on one row; the supported range is every width at or above `W_min`. The two-option layout (`Allow once` / `Reject`) follows the same rule. One request rule matches both supported layouts. Its `focus` matcher matches the choice row with or without the trailing control line, and its `deny` matcher accepts a choice row that ends at `Reject`. Its region matcher `controls` requires either the wide choice-and-control row to end the region, or the split control row to end it with the choice row as the last non-blank row above it. The split control row carries no label and takes no part in focus resolution.
+Three breakpoints separate the layouts: `W_split` = 76, the widest split width; `W_compact` = 55, the widest compact width; and `W_min` = 36, the narrowest width that still renders the three choices on one row. The supported range is every width at or above `W_min`. The two-option layout (`Allow once` / `Reject`) follows the same rules. At any width exactly one of the two request rules matches, because their heading margins differ. Both have the same choices, answers, focus resolution, `native_request_id` and sensitivity, and the detection capability lists both.
 
-The focus matcher's full capture is part of the request identity, and the two layouts capture different text. A resize across `W_split` therefore starts a new request generation, as a focus change does: an earlier request token stops validating, and a response in flight fails before its next byte, or ends `uncertain` once a byte was written.
+Each request rule's `focus` matcher matches the choice row with or without its trailing control text, and its `deny` matcher accepts a choice row that ends at `Reject`. Its region matcher `controls` requires either a choice-and-control row to end the region, or a control-only row to end it with the choice row as the last non-blank row above it. A control-only row carries no label and takes no part in focus resolution.
 
-The operation matcher is region-scoped. It captures from after `  $ ` on the first command row through each following row that starts with the continuation margin and then a non-space character, and its extraction removes the continuation margin from the following rows and the scrollbar glyph `█` beside the command box from every row (§ Operation extraction). The capture is anchored at both ends: after the last captured row, only rows that are blank or hold only `█` may precede the choice row, and any other row fails the match. The `operation` evidence reports the displayed rows joined with `\n` and `operation_rows` equals the displayed row count; a one-row command extracts the same text with `operation_rows` 1. The semantic fingerprint keeps the row breaks, so a resize that moves a row break closes the episode and opens a new one.
+The focus matcher's full capture is part of the request identity, and the layouts capture different text. A resize across `W_split` or `W_compact` therefore starts a new request generation, as a focus change does: an earlier request token stops validating, and a response in flight fails before its next byte, or ends `uncertain` once a byte was written.
 
-A command taller than the form's command box can scroll inside the box and hide rows. A clipped command matches no request, so the Director never approves a command it cannot read in full; a form taller than the rule's `max_rows` or the pane matches no request either.
+Each operation matcher is region-scoped. It captures from after the `$ ` prefix on the first command row through each following row that continues the command, and its extraction removes the scrollbar glyph `█` beside the command box from every row (§ Operation extraction). A wide or split continuation row starts with the two-space continuation margin and then a non-space character, and the extraction removes that margin from every row after the first. A compact continuation row starts with a non-space character at column 0 and has no margin to remove. The capture is anchored at both ends: after the last captured row, only rows that are blank or hold only `█` may precede the choice row, and any other row fails the match. The `operation` evidence reports the displayed rows joined with `\n` and `operation_rows` equals the displayed row count; a one-row command extracts the same text with `operation_rows` 1. The semantic fingerprint keeps the row breaks, so a resize that moves a row break closes the episode and opens a new one.
 
-`mini` hides the cursor while a form or dialog shows, and its recorded position varies, including the pending-wrap position on the row below the form. Both OpenCode permission rules therefore match with cursor `any` and rely on their heading and control-line anchors.
+A command taller than the form's command box scrolls inside the box: in the 57-column capture the box keeps its height, clips the command and shows the scrollbar thumb `▀` on the first track row with the rest of the track blank. Each request rule therefore requires its region matcher `unclipped`, which holds only when the thumb `█` ends every row from `# Shell command` through the last command row. A clipped command matches no request, so the Director never approves a command it cannot read in full; a form taller than the rule's `max_rows` (24) or the pane matches no request either.
+
+| Rule | Element | Pattern |
+|---|---|---|
+| `opencode-shell-permission` | Region | Start `^  △ Permission required\s*$`, end `  ⇆ select  enter confirm  esc reject\s*$`, 24 rows |
+| `opencode-shell-permission` | `heading`, `shell` (line) | `^  △ Permission required\s*$`, <code>^   # Shell command(?:\s&#124;$)</code> |
+| `opencode-shell-permission` | `operation` (region) | `(?m)^  \$ (?P<operation>\S[^\n]*(?:\n  \S[^\n]*)*)(?:\n *(?:█ *)?)*\n   Allow once   `, with `row_margin` two spaces, `margin_rows` `continuation` and `row_trailer` `█` |
+| `opencode-shell-permission` | `unclipped` (region) | `(?m)^   # Shell command +█ *\n(?: *█ *\n)*  \$ [^\n]*█ *(?:\n  \S[^\n]*█ *)*(?:\n *(?:█ *)?)*\n   Allow once   ` |
+| `opencode-shell-permission` | `controls` (region) | <code>(?m)^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject *&#124; *(?:\n *)*\n  ⇆ select  enter confirm  esc reject *)\z</code> |
+| `opencode-shell-permission` | `focus`, `allow`, `deny` (line) | `^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\s*$` with `focus_style` `background`, `^   (?P<label>Allow once)   `, <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject)(?: &#124;$)</code> |
+| `opencode-shell-permission-compact` | Region | Start `^△ Permission required\s*$`, end `pgup/pgdn scroll\s*$`, 24 rows |
+| `opencode-shell-permission-compact` | `heading`, `shell` (line) | `^△ Permission required\s*$`, <code>^# Shell command(?:\s&#124;$)</code> |
+| `opencode-shell-permission-compact` | `operation` (region) | `(?m)^\$ (?P<operation>\S[^\n]*(?:\n\S[^\n]*)*)(?:\n *(?:█ *)?)*\n Allow once   `, with `row_trailer` `█` and no `row_margin` |
+| `opencode-shell-permission-compact` | `unclipped` (region) | `(?m)^# Shell command +█ *\n(?: *█ *\n)*\$ [^\n]*█ *(?:\n\S[^\n]*█ *)*(?:\n *(?:█ *)?)*\n Allow once   ` |
+| `opencode-shell-permission-compact` | `controls` (region) | <code>(?m)^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll *&#124; *(?:\n *)*\npgup/pgdn scroll *)\z</code> |
+| `opencode-shell-permission-compact` | `focus`, `allow`, `deny` (line) | `^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\s*$` with `focus_style` `background`, `^ (?P<label>Allow once)   `, <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject)(?: &#124;$)</code> |
+
+`mini` hides the cursor while a form or dialog shows, and its recorded position varies, including the pending-wrap position on the row below the form. Every OpenCode permission rule therefore matches with cursor `any` and relies on its heading and control-text anchors.
 
 | Stage | Bytes | Gate | Native effect |
 |---|---|---|---|
 | Allow 1 | `0d` | Focus `allow-once` | Selects `Allow once`; OpenCode runs the command once |
 | Deny 1 | `68` | Focus `allow-once` | Moves the focus to `Reject` |
 | Deny 2 | `0d` | Focus `deny-once` | Selects `Reject`; OpenCode opens the rejection-reason dialog and keeps the request pending |
-| Deny 3 | `0d` | Screen `opencode-reject-reason` | Submits an empty reason; OpenCode rejects the request without running it |
+| Deny 3 | `0d` | Screen `opencode-reject-reason` (wide, split) or `opencode-reject-reason-compact` (compact) | Submits an empty reason; OpenCode rejects the request without running it |
 
-The continuation rule `opencode-reject-reason` (§ Continuation screens) continues `opencode-shell-permission` after `deny-once`. It matches the `△ Reject permission` dialog with its `Tell OpenCode what to do differently` prompt and the `enter confirm  esc cancel` control line. In the wide layout the textarea shares the control line's row; in the split layout the control line moves to its own row and the textarea row reads the same text as the prompt row above it. One region matcher `empty_reason` requires the prompt row, then the placeholder `Tell OpenCode what to do differently` either sharing the control-line row or on the last non-blank row above a control-only row, so it recognises an empty reason in both layouts. Typed text replaces the placeholder and fails the gate. CAFleet never types a reason and never sends Escape to the dialog.
+The stages are the same for both request rules, and each rule has its own allow and deny answer entries. The captures at 120, 57, 55 and 36 columns showed the same native effects in every layout.
+
+The continuation rule `opencode-reject-reason` (§ Continuation screens) continues `opencode-shell-permission` after `deny-once`. It matches the `△ Reject permission` dialog with its `Tell OpenCode what to do differently` prompt and the `enter confirm  esc cancel` control line. In the wide layout the textarea shares the control line's row; in the split layout the control line moves to its own row and the textarea row reads the same text as the prompt row above it. One region matcher `empty_reason` requires the prompt row, then the placeholder `Tell OpenCode what to do differently` either sharing the control-line row or on the last non-blank row above a control-only row, so it recognises an empty reason in both layouts.
+
+The continuation rule `opencode-reject-reason-compact` continues `opencode-shell-permission-compact` after `deny-once`. The compact dialog shows `△ Reject permission`, no prompt row, the placeholder and then the control text `enter reject esc back` on the next row, each at column 0. Its region matcher `empty_reason` requires the heading, then the placeholder as the last non-blank row above the control row. In either dialog, typed text replaces the placeholder and fails the gate. CAFleet never types a reason and never sends Escape to the dialog.
+
+| Rule | Element | Pattern |
+|---|---|---|
+| `opencode-reject-reason` | Region | Start `^  △ Reject permission\s*$`, end `  enter confirm  esc cancel\s*$`, 24 rows |
+| `opencode-reject-reason` | `heading` (line), `empty_reason` (region) | `^  △ Reject permission\s*$`; <code>(?m)^  △ Reject permission *(?:\n *)*\n  Tell OpenCode what to do differently *(?:\n *)*\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *&#124; *(?:\n *)*\n  enter confirm  esc cancel *)\z</code> |
+| `opencode-reject-reason-compact` | Region | Start `^△ Reject permission\s*$`, end `^enter reject esc back\s*$`, 24 rows |
+| `opencode-reject-reason-compact` | `heading` (line), `empty_reason` (region) | `^△ Reject permission\s*$`; `(?m)^△ Reject permission *(?:\n *)*\nTell OpenCode what to do differently *(?:\n *)*\nenter reject esc back *\z` |
 
 The native captures showed this decision evidence:
 
@@ -2127,14 +2156,23 @@ The native captures showed this decision evidence:
 | Allow | The hint area briefly shows `Waiting for permission event…`, then the form disappears without transcript text, the command runs and the member prints its report, a `<agent> · <model> · <duration>` line and the idle composer | The member continues on its own |
 | Deny | After the final Enter the hint area briefly shows `Waiting for permission event…`, then the dialog disappears and the transcript shows `Step interrupted`, a `<agent> · <model> · <duration>` line and the idle composer; nothing runs | OpenCode does not continue after a rejection; the Director's next message reaches the idle composer through the prompt submission plan and continues the member |
 
-These lines are decision evidence for the Director's continuation check, not bundled rules. Because an answered form or dialog leaves no transcript text, the false-positive guard rests on the live-region anchors. The fixtures are native 36x120 captures with only row 35 masked; the visible default public model name and context-usage counter are neither account, plan nor path text. The OpenCode limits apply as follows:
+These lines are decision evidence for the Director's continuation check, not bundled rules. Because an answered form or dialog leaves no transcript text, the false-positive guard rests on the live-region anchors. The fixtures are native 36-row captures, each with one reviewed masked row; the visible public model name and context-usage counter are neither account, plan nor path text:
+
+| Fixtures | Geometry | Masked row | Supports |
+|---|---|---|---|
+| `opencode-2.1.4-ask-permission-1`, `-allow-pre-stage-1`, `-deny-pre-stage-1`, `-deny-pre-stage-2`, `-deny-pre-stage-3`, `-focus-always-1`, `-idle-composer-1` and the submission fixtures | 36x120 | 35 | The wide layout and its dialog, the composer and the submission plans |
+| `opencode-2.1.4-narrow-permission-057-1`, `-narrow-deny-pre-stage-2-057-1`, `-narrow-deny-pre-stage-3-057-1`, `-narrow-long-command-057-1`, `-narrow-idle-composer-057-1` | 36x57 | 35 | The split layout with a wrapped command, its dialog, the clipped long command and the idle composer |
+| `opencode-2.1.4-compact-permission-055-1`, `-compact-deny-pre-stage-2-055-1`, `-compact-deny-pre-stage-3-055-1` | 36x55 | 35, or 0 for the dialog | The compact layout with its control text sharing the choice row, and the compact dialog |
+| `opencode-2.1.4-narrow-permission-min-1`, `-narrow-deny-pre-stage-2-min-1`, `-narrow-deny-pre-stage-3-min-1` | 36x36 | 0 for the form and the dialog, 35 for the stage-2 form | The compact layout at `W_min` with a control-only row, and the compact dialog |
+
+A capture whose compact control text sits on row 35 masks row 0, a transcript row, so its rule region lies in unmasked rows. The OpenCode limits apply as follows:
 
 | Limit | Behavior |
 |---|---|
 | A pane narrower than `W_min` | The choices break, no request matches, input stays held and the form is answered manually |
 | A command clipped by the command box | No request matches; the form is answered manually |
 | A form taller than `max_rows` or the pane | No request matches; the form is answered manually |
-| A command row that begins with whitespace after the continuation margin, such as an indented line of a multi-line command | The anchored capture fails, no request matches, and the form is answered manually |
+| A command row that begins with whitespace after its layout's continuation margin, such as an indented line of a multi-line command | The anchored capture fails, no request matches, and the form is answered manually |
 | A resize while the form is open | A new request generation, and a new episode when the command's row breaks move; an earlier token stops validating |
 | A non-shell permission | Never asks under the `cafleet-ask` preset |
 | A typed reason identical to the placeholder | Cannot be told from an empty textarea; such typing is human input, which fails the deny stage-3 gate inside a response |
