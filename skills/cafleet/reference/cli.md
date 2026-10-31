@@ -232,7 +232,7 @@ The runner selects each wrapped preview, `member prompt` and `member exec` deliv
 
 1. A failed identity, reachability, ownership, storage or receipt-history check, or an uncertain prior attempt, is an explicit failure and sends no fallback bytes. Unknown detection coverage alone is not such a failure.
 2. A candidate or open detected interaction (`permission_request`, `question`, `trust`, `update` or `unknown_interaction`, including while obscured), or earlier queued input, queues the request with zero bytes, including zero Escape bytes.
-3. A verified empty composer with the operation's measured submission plan uses profile delivery: the literal stage, a 500 ms settle, then the measured submit key, without Escape.
+3. A verified empty composer with the operation's measured submission plan uses profile delivery: the literal stage, a 500 ms settle, then the measured submit key, without Escape. Outer-terminal replies such as cursor-position, color or focus reports during the settle are forwarded and leave the submit stage valid; human input stops the remaining stages as uncertain with `uncertain_cause` `manual_input`.
 4. With a measured plan and a composer that is not verified empty (a draft, or a screen the observer cannot classify), the request queues with zero bytes under `composer_busy` and drains by profile delivery once the composer is verified empty. A working member whose composer row is empty receives profile delivery, which the native CLI queues behind its current turn. After it has waited 3 minutes only on a composer that is not verified empty, it is delivered by fallback with reason `idle_timeout`; time spent behind an interaction or earlier input does not count. Interrupt a working member explicitly with `cafleet member press MEMBER_ID Escape`.
 5. Otherwise the runner uses delivery fallback: Escape, 500 ms settle, the literal (with `! ` for exec), 500 ms settle, Enter. This covers a missing plan, profile or version probe.
 
@@ -446,7 +446,7 @@ Runner-managed members receive input through their runner's own PTY under § Wra
 
 Member create preserves ordered `member_id,name,registered_at,placement` and appends `runtime`; member show preserves ordered `member_id,name,description,status,registered_at,kind,placement` and appends `runtime`. An explicitly unwrapped member has `runtime: null`. The runtime object has ordered keys `run_id,resolved_mode,status,reachability,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity,effective_policy`, preserving stored nullability. `effective_policy` is the stored effective policy record or null. `unresolved_input_ids` lists the run's inputs in `in_progress`, `accepted` or `uncertain`, plus queued `ready` inputs, in input-ID order; an accepted input needs no reconciliation and stays listed until a settlement records its disposition, a queued input stays listed while the runner owns it, and `in_progress` and `uncertain` inputs need Director reconciliation. These are registry reads and make no live-health claim.
 
-Wrapped create/show preserves its existing text row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE review=STATE`, where `STATE` is the effective policy's `automatic_review` value, `-` when absent. `event show` uses the same runtime object and line. An uncertain error retains its existing exit category and includes known receipt identity in the cause as `input_id=INPUT_ID` together with the selected method; run/interaction context accompanies held/rejected input.
+Wrapped create/show preserves its existing text row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE review=STATE`, where `STATE` is the effective policy's `automatic_review` value, `-` when absent. `event show` uses the same runtime object and line. An uncertain error retains its existing exit category, names the receipt's recorded `uncertain_cause` and the selected method, as in `exec delivery to member 110 is uncertain: manual_input (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
 
 ### Delivery reporting
 
@@ -457,7 +457,7 @@ Send, prompt and exec JSON append `delivery` with ordered `status,method,reason`
 | `submitted` | Complete literal and submit stages were written | Exit 0; send has `notification_sent=true`, exec has `dispatched=true` |
 | `queued` | The runner accepted durable zero-byte deferred work | Exit 0; send has `notification_sent=false`, exec has `dispatched=false`; the input ID and reason are returned |
 | `held` | No queue acceptance or write, due to unavailable health, ownership or storage | Send keeps its committed message and prints the reason; prompt/exec exits 1 with the existing delivery context |
-| `uncertain` | Some stage may have written; reconciliation is required | Existing error categories, input identity and stage diagnostics, including the selected method |
+| `uncertain` | Some stage may have written; reconciliation is required | Existing error categories, input identity and stage diagnostics, including the recorded `uncertain_cause` and the selected method |
 | `not_submitted` | Cancelled with established zero-byte evidence | Visible through `input show` and, for deferred work, its result event |
 | `not_applicable` | A self-send or root-Director target uses broker consumption only | Send keeps `notification_sent=false`, null method and input ID, and no warning |
 
@@ -491,7 +491,7 @@ Version-2 event keys are ordered `schema_version,event_id,run_id,event_seq,membe
 
 Neither automatic review event creates an interaction or changes input eligibility, so `permission inspect` and `permission respond` naming one fail their event/interaction association check before any byte.
 
-`input_delivery_result` reports a deferred input's first submitted, not-submitted or uncertain result. It has null `interaction_id`, `classification` and `director_action`, `source` `runner_lifecycle`, `decision_outcome` `"unknown"`, and a `cause` only when uncertain. `input_id` names the input, `message_id` is the preview's message or null for prompt/exec, `delivery` is the stored projection, and `stage` is `zero_bytes`, `partial`, `submitted` or `unknown`. It carries no literal payload and is published once per input.
+`input_delivery_result` reports a deferred input's first submitted, not-submitted or uncertain result. It has null `interaction_id`, `classification` and `director_action`, `source` `runner_lifecycle`, `decision_outcome` `"unknown"`, and `cause` `{"kind":UNCERTAIN_CAUSE}` only for an uncertain result whose receipt records an `uncertain_cause`; the cause is derived from that durable receipt and is absent otherwise. `input_id` names the input, `message_id` is the preview's message or null for prompt/exec, `delivery` is the stored projection, and `stage` is `zero_bytes`, `partial`, `submitted` or `unknown`. It carries no literal payload and is published once per input.
 
 ### `event show`
 
@@ -499,11 +499,26 @@ Neither automatic review event creates an interaction or changes input eligibili
 
 ### `input show` and `input reconcile`
 
-`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,payload_digest_version`. Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
+`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,payload_digest_version,uncertain_cause`. Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
 
 Input kinds are `preview`, `prompt`, `exec` and `permission_response`; states are `ready`, `in_progress`, `accepted`, `uncertain` and `settled`. `ready` certifies a zero-byte attempt, and a settled disposition is `submitted`, `not_submitted` or `abandoned_uncertain`. A preview receipt uses the operation key `preview:<run_id>:<message_id>`. The receipt stores a payload digest and never the literal prompt or command. New preview receipts use `payload_digest_version` `2`, which binds the method-independent canonical preview so a later change between profile and fallback delivery reuses the same input ID; other receipts use `1`.
 
 `delivery` projects the stored receipt: `ready` with `deferred_at`/`defer_reason` is `queued` with the original defer reason; `ready` without them is `held` with `zero_bytes_ready`; `in_progress`, `uncertain` and `settled/abandoned_uncertain` are `uncertain`; `accepted` and `settled/submitted` are `submitted`; `settled/not_submitted` is `not_submitted`, with a null method and its zero-byte outcome reason for a cancellation, or its recorded selection after reconciling an uncertain attempt. A receipt whose method was never recorded keeps a null method, with reason `method_unrecorded` outside `ready`. A permission response has `delivery: null`, null deferred fields and digest version `1`.
+
+`uncertain_cause` is the cause the runner recorded when the input moved from `in_progress` to `uncertain`. Settlement and reconciliation preserve it. It is null for inputs that never became uncertain, inputs recorded before the V8 schema and `in_progress` inputs left by runner loss. Use it as attribution evidence before choosing a reconciliation disposition:
+
+| Cause | Recorded when |
+|---|---|
+| `manual_accounting_failed` | Manual-input accounting failed when a staged stage stopped |
+| `manual_input` | Human input (terminal replies excluded) arrived after the literal stage, stopping the submit stage |
+| `interaction_candidate` | A staged stage stopped on a candidate interaction |
+| `interaction_open` | A staged stage stopped on any other blocking interaction |
+| `observer_unavailable` | A staged stage stopped because the observer was unavailable or reported a gap |
+| `short_write` | A programmatic write accepted fewer bytes than its stage |
+| `write_failed` | The attempt failed after a possible child byte, including a failed deferred attempt or permission response |
+| `runner_stopped` | Runner shutdown ended an active deferred attempt that may have written a child byte |
+
+When a staged stage stops at its settle check, the first matching row among the first five wins.
 
 Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores. Require a nonempty evidence reference; the command synchronizes with the current owner before settlement and preserves uncertainty while an active writer cannot be ruled out. A settled ordinary receipt with the same disposition returns its original row and evidence reference; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One five-second budget covers the pane wait, current-owner synchronization, database work and socket exchange. If the writer is unreachable, settlement requires exclusive receipt-only ownership; unavailable proof retains uncertainty.
 
@@ -559,7 +574,7 @@ status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,de
 | `settled/not_submitted` or `settled/abandoned_uncertain` | `rejected/zero_bytes` with a consumed-key reason; preserve the original disposition and claim |
 | `ready` | The separate exact-metadata live-validation path |
 
-For a consumed key, `zero_bytes` describes this retry only and supplies no zero-byte evidence about the original attempt.
+An uncertain reply, live or retained, reports the receipt's recorded `uncertain_cause` as `reason`; a receipt without a recorded cause reports `prior transmission remains uncertain`. For a consumed key, `zero_bytes` describes this retry only and supplies no zero-byte evidence about the original attempt.
 
 Response text is:
 
@@ -587,6 +602,7 @@ A new attempt against a blocked current request fails before any receipt, audit,
 | `outer terminal closed` | The outer terminal reached end of input |
 | `native output closed` | The native child's output reached end of file |
 | `terminal output still arriving` | The drain's bounded rounds ended before human and child input were quiet |
+| `terminal reply pending` | An outer-terminal reply prefix awaits completion within its 100 ms classification bound |
 | `permission request is not visible` | The request is obscured, closed or not observed as visible |
 | `permission request is not the current interaction` | Input eligibility is not held for the current permission interaction |
 

@@ -1,7 +1,7 @@
 # Runner terminal-reply classification and uncertain-cause recording
 
 **Status**: Approved
-**Progress**: 0/43 tasks complete
+**Progress**: 14/43 tasks complete
 **Last Updated**: 2026-10-31
 
 ## Overview
@@ -244,26 +244,26 @@ The live permission reply goes through `durable_outcome`, which returns null for
 
 ### Step 1: SPEC.md
 
-- [ ] §6.9 *Terminal transport and lifecycle*: rewrite the Framing row so it says forwarding stays unframed, unchanged and in order with no holding or timeout, and point to the `Terminal reply classification` subsection for accounting <!-- completed: -->
-- [ ] §6.9 *Terminal transport and lifecycle*: replace "Every read advances the manual-input generation by its byte count" with the classification contract: only bytes classified as manual advance the generation. Add a `Terminal reply classification` subsection carrying the shared productions and allowlist table (1.3), the manual-input table, the parse-state table and general rule (1.4), the 100 ms pending bound, the EOF rule and the accepted collision class (1.5) <!-- completed: -->
-- [ ] §6.9 *Measured submission plans and settle intervals*: steps 3–4 and the following paragraph say "manual input" (terminal replies excluded); the uncertain paragraph states that the receipt records its `uncertain_cause` <!-- completed: -->
-- [ ] §6.9 *Bounded input draining*: `human_generation` is the cumulative manual-byte count; a pending reply prefix keeps the drain `Pending` with blocker `terminal reply pending` <!-- completed: -->
-- [ ] §6.9 *Explicit manual key input* and the permission-token paragraphs: the runner counts manual bytes of positive outer reads (terminal replies excluded) <!-- completed: -->
-- [ ] §6.3 permission blocker reason table: add the `terminal reply pending` row <!-- completed: -->
-- [ ] §6.3 `input show`/`input reconcile` key order: append `uncertain_cause`; wrapped prompt/exec uncertain errors include the cause <!-- completed: -->
-- [ ] §6.9 *Delivery reporting*: add an `Uncertain cause` subsection with the value table (2.1) and transition-site rules (2.2); the `uncertain` status row names the cause <!-- completed: -->
-- [ ] §6.9 *Input delivery result event*: the `cause` row becomes `{"kind": UNCERTAIN_CAUSE}`, present only for an uncertain result whose receipt records a cause and derived from the durable receipt by every publisher <!-- completed: -->
-- [ ] Runtime records: the input-operation row lists `uncertain_cause` and its nullability rule; the `cafleet_v8.db` chain sentence names V8; add a `V8 storage` paragraph <!-- completed: -->
-- [ ] §8: add `### V8 uncertain cause migration` with the DDL from 2.4; §9 testing strategy mentions terminal-reply classification and uncertain-cause recording <!-- completed: -->
+- [x] §6.9 *Terminal transport and lifecycle*: rewrite the Framing row so it says forwarding stays unframed, unchanged and in order with no holding or timeout, and point to the `Terminal reply classification` subsection for accounting <!-- completed: 2026-10-31T00:59 -->
+- [x] §6.9 *Terminal transport and lifecycle*: replace "Every read advances the manual-input generation by its byte count" with the classification contract: only bytes classified as manual advance the generation. Add a `Terminal reply classification` subsection carrying the shared productions and allowlist table (1.3), the manual-input table, the parse-state table and general rule (1.4), the 100 ms pending bound, the EOF rule and the accepted collision class (1.5) <!-- completed: 2026-10-31T00:59 -->
+- [x] §6.9 *Measured submission plans and settle intervals*: steps 3–4 and the following paragraph say "manual input" (terminal replies excluded); the uncertain paragraph states that the receipt records its `uncertain_cause` <!-- completed: 2026-10-31T00:59 -->
+- [x] §6.9 *Bounded input draining*: `human_generation` is the cumulative manual-byte count; a pending reply prefix keeps the drain `Pending` with blocker `terminal reply pending` <!-- completed: 2026-10-31T00:59 -->
+- [x] §6.9 *Explicit manual key input* and the permission-token paragraphs: the runner counts manual bytes of positive outer reads (terminal replies excluded) <!-- completed: 2026-10-31T00:59 -->
+- [x] §6.3 permission blocker reason table: add the `terminal reply pending` row <!-- completed: 2026-10-31T00:59 -->
+- [x] §6.3 `input show`/`input reconcile` key order: append `uncertain_cause`; wrapped prompt/exec uncertain errors include the cause <!-- completed: 2026-10-31T00:59 -->
+- [x] §6.9 *Delivery reporting*: add an `Uncertain cause` subsection with the value table (2.1) and transition-site rules (2.2); the `uncertain` status row names the cause <!-- completed: 2026-10-31T00:59 -->
+- [x] §6.9 *Input delivery result event*: the `cause` row becomes `{"kind": UNCERTAIN_CAUSE}`, present only for an uncertain result whose receipt records a cause and derived from the durable receipt by every publisher <!-- completed: 2026-10-31T00:59 -->
+- [x] Runtime records: the input-operation row lists `uncertain_cause` and its nullability rule; the `cafleet_v8.db` chain sentence names V8; add a `V8 storage` paragraph <!-- completed: 2026-10-31T00:59 -->
+- [x] §8: add `### V8 uncertain cause migration` with the DDL from 2.4; §9 testing strategy mentions terminal-reply classification and uncertain-cause recording <!-- completed: 2026-10-31T00:59 -->
 
 ### Step 2: docs/
 
-- [ ] `docs/docs/concepts/member-permission-events.md` § *Deliver generated input*: terminal replies and focus reports during the settle leave profile delivery intact, human input stops it as uncertain, and `input show INPUT_ID --json` reports the recorded `uncertain_cause`; § *Preserve a native request*: "human input" invalidating the token excludes terminal replies <!-- completed: -->
+- [x] `docs/docs/concepts/member-permission-events.md` § *Deliver generated input*: terminal replies and focus reports during the settle leave profile delivery intact, human input stops it as uncertain, and `input show INPUT_ID --json` reports the recorded `uncertain_cause`; § *Preserve a native request*: "human input" invalidating the token excludes terminal replies <!-- completed: 2026-10-31T01:00 -->
 
 ### Step 3: skills/
 
-- [ ] `skills/cafleet/reference/cli.md`: `input show` key order with `uncertain_cause`, the cause value domain, the uncertain error/status rows, the `input_delivery_result` `cause` sentence and the `terminal reply pending` blocker row <!-- completed: -->
-- [ ] `skills/cafleet/reference/member-runtime.md`: the manual-accounting paragraph says the runner counts manual bytes and ignores terminal replies; the inspection paragraph names `uncertain_cause` as attribution evidence before reconciliation <!-- completed: -->
+- [x] `skills/cafleet/reference/cli.md`: `input show` key order with `uncertain_cause`, the cause value domain, the uncertain error/status rows, the `input_delivery_result` `cause` sentence and the `terminal reply pending` blocker row <!-- completed: 2026-10-31T01:00 -->
+- [x] `skills/cafleet/reference/member-runtime.md`: the manual-accounting paragraph says the runner counts manual bytes and ignores terminal replies; the inspection paragraph names `uncertain_cause` as attribution evidence before reconciliation <!-- completed: 2026-10-31T01:00 -->
 
 ### Step 4: Reply classifier
 
