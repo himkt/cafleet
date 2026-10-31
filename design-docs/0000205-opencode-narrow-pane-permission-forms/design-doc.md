@@ -89,23 +89,34 @@ The two-option layout (`Allow once` / `Reject`) follows the same rule because th
 
 ### Request rule `opencode-shell-permission`
 
-One request rule matches all three supported layouts; there is no second rule. Its answers, choices, `native_request_id` and sensitivity are unchanged. Every matcher below also accepts the compact layout's margins (no margin on the heading, `# Shell command` and `$ ` rows; a one-space margin on the choice row), with the exact compact patterns pinned from the Step 3 compact captures.
+`opencode-shell-permission` matches the wide and split layouts. Its answers, choices, `native_request_id` and sensitivity are unchanged. The compact layout uses its own margins, so it has its own request rule (§ Compact rules).
 
-| Element | Shipped | All supported layouts |
+| Element | Shipped | Wide and split |
 |---|---|---|
-| Region start | `^  △ Permission required\s*$` | The heading with a two-space (wide, split) or no (compact) margin |
-| Region end | `  ⇆ select  enter confirm  esc reject\s*$`, not anchored at the row start | The `⇆ select  enter confirm  esc reject` control line (wide, split) or the compact `pgup/pgdn scroll` control text, in either case sharing the choice row or on its own row |
+| Region start | `^  △ Permission required\s*$` | Unchanged |
+| Region end | `  ⇆ select  enter confirm  esc reject\s*$`, not anchored at the row start | Unchanged: it matches the control line in either layout |
 | `max_rows` | 24 | The largest form height among the supported captures, including the long-command capture when its box grows (§ Clipped commands), and at least 24 |
 | `focus` (line, `focus_style: "background"`) | Choices and control line on one row | `^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\s*$`, the choice row in either layout |
 | `allow` (line) | `^   (?P<label>Allow once)   ` | Unchanged |
 | `deny` (line) | <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject) </code> | <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject)(?: &#124;$)</code>, so a choice row ending at `Reject` matches |
-| `controls` (region, new) | — | Either a choice-and-control row ends the region, or a control-only row ends it with the choice row as the last non-blank row above it, for the wide/split control line and the compact `pgup/pgdn scroll` text alike; the exact pattern is pinned from the Step 3 captures |
+| `controls` (region, new) | — | Either the wide choice-and-control row ends the region, or the split control row ends it with the choice row as the last non-blank row above it; the exact pattern is pinned from the Step 3 captures |
 | `operation` | Line-scoped, single row | Region-scoped, multi-row (§ Operation extraction) |
 | `unclipped` (new, conditional) | — | Holds only when the command box shows the whole command (§ Clipped commands) |
 
 The `focus` matcher still resolves the focused choice from cell backgrounds. Its labels come from the line-scoped `allow` and `deny` matchers, as catalog validation requires. The split control row carries no label, so it takes no part in focus resolution.
 
 The focus matcher's full capture is part of the request identity. The layouts capture different text, so a resize across `W_split` or `W_compact` starts a new request generation, as a focus change does today. An earlier request token stops validating, and a response in flight fails before its next byte (`uncertain` once a byte was written). This is the shipped behavior; a synthetic test covers it.
+
+### Compact rules
+
+The compact layout (36–55 columns) drops the form margins, so its patterns cannot share the wide/split rule's margins. Two compact rules match it, pinned from the Step 3 compact captures:
+
+| Rule | Kind | Differences from its wide/split counterpart |
+|---|---|---|
+| `opencode-shell-permission-compact` | Permission request | The heading, `# Shell command` and `$ ` rows start at column 0, the choice row has a one-space margin, and the region ends at the `pgup/pgdn scroll` control text, which shares the choice row (53–55 columns) or sits on its own row (36–52). Its `operation` extract declares `row_trailer: "█"` and no `row_margin`, because compact continuation rows start at column 0; the both-ends anchoring of § Operation extraction applies, with "starts with a non-space character" in place of "starts with the continuation margin and then a non-space character". |
+| `opencode-reject-reason-compact` | Permission continuation | The rejection-reason dialog in its compact margins and control text; `continues_rule_id` `opencode-shell-permission-compact`, `continues_choice_id` `deny-once`, and the same `empty_reason` meaning |
+
+The compact request rule has its own `allow` and `deny` answer entries, with the bytes and gates of § Answer stages and the compact pre-stage fixtures. Its choices, `native_request_id`, focus resolution and sensitivity are those of `opencode-shell-permission`. The detection capability lists both request rules. At any width exactly one of the two request rules matches, because their heading margins differ.
 
 ### Operation extraction
 
@@ -118,7 +129,7 @@ The operation is read from every displayed row of the command, not only the firs
 
 Extraction applies, per row: remove the trailer, then remove the margin from the rows `margin_rows` selects, then remove trailing whitespace. A selected row without the margin fails the match, as today. This keeps the shipped margin-then-trim order, so a whitespace-only margined row, such as a blank line inside a multi-line Claude command, still matches. The Claude and Codex rules declare neither key, so their extraction is unchanged.
 
-The OpenCode `operation` matcher becomes region-scoped. It captures from after the `$ ` prefix (two-space margin, or none in the compact layout) on the first command row through each following row that starts with the continuation margin and then a non-space character. Its extract declares `row_margin` equal to the continuation margin the Step 3 captures show, `margin_rows: "continuation"` and `row_trailer: "█"`, the glyph the 120-column capture shows in a column beside the command box. A one-row command extracts the same text as today, with `operation_rows` 1.
+The OpenCode `operation` matcher becomes region-scoped. It captures from after `  $ ` on the first command row through each following row that starts with the continuation margin and then a non-space character. Its extract declares `row_margin` equal to the continuation margin the Step 3 captures show, `margin_rows: "continuation"` and `row_trailer: "█"`, the glyph the 120-column capture shows in a column beside the command box. A one-row command extracts the same text as today, with `operation_rows` 1.
 
 The capture is anchored at both ends, so it cannot drop command rows. After the last captured row, only rows that are blank or hold only the trailer may follow until the choice row. Any other row in between fails the match, so the request is not observed. Examples are a continuation row whose text begins with a space after the margin, such as an indented second line of a multi-line command, or a row without the margin. Such a form is answered manually (§ Limits).
 
@@ -142,8 +153,8 @@ In the split layout, the rejection-reason dialog's control line `enter confirm  
 
 | Element | Shipped | Both layouts |
 |---|---|---|
-| Region | `△ Reject permission` to `enter confirm  esc cancel\s*$` within 24 rows | The heading with its wide/split or compact margin, to the dialog's control text in each layout, as the Step 3 captures show |
-| `prompt` and `empty` (line) | `prompt` matches the prompt row; `empty` matches the placeholder sharing the control-line row | Replaced by one region matcher `empty_reason`. It requires the prompt row, then the placeholder either sharing the control-line row (wide) or on the last non-blank row above a control-only row (split, compact). The exact pattern, including the compact margins, is pinned from the Step 3 captures. |
+| Region | `△ Reject permission` to `enter confirm  esc cancel\s*$` within 24 rows | Unchanged; the compact dialog has its own rule (§ Compact rules) |
+| `prompt` and `empty` (line) | `prompt` matches the prompt row; `empty` matches the placeholder sharing the control-line row | Replaced by one region matcher `empty_reason`. It requires the prompt row, then the placeholder either sharing the control-line row (wide) or on the last non-blank row above a control-only row (split). The exact pattern is pinned from the Step 3 captures. |
 
 The empty-reason meaning is unchanged. The textarea must show exactly the placeholder; typed text replaces it and fails the stage-3 gate, and a typed copy of the placeholder remains a documented limit.
 
