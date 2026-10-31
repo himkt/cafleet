@@ -46,6 +46,12 @@ mod tests {
             ("a\rb\rc", "c"),
             ("\x1b[2Kspinner\rdone", "done"),
             ("\x1b]0;title\x07 done", "\x1b]0;title\x07 done"),
+            ("one\r\ntwo\r\nthree", "one\ntwo\nthree"),
+            ("row1\r\nrow2\r", "row1\nrow2"),
+            ("row\r", "row"),
+            ("row\r\r\n", "row\n"),
+            ("spin\rDONE\r\nnext", "DONE\nnext"),
+            ("kept\x1b[0m\r\n", "kept\n"),
         ] {
             assert_eq!(strip_ansi(raw), expected);
         }
