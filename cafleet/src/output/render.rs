@@ -46,6 +46,16 @@ mod tests {
             ("a\rb\rc", "c"),
             ("\x1b[2Kspinner\rdone", "done"),
             ("\x1b]0;title\x07 done", "\x1b]0;title\x07 done"),
+            ("text\r\nnext", "text\nnext"),
+            ("text\r\n", "text\n"),
+            ("old\rnew\r\nnext", "new\nnext"),
+            ("first\r\nold\rnew", "first\nnew"),
+            ("\r\n", "\n"),
+            ("a\r\n\r\nb", "a\n\nb"),
+            (
+                "\x1b[1m Allow this read?\x1b[0m\r\n ❯ 1. Yes\r\n   2. No\r\n Esc to cancel",
+                " Allow this read?\n ❯ 1. Yes\n   2. No\n Esc to cancel",
+            ),
         ] {
             assert_eq!(strip_ansi(raw), expected);
         }

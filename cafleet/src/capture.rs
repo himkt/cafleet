@@ -91,6 +91,24 @@ mod tests {
         );
     }
     #[test]
+    fn snapshot_keeps_every_crlf_terminated_line_and_ansi_keeps_the_raw_bytes() {
+        let raw = " Read outside\r\n\x1b[2m ❯ 1. Yes\x1b[0m\r\n   4. Once\r\n\r\n Esc to cancel";
+        let plain = CaptureSnapshot::from_raw(raw, false, now());
+        let expected = " Read outside\n ❯ 1. Yes\n   4. Once\n\n Esc to cancel";
+        assert_eq!(plain.content, expected);
+        assert_eq!(
+            plain.content_sha256,
+            crate::digest::sha256_hex(expected.as_bytes())
+        );
+
+        let styled = CaptureSnapshot::from_raw(raw, true, now());
+        assert_eq!(styled.content, raw);
+        assert_eq!(
+            styled.content_sha256,
+            crate::digest::sha256_hex(raw.as_bytes())
+        );
+    }
+    #[test]
     fn output_failures_propagate_from_member_capture() {
         struct Fail;
         impl io::Write for Fail {
