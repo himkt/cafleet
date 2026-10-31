@@ -10,13 +10,13 @@ Turn the shipped § Role requirements into the written bar a maintainer evaluate
 
 ## Success Criteria
 
-- [ ] `SPEC.md` §6.7 Role requirements and `skills/cafleet/reference/coding-agents.md` § Role requirements contain the final texts in § The bar, with every shipped sentence handled as § Shipped sentence dispositions states.
-- [ ] `SPEC.md` §6.7 has a `#### Role eligibility` table with one Director row and one Member row per bundled backend, each `yes`/`no` with version, source and date; OpenCode's Director row is `no`.
-- [ ] Every backend section in `coding-agents.md` and its `## Template` carry a fifth `### Role eligibility` subsection, and `.claude/rules/coding-agent-overlay.md` specifies five subsections.
-- [ ] The OpenCode conditional manual-reception note is replaced by its explicit Director verdict, and the check that would flip it is written beneath its Role eligibility table.
-- [ ] `docs/docs/contributing.md` § Extend a coding-agent backend contains the evaluation procedure, the capability → evidence table and the candidate design-doc `## Role evaluation` recording rule.
-- [ ] Director backend selection (`skills/cafleet/roles/director.md`, `skills/cafleet/SKILL.md`, the coding-agents selector table and `docs/docs/concepts/coding-agents.md`) checks the recorded verdicts, and a session whose backend's Director verdict is `no` reports it, names the eligible backends and runs no `fleet create`.
-- [ ] The diff is confined to the Markdown files listed in § Placement, `mise //docs:build` passes and every new or changed link/anchor resolves.
+- [x] `SPEC.md` §6.7 Role requirements and `skills/cafleet/reference/coding-agents.md` § Role requirements contain the final texts in § The bar, with every shipped sentence handled as § Shipped sentence dispositions states.
+- [x] `SPEC.md` §6.7 has a `#### Role eligibility` table with one Director row and one Member row per bundled backend, each `yes`/`no` with version, source and date; OpenCode's Director row is `no`.
+- [x] Every backend section in `coding-agents.md` and its `## Template` carry a fifth `### Role eligibility` subsection, and `.claude/rules/coding-agent-overlay.md` specifies five subsections.
+- [x] The OpenCode conditional manual-reception note is replaced by its explicit Director verdict, and the check that would flip it is written beneath its Role eligibility table.
+- [x] `docs/docs/contributing.md` § Extend a coding-agent backend contains the evaluation procedure, the capability → evidence table and the candidate design-doc `## Role evaluation` recording rule.
+- [x] Director backend selection (`skills/cafleet/roles/director.md`, `skills/cafleet/SKILL.md`, the coding-agents selector table and `docs/docs/concepts/coding-agents.md`) checks the recorded verdicts, and a session whose backend's Director verdict is `no` reports it, names the eligible backends and runs no `fleet create`.
+- [x] The diff is confined to the Markdown files listed in § Placement, `mise //docs:build` passes and every new or changed link/anchor resolves.
 
 ---
 
