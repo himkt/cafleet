@@ -1689,6 +1689,59 @@ mod tests {
             assert_eq!(published_causes(&case, caused).len(), 1, "published once");
         }
 
+        #[test]
+        fn runner_recovery_replay_publishes_a_causeless_result_for_a_receipt_reconciled_before_publication()
+         {
+            for (disposition, status, stage) in [
+                ("submitted", "submitted", "submitted"),
+                ("not_submitted", "not_submitted", "zero_bytes"),
+            ] {
+                let mut case = Case::new();
+                case.seed(&[opening(&case.fixture.run, 1, 1)]);
+                let reconciled =
+                    uncertain_deferred(&case, "prompt:reconciled", Some("write_failed"));
+                case.fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET state='settled',disposition=?1,evidence_ref='audit:inspected' WHERE input_id=?2",
+                        rusqlite::params![disposition, reconciled],
+                    )
+                    .unwrap();
+                assert_eq!(
+                    storage::get_input(&case.fixture.conn, reconciled)
+                        .unwrap()
+                        .uncertain_cause,
+                    Some(storage::UncertainCause::WriteFailed),
+                    "{disposition}: reconciliation keeps the recorded cause"
+                );
+                let report = case.recover(&mut new_host()).unwrap();
+                assert!(
+                    matches!(report.outcome, RecoveryOutcome::Recovered),
+                    "{disposition}"
+                );
+                let published: Vec<(String, String, Option<String>)> = case
+                    .fixture
+                    .conn
+                    .prepare(
+                        "SELECT json_extract(payload_json,'$.delivery.status'),json_extract(payload_json,'$.stage'),json_extract(payload_json,'$.cause') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                    )
+                    .unwrap()
+                    .query_map(
+                        rusqlite::params![case.fixture.run.run_id, reconciled],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap();
+                assert_eq!(
+                    published,
+                    vec![(status.to_owned(), stage.to_owned(), None)],
+                    "{disposition}: a reconciled result publishes once without an uncertain cause"
+                );
+                assert_eq!(events(&case).len(), report_events(&case), "{disposition}");
+            }
+        }
+
         fn report_events(case: &Case) -> usize {
             usize::try_from(
                 case.fixture

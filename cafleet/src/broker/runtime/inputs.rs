@@ -320,7 +320,10 @@ pub(crate) fn unpublished_delivery_results(
                 continue;
             }
         };
-        results.push((input_id, stage, input.uncertain_cause));
+        let uncertain_cause = input
+            .uncertain_cause
+            .filter(|_| delivery.status == DeliveryStatus::Uncertain);
+        results.push((input_id, stage, uncertain_cause));
     }
     Ok(results)
 }
@@ -1528,6 +1531,51 @@ mod tests {
                         Some(UncertainCause::RunnerStopped)
                     ),
                 ]
+            );
+        }
+
+        #[test]
+        fn unpublished_delivery_results_report_no_cause_for_a_receipt_reconciled_out_of_uncertainty()
+         {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let mut expected = Vec::new();
+            for (key, disposition, stage) in [
+                (
+                    "prompt:reconciled-submitted",
+                    InputDisposition::Submitted,
+                    "submitted",
+                ),
+                (
+                    "prompt:reconciled-not-submitted",
+                    InputDisposition::NotSubmitted,
+                    "zero_bytes",
+                ),
+            ] {
+                let input = deferred_attempt(&mut fixture, &owner, key);
+                storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    UncertainCause::WriteFailed,
+                )
+                .unwrap();
+                let settled = storage::settle_input(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    InputState::Uncertain,
+                    disposition,
+                    "audit:inspected",
+                )
+                .unwrap();
+                assert_eq!(settled.uncertain_cause, Some(UncertainCause::WriteFailed));
+                expected.push((input.input_id, stage, None));
+            }
+            assert_eq!(
+                storage::unpublished_delivery_results(&fixture.conn, owner.run_id).unwrap(),
+                expected,
+                "only an uncertain result carries the receipt's cause"
             );
         }
 

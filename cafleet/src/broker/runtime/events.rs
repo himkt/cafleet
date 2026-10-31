@@ -765,7 +765,10 @@ pub(crate) fn persist_transition_in_transaction(
         let delivery = input
             .delivery()
             .ok_or_else(|| invalid("input_id", "delivery results describe ordinary inputs"))?;
-        Some((record.clone(), input.message_id, delivery))
+        let uncertain_cause = input
+            .uncertain_cause
+            .filter(|_| delivery.status == DeliveryStatus::Uncertain);
+        Some((record.clone(), input.message_id, delivery, uncertain_cause))
     } else {
         None
     };
@@ -802,13 +805,13 @@ pub(crate) fn persist_transition_in_transaction(
         )?;
     let event_id = conn.last_insert_rowid();
     let mut payload = payload(run, transition, event_id, interaction_id)?;
-    if let Some((record, message_id, delivery)) = delivery_fields {
+    if let Some((record, message_id, delivery, uncertain_cause)) = delivery_fields {
         let object = payload.as_object_mut().expect("event payload object");
         let action = object
             .remove("director_action")
             .expect("payload carries its action");
-        if let Some(diagnostic) = record.get("cause") {
-            object.insert("cause".into(), diagnostic.clone());
+        if let Some(uncertain_cause) = uncertain_cause {
+            object.insert("cause".into(), uncertain_cause_payload(uncertain_cause));
         }
         object.insert("input_id".into(), record["input_id"].clone());
         object.insert("message_id".into(), json!(message_id));
