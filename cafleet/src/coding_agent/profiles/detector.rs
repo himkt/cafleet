@@ -3564,6 +3564,55 @@ mod tests {
             assert_request(&observe(&form(120, &[command], Layout::Wide)), command);
         }
 
+        /// `rows` with the scrollbar thumb replaced on the given rows, as a command box that
+        /// scrolls shows a shorter thumb than its track.
+        fn clipped(mut rows: Vec<String>, thumb_row: usize, track_rows: &[usize]) -> Vec<String> {
+            rows[thumb_row] = rows[thumb_row].replacen('█', "▀", 1);
+            for &row in track_rows {
+                rows[row] = rows[row].replacen('█', " ", 1);
+            }
+            rows
+        }
+
+        #[test]
+        fn opencode_clipped_commands_yield_no_request_for_either_request_rule() {
+            let split = form_rows(57, &wrapped(), Layout::Split);
+            let compact_command = [
+                "/tmp/cafleet-194/opencode-survey-",
+                "036/permission-probe allow",
+            ];
+            let compact = compact_rows(36, &compact_command, Compact::OwnControls);
+            assert_request(
+                &observe(&paint(57, &split)),
+                &format!("{PROBE_DIRECTORY}\npermission-probe allow"),
+            );
+            assert_compact_request(&observe(&paint(36, &compact)), &compact_command.join("\n"));
+            for (case, cols, rows) in [
+                (
+                    "split, thumb above every command row",
+                    57,
+                    clipped(split.clone(), 2, &[4, 5]),
+                ),
+                (
+                    "split, a later command row off the thumb",
+                    57,
+                    clipped(split.clone(), 5, &[]),
+                ),
+                (
+                    "compact, thumb above every command row",
+                    36,
+                    clipped(compact.clone(), 1, &[2, 3]),
+                ),
+                (
+                    "compact, a later command row off the thumb",
+                    36,
+                    clipped(compact.clone(), 3, &[]),
+                ),
+            ] {
+                assert_no_request(&observe(&paint(cols, &rows)), case);
+            }
+        }
+
         #[test]
         fn opencode_forms_outside_the_supported_layouts_yield_no_request() {
             let mut headless = form_rows(57, &wrapped(), Layout::Split);
