@@ -2174,6 +2174,7 @@ A capture whose compact control text sits on row 35 masks row 0, a transcript ro
 | A form taller than `max_rows` or the pane | No request matches; the form is answered manually |
 | A command row that begins with whitespace after its layout's continuation margin, such as an indented line of a multi-line command | The anchored capture fails, no request matches, and the form is answered manually |
 | A resize while the form is open | A new request generation, and a new episode when the command's row breaks move; an earlier token stops validating |
+| Resizing a running OpenCode member pane on herdr | OpenCode can receive a fragment of a terminal colour reply as keys (`Invalid key name`), after which no request matches; size the herdr pane before creating the member |
 | A non-shell permission | Never asks under the `cafleet-ask` preset |
 | A typed reason identical to the placeholder | Cannot be told from an empty textarea; such typing is human input, which fails the deny stage-3 gate inside a response |
 

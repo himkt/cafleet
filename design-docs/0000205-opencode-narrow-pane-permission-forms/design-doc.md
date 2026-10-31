@@ -1,7 +1,7 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
 **Status**: Approved
-**Progress**: 21/22 tasks complete
+**Progress**: 22/22 tasks complete
 **Last Updated**: 2026-11-01
 
 ## Overview
@@ -525,7 +525,21 @@ Observed outside the required cases:
 
 ### Step 9: Validate the shipping surfaces
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`, run the Success Criteria `git grep`, verify the bundled catalog and baseline match `SPEC.md`, and record the execution summary in this document. <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`, run the Success Criteria `git grep`, verify the bundled catalog and baseline match `SPEC.md`, and record the execution summary in this document. <!-- completed: 2026-11-01T03:52 -->
+
+Execution summary (2026-11-01, macOS, Rust 1.99.1, working tree on top of `HEAD` with only the `SPEC.md` herdr-resize limit row uncommitted):
+
+| Check | Result |
+|---|---|
+| `mise //cafleet:typecheck` | Pass |
+| `mise //cafleet:lint` | Pass: clippy with `-D warnings` and `cargo fmt --check` |
+| `mise //cafleet:test` | 1499 passed, 3 failed, 7 ignored at the default thread count. The three failures (`opencode_deny_moves_the_focus_selects_reject_and_submits_the_empty_reason`, `opencode_focus_on_always_allow_after_the_first_deny_stage_fails_uncertain`, `service_quiet_timer_persists_one_opening_without_changing_output_sequence`) each pass in isolation. |
+| `mise //cafleet:test -- -- --test-threads=4` | 1502 passed, 0 failed, 7 ignored |
+| `mise //docs:build` | Pass |
+| Success Criteria `git grep` outside `design-docs/` | No match; the same pattern matches inside `design-docs/`, so the pattern itself works |
+| Baseline against `SPEC.md` §8 | `cafleet/migrations/V1__baseline.sql` equals the §8 DDL line for line, and it is the only embedded migration |
+| v9 identity | `APPLICATION_ID` `1128351289` and the default URL `~/.local/share/cafleet/cafleet_v9.db` in `config.rs` |
+| Bundled catalog against `SPEC.md` §6.9 | Every profile entry has exactly `backend`, `min_version`, `rules` and `capabilities`. Every OpenCode region and matcher pattern appears verbatim in `SPEC.md`, except the unchanged idle composer prefix `^┃ `, which §6.9 describes in prose. Detection lists both request rules with the 120-, 57-, 55- and 36-column form fixtures, each request rule has its own allow and deny entries, and every narrow or compact fixture ID that `SPEC.md` names is registered. |
 
 ---
 
