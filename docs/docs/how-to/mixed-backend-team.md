@@ -77,7 +77,7 @@ Keep deferred questions/approvals in host-owned task state after ACK. Reconcile 
 
 A clean expired listener lease can renew after its native task exits while authorized work remains. Unexpected EOF or failure requires inspecting the exit, reconciling the inbox and a fresh successful broker health check before replacement. Retain incomplete JSONL across chunks and preserve unACKed messages after damaged output. Establish old-process termination before replacing a receiver. Fully idle Codex waits for the next user/native activation; a background process alone supplies no unsolicited per-line wake.
 
-On a host satisfying the [Director requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements), state an unavailable native adapter’s reception limit and use explicit manual poll or finite reception within host permissions. Finite wait also provides ordinary-member retry recovery:
+On a backend whose [Director verdict](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) is `yes`, state an unavailable native adapter’s reception limit and use explicit manual poll or finite reception within host permissions. Finite wait also provides ordinary-member retry recovery:
 
 ```bash
 cafleet message wait 2 --timeout 300 --json

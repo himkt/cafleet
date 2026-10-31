@@ -1464,14 +1464,30 @@ Every member pane runs a coding-agent binary selected from the backend registry 
 
 #### Role requirements
 
-| Role | Required backend capability |
-|---|---|
-| Director | Native goal lifecycle controls, plus background execution while supervision continues |
-| Member | A compatible PTY lifecycle with an explicit detection-coverage declaration; launch, detection and composer capability are evaluated separately |
+| Role | Tier | Required backend capability |
+|---|---|---|
+| Director | Eligible | Native goal lifecycle controls, such as a goal command, and background execution while supervision continues. Both capabilities are required. |
+| Member | Eligible | A runner-compatible PTY lifecycle and an explicit detection-coverage declaration. A launch-policy catalog whose omitted policy is non-interactive: native automatic review where the backend offers one, otherwise a fixed allow/deny policy that runs the spawn-allowed broker commands. |
+| Member | Bundled support | A native version the version probe parses, selecting a bundled profile that declares detection, automatic review annotations, composer plans and request-bound answers independently from native evidence. A failed probe or an undeclared capability is `unknown` coverage or unsupported, and the backend stays Member-eligible. |
 
-Evaluate each role independently. A backend's native automatic review is its omitted member policy where the backend offers one; interactive and fixed allow/deny policies remain explicit choices under §6.9 Launch policy and capability registry. Preserve native guards, managed policy, explicit denies, sandbox boundaries and the host's activation, pause, completion and budget authority. A backend with unknown detector/composer coverage permits manual terminal work and delivers ordinary generated input through delivery fallback. Native receive support is evaluated independently: a Director meeting both requirements may use manual `poll` or finite `wait` when its native adapter is unavailable, and background execution alone establishes no unsolicited wake or per-record reception guarantee.
+Evaluate each role independently; a backend ships for the roles it meets. A verdict is `yes` only when recorded evidence establishes every Eligible-tier requirement for that role, and otherwise `no` with "not established" or the observed failure as its evidence; bundled-support capabilities never change a verdict. Each requirement group's evidence holds for its own recorded native version, and a newer installed version carries the verdict forward until the next re-check, which follows any change to the backend's bundled profile boundary or recorded evidence. § Role eligibility records each backend's verdicts.
+
+Interactive native policies remain explicit `--permission-mode` choices under §6.9 Launch policy and capability registry; an interactive-only backend is not Member-eligible. Preserve native guards, managed policy, explicit denies, sandbox boundaries and the host's activation, pause, completion and budget authority. A backend with unknown detector/composer coverage permits manual terminal work and delivers ordinary generated input through delivery fallback. The decision surface and native receive support are evaluated independently of Director eligibility: a Director meeting both requirements may use manual `poll` or finite `wait` when its native adapter is unavailable, and background execution alone establishes no unsolicited wake or per-record reception guarantee.
 
 The bundled backend policy catalog owns launch-mode choices and defaults, exact argv mapping, version eligibility and detection/composer profiles. The omitted native argv is specified below; an explicit native mode changes only its permission argument and preserves the remaining argv and literal assignment.
+
+#### Role eligibility
+
+| Backend | Role | Eligible | Evidence |
+|---|---|---|---|
+| `claude` | Director | `yes` | Goal lifecycle: [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. Background execution: Monitor stream probes, 2.1.301, checked 2026-10-25. |
+| `claude` | Member | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: profile `claude-2.1.302-auto-1`. |
+| `codex` | Director | `yes` | Goal lifecycle: [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Background execution: retained `exec_command` session stream probes, 0.162.1, checked 2026-10-25. |
+| `codex` | Member | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: profile `codex-0.163.0-approve-for-me-1`. |
+| `opencode` | Director | `no` | Goal lifecycle controls: not established for 2.1.4, with no goal evidence recorded, checked 2026-10-31. Background execution while supervision continues: not established for 2.1.4, checked 2026-10-31. |
+| `opencode` | Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: profile `opencode-2.1.4-cafleet-ask-1`. |
+
+To change the OpenCode Director verdict, a maintainer establishes, for an installed OpenCode version, native goal lifecycle controls, such as a goal command, from official documentation or installed help, and background execution while supervision continues from a CAFleet stream probe. Record the version, source and date in this table and in the installed CAFleet skill's OpenCode backend section, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
 
 #### Interface
 
@@ -1867,7 +1883,7 @@ CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root D
 
 A native shell probe displayed the actual command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the TUI's effective boundary and protocol path were not established. Treat native input as a Director-authorized action rather than assume a second member-tool permission check.
 
-**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and routed native shell commands, and owns explicit pane input dispatch. Leading-`!` input runs a native shell command in `mini`. The native path's effective permission boundary and any second member-tool permission check remain unestablished; preserve the preset's member-tool permissions and the Director's command authorization.
+**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and routed native shell commands, and owns explicit pane input dispatch. Leading-`!` input runs a native shell command in `mini`. The native path's effective permission boundary and any second member-tool permission check remain unestablished; preserve the preset's member-tool permissions and the Director's command authorization. Goal lifecycle controls and Director background execution are not established for opencode 2.1.4, so its Director verdict is `no` (§ Role eligibility).
 
 ### 6.8 Configuration
 
