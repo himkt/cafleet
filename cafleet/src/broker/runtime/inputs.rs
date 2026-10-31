@@ -937,12 +937,11 @@ mod tests {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
         let input = fixture.input(&owner, "exec:lost-stdout", InputKind::Exec, None);
-        storage::record_input_state(
+        storage::record_input_uncertain(
             &mut fixture.conn,
             &owner,
             input.input_id,
-            InputState::InProgress,
-            InputState::Uncertain,
+            UncertainCause::WriteFailed,
         )
         .unwrap();
         assert!(
@@ -1020,12 +1019,11 @@ mod tests {
             Some("idle_timeout"),
         )
         .unwrap();
-        storage::record_input_state(
+        storage::record_input_uncertain(
             &mut fixture.conn,
             &owner,
             input.input_id,
-            InputState::InProgress,
-            InputState::Uncertain,
+            UncertainCause::ShortWrite,
         )
         .unwrap();
         let settled = storage::settle_input(
@@ -1110,5 +1108,400 @@ mod tests {
         let error = storage::get_input(&fixture.conn, input.input_id).unwrap_err();
         assert!(error.message().contains("state"));
         assert!(error.message().contains("corrupt"));
+    }
+
+    mod uncertain_cause {
+        use super::*;
+
+        fn deferred_attempt(fixture: &mut Fixture, owner: &RunOwner, key: &str) -> InputOperation {
+            let input = fixture.input(owner, key, InputKind::Prompt, None);
+            storage::requeue_zero_byte_immediate(
+                &mut fixture.conn,
+                owner,
+                input.input_id,
+                "interaction_open",
+            )
+            .unwrap();
+            storage::begin_deferred_attempt(
+                &mut fixture.conn,
+                owner,
+                input.input_id,
+                DeliveryMethod::Profile,
+                None,
+            )
+            .unwrap()
+        }
+
+        #[test]
+        fn record_input_uncertain_persists_its_cause_across_reconnection() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(&owner, "prompt:caused", InputKind::Prompt, None);
+            assert_eq!(input.uncertain_cause, None);
+            let uncertain = storage::record_input_uncertain(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                UncertainCause::ManualInput,
+            )
+            .unwrap();
+            assert_eq!(uncertain.state, InputState::Uncertain);
+            assert_eq!(uncertain.uncertain_cause, Some(UncertainCause::ManualInput));
+            assert_eq!(
+                uncertain.delivery().unwrap().status,
+                DeliveryStatus::Uncertain
+            );
+            let read = storage::get_input(&fixture.reopen(), input.input_id).unwrap();
+            assert_eq!(read, uncertain);
+            let found = storage::find_input(&fixture.reopen(), owner.run_id, "prompt:caused")
+                .unwrap()
+                .unwrap();
+            assert_eq!(found.uncertain_cause, Some(UncertainCause::ManualInput));
+        }
+
+        #[test]
+        fn record_input_uncertain_stores_every_cause_value() {
+            for cause in [
+                UncertainCause::ManualInput,
+                UncertainCause::ManualAccountingFailed,
+                UncertainCause::InteractionCandidate,
+                UncertainCause::InteractionOpen,
+                UncertainCause::ObserverUnavailable,
+                UncertainCause::ShortWrite,
+                UncertainCause::WriteFailed,
+                UncertainCause::RunnerStopped,
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let input = fixture.input(&owner, "exec:cause", InputKind::Exec, None);
+                let uncertain = storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    cause,
+                )
+                .unwrap_or_else(|error| panic!("{cause:?}: {error}"));
+                assert_eq!(uncertain.uncertain_cause, Some(cause));
+                assert_eq!(
+                    storage::get_input(&fixture.reopen(), input.input_id)
+                        .unwrap()
+                        .uncertain_cause,
+                    Some(cause)
+                );
+            }
+        }
+
+        #[test]
+        fn uncertain_cause_survives_each_reconcile_disposition() {
+            for disposition in [
+                InputDisposition::Submitted,
+                InputDisposition::NotSubmitted,
+                InputDisposition::AbandonedUncertain,
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let input = fixture.input(&owner, "prompt:reconcile", InputKind::Prompt, None);
+                storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    UncertainCause::InteractionOpen,
+                )
+                .unwrap();
+                let settled = storage::settle_input(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    InputState::Uncertain,
+                    disposition,
+                    "audit:inspected",
+                )
+                .unwrap_or_else(|error| panic!("{disposition:?}: {error}"));
+                assert_eq!(settled.state, InputState::Settled);
+                assert_eq!(settled.disposition, Some(disposition));
+                assert_eq!(
+                    settled.uncertain_cause,
+                    Some(UncertainCause::InteractionOpen),
+                    "{disposition:?}"
+                );
+                assert_eq!(
+                    storage::get_input(&fixture.reopen(), input.input_id)
+                        .unwrap()
+                        .uncertain_cause,
+                    Some(UncertainCause::InteractionOpen),
+                    "{disposition:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn receipts_that_never_became_uncertain_keep_a_null_cause() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let accepted = fixture.input(&owner, "prompt:accepted", InputKind::Prompt, None);
+            let accepted = storage::record_input_state(
+                &mut fixture.conn,
+                &owner,
+                accepted.input_id,
+                InputState::InProgress,
+                InputState::Accepted,
+            )
+            .unwrap();
+            assert_eq!(accepted.uncertain_cause, None);
+            let settled = storage::settle_input(
+                &mut fixture.conn,
+                &owner,
+                accepted.input_id,
+                InputState::Accepted,
+                InputDisposition::Submitted,
+                "audit:accepted",
+            )
+            .unwrap();
+            assert_eq!(settled.uncertain_cause, None);
+            let in_progress = fixture.input(&owner, "prompt:lost", InputKind::Prompt, None);
+            assert_eq!(in_progress.state, InputState::InProgress);
+            assert_eq!(in_progress.uncertain_cause, None);
+        }
+
+        #[test]
+        fn record_input_state_rejects_in_progress_to_uncertain() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(&owner, "prompt:no-cause", InputKind::Prompt, None);
+            let before = durable_state(&fixture.conn);
+            let error = storage::record_input_state(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                InputState::InProgress,
+                InputState::Uncertain,
+            )
+            .unwrap_err();
+            assert!(
+                error.message().contains("invalid input transition"),
+                "{}",
+                error.message()
+            );
+            assert_eq!(durable_state(&fixture.conn), before);
+            assert_eq!(
+                storage::get_input(&fixture.conn, input.input_id)
+                    .unwrap()
+                    .state,
+                InputState::InProgress
+            );
+        }
+
+        #[test]
+        fn record_input_uncertain_requires_an_in_progress_receipt() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let queued = fixture.input(&owner, "prompt:queued", InputKind::Prompt, None);
+            storage::requeue_zero_byte_immediate(
+                &mut fixture.conn,
+                &owner,
+                queued.input_id,
+                "interaction_open",
+            )
+            .unwrap();
+            let accepted = fixture.input(&owner, "prompt:accepted", InputKind::Prompt, None);
+            storage::record_input_state(
+                &mut fixture.conn,
+                &owner,
+                accepted.input_id,
+                InputState::InProgress,
+                InputState::Accepted,
+            )
+            .unwrap();
+            let uncertain = fixture.input(&owner, "prompt:uncertain", InputKind::Prompt, None);
+            storage::record_input_uncertain(
+                &mut fixture.conn,
+                &owner,
+                uncertain.input_id,
+                UncertainCause::WriteFailed,
+            )
+            .unwrap();
+            for (input, state) in [
+                (queued.input_id, "ready"),
+                (accepted.input_id, "accepted"),
+                (uncertain.input_id, "uncertain"),
+            ] {
+                let before = durable_state(&fixture.conn);
+                let error = storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    input,
+                    UncertainCause::ManualInput,
+                )
+                .unwrap_err();
+                assert!(
+                    error.message().contains("input state changed"),
+                    "{state}: {}",
+                    error.message()
+                );
+                assert_eq!(durable_state(&fixture.conn), before, "{state}");
+            }
+            assert_eq!(
+                storage::get_input(&fixture.conn, uncertain.input_id)
+                    .unwrap()
+                    .uncertain_cause,
+                Some(UncertainCause::WriteFailed),
+                "a repeated transition keeps the first recorded cause"
+            );
+        }
+
+        #[test]
+        fn record_input_uncertain_checks_run_ownership() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(&owner, "prompt:owned", InputKind::Prompt, None);
+            fixture.activate_next_epoch();
+            let before = durable_state(&fixture.conn);
+            assert!(
+                storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    input.input_id,
+                    UncertainCause::ManualInput,
+                )
+                .is_err(),
+                "a superseded owner records no cause"
+            );
+            assert_eq!(durable_state(&fixture.conn), before);
+        }
+
+        #[test]
+        fn stored_cause_on_a_state_without_uncertainty_is_rejected_on_read() {
+            for state in ["in_progress", "accepted"] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let input = fixture.input(&owner, "prompt:corrupt", InputKind::Prompt, None);
+                if state == "accepted" {
+                    storage::record_input_state(
+                        &mut fixture.conn,
+                        &owner,
+                        input.input_id,
+                        InputState::InProgress,
+                        InputState::Accepted,
+                    )
+                    .unwrap();
+                }
+                fixture
+                    .conn
+                    .execute_batch("PRAGMA ignore_check_constraints=ON")
+                    .unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET uncertain_cause='manual_input' WHERE input_id=?1",
+                        [input.input_id],
+                    )
+                    .unwrap();
+                let error = storage::get_input(&fixture.conn, input.input_id).unwrap_err();
+                assert!(
+                    error.message().contains("uncertain_cause"),
+                    "{state}: {}",
+                    error.message()
+                );
+            }
+        }
+
+        #[test]
+        fn unknown_stored_cause_is_rejected_on_read() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let input = fixture.input(&owner, "prompt:unknown", InputKind::Prompt, None);
+            storage::record_input_uncertain(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                UncertainCause::WriteFailed,
+            )
+            .unwrap();
+            fixture
+                .conn
+                .execute_batch("PRAGMA ignore_check_constraints=ON")
+                .unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET uncertain_cause='terminal_reply' WHERE input_id=?1",
+                    [input.input_id],
+                )
+                .unwrap();
+            let error = storage::get_input(&fixture.conn, input.input_id).unwrap_err();
+            assert!(
+                error.message().contains("terminal_reply"),
+                "{}",
+                error.message()
+            );
+        }
+
+        #[test]
+        fn unpublished_delivery_results_return_the_receipt_cause() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let uncertain = deferred_attempt(&mut fixture, &owner, "prompt:deferred-uncertain");
+            storage::record_input_uncertain(
+                &mut fixture.conn,
+                &owner,
+                uncertain.input_id,
+                UncertainCause::WriteFailed,
+            )
+            .unwrap();
+            let submitted = deferred_attempt(&mut fixture, &owner, "prompt:deferred-submitted");
+            storage::record_input_state(
+                &mut fixture.conn,
+                &owner,
+                submitted.input_id,
+                InputState::InProgress,
+                InputState::Accepted,
+            )
+            .unwrap();
+            let abandoned = deferred_attempt(&mut fixture, &owner, "prompt:deferred-abandoned");
+            storage::record_input_uncertain(
+                &mut fixture.conn,
+                &owner,
+                abandoned.input_id,
+                UncertainCause::RunnerStopped,
+            )
+            .unwrap();
+            storage::settle_input(
+                &mut fixture.conn,
+                &owner,
+                abandoned.input_id,
+                InputState::Uncertain,
+                InputDisposition::AbandonedUncertain,
+                "audit:abandoned",
+            )
+            .unwrap();
+            let results =
+                storage::unpublished_delivery_results(&fixture.conn, owner.run_id).unwrap();
+            assert_eq!(
+                results,
+                vec![
+                    (
+                        uncertain.input_id,
+                        "unknown",
+                        Some(UncertainCause::WriteFailed)
+                    ),
+                    (submitted.input_id, "submitted", None),
+                    (
+                        abandoned.input_id,
+                        "unknown",
+                        Some(UncertainCause::RunnerStopped)
+                    ),
+                ]
+            );
+        }
+
+        #[test]
+        fn unpublished_delivery_results_report_no_cause_for_a_causeless_uncertain_receipt() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let lost = deferred_attempt(&mut fixture, &owner, "prompt:deferred-lost");
+            let results =
+                storage::unpublished_delivery_results(&fixture.conn, owner.run_id).unwrap();
+            assert_eq!(results, vec![(lost.input_id, "unknown", None)]);
+        }
     }
 }

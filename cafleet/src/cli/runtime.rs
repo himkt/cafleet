@@ -355,12 +355,11 @@ mod tests {
                     },
                 )
                 .unwrap();
-                storage::record_input_state(
+                storage::record_input_uncertain(
                     &mut fixture.fixture.conn,
                     &run.owner(),
                     original.input_id,
-                    storage::InputState::InProgress,
-                    storage::InputState::Uncertain,
+                    storage::UncertainCause::WriteFailed,
                 )
                 .unwrap();
                 let until = outer.min(Instant::now() + Duration::from_secs(2));

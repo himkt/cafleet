@@ -1727,10 +1727,18 @@ mod tests {
             let mut fixture = ResponseFixture::new();
             let receipt = fixture.reserve();
             match outcome {
-                "accepted" | "uncertain" | "ready" => {
+                "uncertain" => {
+                    storage::record_input_uncertain(
+                        &mut fixture.base.conn,
+                        &fixture.owner,
+                        receipt.input.input_id,
+                        storage::UncertainCause::WriteFailed,
+                    )
+                    .unwrap();
+                }
+                "accepted" | "ready" => {
                     let next = match outcome {
                         "accepted" => InputState::Accepted,
-                        "uncertain" => InputState::Uncertain,
                         "ready" => InputState::Ready,
                         _ => unreachable!(),
                     };
@@ -1952,17 +1960,22 @@ mod tests {
             let mut fixture = ResponseFixture::new();
             let receipt = fixture.reserve();
             match outcome {
-                "accepted" | "uncertain" => {
+                "accepted" => {
                     storage::record_input_state(
                         &mut fixture.base.conn,
                         &fixture.owner,
                         receipt.input.input_id,
                         InputState::InProgress,
-                        if outcome == "accepted" {
-                            InputState::Accepted
-                        } else {
-                            InputState::Uncertain
-                        },
+                        InputState::Accepted,
+                    )
+                    .unwrap();
+                }
+                "uncertain" => {
+                    storage::record_input_uncertain(
+                        &mut fixture.base.conn,
+                        &fixture.owner,
+                        receipt.input.input_id,
+                        storage::UncertainCause::WriteFailed,
                     )
                     .unwrap();
                 }

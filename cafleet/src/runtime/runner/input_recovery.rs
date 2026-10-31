@@ -574,12 +574,11 @@ mod tests {
                 },
             )
             .unwrap();
-            let input = storage::record_input_state(
+            let input = storage::record_input_uncertain(
                 &mut fixture.conn,
                 &owner,
                 input.input_id,
-                InputState::InProgress,
-                InputState::Uncertain,
+                storage::UncertainCause::WriteFailed,
             )
             .unwrap();
             storage::reserve_event_sequences(&mut fixture.conn, &owner).unwrap();

@@ -468,12 +468,11 @@ mod tests {
             )
             .unwrap();
             assert_eq!(input.state, InputState::InProgress);
-            storage::record_input_state(
+            storage::record_input_uncertain(
                 &mut case.fixture.conn,
                 &owner,
                 input.input_id,
-                InputState::InProgress,
-                InputState::Uncertain,
+                storage::UncertainCause::WriteFailed,
             )
             .unwrap();
             let capability = AnswerCapability::fixture(

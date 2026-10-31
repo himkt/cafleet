@@ -12012,12 +12012,11 @@ mod tests {
                     },
                 )
                 .unwrap();
-                storage::record_input_state(
+                storage::record_input_uncertain(
                     &mut h.fixture.conn,
                     &run.owner(),
                     preview.input_id,
-                    storage::InputState::InProgress,
-                    storage::InputState::Uncertain,
+                    storage::UncertainCause::WriteFailed,
                 )
                 .unwrap();
                 let preview = storage::settle_input(
