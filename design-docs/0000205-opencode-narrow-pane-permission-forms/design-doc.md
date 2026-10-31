@@ -1,0 +1,443 @@
+# OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
+
+**Status**: Approved
+**Progress**: 0/22 tasks complete
+**Last Updated**: 2026-11-01
+
+## Overview
+
+Detect, extract and answer the OpenCode 2.1.4 `cafleet-ask` shell permission form in narrow panes, where OpenCode puts the choice row and the control line on separate rows and wraps a long command across several rows. Remove the bundled-profile identifier (`profile_version`, `answer_profile_version` and every profile-id string), because `min_version` already identifies each profile, and start a fresh `cafleet_v9.db` format family whose V1 baseline has no profile-identifier columns.
+
+## Success Criteria
+
+- [ ] At every width where OpenCode 2.1.4 `mini` renders the three choices on one row, the `cafleet-ask` shell permission form produces exactly one `interaction_opened` event, whether the control line shares the choice row or sits on its own row.
+- [ ] A command that wraps in the form is reported as its displayed rows joined with `\n`, with the continuation margin and the scrollbar column removed, and `operation_rows` equals the displayed row count; the request fingerprint keeps the row breaks.
+- [ ] A command clipped by the form's command box, and a form narrower than the lowest supported width, produce no `interaction_opened`; programmatic input stays held and the form is answered manually, as documented limits.
+- [ ] The existing allow (Enter) and deny (`h`, Enter, Enter on the empty rejection-reason dialog) plans answer the narrow form, with every stage gate proven on a narrow native pre-stage fixture, including the rejection-reason dialog whose control line splits from its textarea row.
+- [ ] Every existing 36x120 OpenCode fixture keeps identical detection, gate and request-identity results.
+- [ ] On both tmux and herdr, a 57-column `cafleet-ask` member with a wrapped command is answered by Director-auto allow and deny through `permission respond`, closing the episode `not_visible` with the native result.
+- [ ] The default database is `~/.local/share/cafleet/cafleet_v9.db` with `application_id` `1128351289` and one embedded migration, `V1__baseline.sql`; an existing `cafleet_v8.db` stays byte-identical, and an explicitly selected v8 file fails with the incompatible-format error.
+- [ ] Runs, events, interaction evidence, inspection, permission responses, composer plans and fingerprints carry no profile identifier, and `permission respond` binds a response to its inspection through the request token, answer rule, backend and native version.
+- [ ] Outside `design-docs/`, `git grep -nE 'profile_version|answer_profile_version|claude-2\.1\.302-(auto|default)-[0-9]|codex-0\.163\.0-(approve-for-me|on-request)-[0-9]|opencode-2\.1\.4-cafleet-ask-[0-9]|profile=ANSWER_PROFILE'` finds nothing.
+- [ ] `SPEC.md`, the docs, the skill references and the project rules describe the narrow layout, its limits, the identifier-free contracts and the v9 format; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
+
+---
+
+## Background
+
+### Narrow-pane forms
+
+Design [0000196](../0000196-opencode-ask-permission-forms/design-doc.md) built the bundled OpenCode profile from 36x120 captures only and listed wrapped or narrow-pane forms as out of scope. Its request rule `opencode-shell-permission` requires the `focus` line matcher
+
+```text
+^   Allow once   (?:Always allow   )?Reject +⇆ select  enter confirm  esc reject\s*$
+```
+
+to match exactly once in the live region. In a live demo the member pane was 57 columns wide, and OpenCode rendered the choices and the control line on separate rows:
+
+```text
+   Allow once   Always allow   Reject
+  ⇆ select  enter confirm  esc reject
+```
+
+The detector's `extract()` (`cafleet/src/coding_agent/profiles/detector.rs`) requires every matcher to match exactly once, so it returned no match and no `interaction_opened` fired. The Director answered with `cafleet member press`. The long command also wrapped (`$ cat /Users/himkt/.config/opencode/skills/cafleet/`, then `roles/member.md`), while the `operation` matcher is line-scoped and reads only the first row.
+
+The Claude wrapped-form work (fixtures `claude-2.1.302-wrapped-*` at 36x52, commit `37721848`) is the prior art. It uses a region-scoped operation matcher, removes a `row_margin` from each displayed row, reports the displayed row count as `operation_rows` and keeps the displayed row breaks in the request fingerprint. OpenCode `mini` lays out its form itself, so its row breaks are hard rows, not terminal soft wraps. The detector's logical lines therefore see each displayed row separately.
+
+### The profile identifier
+
+Design [0000200](../0000200-min-version-runner-profiles/design-doc.md) made `min_version` the profile selection key: catalog loading rejects two profiles of one backend with equal precedence, and a native version selects the profile with the greatest `min_version` at or below it. The `profile_version` string stayed as a recorded label. It is written to `member_runs.profile_version`, the evidence object, semantic and annotation fingerprints, `permission inspect` output, composer plans and the NOT NULL `member_permission_responses.answer_profile_version`, which the permission-response payload digest covers. `permission respond` requires the inspected capability's label to equal the response metadata's.
+
+The label adds no identity that the backend and native version lack within one binary. Editing a profile in place, as this design does for OpenCode, also keeps the label unchanged while the rules change, so the label never distinguished profile contents.
+
+Stored interaction evidence and event payloads carry the label inside the evidence object, and every read validates the allowed key set and recomputes `evidence_digest` (`cafleet/src/broker/runtime/evidence.rs`). A hand-written SQL migration cannot recompute SHA-256, so the existing rows cannot shed the key in place. The user therefore chose a format-family reset, the path `.claude/rules/database-migrations.md` provides for a deliberate break.
+
+---
+
+## Specification
+
+### Scope
+
+| In scope | Out of scope |
+|---|---|
+| The OpenCode split layout, at every width where the three choices fit on one row | Layouts where the choice row itself wraps or truncates; they stay manual |
+| A command wrapped across several rows of the command box | A command clipped by the command box; it stays manual |
+| The narrow rejection-reason dialog | Typed rejection reasons; non-shell `ask` forms |
+| Two operation-extract options, `margin_rows` and `row_trailer` (§ Operation extraction) | Changes to the Claude or Codex rules, plans or fixtures |
+| Narrow native captures through the existing capture driver, and narrow Director-auto acceptance on tmux and herdr | User-attended acceptance cases; native resize captures |
+| Removing every profile identifier from the catalog, runtime records, outputs, documentation and tests | A replacement identifier for the respond-time capability binding |
+| The `cafleet_v9.db` format family with a fresh `V1__baseline.sql` | Carrying `cafleet_v8.db` fleets, messages or runtime history into v9 |
+
+The narrow-pane work changes no answer bytes, gates, runner, event, inspection, response or Director-workflow contract; only the rules the stages are gated on widen. The removal changes those contracts only by deleting the identifier fields and the binding check named in § Respond-time binding.
+
+The payload digest versions keep their current meaning in the new family, including the version-1 preview path that only pre-V7 rows used, and readers keep validating schema-version-1 event payloads. Retiring those paths is a separate change.
+
+### Layouts and supported widths
+
+OpenCode 2.1.4 `mini` renders the shell permission form in one of three layouts, by pane width:
+
+| Layout | Choice row | Control line | Detection |
+|---|---|---|---|
+| Wide | `   Allow once   Always allow   Reject` with the control line on the same row | Shares the choice row | Supported (shipped) |
+| Split | The three choices on one row | `  ⇆ select  enter confirm  esc reject` on its own row below | Supported (this design) |
+| Broken | The choices wrap or truncate | Any | Unsupported: no detection, manual answer |
+
+Two breakpoints separate the layouts: `W_split`, the widest width that uses the split layout, and `W_min`, the narrowest width that still renders the three choices on one row. Step 3 measures both with the survey cases (§ Native capture procedure). It records them in this document, `SPEC.md` and the skill overlay. The supported range is every width at or above `W_min`.
+
+The two-option layout (`Allow once` / `Reject`) follows the same rule because the patterns already accept it; its breakpoints are not measured separately.
+
+### Request rule `opencode-shell-permission`
+
+One request rule matches both supported layouts; there is no second rule. Its answers, choices, `native_request_id` and sensitivity are unchanged.
+
+| Element | Shipped | Both layouts |
+|---|---|---|
+| Region start | `^  △ Permission required\s*$` | Unchanged |
+| Region end | `  ⇆ select  enter confirm  esc reject\s*$`, not anchored at the row start | Unchanged: it matches the control line in either layout |
+| `max_rows` | 24 | The largest form height among the supported captures, including the long-command capture when its box grows (§ Clipped commands), and at least 24 |
+| `focus` (line, `focus_style: "background"`) | Choices and control line on one row | `^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\s*$`, the choice row in either layout |
+| `allow` (line) | `^   (?P<label>Allow once)   ` | Unchanged |
+| `deny` (line) | <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject) </code> | <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject)(?: &#124;$)</code>, so a choice row ending at `Reject` matches |
+| `controls` (region, new) | — | Either the wide choice-and-control row ends the region, or the split control row ends it with the choice row as the last non-blank row above it; the exact pattern is pinned from the Step 3 captures |
+| `operation` | Line-scoped, single row | Region-scoped, multi-row (§ Operation extraction) |
+| `unclipped` (new, conditional) | — | Holds only when the command box shows the whole command (§ Clipped commands) |
+
+The `focus` matcher still resolves the focused choice from cell backgrounds. Its labels come from the line-scoped `allow` and `deny` matchers, as catalog validation requires. The split control row carries no label, so it takes no part in focus resolution.
+
+The focus matcher's full capture is part of the request identity. The wide and split layouts capture different text, so a resize across `W_split` starts a new request generation, as a focus change does today. An earlier request token stops validating, and a response in flight fails before its next byte (`uncertain` once a byte was written). This is the shipped behavior; a synthetic test covers it.
+
+### Operation extraction
+
+The operation is read from every displayed row of the command, not only the first. Two optional keys extend `extract.operation`, and the OpenCode request rule declares both:
+
+| Key | Values | Behavior |
+|---|---|---|
+| `margin_rows` | `all` (default) or `continuation` | Which captured rows carry `row_margin`. `all` keeps the shipped behavior: every row must start with the margin, which is removed. `continuation` exempts the first row, whose prefix the matcher already consumed. Declaring it without `row_margin` fails catalog loading. |
+| `row_trailer` | A non-empty single-row literal without leading or trailing whitespace | A captured row that ends with the trailer, ignoring trailing whitespace, loses the trailer and the whitespace before it. Every other row is left as it is at this step. |
+
+Extraction applies, per row: remove the trailer, then remove the margin from the rows `margin_rows` selects, then remove trailing whitespace. A selected row without the margin fails the match, as today. This keeps the shipped margin-then-trim order, so a whitespace-only margined row, such as a blank line inside a multi-line Claude command, still matches. The Claude and Codex rules declare neither key, so their extraction is unchanged.
+
+The OpenCode `operation` matcher becomes region-scoped. It captures from after `  $ ` on the first command row through each following row that starts with the continuation margin and then a non-space character. Its extract declares `row_margin` equal to the continuation margin the Step 3 captures show, `margin_rows: "continuation"` and `row_trailer: "█"`, the glyph the 120-column capture shows in a column beside the command box. A one-row command extracts the same text as today, with `operation_rows` 1.
+
+The capture is anchored at both ends, so it cannot drop command rows. After the last captured row, only rows that are blank or hold only the trailer may follow until the choice row. Any other row in between fails the match, so the request is not observed. Examples are a continuation row whose text begins with a space after the margin, such as an indented second line of a multi-line command, or a row without the margin. Such a form is answered manually (§ Limits).
+
+The `operation` evidence reports the displayed rows joined with `\n`, and `operation_rows` equals the displayed row count, so the Director's existing multi-row instruction applies. The request's semantic fingerprint keeps those row breaks, as for Claude and Codex. A resize that moves a row break therefore closes the episode and opens a new one with a fresh `interaction_opened`.
+
+### Clipped commands
+
+A command taller than the form's command box may scroll inside the box and hide rows. The Director must not approve a command it cannot read in full, so a clipped command matches no request. The Step 3 long-command capture decides how the rule observes this:
+
+| Long-command capture shows | Rule requirement |
+|---|---|
+| The box grows to fit the command, with no hidden rows | No `unclipped` matcher. The long-command capture is then a supported capture, so `max_rows` covers its form height. A taller form, beyond `max_rows` or the pane, matches no request (§ Limits). |
+| A scrollbar thumb that differs textually from its track | Region matcher `unclipped`: the thumb glyph `█` spans every row of the box's track |
+| Hidden rows distinguishable only by cell background | Step 3 blocker: the text matchers cannot observe it |
+
+A clipped form keeps input held, as any unmatched interaction does, and is answered manually on the native surface.
+
+### Continuation rule `opencode-reject-reason`
+
+In the split layout, the rejection-reason dialog's control line `enter confirm  esc cancel` moves to its own row. The empty textarea row then reads `  Tell OpenCode what to do differently`, the same text as the prompt row above it. The line-scoped `prompt` matcher would match twice, so the rule would fail.
+
+| Element | Shipped | Both layouts |
+|---|---|---|
+| Region | `△ Reject permission` to `enter confirm  esc cancel\s*$` within 24 rows | Unchanged |
+| `prompt` and `empty` (line) | `prompt` matches the prompt row; `empty` matches the placeholder sharing the control-line row | Replaced by one region matcher `empty_reason`. It requires the prompt row, then the placeholder either sharing the control-line row (wide) or on the last non-blank row above a control-only row (split). The exact pattern is pinned from the Step 3 captures. |
+
+The empty-reason meaning is unchanged. The textarea must show exactly the placeholder; typed text replaces it and fails the stage-3 gate, and a typed copy of the placeholder remains a documented limit.
+
+### Answer stages
+
+The 0000196 bytes, gates and native effects apply in both layouts:
+
+| Answer | Stage | Bytes | Gate |
+|---|---|---|---|
+| Allow | 1 | `0d` | Focus `allow-once` |
+| Deny | 1 | `68` | Focus `allow-once` |
+| Deny | 2 | `0d` | Focus `deny-once` |
+| Deny | 3 | `0d` | Screen `opencode-reject-reason` with an empty reason |
+
+Each answer entry's `fixture_ids` gains the narrow pre-stage fixtures (§ Fixtures). Step 3 stops at a blocker when a narrow measurement contradicts the table. The blocker is a Programmer blocker marker at `paragraph-Implementation > Step 3`, paired with a `blocked (paragraph-Implementation > Step 3)` message to the Director. Each of these measurements is a blocker:
+
+- the focused choice cannot be resolved from cell backgrounds in the split layout;
+- `h` from `Allow once` focuses an option other than `Reject`;
+- Enter on `Reject` shows anything other than the empty rejection-reason dialog;
+- Enter in the empty dialog does not reject the request without text.
+
+### Native capture procedure
+
+Captures use the existing driver and its approved-case registry in `cafleet/src/runtime/runner/observation.rs`, with the 0000196 OpenCode procedure:
+
+- a private `OPENCODE_CONFIG_DIR` holding `cafleet-ask.md`;
+- the OpenCode prompt branch;
+- `prefix_hex` stages sent before arming;
+- a fresh pane capture confirming each stage's gate before its byte.
+
+Every case uses backend `opencode`, permission mode `cafleet-ask`, 36 rows, database `<case id>.db` and socket `<case id>` in the driver's private root. The case cwd is `/tmp/cafleet-194/<case id>`, so `<cwd>/permission-probe <argument>` exceeds 57 columns and wraps.
+
+The survey cases bracket the breakpoints. Each is `no_answer` with probe argument `allow`, and survey captures are evidence only, with no fixtures:
+
+| Case ID | Columns |
+|---|---|
+| `opencode-survey-096` | 96 |
+| `opencode-survey-080` | 80 |
+| `opencode-survey-064` | 64 |
+| `opencode-survey-048` | 48 |
+| `opencode-survey-040` | 40 |
+
+Each breakpoint needs an observed layout on both sides of it. The Programmer adds cases as reviewed registry edits, each with the same shape and an ID of the form `opencode-survey-<columns, three digits>`:
+
+1. **Upper edge of `W_split`.** The shipped 120-column capture (`opencode-cells-001`) is the wide upper bound. If 96 is already split, add cases between 96 and 120 until the widest split width and the narrowest wide width are adjacent column counts.
+2. **Lower edge of `W_min`.** If 40 still renders the choices on one row, add narrower cases (32, then 4 columns narrower each time) until a broken layout is observed.
+3. **Exact breakpoints.** Bisect between each bracketing pair until `W_split` (the widest split width) and `W_min` (the narrowest one-row-choice width) are exact column counts.
+
+The fixture cases run at 57 columns, the demo width, and at `W_min`:
+
+| Case ID | Columns | Driver mode | Decision | Prefix bytes | Stage bytes | Probe argument | Supplies |
+|---|---|---|---|---|---|---|---|
+| `opencode-narrow-cells-057` | 57 | `no_answer` | — | — | — | `allow` | The split form with a wrapped command; the allow and deny stage-1 pre-stage |
+| `opencode-narrow-allow-057` | 57 | `answer_stage` | `allow` | — | `0d` | `allow` | Narrow allow decision evidence |
+| `opencode-narrow-deny-002-057` | 57 | `answer_stage` | `deny` | `68` | `0d`, then `0d` | `deny` | The deny stage-2 pre-stage (`Reject` focused) and narrow deny decision evidence |
+| `opencode-narrow-deny-003-057` | 57 | `answer_stage` | `deny` | `68`, then `0d` | `0d` | `deny` | The deny stage-3 pre-stage: the split empty rejection-reason dialog |
+| `opencode-narrow-long-057` | 57 | `no_answer` | — | — | — | `allow`, one space and 400 `x` characters | The long-command screen for § Clipped commands |
+| `opencode-narrow-idle-057` | 57 | `no_answer` | — | — | — | — | The idle composer at 57 columns, the screen after an answer |
+| `opencode-narrow-cells-min` | `W_min` | `no_answer` | — | — | — | `allow` | The form at the lowest supported width |
+| `opencode-narrow-deny-002-min` | `W_min` | `answer_stage` | `deny` | `68` | `0d`, then `0d` | `deny` | The deny stage-2 pre-stage at `W_min` |
+| `opencode-narrow-deny-003-min` | `W_min` | `answer_stage` | `deny` | `68`, then `0d` | `0d` | `deny` | The deny stage-3 pre-stage at `W_min` |
+
+The long-command case never answers, so the helper never runs and its argument needs no meaning. Step 3 reviews masking as in 0000196 and confirms every rule region lies in unmasked rows. Each fixture records `cell_backgrounds` so focus resolves on replay. Step 3 records the CAFleet commit, OpenCode version, model, geometry, breakpoints and masking review.
+
+### Fixtures
+
+| Fixture ID | From case | Cited by |
+|---|---|---|
+| `opencode-2.1.4-narrow-permission-057-1` | `opencode-narrow-cells-057` | Detection; allow stage 1; deny stage 1 |
+| `opencode-2.1.4-narrow-deny-pre-stage-2-057-1` | `opencode-narrow-deny-002-057` | Deny stage 2 |
+| `opencode-2.1.4-narrow-deny-pre-stage-3-057-1` | `opencode-narrow-deny-003-057` | Deny stage 3; `opencode-reject-reason` |
+| `opencode-2.1.4-narrow-long-command-057-1` | `opencode-narrow-long-057` | Clipped-command tests: no match when clipped, or full extraction when the box grows |
+| `opencode-2.1.4-narrow-idle-composer-057-1` | `opencode-narrow-idle-057` | Empty-composer observation at 57 columns |
+| `opencode-2.1.4-narrow-permission-min-1` | `opencode-narrow-cells-min` | Detection; allow stage 1; deny stage 1 |
+| `opencode-2.1.4-narrow-deny-pre-stage-2-min-1` | `opencode-narrow-deny-002-min` | Deny stage 2 |
+| `opencode-2.1.4-narrow-deny-pre-stage-3-min-1` | `opencode-narrow-deny-003-min` | Deny stage 3; `opencode-reject-reason` |
+
+The 0000196 fixtures stay, with their citations. Fixture IDs name captures, not profiles, so they keep their native-version prefix.
+
+### Profile identity after removal
+
+A bundled profile entry has required `backend`, `min_version`, `rules` and `capabilities`, and nothing else. The strict loader rejects any other key, `profile_version` included, with its existing unknown-key error. Documentation and messages refer to a profile by backend and boundary, written as "the OpenCode profile from `2.1.4`". The OpenCode profile is edited in place; its boundary `2.1.4` is unchanged.
+
+| Surface | Change |
+|---|---|
+| Catalog and selection (`catalog.rs`, `native_version.rs`, `profiles.rs`) | The profile struct, the selection result and the detection, composer and answer capabilities lose the identifier; selection reports the selected `min_version` where tests need to name the selected profile |
+| Detector (`detector.rs`) | Raw evidence loses `profile_version`. Semantic parts and `AnnotationFingerprint` lose the profile element; within one detector it was constant. |
+| Composer plans (`composer.rs`) | A plan retains the run's native version and its cited fixture identities |
+| Run creation and replacement (`cli/member.rs`, `runtime/runner/creation.rs`, `deletion.rs`) | No identifier is recorded or copied; `coverage` and `native_version` stay |
+| Runner wire and client (`input_protocol.rs`, `input_client.rs`, `input.rs`, `observation.rs`, `service.rs`, `writer.rs`, `recovery/replay.rs`, `runner/mod.rs`) | Inspection replies and response requests lose both fields and their cross-checks |
+| Broker records and validation (`broker/runtime/*.rs`) | Run rows, event validation, evidence keys, inspection association and the response audit lose the fields |
+| Presentation (`presentation.rs`, `output/runtime.rs`) | JSON objects lose the keys, and the inspection text line loses `profile=` |
+
+Three runtime invariants compare the identifier today. Each keeps an identifier-free invariant:
+
+| Invariant | Today | After removal |
+|---|---|---|
+| Observer initialization (`observation.rs`, `observer profile/coverage mismatch`) | The catalog's selection for the run's backend and native version has the run's `profile_version` and its detection coverage equals the run's `coverage` | The selection's detection coverage equals the run's `coverage`. A `tested` coverage therefore still requires a selected profile, and a probe failure (null native version) still requires `unknown`. |
+| Inspection reply (`input_client.rs`) | The reply's and its evidence's `profile_version` equal the run's; a `tested` reply's `answer_profile_version` equals the run's `profile_version` | The reply's and its evidence's backend and native version equal the run's. A `tested` reply requires a non-null run `native_version`, a non-null, non-blank `answer_rule_id` of at most 256 bytes, a token, a non-empty decision set, a visible permission request and no capability reason. |
+| Capture-run identity (`same_capture_run`, `observation.rs`) | Run fields including `profile_version` are equal | The same fields without `profile_version`; backend and native version already determine the selection |
+
+### Respond-time binding
+
+`permission respond` no longer compares a profile identifier. It still requires, before the first byte:
+
+- the capability's backend and native version to equal the run's;
+- the capability's answer rule to equal the response metadata's `answer_rule_id`;
+- the capability's request rule to equal the event evidence `rule_id`;
+- the capability's decision to equal the requested decision, with a non-empty fixture list;
+- the request token, expected owner epoch, event/message association and the remaining shipped checks.
+
+The runner is one process from one binary and selects its profile deterministically from the backend and native version. The request token already binds a response to the inspection that minted it, so no replacement identifier is recorded.
+
+### Output and record contracts
+
+| Contract | New shape |
+|---|---|
+| Evidence object (events and stored interaction evidence) | Ordered keys `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`; `evidence_digest` covers this shape |
+| `permission inspect` JSON `{request}` | Ordered keys `event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence` |
+| `permission inspect` text | `Request: token=TOKEN output_seq=SEQUENCE rule=ANSWER_RULE` |
+| `input show` / `input reconcile` `permission_response` | Ordered keys `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at` |
+| Permission-response payload digest (version 1) | Covers `run_id,owner_epoch,interaction_id,event_id,director_member_id,request_token,decision,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id` |
+| Metadata evidence policy | Persists identities, classification, rule and native version, sequence, timestamps and health/closure causes |
+| Permission-request semantic fingerprint | Backend, interaction class, visible operation with its row breaks and stable choice labels |
+| Annotation fingerprint | Backend, rule id and the normalized displayed operation or notice text |
+
+Event and evidence schema version numbers stay as they are. The v9 family starts empty, so no record of the earlier shape coexists with the new one.
+
+### Database format `cafleet_v9.db`
+
+| Element | Value |
+|---|---|
+| Default URL | `sqlite:///` + `~/.local/share/cafleet/cafleet_v9.db` |
+| `PRAGMA application_id` | `1128351289` (`0x43414639`, ASCII `CAF9`) |
+| Embedded migrations | `cafleet/migrations/V1__baseline.sql` only; the in-tree V1 through V8 files of the v8 family are deleted (git keeps them) |
+| Baseline content | The current head schema (V1 through V8 applied) with `member_runs.profile_version` and `member_permission_responses.answer_profile_version` omitted, the new application identity, and every other table, column, CHECK, index, foreign key and the singleton instance-identity initialization unchanged |
+| Predecessor file | `~/.local/share/cafleet/cafleet_v8.db` and its sidecars are never opened, migrated, renamed or deleted |
+
+The shipped format classification applies unchanged:
+
+| Selected file | Behavior |
+|---|---|
+| Empty SQLite file, or the absent default path | `cafleet setup` applies the baseline transactionally, then installs assets |
+| v9 identity and the V1 shape | Normal commands and idempotent setup proceed |
+| v9 identity with a ledger ahead of V1 | `database schema M is newer than this cafleet (head 1); upgrade cafleet` |
+| Any other identified or populated file, including a v8 file selected through `CAFLEET_DATABASE_URL` | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.`, with file bytes preserved |
+
+After upgrading, a user runs `cafleet setup` once. It creates the v9 database and records the asset installations there, and fleets are created anew. `cafleet doctor` reports the v9 file as absent until setup runs.
+
+The chain guard in `cafleet/src/db/mod.rs` derives the registry from the embedded migrations, so it now asserts a single baseline at head 1. A baseline test asserts the fresh head shape, including the absence of both identifier columns. The behind-state classification and its `database schema is outdated` error stay for future successors; at head 1 no earlier version exists to exercise them, and the first V2 adds that coverage through its successor test.
+
+Every test that depends on an intermediate version or the v8 identity changes:
+
+| Test | Change |
+|---|---|
+| The V2 through V8 successor tests in `db/mod.rs`, including the `head_version() >= 5/6/7/8` modules and their `migrate_to_version(…, 6)` and `schema_matches_version(…, 6/7/8)` assertions | Deleted with their migrations |
+| `runtime_migration_extends_the_existing_family_after_v3` (`db/mod.rs`) | Deleted; the baseline-shape test asserts the runtime tables and `APPLICATION_ID` |
+| `supported_upgrades_and_repeated_migration_preserve_all_application_rows` (`db/mod.rs`) | Rewritten against the baseline: repeated migration at head 1 preserves every application row; the `version == 2` branch and the behind-version assertions go |
+| `legacy_opening` and its callers (`broker/runtime/events.rs`) | Rewritten to insert the schema-version-1 event payload directly into the v9 baseline, without `migrate_to_version(…, 4)` or the upgrade-preservation assertion |
+| The `Unreachable` classification test (`diagnosis.rs`) | Uses `crate::db::APPLICATION_ID` instead of the literal `1128351288` |
+
+The schema-version-1 event read path stays, as the version-1 preview digest path does (§ Scope): readers keep validating v1 and v2 event payloads, and `legacy_opening` keeps covering v1.
+
+### Tests
+
+Every test is an in-file unit test of the file that owns the asserted behavior (`.claude/rules/code-quality.md` § Test placement):
+
+| Behavior | Owning file |
+|---|---|
+| `margin_rows` and `row_trailer` parsing and validation: an unknown value, `margin_rows` without `row_margin`, an empty or whitespace-bearing trailer | `cafleet/src/coding_agent/profiles/catalog.rs` |
+| Extraction order, the first-row exemption, a continuation row without its margin failing the match, a row without the trailer kept unchanged, and unchanged Claude and Codex extraction | `cafleet/src/coding_agent/profiles/detector.rs` |
+| Detection on every narrow fixture (operation rows, `operation_rows` at least 2, both choices, resolved focus) and every gate holding on its narrow pre-stage fixture | `cafleet/src/coding_agent/profiles/catalog.rs` |
+| Every existing 36x120 OpenCode fixture keeping its operation, choices, focus, fingerprint and gate results | `cafleet/src/coding_agent/profiles/catalog.rs` |
+| Synthetic screens yielding no request or no gate: a broken layout, a clipped command, a continuation row beginning with a space after the margin or lacking the margin before the box end, form text outside a live region, a control-only row without a choice row above it, a prompt-only rejection dialog, a typed reason in the split dialog | `cafleet/src/coding_agent/profiles/detector.rs` |
+| A blank margined row inside a multi-line Claude command still matching under the shipped extraction order | `cafleet/src/coding_agent/profiles/detector.rs` |
+| The focus capture and the semantic fingerprint differing between the wide and split layouts of one request, and across a rewrap that moves a row break | `cafleet/src/coding_agent/profiles/detector.rs` |
+| A resize across `W_split` starting a new request generation, and a rewrap that moves a row break opening a new episode | `cafleet/src/runtime/runner/observation.rs` |
+| A resize across `W_split` between deny stages failing the response before its next byte (`uncertain`) | `cafleet/src/runtime/runner/input.rs` |
+| The identifier-free observer-initialization and capture-run invariants | `cafleet/src/runtime/runner/observation.rs` |
+| The identifier-free inspection-reply invariant | `cafleet/src/runtime/runner/input_client.rs` |
+| The survey and fixture cases in the approved-case registry | `cafleet/src/runtime/runner/observation.rs` |
+| The v9 default URL | `cafleet/src/config.rs` |
+| The baseline at head 1, its application identity and shape, and v8-file rejection with preserved bytes | `cafleet/src/db/mod.rs` |
+| The new evidence, inspection, `permission_response` and digest shapes | The files that own each shape (`evidence.rs`, `presentation.rs`, `output/runtime.rs`, `permissions.rs`, `input_protocol.rs`) |
+
+Existing tests that set or assert a profile identifier are rewritten to the identifier-free shape; no test asserts that the removed key is rejected.
+
+### Acceptance
+
+The executing fleet's installed CLI and its `cafleet_v8.db` stay untouched during implementation. Acceptance runs the shipping release build by its build path, with an explicit private `CAFLEET_DATABASE_URL`, OpenCode 2.1.4 and `--permission-mode cafleet-ask`. The member pane is 57 columns wide, and the case folder is long enough that the probe command wraps.
+
+| Case | Multiplexers | Required evidence |
+|---|---|---|
+| Director-auto allow | tmux and herdr | `interaction_opened` with `operation_rows` at least 2, no profile identifier in its evidence, and the review instruction; `accepted`/`submitted`; the allow marker exists; `interaction_closed` `not_visible`; the member continues |
+| Director-auto deny | tmux and herdr | The same opening; the three-stage deny `accepted`/`submitted`; no marker; `Step interrupted` and the idle composer; `interaction_closed` `not_visible` |
+
+Each case sizes the member pane before the probe runs:
+
+1. Create the member with a spawn prompt that tells it to wait for the Director's next message before running `<case folder>/permission-probe <allow|deny>`.
+2. Resize the member pane to 57 columns. On tmux, run `tmux resize-pane -t <member pane> -x 57`. On herdr, read `herdr pane layout --pane <member pane>`, then run `herdr pane resize --pane <director pane> --direction right --amount <delta>`, with the signed ratio delta computed from the tab width so that the member's `rect.width` becomes 57.
+3. Confirm the width: tmux `tmux display-message -p -t <member pane> '#{pane_width}'` prints `57`; on herdr, the member's `rect.width` in a fresh `herdr pane layout` read is 57. Repeat step 2 until it holds.
+4. Send the Director message that starts the probe, then follow the case.
+
+Record the confirmed width output, the CAFleet commit, versions, latency and every unobserved case; a missing case fails acceptance.
+
+### Limits
+
+| Limit | Behavior |
+|---|---|
+| A pane narrower than `W_min` | The choices break, no request matches, input stays held and the form is answered manually |
+| A command clipped by the command box | No request matches; the form is answered manually |
+| A form taller than `max_rows` or the pane | No request matches; the form is answered manually |
+| A command row that begins with whitespace after the continuation margin, such as an indented line of a multi-line command | The anchored capture fails, no request matches, and the form is answered manually |
+| A resize while the form is open | A new request generation, and a new episode when the command's row breaks move; an earlier token stops validating |
+| Upgrading from `cafleet_v8.db` | Fleets, messages and runtime history stay in the v8 file and are not shown by the new CLI |
+
+### Documentation targets
+
+| Target | Change |
+|---|---|
+| `SPEC.md` §6.9 OpenCode profile | Both layouts, `W_split` and `W_min`, the widened `focus`, `deny`, `controls`, `operation` and `unclipped` matchers, the widened `opencode-reject-reason`, the narrow fixtures, and limits replacing "A command that wraps in the form yields no detection" |
+| `SPEC.md` operation-extract contract | `margin_rows` and `row_trailer`, their validation and the extraction order |
+| `SPEC.md` §6.7 OpenCode prose | The narrow-width and clipped-command limits replace "A command that wraps in the form … answered manually" |
+| `SPEC.md` profile invariants | The selection table's `profile_version` and `coverage` column becomes `coverage` only: "Its identifier; `tested` …" becomes "`tested` when the selected profile declares detection, otherwise `unknown`", and the `null; unknown` cells become `unknown`. "Fresh creation and observer initialization verify that deterministic selection agrees with the recorded profile and coverage" becomes "… that deterministic selection from the recorded backend and native version yields the recorded coverage". "Recovery reports an unavailable or mismatched historical profile" becomes "recovery reports a recorded `tested` coverage for which no profile is selected now". The §8 `member_runs` responsibility "selected profile" is dropped. The inspection-reply invariant in § Profile identity after removal is stated with the inspection contract. |
+| `SPEC.md` profile and runtime contracts | The bundled-entry key list, "earlier runs keep their recorded `profile_version` text", the composer and capability retention sentence, every profile-id string (rewritten to "the BACKEND profile from VERSION", including the Role-eligibility evidence rows), the evidence, inspection, `permission_response` and digest key lists, the fingerprint and metadata-policy sentences, the answer-profile inspection sentence, the payload-digest "separate from any native profile version" clause, and the example evidence JSON |
+| `SPEC.md` storage | The default URL rows, the HOME-expansion rule, the `member_runs` row, the persistence paragraph and the §8 baseline DDL become the v9 baseline; § V6, V7 and V8 storage and §8's V2/V3 through V8 migration sections are deleted |
+| `docs/docs/concepts/storage.md` | The `cafleet_v9.db` default and the upgrade step: run `cafleet setup` and recreate fleets, with the v8 file left in place |
+| `docs/` other pages | No page states the OpenCode form-layout limits or a profile identifier; Step 2 confirms this by repository search |
+| `README.md` | No change: install commands and the pitch are unchanged |
+| `skills/cafleet/reference/cli.md` | The v9 default URL, the inspection key list and text line, and the `permission_response` key list |
+| `skills/cafleet/reference/coding-agents.md` | The opencode deny note's "A wrapped command … is answered manually" becomes the `W_min` and clipped-command limits; each Role-eligibility "Bundled support: profile `<id>`" becomes "Bundled support: the BACKEND profile from `<min_version>`" with an unchanged boundary and verdict |
+| `.claude/rules/database-migrations.md` | "The `cafleet_v8.db` family has its own V1 baseline" names `cafleet_v9.db` |
+
+---
+
+## Implementation
+
+> Task format: `- [x] Done task <!-- completed: 2026-02-13T14:30 -->`
+> When completing a task, check the box and record the timestamp in the same edit.
+
+### Step 1: Document the narrow layout and extract options
+
+- [ ] Document `margin_rows` and `row_trailer` in the `SPEC.md` operation-extract contract, and the split layout, the supported-width rule and the limits in `SPEC.md` §6.7 and §6.9; `W_split`, `W_min` and the pinned patterns follow in Step 4. <!-- completed: -->
+- [ ] Update the opencode deny note in `skills/cafleet/reference/coding-agents.md`. <!-- completed: -->
+
+### Step 2: Document the identifier removal and the v9 format
+
+- [ ] Apply the `SPEC.md` profile, runtime and storage changes in § Documentation targets, including the v9 baseline DDL in §8. <!-- completed: -->
+- [ ] Update `docs/docs/concepts/storage.md`, and confirm by repository search that no other `docs/` page names a profile identifier or the OpenCode form-layout limits. <!-- completed: -->
+- [ ] Update `skills/cafleet/reference/cli.md`, the Role-eligibility rows in `skills/cafleet/reference/coding-agents.md` and `.claude/rules/database-migrations.md`. <!-- completed: -->
+
+### Step 3: Capture narrow native evidence
+
+- [ ] Add the survey cases to the approved-case registry and run them, extend and bisect the survey per § Native capture procedure until `W_split` and `W_min` are exact, and record both in this document. <!-- completed: -->
+- [ ] Add and run the 57-column and `W_min` fixture cases, confirming each stage's gate in a fresh pane capture before its byte and applying the blocker list in § Answer stages. <!-- completed: -->
+- [ ] Pin the exact `controls`, `operation`, `unclipped` and `empty_reason` patterns, the continuation margin and `max_rows` from the captures, applying § Clipped commands. <!-- completed: -->
+- [ ] Review masking, convert the captures into fixtures with `cell_backgrounds`, add them to the native fixture directory with their SHA-256 digests, and record the evidence. <!-- completed: -->
+
+### Step 4: Document the measured profile
+
+- [ ] Record `W_split`, `W_min`, the pinned patterns and the narrow fixtures in `SPEC.md` §6.9 and the opencode section of `skills/cafleet/reference/coding-agents.md`. <!-- completed: -->
+
+### Step 5: Implement narrow detection
+
+- [ ] Write the extract-option, narrow-fixture, 36x120 regression, synthetic-screen and resize tests in § Tests. <!-- completed: -->
+- [ ] Implement `margin_rows` and `row_trailer` in the catalog loader and the detector's extraction. <!-- completed: -->
+- [ ] Widen `opencode-shell-permission` and `opencode-reject-reason` in `bundled.json`, register the narrow fixtures and add them to the detection and answer `fixture_ids`. <!-- completed: -->
+- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
+
+### Step 6: Remove the profile identifier
+
+- [ ] Rewrite the tests that set or assert a profile identifier to the identifier-free shapes in § Output and record contracts, and add the shape, respond-binding and identifier-free invariant tests in § Tests. <!-- completed: -->
+- [ ] Remove `profile_version` from `bundled.json` and every surface in § Profile identity after removal, replace the three runtime invariants with their identifier-free forms, and remove the identifier comparison in § Respond-time binding. <!-- completed: -->
+- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
+
+### Step 7: Start the v9 format family
+
+- [ ] Write the config default, baseline-shape and v8-rejection tests in § Tests, and apply the version-dependent test changes in § Database format `cafleet_v9.db` (successor and post-V3 tests deleted, the repeated-migration and `legacy_opening` tests rewritten against the baseline, the diagnosis test on `APPLICATION_ID`). <!-- completed: -->
+- [ ] Replace `cafleet/migrations/V1__baseline.sql` through `V8__uncertain_cause.sql` with the v9 `V1__baseline.sql`, set `APPLICATION_ID` to `1128351289` and the default URL to `cafleet_v9.db`. <!-- completed: -->
+- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
+
+### Step 8: Accept natively
+
+- [ ] Run Director-auto allow and deny at 57 columns on tmux and on herdr with the release build and a private database, sizing and confirming the member pane per § Acceptance and recording the evidence there. <!-- completed: -->
+
+### Step 9: Validate the shipping surfaces
+
+- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`, run the Success Criteria `git grep`, verify the bundled catalog and baseline match `SPEC.md`, and record the execution summary in this document. <!-- completed: -->
+
+---
+
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-11-01 | Initial draft |
+| 2026-11-01 | Review revision: shipped margin-then-trim extraction order, a capture anchored at the command box end, `max_rows` covering a growing long-command form, two-edge breakpoint bracketing, identifier-free runtime invariants, the version-dependent test changes, runner-owned resize tests and the acceptance pane-sizing procedure |
+| 2026-11-01 | Approved by the user |
