@@ -1345,7 +1345,7 @@ mod tests {
                     conn.execute_batch("BEGIN IMMEDIATE").unwrap();
                     match change {
                         "digest" => { conn.execute("UPDATE member_input_operations SET payload_digest=?1 WHERE input_id=?2", rusqlite::params!["e".repeat(64), input_id]).unwrap(); }
-                        "state" => { conn.execute("UPDATE member_input_operations SET state='accepted' WHERE input_id=?1", [input_id]).unwrap(); }
+                        "state" => { conn.execute("UPDATE member_input_operations SET state='accepted',uncertain_cause=NULL WHERE input_id=?1", [input_id]).unwrap(); }
                         "placement" => { conn.execute("DELETE FROM member_placements WHERE member_id=?1", [member_id]).unwrap(); }
                         "appearance" => { conn.execute(
                             "INSERT INTO member_placements(member_id,mux_session,mux_window_id,mux_pane_id,backend,coding_agent,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)",

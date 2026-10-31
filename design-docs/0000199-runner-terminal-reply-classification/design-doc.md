@@ -1,7 +1,7 @@
 # Runner terminal-reply classification and uncertain-cause recording
 
 **Status**: Approved
-**Progress**: 14/43 tasks complete
+**Progress**: 30/43 tasks complete
 **Last Updated**: 2026-10-31
 
 ## Overview
@@ -267,31 +267,31 @@ The live permission reply goes through `durable_outcome`, which returns null for
 
 ### Step 4: Reply classifier
 
-- [ ] Create `cafleet/src/runtime/runner/transport/replies.rs` with `ReplyClassifier`, `Classified`, `REPLY_PREFIX_BOUND`, `CSI_PARAMETER_LIMIT`, `STRING_BODY_LIMIT` and the `#[cfg(test)]` `backdate` method per 1.2–1.5; declare `mod replies;` in `transport.rs` <!-- completed: -->
-- [ ] In-file tests: each allowlisted form, including APC and the single-parameter window report `CSI 1 t`, yields zero manual bytes; `L(min,max)` arity limits hold (`CSI 8;24;80;1 t`, `CSI 5 R` and `CSI 8; t` count as manual); each manual-table input counts its full length; modified-F3 `CSI 1;5R` classifies as a reply <!-- completed: -->
-- [ ] In-file tests: bracketed paste containing `ESC[1;1R` and `ESC[I` counts every byte; a mixed read `ab ESC[I cd` counts 4; an overlong CSI and an OSC body over `STRING_BODY_LIMIT` count as manual; 8-bit C1 bytes count as manual <!-- completed: -->
-- [ ] In-file tests for the general invalid-continuation rule, one per boundary-table row: `ESC [ 1 ; ESC [ I` counts 4; `ESC ESC [ I` counts 1; CAN, SUB, other C0 controls, DEL and a byte `≥ 0x80` inside a CSI count the prefix and that byte; `BEL` inside a DCS or APC counts as manual while `BEL` ends an OSC reply; `ESC` followed by a non-`\` byte inside an OSC counts as manual <!-- completed: -->
-- [ ] In-file tests: a reply split at every byte boundary across `feed` calls stays pending and counts zero on completion; a lone `ESC` and `ESC [ 12 ;` stay pending before 100 ms and resolve as manual at the bound through `expire`; `finish` resolves a pending prefix as manual <!-- completed: -->
+- [x] Create `cafleet/src/runtime/runner/transport/replies.rs` with `ReplyClassifier`, `Classified`, `REPLY_PREFIX_BOUND`, `CSI_PARAMETER_LIMIT`, `STRING_BODY_LIMIT` and the `#[cfg(test)]` `backdate` method per 1.2–1.5; declare `mod replies;` in `transport.rs` <!-- completed: 2026-10-31T01:17 -->
+- [x] In-file tests: each allowlisted form, including APC and the single-parameter window report `CSI 1 t`, yields zero manual bytes; `L(min,max)` arity limits hold (`CSI 8;24;80;1 t`, `CSI 5 R` and `CSI 8; t` count as manual); each manual-table input counts its full length; modified-F3 `CSI 1;5R` classifies as a reply <!-- completed: 2026-10-31T01:17 -->
+- [x] In-file tests: bracketed paste containing `ESC[1;1R` and `ESC[I` counts every byte; a mixed read `ab ESC[I cd` counts 4; an overlong CSI and an OSC body over `STRING_BODY_LIMIT` count as manual; 8-bit C1 bytes count as manual <!-- completed: 2026-10-31T01:17 -->
+- [x] In-file tests for the general invalid-continuation rule, one per boundary-table row: `ESC [ 1 ; ESC [ I` counts 4; `ESC ESC [ I` counts 1; CAN, SUB, other C0 controls, DEL and a byte `≥ 0x80` inside a CSI count the prefix and that byte; `BEL` inside a DCS or APC counts as manual while `BEL` ends an OSC reply; `ESC` followed by a non-`\` byte inside an OSC counts as manual <!-- completed: 2026-10-31T01:17 -->
+- [x] In-file tests: a reply split at every byte boundary across `feed` calls stays pending and counts zero on completion; a lone `ESC` and `ESC [ 12 ;` stay pending before 100 ms and resolve as manual at the bound through `expire`; `finish` resolves a pending prefix as manual <!-- completed: 2026-10-31T01:17 -->
 
 ### Step 5: Transport integration
 
-- [ ] `Transport` owns a `ReplyClassifier`; `retain_human` feeds it and advances `human_generation` by the manual count only; `drain_outer` and each `quiesce_for_input` round call `expire` first; outer EOF calls `finish` before reporting EOF; add the `#[cfg(test)]` `backdate_reply_prefix` method <!-- completed: -->
-- [ ] `quiesce_for_input` returns `Pending("terminal reply pending")` while `pending()`; `validate_observation_drain` requires `!pending()` <!-- completed: -->
-- [ ] `transport.rs` tests: extend `runner_transport_forwards_one_outer_terminal_query_answer_without_parser_duplicates` to assert generation 0; a focus/OSC/CPR burst is forwarded unchanged with generation 0; `runner_transport_passes_escape_sequences_unframed` forwards the trailing `ESC [` immediately and counts it as manual only after `backdate_reply_prefix(REPLY_PREFIX_BOUND)` and the next tick; outer EOF with a pending prefix counts it; existing patterned-byte tests keep their generation assertions <!-- completed: -->
-- [ ] `transport/drain.rs` tests: a pending prefix makes the drain `Pending` with the new blocker and no proof; after completion a quiet drain seals a proof with an unchanged generation; a proof taken before a reply prefix fails validation while it is pending; after `backdate_reply_prefix(REPLY_PREFIX_BOUND)` the next drain resolves a lone `ESC` as manual <!-- completed: -->
+- [x] `Transport` owns a `ReplyClassifier`; `retain_human` feeds it and advances `human_generation` by the manual count only; `drain_outer` and each `quiesce_for_input` round call `expire` first; outer EOF calls `finish` before reporting EOF; add the `#[cfg(test)]` `backdate_reply_prefix` method <!-- completed: 2026-10-31T01:17 -->
+- [x] `quiesce_for_input` returns `Pending("terminal reply pending")` while `pending()`; `validate_observation_drain` requires `!pending()` <!-- completed: 2026-10-31T01:17 -->
+- [x] `transport.rs` tests: extend `runner_transport_forwards_one_outer_terminal_query_answer_without_parser_duplicates` to assert generation 0; a focus/OSC/CPR burst is forwarded unchanged with generation 0; `runner_transport_passes_escape_sequences_unframed` forwards the trailing `ESC [` immediately and counts it as manual only after `backdate_reply_prefix(REPLY_PREFIX_BOUND)` and the next tick; outer EOF with a pending prefix counts it; existing patterned-byte tests keep their generation assertions <!-- completed: 2026-10-31T01:17 -->
+- [x] `transport/drain.rs` tests: a pending prefix makes the drain `Pending` with the new blocker and no proof; after completion a quiet drain seals a proof with an unchanged generation; a proof taken before a reply prefix fails validation while it is pending; after `backdate_reply_prefix(REPLY_PREFIX_BOUND)` the next drain resolves a lone `ESC` as manual <!-- completed: 2026-10-31T01:17 -->
 
 ### Step 6: Storage and migration
 
-- [ ] Add `cafleet/migrations/V8__uncertain_cause.sql` (2.4); extend the hand-written `member_input_operations` column string in the `db/mod.rs` tests with `uncertain_cause` <!-- completed: -->
-- [ ] `db/mod.rs` tests: `runtime_v8_uncertain_cause_is_the_contiguous_successor_to_v7` migrates a V7 head with populated input rows and checks preserved rows and the new column; a constraint test rejects an unknown value and a cause on a `ready`, `in_progress` or `accepted` row; `runtime_v8_head_guard_refuses_a_v7_shape_recorded_as_v8` follows `runtime_v7_head_guard_refuses_a_v6_shape_recorded_as_v7` <!-- completed: -->
-- [ ] Add `UncertainCause` to `records.rs`, the `uncertain_cause` field to `InputOperation`, the `map_input` read and the `validate_input` rule <!-- completed: -->
-- [ ] Add `record_input_uncertain` (2.3); remove `InProgress → Uncertain` from `record_input_state`; move every `record_input_state` call whose `next` is `InputState::Uncertain` (found with grep across `cafleet/src`) to `record_input_uncertain` <!-- completed: -->
-- [ ] `inputs.rs` tests: the cause persists and survives each reconcile disposition; `record_input_state` rejects `InProgress → Uncertain`; `unpublished_delivery_results` returns the cause <!-- completed: -->
+- [x] Add `cafleet/migrations/V8__uncertain_cause.sql` (2.4); extend the hand-written `member_input_operations` column string in the `db/mod.rs` tests with `uncertain_cause` <!-- completed: 2026-10-31T01:17 -->
+- [x] `db/mod.rs` tests: `runtime_v8_uncertain_cause_is_the_contiguous_successor_to_v7` migrates a V7 head with populated input rows and checks preserved rows and the new column; a constraint test rejects an unknown value and a cause on a `ready`, `in_progress` or `accepted` row; `runtime_v8_head_guard_refuses_a_v7_shape_recorded_as_v8` follows `runtime_v7_head_guard_refuses_a_v6_shape_recorded_as_v7` <!-- completed: 2026-10-31T01:17 -->
+- [x] Add `UncertainCause` to `records.rs`, the `uncertain_cause` field to `InputOperation`, the `map_input` read and the `validate_input` rule <!-- completed: 2026-10-31T01:17 -->
+- [x] Add `record_input_uncertain` (2.3); remove `InProgress → Uncertain` from `record_input_state`; move every `record_input_state` call whose `next` is `InputState::Uncertain` (found with grep across `cafleet/src`) to `record_input_uncertain` <!-- completed: 2026-10-31T01:17 -->
+- [x] `inputs.rs` tests: the cause persists and survives each reconcile disposition; `record_input_state` rejects `InProgress → Uncertain`; `unpublished_delivery_results` returns the cause <!-- completed: 2026-10-31T01:17 -->
 
 ### Step 7: Runner cause recording
 
-- [ ] Add `interaction_cause` and the ordered settle-check selection; pass a cause through `stop_composer_stages` at both call sites <!-- completed: -->
-- [ ] Record `short_write` / `write_failed` at the write-outcome site and `write_failed` in `retain_permission_failure`; give `record_deferred_uncertain` a cause parameter, with `write_failed` from `retire_failed_deferred` and `runner_stopped` from `fence` <!-- completed: -->
+- [x] Add `interaction_cause` and the ordered settle-check selection; pass a cause through `stop_composer_stages` at both call sites <!-- completed: 2026-10-31T01:17 -->
+- [x] Record `short_write` / `write_failed` at the write-outcome site and `write_failed` in `retain_permission_failure`; give `record_deferred_uncertain` a cause parameter, with `write_failed` from `retire_failed_deferred` and `runner_stopped` from `fence` <!-- completed: 2026-10-31T01:17 -->
 - [ ] `input.rs` tests: a staged profile delivery that receives `ESC[I`, `ESC[24;80R` or an OSC reply during the settle writes the submit key and ends `accepted` <!-- completed: -->
 - [ ] `input.rs` tests: a keystroke during the settle ends `uncertain` with `manual_input` and reply reason `manual_input`; a lone Escape during the settle ends `uncertain` with `manual_input` after `backdate_reply_prefix(REPLY_PREFIX_BOUND)` and the next drain <!-- completed: -->
 - [ ] `input.rs` tests, one per remaining cause:
