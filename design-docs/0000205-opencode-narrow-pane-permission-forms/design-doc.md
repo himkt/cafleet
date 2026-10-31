@@ -1,7 +1,7 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
 **Status**: Approved
-**Progress**: 16/22 tasks complete
+**Progress**: 20/22 tasks complete
 **Last Updated**: 2026-11-01
 
 ## Overview
@@ -479,10 +479,10 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 ### Step 5: Implement narrow detection
 
-- [ ] Write the extract-option, narrow-fixture, 36x120 regression, synthetic-screen and resize tests in § Tests. <!-- completed: -->
-- [ ] Implement `margin_rows` and `row_trailer` in the catalog loader and the detector's extraction. <!-- completed: -->
-- [ ] Widen `opencode-shell-permission` and `opencode-reject-reason` in `bundled.json`, register the narrow fixtures and add them to the detection and answer `fixture_ids`. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
+- [x] Write the extract-option, narrow-fixture, 36x120 regression, synthetic-screen and resize tests in § Tests. <!-- completed: 2026-11-01T03:25 -->
+- [x] Implement `margin_rows` and `row_trailer` in the catalog loader and the detector's extraction. <!-- completed: 2026-11-01T03:25 -->
+- [x] Widen `opencode-shell-permission` and `opencode-reject-reason` in `bundled.json`, register the narrow fixtures and add them to the detection and answer `fixture_ids`. <!-- completed: 2026-11-01T03:25 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: 2026-11-01T03:25 -->
 
 ### Step 6: Remove the profile identifier
 
