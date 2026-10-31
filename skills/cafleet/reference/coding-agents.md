@@ -105,7 +105,7 @@ Evidence: Claude Code 2.1.301 stream probes established separate event turns fro
 | Role | Eligible | Evidence |
 |---|---|---|
 | Director | `yes` | Goal lifecycle: [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. Background execution: Monitor stream probes, 2.1.301, checked 2026-10-25. |
-| Member | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: profile `claude-2.1.302-auto-1`. |
+| Member | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the Claude profile from `2.1.302`. |
 
 ## codex
 
@@ -172,7 +172,7 @@ Evidence: Codex CLI 0.162.1 stream probes established one retained session/proce
 | Role | Eligible | Evidence |
 |---|---|---|
 | Director | `yes` | Goal lifecycle: [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Background execution: retained `exec_command` session stream probes, 0.162.1, checked 2026-10-25. |
-| Member | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: profile `codex-0.163.0-approve-for-me-1`. |
+| Member | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the Codex profile from `0.163.0`. |
 
 ## opencode
 
@@ -435,7 +435,7 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 | Role | Eligible | Evidence |
 |---|---|---|
 | Director | `no` | Goal lifecycle controls: not established for 2.1.4, with no goal evidence recorded, checked 2026-10-31. Background execution while supervision continues: not established for 2.1.4, checked 2026-10-31. |
-| Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: profile `opencode-2.1.4-cafleet-ask-1`. |
+| Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: the OpenCode profile from `2.1.4`. |
 
 To change the Director verdict, a maintainer establishes, for an installed OpenCode version, native goal lifecycle controls, such as a goal command, from official documentation or installed help, and background execution while supervision continues from a CAFleet stream probe. Record the version, source and date in this table, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
 

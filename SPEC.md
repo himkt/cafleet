@@ -142,7 +142,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 
 | Variable | Field | Default | Meaning |
 |---|---|---|---|
-| `CAFLEET_DATABASE_URL` | `database_url` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v8.db` | Selected SQLite file path |
+| `CAFLEET_DATABASE_URL` | `database_url` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v9.db` | Selected SQLite file path |
 | `CAFLEET_MULTIPLEXER` | `multiplexer` | Auto-detect | Explicit supported multiplexer override |
 | `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | CLI text-output body codepoint limit |
 
@@ -841,18 +841,18 @@ Ordered JSON keys are `member_id,run_id,outcome,replayed_count,inbox_count,archi
 The inspection JSON is `{request}`. Its object has ordered keys:
 
 ```text
-event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,profile_version,answer_profile_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence
+event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence
 ```
 
-IDs/epoch/episode are positive integers; `output_seq` is an unsigned integer. `message_id` is the verified inbox message ID. `classification` is the current interactive class or null, and `visibility` is `visible`, `obscured`, `not_visible` or `unknown`. Native/detector/answer-profile identifiers are nullable when unavailable. `answer_profile_version` is shared by the currently supported decision plans. `answer_rule_id` is their common rule when unique, including the actual rule for one supported decision; differing supported rules yield null. Respond derives its chosen nonnullable rule internally for the immutable audit. `answer_capability` is `tested` or `unknown`; `capability_reason` is null when the current request is answerable and otherwise a bounded explanation. `supported_decisions` contains the currently tested subset of `allow,deny`, in that order; a blocked or unsupported request returns an empty array and null token.
+IDs/epoch/episode are positive integers; `output_seq` is an unsigned integer. `message_id` is the verified inbox message ID. `classification` is the current interactive class or null, and `visibility` is `visible`, `obscured`, `not_visible` or `unknown`. `native_version` and `answer_rule_id` are nullable when unavailable. `answer_rule_id` is the common rule of the currently supported decision plans when unique, including the actual rule for one supported decision; differing supported rules yield null. Respond derives its chosen nonnullable rule internally for the immutable audit. The runner's reply and its evidence carry the run's backend and native version. A `tested` reply requires a non-null run `native_version`, a non-null, non-blank `answer_rule_id` of at most 256 bytes, a token, a non-empty decision set, a visible permission request and no capability reason. `answer_capability` is `tested` or `unknown`; `capability_reason` is null when the current request is answerable and otherwise a bounded explanation. `supported_decisions` contains the currently tested subset of `allow,deny`, in that order; a blocked or unsupported request returns an empty array and null token.
 
-`request_token` is a nullable random lowercase 64-hex value issued by the current runner, bound to the request and invalidated under the response contract (§6.9 Request-bound permission responses). `evidence` is the complete selected current post-policy object. `missing_evidence` lists unavailable public facts in order from `operation,arguments,cwd,environment,targets,effects,choice_scope`. Treat operation as available only when its post-policy value is nonblank, unredacted and untruncated; metadata-only, `[redacted]` or truncated evidence leaves it missing. The current detector supplies no independent structured arguments, cwd, environment, targets or effects, so those facts remain missing rather than being parsed from operation text. Include `choice_scope` whenever the public post-policy evidence has no explicit scope fact, including scope-free evidence accompanied by a valid token and a proved private `single_request` plan. The Director obtains necessary missing facts through authorized current capture/routed evidence before deciding. Token identity and private plan eligibility are independent of public evidence completeness and authorization. The token binds the full immutable decision-to-plan set, including each profile, rule and stage identity; a null common-rule field supplies no authority to select a replacement plan.
+`request_token` is a nullable random lowercase 64-hex value issued by the current runner, bound to the request and invalidated under the response contract (§6.9 Request-bound permission responses). `evidence` is the complete selected current post-policy object. `missing_evidence` lists unavailable public facts in order from `operation,arguments,cwd,environment,targets,effects,choice_scope`. Treat operation as available only when its post-policy value is nonblank, unredacted and untruncated; metadata-only, `[redacted]` or truncated evidence leaves it missing. The current detector supplies no independent structured arguments, cwd, environment, targets or effects, so those facts remain missing rather than being parsed from operation text. Include `choice_scope` whenever the public post-policy evidence has no explicit scope fact, including scope-free evidence accompanied by a valid token and a proved private `single_request` plan. The Director obtains necessary missing facts through authorized current capture/routed evidence before deciding. Token identity and private plan eligibility are independent of public evidence completeness and authorization. The token binds the full immutable decision-to-plan set, including each rule and stage identity; a null common-rule field supplies no authority to select a replacement plan.
 
 Inspection text is:
 
 ```text
 Permission: interaction=INTERACTION_ID event=EVENT_ID member=MEMBER_ID run=RUN_ID epoch=EPOCH visibility=VISIBILITY answers=DECISIONS
-Request: token=TOKEN output_seq=SEQUENCE profile=ANSWER_PROFILE rule=ANSWER_RULE
+Request: token=TOKEN output_seq=SEQUENCE rule=ANSWER_RULE
 ```
 
 Join supported decisions with commas and render unavailable values or an empty decision set as `-`. Append `Capability: REASON` when nonnull and `Missing evidence: FIELDS` when the array is nonempty; join fields with commas. Text includes no raw screen content.
@@ -919,11 +919,11 @@ A new attempt against a blocked current request fails before any receipt, audit,
 
 A retained operation key is resolved before the admission drain, so its stored result returns without typing even when the current request is blocked.
 
-The CLI takes semantic decisions. For a new attempt, the pinned runner validates the current stable permission request, token, profile, manual input and output state, atomically reserves its audit/claim/receipt, and sends only a tested single-request native choice. Same-key retries return the prior receipt; a conflicting decision/digest or another key bypassing the episode claim fails. Unknown capability preserves manual native input. `member prompt`, `member exec`, message previews, receipt settlement and recovery remain separate operations.
+The CLI takes semantic decisions. For a new attempt, the pinned runner validates the current stable permission request, token, answer capability, manual input and output state, atomically reserves its audit/claim/receipt, and sends only a tested single-request native choice. Same-key retries return the prior receipt; a conflicting decision/digest or another key bypassing the episode claim fails. Unknown capability preserves manual native input. `member prompt`, `member exec`, message previews, receipt settlement and recovery remain separate operations.
 
 ##### Permission-response audit output
 
-`input show` and `input reconcile` append nullable `permission_response` after `evidence_ref`. For a response kind it contains ordered `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at`; every field is required and follows its SQL type/nullability. Other input kinds return null.
+`input show` and `input reconcile` append nullable `permission_response` after `evidence_ref`. For a response kind it contains ordered `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at`; every field is required and follows its SQL type/nullability. Other input kinds return null.
 
 Preserve the existing input text line and append `Permission decision: interaction=INTERACTION_ID event=EVENT_ID decision=DECISION source=SOURCE mode=MODE director=DIRECTOR_ID epoch=EPOCH` for a response audit. Settlement records disposition and sends zero bytes; it neither grants a native answer nor releases a possibly transmitted episode claim.
 
@@ -1481,11 +1481,11 @@ The bundled backend policy catalog owns launch-mode choices and defaults, exact 
 | Backend | Role | Eligible | Evidence |
 |---|---|---|---|
 | `claude` | Director | `yes` | Goal lifecycle: [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. Background execution: Monitor stream probes, 2.1.301, checked 2026-10-25. |
-| `claude` | Member | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: profile `claude-2.1.302-auto-1`. |
+| `claude` | Member | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the Claude profile from `2.1.302`. |
 | `codex` | Director | `yes` | Goal lifecycle: [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Background execution: retained `exec_command` session stream probes, 0.162.1, checked 2026-10-25. |
-| `codex` | Member | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: profile `codex-0.163.0-approve-for-me-1`. |
+| `codex` | Member | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the Codex profile from `0.163.0`. |
 | `opencode` | Director | `no` | Goal lifecycle controls: not established for 2.1.4, with no goal evidence recorded, checked 2026-10-31. Background execution while supervision continues: not established for 2.1.4, checked 2026-10-31. |
-| `opencode` | Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: profile `opencode-2.1.4-cafleet-ask-1`. |
+| `opencode` | Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: the OpenCode profile from `2.1.4`. |
 
 To change the OpenCode Director verdict, a maintainer establishes, for an installed OpenCode version, native goal lifecycle controls, such as a goal command, from official documentation or installed help, and background execution while supervision continues from a CAFleet stream probe. Record the version, source and date in this table and in the installed CAFleet skill's OpenCode backend section, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
 
@@ -1943,7 +1943,7 @@ The probe yields a version only when it exits with status `0` and the first stdo
 
 The probed version then selects the run's bundled profile (§ Profile selection by minimum version).
 
-A probe that cannot start, times out, exits nonzero, prints non-UTF-8 output or has zero or several version tokens records `native_version` null, `profile_version` null and `coverage=unknown`. Creation continues. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.`, and leaves its stdout text and JSON unchanged. Ordinary programmatic input to that run uses delivery fallback (§ Delivery method and interaction priority). The probed version identifies the installed binary only; it establishes no effective native policy.
+A probe that cannot start, times out, exits nonzero, prints non-UTF-8 output or has zero or several version tokens records `native_version` null and `coverage=unknown`. Creation continues. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.`, and leaves its stdout text and JSON unchanged. Ordinary programmatic input to that run uses delivery fallback (§ Delivery method and interaction priority). The probed version identifies the installed binary only; it establishes no effective native policy.
 
 ##### Profile selection by minimum version
 
@@ -1954,21 +1954,21 @@ eligible = profiles where profile.backend == backend and profile.min_version <= 
 selected = eligible profile with greatest min_version
 ```
 
-| Native version and catalog state | Creation behavior | `profile_version` and `coverage` |
+| Native version and catalog state | Creation behavior | `coverage` |
 |---|---|---|
-| At a boundary or between boundaries | Launch with the selected profile | Its identifier; `tested` when the profile declares detection, otherwise `unknown` |
+| At a boundary or between boundaries | Launch with the selected profile | `tested` when the selected profile declares detection, otherwise `unknown` |
 | Newer than every boundary | Launch with the newest eligible profile | The same; there is no upper cap and no version-mismatch warning |
 | Below the backend's first boundary | Exit 1 before member/run registration or pane creation | — |
-| Probe failure | Continue launch with the probe warning | `null`; `unknown`, and ordinary input uses delivery fallback |
-| Backend with no profile entries | Continue launch | `null`; `unknown`, and ordinary input uses delivery fallback |
+| Probe failure | Continue launch with the probe warning | `unknown`, and ordinary input uses delivery fallback |
+| Backend with no profile entries | Continue launch | `unknown`, and ordinary input uses delivery fallback |
 
 A known version below the first boundary fails with `Error: unsupported native version for BACKEND: VERSION; minimum supported version is MIN_VERSION`. For example, boundaries `2.1.302` and `2.1.310` select the first profile for `2.1.308` and `2.1.310-beta.1` and the second for `2.1.310` and `2.2.0`, while `2.1.301` is unsupported. A prerelease can itself be a boundary when a measured prerelease requires a new profile.
 
 One shared SemVer parser and precedence comparison serves profile validation, native-version admission, fixture validation and selection. Numeric components compare numerically, prerelease identifiers by SemVer precedence, and a release ranks above its prereleases. Build metadata contributes no precedence. Selection is independent of catalog order.
 
-Detection, annotations, empty-composer observation, prompt submission, native-exec submission and request-bound permission answers all resolve through the selected profile, and their coverage declarations stay independent: selecting a profile or observing an empty composer alone supplies no executable plan or answer capability. The run retains the actual probed `native_version` and selected `profile_version`. A composer plan and an answer capability retain the actual run version, the selected profile identifier and the cited fixture identities, while each fixture record keeps its original capture version; input validation compares these identities with the run rather than requiring the run version to equal a capture version or boundary.
+Detection, annotations, empty-composer observation, prompt submission, native-exec submission and request-bound permission answers all resolve through the selected profile, and their coverage declarations stay independent: selecting a profile or observing an empty composer alone supplies no executable plan or answer capability. The run retains the actual probed `native_version`; the backend and that version determine the selected profile within one binary. A composer plan and an answer capability retain the actual run version and the cited fixture identities, while each fixture record keeps its original capture version; input validation compares the backend and native version with the run rather than requiring the run version to equal a capture version or boundary.
 
-The runner pins its selected profile for its lifetime. Fresh creation and observer initialization verify that deterministic selection agrees with the recorded profile and coverage. Historical run, event and audit reads preserve their recorded identities; recovery reports an unavailable or mismatched historical profile explicitly rather than attaching another profile. A catalog update affects newly launched runners only.
+The runner pins its selected profile for its lifetime. Fresh creation and observer initialization verify that deterministic selection from the recorded backend and native version yields the recorded coverage, so a `tested` coverage requires a selected profile and a null native version requires `unknown`. Historical run, event and audit reads preserve their recorded identities; recovery reports a recorded `tested` coverage for which no profile is selected now explicitly rather than attaching another profile. A catalog update affects newly launched runners only.
 
 The rules match screen patterns, so a changed native UI fails safe for detection: an unmatched form yields the `unknown` or `unknown_interaction` observation and offers no answer plan, and an unverified composer selects delivery fallback for ordinary input. An answer plan writes only after its request rule, choices and gates match the fresh observation.
 
@@ -1976,11 +1976,11 @@ Native evidence is the provenance of a profile interval. Catalog validation requ
 
 ##### Bundled profiles and native screen fixtures
 
-The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. Each profile's capabilities rest on accepted native captures taken on a native version within its interval. A bundled profile entry has required `backend`, `min_version`, `profile_version`, `rules` and `capabilities`; each fixture entry keeps its own `native_version` as the actual capture version. Each existing profile's `min_version` is the native version its captures were taken on, and adding operation plans to an existing entry changes its contents without introducing a new boundary.
+The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. Each profile's capabilities rest on accepted native captures taken on a native version within its interval. A bundled profile entry has required `backend`, `min_version`, `rules` and `capabilities`, and no other key; documentation and messages name a profile by its backend and boundary, as in "the OpenCode profile from `2.1.4`". Each fixture entry keeps its own `native_version` as the actual capture version. Each existing profile's `min_version` is the native version its captures were taken on, and adding operation plans to an existing entry changes its contents without introducing a new boundary.
 
-Each automatic-mode profile replaces its predecessor as its version's bundled profile and keeps every predecessor rule and answer plan unchanged; earlier runs keep their recorded `profile_version` text. Codex 0.163.0 shows no startup notice or opt-in dialog for `approve-for-me`, so its profile declares no startup rule. Claude Code 2.1.302 shows its `Teach auto mode about your environment?` dialog at most once per native configuration, described below, and the profile declares the question rule `claude-auto-startup` for it.
+Each automatic-mode profile replaces its predecessor as its version's bundled profile and keeps every predecessor rule and answer plan unchanged. Codex 0.163.0 shows no startup notice or opt-in dialog for `approve-for-me`, so its profile declares no startup rule. Claude Code 2.1.302 shows its `Teach auto mode about your environment?` dialog at most once per native configuration, described below, and the profile declares the question rule `claude-auto-startup` for it.
 
-Profile `claude-2.1.302-auto-1`, with `min_version` `2.1.302`, applies to Claude Code under every Claude launch policy:
+The Claude profile from `2.1.302` applies to Claude Code under every Claude launch policy:
 
 | Capability | Status | Declaration |
 |---|---|---|
@@ -2059,7 +2059,7 @@ Claude renders an automatic refusal in one of two native forms, depending on the
 
 `claude-auto-refusal` matches its region with one region-scoped matcher that captures the refused tool, the operation between the parentheses and the category, so the operation evidence is the refused command. Its first row follows `● Bash(` and carries no margin, so the rule declares no `row_margin`, and a wrapped operation reports its continuation rows with their two-space margin. `claude-auto-refusal-notice` captures `<tool> denied by auto mode · [<category>]` as its operation, because the default view never shows the refused command. `claude-auto-unavailable` captures its notice with a null operation. The native result prefix carries a U+00A0 after `⎿`, while a model quote of the same words carries two ASCII spaces, so quotes do not match.
 
-Profile `codex-0.163.0-approve-for-me-1`, with `min_version` `0.163.0`, applies to Codex CLI under every Codex launch policy; the request and answer rules come from captures under `--ask-for-approval on-request --sandbox workspace-write`:
+The Codex profile from `0.163.0` applies to Codex CLI under every Codex launch policy; the request and answer rules come from captures under `--ask-for-approval on-request --sandbox workspace-write`:
 
 | Capability | Status | Declaration |
 |---|---|---|
@@ -2080,7 +2080,7 @@ Codex 0.163.0 in `approve-for-me` routes every escalation to its automatic revie
 
 The captures showed an allowed escalation only as an ordinary `• Ran …` transcript line, and the reviewer at work as `• Reviewing approval request (Ns • esc to interrupt)`; both are verified non-interaction frames with the composer visible, so neither needs a rule.
 
-Profile `opencode-2.1.4-cafleet-ask-1`, with `min_version` `2.1.4`, applies to OpenCode `mini` under either OpenCode launch policy; only `cafleet-ask` shows permission forms:
+The OpenCode profile from `2.1.4` applies to OpenCode `mini` under either OpenCode launch policy; only `cafleet-ask` shows permission forms:
 
 | Capability | Status | Declaration |
 |---|---|---|
@@ -2407,7 +2407,7 @@ Human input whose bytes exactly equal an allowlisted reply and arrive within the
 
 #### Classification and episode identity
 
-Each detector consumes a reconstructed screen, title, cursor/input-region evidence, output sequence and known backend version. Return a typed observation with profile/rule identifiers, matched region, extracted visible operation/choices, a normalized semantic fingerprint and a confidence/evidence designation. Compile rules at startup and fail on invalid rule definitions. Bundle versioned profiles in CAFleet; profiles are bundled locally rather than loaded from remote rules or herdr manifests.
+Each detector consumes a reconstructed screen, title, cursor/input-region evidence, output sequence and known backend version. Return a typed observation with its rule identifier, matched region, extracted visible operation/choices, a normalized semantic fingerprint and a confidence/evidence designation. Compile rules at startup and fail on invalid rule definitions. Bundle versioned profiles in CAFleet; profiles are bundled locally rather than loaded from remote rules or herdr manifests.
 
 | Classification | Evidence needed | Meaning |
 |---|---|---|
@@ -2425,7 +2425,7 @@ A title such as `Action Required`, a quoted approval transcript, a transcript vi
 
 An episode is a CAFleet observation identity, `(run_id, episode_seq)`, not a native request ID. Allocate `episode_seq` monotonically within a run when a stable live interaction first appears. Use two compatible observations at least 100 ms apart before opening; recheck after 100 ms even if no bytes arrive. Gate programmatic input immediately on the first candidate, before this notification debounce.
 
-The fingerprint contains backend/profile, interaction class, visible operation and stable choice labels. Exclude spinner/counter/cursor decoration. The visible operation includes its displayed row breaks, so a resize that rewraps the operation changes the fingerprint and replaces the episode. Redraws and resize matching the fingerprint refresh the stored latest interaction evidence without another opening notification, but only when the post-policy evidence differs in a field other than `screen_seq` and the `evidence_digest` derived from it; a redraw that changes only the output sequence schedules no refresh and leaves the stored evidence and any issued request token unchanged. A different operation/choice/class candidate holds input immediately and needs two compatible observations at least 100 ms apart before replacing the active episode; retain the old episode until then, close it with `superseded`, and open the new episode in order. An incompatible candidate restarts stability, while return to the original fingerprint cancels the pending replacement. After a verified native non-interaction boundary, an identical request gets a new episode. If two native requests are visually indistinguishable with no observable boundary, preserve one episode and report that identity limitation; never claim one-to-one native request coverage.
+The fingerprint contains backend, interaction class, visible operation and stable choice labels. Exclude spinner/counter/cursor decoration. The visible operation includes its displayed row breaks, so a resize that rewraps the operation changes the fingerprint and replaces the episode. Redraws and resize matching the fingerprint refresh the stored latest interaction evidence without another opening notification, but only when the post-policy evidence differs in a field other than `screen_seq` and the `evidence_digest` derived from it; a redraw that changes only the output sequence schedules no refresh and leaves the stored evidence and any issued request token unchanged. A different operation/choice/class candidate holds input immediately and needs two compatible observations at least 100 ms apart before replacing the active episode; retain the old episode until then, close it with `superseded`, and open the new episode in order. An incompatible candidate restarts stability, while return to the original fingerprint cancels the pending replacement. After a verified native non-interaction boundary, an identical request gets a new episode. If two native requests are visually indistinguishable with no observable boundary, preserve one episode and report that identity limitation; never claim one-to-one native request coverage.
 
 | Episode transition | Event and interpretation |
 |---|---|
@@ -2481,7 +2481,7 @@ Annotation rules use the region contract of the other rules, with these differen
 | Screen | Each rule declares the screen its captures show. Scrollback is excluded, as for every rule. |
 | Blocks | The start and end patterns delimit one refusal or notice block, and the matchers require the native result decoration, so model text quoting the same words does not match. Every qualifying region yields a block, in row order and non-overlapping, so two refusals visible together are two blocks; other rules still require exactly one qualifying region. |
 | Live-transcript frame guard | Each `frame.require_patterns` entry must match a live-screen line of the same frame and no `frame.reject_patterns` entry may match one. Require patterns name lines present only in the live TUI, such as its composer or footer line; reject patterns name the transcript viewer's header, and a frame failing the guard yields no blocks for that rule. |
-| Fingerprint | Backend, profile, rule id and the displayed operation or notice text, normalized by first stripping the operation extract's `row_margin` from each continuation row, then removing every row break and collapsing each whitespace run to one space, so a resize that rewraps a block, even inside a token, keeps its fingerprint. The event's `operation` evidence still reports the displayed rows, continuation margins included. |
+| Fingerprint | Backend, rule id and the displayed operation or notice text, normalized by first stripping the operation extract's `row_margin` from each continuation row, then removing every row break and collapsing each whitespace run to one space, so a resize that rewraps a block, even inside a token, keeps its fingerprint. The event's `operation` evidence still reports the displayed rows, continuation margins included. |
 
 The annotation tracker keeps a set of fingerprint states per annotation rule:
 
@@ -2510,11 +2510,11 @@ The member's routed refusal evidence remains the record in each case.
 
 #### Persistence, notification and read interfaces
 
-The `cafleet_v8.db` format preserves its application identity and existing rows through contiguous embedded migrations. V4 establishes runtime records, V5 adds the permission-response audit/claim relationships specified below, V6 adds the automatic review event kinds, V7 adds ordinary-delivery receipt metadata, payload digest versions and the deferred-result event kind, and V8 adds the uncertain cause of input receipts (§ V6 storage, § V7 storage, § V8 storage). The singleton `runtime_database_identity(singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1), instance_id TEXT NOT NULL)` has a random 128-bit hex instance ID initialized once during migration. Runtime records have these fields:
+The `cafleet_v9.db` baseline creates the runtime records together with the broker tables (§8). A user upgrading from the `cafleet_v8.db` family runs `cafleet setup` once to create the v9 database; the v8 file and its sidecars are never opened, migrated, renamed or deleted, so its fleets, messages and runtime history stay there and the new CLI does not show them. The singleton `runtime_database_identity(singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1), instance_id TEXT NOT NULL)` has a random 128-bit hex instance ID initialized once during migration. Runtime records have these fields:
 
 | Table | Required fields and constraints |
 |---|---|
-| `member_runs` | `run_id INTEGER PRIMARY KEY AUTOINCREMENT`; member/fleet/Director foreign keys; backend, launch nonce, canonical runtime path, requested/resolved mode, mode source, permission argv JSON, native version, profile version, coverage, status and lifecycle/health timestamps; nullable runner/child PID plus verified start identity and exit code/signal. At most one nonterminal run per member. |
+| `member_runs` | `run_id INTEGER PRIMARY KEY AUTOINCREMENT`; member/fleet/Director foreign keys; backend, launch nonce, canonical runtime path, requested/resolved mode, mode source, permission argv JSON, native version, coverage, status and lifecycle/health timestamps; nullable runner/child PID plus verified start identity and exit code/signal. At most one nonterminal run per member. |
 | `member_interactions` | `interaction_id INTEGER PRIMARY KEY AUTOINCREMENT`, `run_id` foreign key, `episode_seq`, classification, post-policy evidence digest, opened timestamp, nullable closed timestamp/reason, and latest bounded evidence JSON. Unique `(run_id, episode_seq)` and at most one unclosed interaction per run. |
 | `member_runtime_events` | `event_id INTEGER PRIMARY KEY AUTOINCREMENT`, `run_id` foreign key, positive `event_seq`, nullable interaction foreign key, `kind`, observed/committed timestamps, versioned payload JSON, notification state and nullable unique `message_id` foreign key. Unique `(run_id, event_seq)` supports idempotent retries. |
 | `member_input_operations` | `input_id INTEGER PRIMARY KEY AUTOINCREMENT`, run foreign key, unique `(run_id, operation_key)`, kind, payload digest, nullable message foreign key, durable receipt/settlement state, payload digest version, ordinary delivery method/reason, deferred metadata, uncertain cause and timestamps. Retain settled rows as replay-rejection records for the run's lifetime. |
@@ -2527,7 +2527,7 @@ The table below fixes names/types beyond the primary-key fields above. Use `INTE
 
 | Record | Exact fields |
 |---|---|
-| Run identity/policy | Required `member_id`, `fleet_id`, `director_member_id`, `backend`, `database_identity_json`, `launch_nonce`, `runtime_path`, `resolved_mode`, `mode_source`, `permission_argv_json`, `event_evidence`, `coverage`, `status`, `created_at`; nullable `requested_mode`, `native_version`, `profile_version`, `effective_policy_json`. |
+| Run identity/policy | Required `member_id`, `fleet_id`, `director_member_id`, `backend`, `database_identity_json`, `launch_nonce`, `runtime_path`, `resolved_mode`, `mode_source`, `permission_argv_json`, `event_evidence`, `coverage`, `status`, `created_at`; nullable `requested_mode`, `native_version`, `effective_policy_json`. |
 | Run lifecycle/ownership | Required `owner_epoch INTEGER` starts at 1, `owner_kind TEXT` is `creator`, `runner` or `reconciler`, `owner_pid INTEGER`, `owner_start_identity TEXT`, `reachability TEXT` is `reachable` or `suspect`, `cleanup_state TEXT` is `complete` or `incomplete`, `event_seq_reserved_through INTEGER` starts at zero, and `observation_gap_count INTEGER` starts at zero. Nullable `runtime_dir_identity_json`, `run_lock_identity_json`, `runner_pid`, `runner_start_identity`, `child_pid`, `child_start_identity`, `started_at`, `last_health_at`, `ended_at`, `exit_code`, `exit_signal`, `cleanup_diagnostics_json`, `recovery_origin_status`; the latter preserves the original lifecycle status while recovering. |
 | Interaction | Required `run_id`, `episode_seq`, `classification`, `evidence_digest`, `opened_at`, `evidence_json`; nullable `closed_at`, `close_reason`. `classification` is an interactive class from the classification table; both closure fields are null together or present together. |
 | Runtime event | Required `run_id`, `event_seq`, `kind`, `observed_at`, `committed_at`, `payload_json`, `notification_state`; nullable `interaction_id`, `message_id`, `archive_reason`. `notification_state=inbox` requires a message and null archive reason; `archived` requires no message and a closure reason. |
@@ -2558,7 +2558,6 @@ Runtime event kinds are `coverage_unknown`, `interaction_opened`, `interaction_o
   "evidence": {
     "backend": "codex",
     "native_version": "recorded-at-launch",
-    "profile_version": "bundled-profile-version",
     "rule_id": "native-tool-permission",
     "screen_seq": 120,
     "truncated": false,
@@ -2578,13 +2577,13 @@ Runtime event kinds are `coverage_unknown`, `interaction_opened`, `interaction_o
 }
 ```
 
-Version-2 event keys are ordered `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for lifecycle events, then, for `input_delivery_result` only, ordered `input_id,message_id,delivery,stage`, then required `director_action`. The action object has ordered `kind,instruction,inspect_argv`, and its `kind` is `review_permission_request`, `review_automatic_refusal` or `review_automatic_review_unavailable`; other new events use null action. Both automatic review event kinds fit this version-2 shape: `evidence.backend` together with the kind identifies the reviewer, and the effective policy lives on the run rather than in the payload. Version-1 reads preserve their original fields and order. An older binary never reads the new kinds, because it refuses the V6 or V7 database as ahead of its embedded chain.
+Version-2 event keys are ordered `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for lifecycle events, then, for `input_delivery_result` only, ordered `input_id,message_id,delivery,stage`, then required `director_action`. The action object has ordered `kind,instruction,inspect_argv`, and its `kind` is `review_permission_request`, `review_automatic_refusal` or `review_automatic_review_unavailable`; other new events use null action. Both automatic review event kinds fit this version-2 shape: `evidence.backend` together with the kind identifies the reviewer, and the effective policy lives on the run rather than in the payload. Version-1 reads preserve their original fields and order. A binary of an earlier format family never reads these records, because it refuses the `cafleet_v9.db` application identity as an incompatible format.
 
-The evidence object, in events and in stored interaction evidence, has ordered keys `backend,native_version,profile_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from; it is null exactly when `operation` is null, including under metadata evidence.
+The evidence object, in events and in stored interaction evidence, has ordered keys `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from; it is null exactly when `operation` is null, including under metadata evidence.
 
 Run-level events use null interaction/classification, `source=runner_lifecycle` and a typed health/exit cause in the payload. Missing command, cwd, environment or native request identity stays null; screen parsing never fills it with invented execution data. Limit a UTF-8 excerpt to 8 KiB and the complete payload to 16 KiB, record truncation, escape control characters and omit raw terminal recording. Treat screen text as untrusted evidence, never as a command or instruction to approve.
 
-Launch-only `--event-evidence <metadata|redacted>` defaults to `metadata`. Metadata mode persists only identities, classification, rule/profile/version, sequence, timestamps and health/closure causes; every screen-derived operation, choice, excerpt and native identifier is null. Semantic fingerprints used for live episode comparison remain in memory and appear in neither logs, outbox nor database. `evidence_digest` is SHA-256 of the canonical post-policy evidence object, so metadata mode exposes no hash of hidden screen text.
+Launch-only `--event-evidence <metadata|redacted>` defaults to `metadata`. Metadata mode persists only identities, classification, rule and native version, sequence, timestamps and health/closure causes; every screen-derived operation, choice, excerpt and native identifier is null. Semantic fingerprints used for live episode comparison remain in memory and appear in neither logs, outbox nor database. `evidence_digest` is SHA-256 of the canonical post-policy evidence object, so metadata mode exposes no hash of hidden screen text.
 
 Redacted mode requires `--event-redaction-file <ABSOLUTE_PATH>` naming readable UTF-8 JSON `{ "schema_version": 1, "patterns": ["regex"], "sensitive_rules": ["rule-id"] }`. Require a nonempty pattern array, known rule IDs and compilable expressions. Missing/malformed configuration, an unsupported policy or a redaction file supplied with metadata mode fails before registration with usage exit `2`; there is no fallback to raw evidence. Compile the file once at launch and keep the compiled policy in memory; events store the policy name, not raw patterns or the file contents.
 
@@ -2684,18 +2683,6 @@ Only a change of `automatic_review` or `observed_mode` writes the record; repeat
 | `automatic_review_available` update | Submitted to the event worker in observation order and committed through the ownership-checked transaction (owner epoch, database identity and historical ownership), additionally requiring `member_runs.status` `running` or `degraded` | A stale owner fails with `stale ownership token` and any other status fails as a `member_runs.status` invariant violation; the worker records a local diagnostic, drops that write without retry and continues |
 
 The available update is not spooled: a runner lost before it commits loses only that observation, and the next indicator observation records it again. A superseded runner therefore never overwrites the record.
-
-##### V6 storage
-
-V6 widens the `member_runtime_events.kind` CHECK to the event kinds listed above and adds `member_runs.profile_match` (§8 *V6 automatic review migration*). SQLite cannot alter a CHECK in place, and the migration transaction runs with foreign keys enabled, so V6 rebuilds `member_runtime_events`, `member_permission_responses` and `member_permission_response_claims` in dependency order. It preserves every row, the event-ID sequence and every foreign key; the rebuilt tables keep their names, columns, other constraints and indexes. Every run recorded before V6 selected its profile by exact version, so V6 sets `profile_match='exact'` on each run with a `profile_version` and leaves the others null.
-
-##### V7 storage
-
-V7 drops `member_runs.profile_match` with its column-local CHECK, adds the ordinary-delivery and digest-version columns to `member_input_operations`, and widens the runtime-event kind CHECK with `input_delivery_result` (§8 *V7 minimum-version delivery migration*). It preserves the application and instance identities, every row and sequence, every foreign key and the audit relationships, rebuilding the event, permission-response and claim tables in the V6 dependency order. Existing input rows receive `payload_digest_version=1` with unchanged digest bytes and null delivery/deferred metadata, because those facts were not recorded.
-
-##### V8 storage
-
-V8 adds the nullable `member_input_operations.uncertain_cause` column in place, with a column-local CHECK restricting it to the § Uncertain cause values and to `uncertain` or `settled` rows (§8 *V8 uncertain cause migration*). It needs no table rebuild and preserves the application and instance identities, every row, ID, sequence, foreign key and audit relationship. Existing input rows receive a null cause, because the cause was not recorded.
 
 #### CLI presentation contract
 
@@ -2933,7 +2920,7 @@ New preview receipts use payload digest version `2`. The preview client sends th
 
 Method, appended clause, native prefix/key bytes and timing are outside the digest preimage. The runner selects and renders afresh only while zero bytes are established; once a stage writes, its method and rendered bytes stay pinned through submission or uncertainty. Queries and duplicate requests validate canonical identity before considering current composer state, so a later method change neither creates a different digest nor authorizes retyping an existing input.
 
-Each input row persists its `payload_digest_version`. New explicit ordinary inputs and permission-response inputs keep their version-1, kind-specific digests. Version-1 preview receipts validate with the frozen pre-V7 wrapped-preview renderer and the preimage `run_id,kind,message_id,literal`, without a version field or a method-dependent clause. Read a receipt's version before computing its expected digest, and choose version `2` only when allocating a new preview receipt, atomically with reservation. An unsupported version or a version/kind mismatch fails explicitly. This version is stored request identity, separate from any native profile version.
+Each input row persists its `payload_digest_version`. New explicit ordinary inputs and permission-response inputs keep their version-1, kind-specific digests. Version-1 preview receipts validate with the frozen version-1 wrapped-preview renderer and the preimage `run_id,kind,message_id,literal`, without a version field or a method-dependent clause. Read a receipt's version before computing its expected digest, and choose version `2` only when allocating a new preview receipt, atomically with reservation. An unsupported version or a version/kind mismatch fails explicitly. This version is stored request identity.
 
 `defer_reason` records why a request first entered the queue and stays paired with its original `deferred_at`. `delivery_reason` records the eventual selected-method reason or a terminal zero-byte cancellation reason. The owned transaction that changes an ordinary receipt to `in_progress` commits its `delivery_method` and `delivery_reason` before the first byte: profile delivery has a null reason, and fallback has `submission_plan_unavailable` or `idle_timeout`, also for an immediate fallback. A zero-byte requeue clears unexecuted selection metadata before any later reselection; a terminal zero-byte cancellation commits a null method and its outcome reason. After any possible positive write, the selected method and reason persist through accepted, uncertain and settled states.
 
@@ -2948,7 +2935,7 @@ Every result consumer projects these durable fields rather than recomputing a re
 | `settled/not_submitted` | `not_submitted` | Null method and recorded outcome reason for a zero-byte cancellation; recorded selection for a reconciled attempt that may have written bytes |
 | `settled/abandoned_uncertain` | `uncertain` | Recorded selection; abandonment ends retries without establishing zero bytes |
 
-An ordinary receipt whose method and reason were never recorded, including pre-V7 history, takes its status from the same mapping with a null method. A `ready` row without deferred metadata uses `zero_bytes_ready`, and every other such row uses `method_unrecorded` rather than an invented method or cancellation reason. Missing deferred metadata establishes no queue ownership. Permission-response receipts expose `delivery:null`, null deferred metadata and digest version `1`, and their semantic decision/submission/settlement projection remains authoritative. Unknown stored combinations fail validation.
+An ordinary receipt whose method and reason were never recorded takes its status from the same mapping with a null method. A `ready` row without deferred metadata uses `zero_bytes_ready`, and every other such row uses `method_unrecorded` rather than an invented method or cancellation reason. Missing deferred metadata establishes no queue ownership. Permission-response receipts expose `delivery:null`, null deferred metadata and digest version `1`, and their semantic decision/submission/settlement projection remains authoritative. Unknown stored combinations fail validation.
 
 An asynchronous completion leaves the originating CLI output unchanged. The runner persists the actual method in the input receipt, `input show` exposes it, and the first submitted, not-submitted or uncertain result of a deferred input emits one `input_delivery_result` event (§ Input delivery result event).
 
@@ -2969,7 +2956,7 @@ Every runner transition of an input from `in_progress` to `uncertain` records ex
 
 At the settle check before a staged submit, the first matching row among the first five, in table order, wins; accounting failure comes first because the generation comparison is unreliable once accounting failed. A stage that stops on an interaction after an earlier stage wrote records `interaction_candidate` or `interaction_open` by the same candidate test. A partial or unknown write outcome records `short_write` for a positive short count and `write_failed` otherwise.
 
-Settlement and reconciliation preserve the recorded cause. Inputs that never became uncertain, inputs recorded before V8 and `in_progress` inputs left by runner loss have a null cause. `input show` and `input reconcile` report the cause, an uncertain submission reply carries it as `reason`, and an uncertain `input_delivery_result` event carries it as `cause`.
+Settlement and reconciliation preserve the recorded cause. Inputs that never became uncertain and `in_progress` inputs left by runner loss have a null cause. `input show` and `input reconcile` report the cause, an uncertain submission reply carries it as `reason`, and an uncertain `input_delivery_result` event carries it as `cause`.
 
 ##### Explicit manual key input
 
@@ -2992,9 +2979,9 @@ cafleet permission inspect INTERACTION_ID --event-id EVENT_ID --from-member-id D
 cafleet permission respond INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID --expected-run-id RUN_ID --expected-owner-epoch EPOCH --request-token TOKEN --decision allow|deny --decision-source director-auto|user --director-mode auto|manual|unknown --mode-evidence-ref REFERENCE --decision-evidence-ref REFERENCE --operation-key KEY --json
 ```
 
-Require positive IDs/epoch, nonempty operation keys and bounded nonblank references. `director-auto` requires mode `auto`; source `user` records a user decision in any mode. Validate the active pinned Director/fleet/member relationships. `inspect` verifies the current durable event/message/interaction association, retains the genuine concrete pane lock, probes the pinned owner and resolves unread output/manual progress under the original deadline clipped to any inherited SQL bound. Current authority comes from the actual parsed screen, a complete single-request choice/focus match and the stable tracked episode. Observation freshness is checked independently of ordinary composer eligibility; inspection sends zero programmatic child bytes and creates no receipt, audit or claim. Return current identities/visibility/classification, selected detector/answer-profile metadata, supported decisions/capability reason, post-policy evidence, missing-evidence indications and an opaque token. Unsupported or blocked capability is an explicit result, and incomplete observation supplies no token.
+Require positive IDs/epoch, nonempty operation keys and bounded nonblank references. `director-auto` requires mode `auto`; source `user` records a user decision in any mode. Validate the active pinned Director/fleet/member relationships. `inspect` verifies the current durable event/message/interaction association, retains the genuine concrete pane lock, probes the pinned owner and resolves unread output/manual progress under the original deadline clipped to any inherited SQL bound. Current authority comes from the actual parsed screen, a complete single-request choice/focus match and the stable tracked episode. Observation freshness is checked independently of ordinary composer eligibility; inspection sends zero programmatic child bytes and creates no receipt, audit or claim. Return current identities/visibility/classification, backend, native version and answer rule, supported decisions/capability reason, post-policy evidence, missing-evidence indications and an opaque token. Unsupported or blocked capability is an explicit result, and incomplete observation supplies no token.
 
-The runner issues one current random token bound in memory to the complete database/run/nonce/epoch, interaction/episode, native version, live operation/choice/focus identity, manual-input generation and full immutable decision-to-plan set, including every selected profile, rule and stage identity. A checked invalidation generation records the first incompatible candidate/request, obscurity, observation gap/degradation or incomplete observation, even when the original display returns before inspection. Positive actual manual input (bytes classified as manual; terminal replies excluded, § Terminal reply classification), shutdown and ownership loss also revoke authority; arithmetic or randomness failure returns an explicit error. Repeated compatible inspections reuse the token. A tested equivalent redraw/resize preserves it only when the exact profile proves unchanged semantic/choice/focus and plan identity; output sequence alone is evidence rather than revocation. Healthy transient queue pressure defers authority without rebinding the token. The random value is independent of hidden-text hashes and authorization; a revoked token requires fresh inspection and decision reconciliation.
+The runner issues one current random token bound in memory to the complete database/run/nonce/epoch, interaction/episode, native version, live operation/choice/focus identity, manual-input generation and full immutable decision-to-plan set, including every rule and stage identity. A checked invalidation generation records the first incompatible candidate/request, obscurity, observation gap/degradation or incomplete observation, even when the original display returns before inspection. Positive actual manual input (bytes classified as manual; terminal replies excluded, § Terminal reply classification), shutdown and ownership loss also revoke authority; arithmetic or randomness failure returns an explicit error. Repeated compatible inspections reuse the token. A tested equivalent redraw/resize preserves it only when the exact profile proves unchanged semantic/choice/focus and plan identity; output sequence alone is evidence rather than revocation. Healthy transient queue pressure defers authority without rebinding the token. The random value is independent of hidden-text hashes and authorization; a revoked token requires fresh inspection and decision reconciliation.
 
 A cursor transit is the one incompatible frame that leaves the generation unchanged. It is a frame that yields no current request while a request is current, is not a verified non-interaction, and keeps every row of the current request's matched live region identical in text to the frame that established the request; typically the native CLI moves the cursor outside the form to redraw another part of the screen. During a transit the request is not current, so inspection returns no token and a response is blocked. A following frame with the same request restores it under the unchanged generation and token. A changed region row, a different request fingerprint, closure, `interaction_obscured`, an observation gap, child exit and positive manual input still invalidate immediately.
 
@@ -3012,26 +2999,26 @@ Inspection exposes the selected current post-policy evidence independently of pr
 
 Validate a retained operation key against its recorded database/run, response identity and canonical digest before any current-request eligibility check, pane lock or live-owner probe. A matching retained receipt returns its stored result after token revocation, interaction closure, deregistration or owner exit, sending zero bytes; conflicting reuse fails. Validate historical audit relationships against recorded ownership while preserving closed/inactive history. Only an absent key or a positively recorded ready zero-byte attempt enters current live-request validation. The durable-only response projection preserves the immutable audit epoch and uses a null output sequence under the permission CLI contract (§6.3 Permission commands); a consumed retry's zero-byte stage describes that retry while retaining original disposition and claim uncertainty.
 
-Inspection reports the shared answer-profile version. Its answer_rule_id is the common rule only when every supported decision resolves to that same rule; one supported decision reports its actual rule, and differing rules yield null. Respond selects the requested decision's actual rule internally and retains that required rule in its immutable audit/digest. A blocked or unsupported request retains the empty-decision/null-token representation.
+Inspection's `answer_rule_id` is the common rule only when every supported decision resolves to that same rule; one supported decision reports its actual rule, and differing rules yield null. Respond selects the requested decision's actual rule internally and retains that required rule in its immutable audit/digest. A blocked or unsupported request retains the empty-decision/null-token representation.
 
-Use versioned control operations `permission_inspect` and `permission_respond` and the existing receipt query/retire boundary. A five-second command deadline covers locking, database work and socket exchange. Before the first byte, the serialized runner resolves pending manual input and unread output, revalidates the current visible stable permission request/token and tested answer profile, and commits the response receipt, audit and episode claim atomically under the current ownership epoch. Other interaction classes, uncertain state, stale identity or unavailable storage receive zero-byte rejection. Write only the profile's single-request answer plan, rechecking relevant state and each stage's gate before that stage; partial writes or ambiguous state retain durable uncertainty. The CLI accepts semantic allow/deny decisions, not arbitrary key sequences.
+Use versioned control operations `permission_inspect` and `permission_respond` and the existing receipt query/retire boundary. A five-second command deadline covers locking, database work and socket exchange. Before the first byte, the serialized runner resolves pending manual input and unread output, revalidates the current visible stable permission request/token and tested answer capability, and commits the response receipt, audit and episode claim atomically under the current ownership epoch. The capability binds to the response without a profile identifier: its backend and native version equal the run's, its answer rule equals the response metadata's `answer_rule_id`, its request rule equals the event evidence `rule_id`, and its decision equals the requested decision with a non-empty fixture list. The request token, expected owner epoch and event/message association bind the response to the inspection that minted the token. Other interaction classes, uncertain state, stale identity or unavailable storage receive zero-byte rejection. Write only the profile's single-request answer plan, rechecking relevant state and each stage's gate before that stage; partial writes or ambiguous state retain durable uncertainty. The CLI accepts semantic allow/deny decisions, not arbitrary key sequences.
 
 Track answer progress as cumulative actual positive byte counts across ordered stages. A complete nonfinal stage retains `partial` progress and durable `in_progress`; only complete final-stage submission establishes `submitted`, followed by durable `accepted` before returning acceptance. A stage syscall returning WouldBlock or Interrupted with zero bytes may yield within the same attempt and original expiration. Retain the untouched next-stage index and any cumulative `partial` progress, then retry only that stage after fresh actual drain, current token/request/choice/focus/plan, manual-generation, owner and immediate-transaction validation through a newly consumed guard. Completed stages remain completed. This continuation supplies neither a new invocation nor a ready-state rearm.
 
 Record a syscall result before yielding. A recorded zero-byte WouldBlock or Interrupted preserves the actual prior stage/count and releases its lease while consuming that guard; a yielding operation remains `in_progress` and supplies no zero-byte retirement proof. Dropping a consumed guard before I/O preserves its actual no-I/O state, while possible I/O without a recorded result retains uncertainty and every known earlier byte count. A positive short write, incompatible state, unrecorded possible I/O or expiration stops the remaining plan. Preserve cumulative progress, the original cause and any known input identity; persist uncertainty only within the original budget, retaining durable `in_progress` when bookkeeping fails.
 
-V5 preserves existing records and expands the input-kind domain with `permission_response`. Table `member_permission_responses` is keyed by `input_id` with event/interaction foreign keys, expected owner epoch, request token, decision, pinned Director ID, attributed Director mode/source, mode/decision evidence references, answer-profile version/rule and decision timestamp. Table `member_permission_response_claims` is keyed by interaction ID with a unique input foreign key, to retain one possibly transmitted answer per observed episode across different operation keys. Validate same-run/event/interaction relationships and all required enum/identity constraints transactionally. The storage subsection below fixes exact SQL names, types and associations.
+The input-kind domain includes `permission_response`. Table `member_permission_responses` is keyed by `input_id` with event/interaction foreign keys, expected owner epoch, request token, decision, pinned Director ID, attributed Director mode/source, mode/decision evidence references, answer rule and decision timestamp. Table `member_permission_response_claims` is keyed by interaction ID with a unique input foreign key, to retain one possibly transmitted answer per observed episode across different operation keys. Validate same-run/event/interaction relationships and all required enum/identity constraints transactionally. The storage subsection below fixes exact SQL names, types and associations.
 
 
 ##### Permission response storage
 
-V5 preserves V4 identities and rows, expands the input-kind check to `kind IN ('preview','prompt','exec','permission_response')`, and creates the `member_permission_responses` and `member_permission_response_claims` tables; the exact DDL is in §8 *V5 permission response migration*. The existing input-operation columns, key uniqueness, foreign keys and settlement constraints are preserved.
+The baseline's input-kind check is `kind IN ('preview','prompt','exec','permission_response')`, and it creates the `member_permission_responses` and `member_permission_response_claims` tables; the exact DDL is in §8.
 
 All audit fields are required and use the displayed column order. `decided_at` is the UTC RFC 3339 time when the runner records the attributed decision, independently of native decision time. Tokens are random 32-byte values encoded as lowercase hex; persist no screen-derived fingerprint or pre-policy hash. Evidence references contain 1–2048 UTF-8 bytes, include a non-whitespace character and contain no C0 or DEL control character; they identify host evidence without embedding commands, screen text or secrets.
 
-In the same immediate transaction, require input kind `permission_response`, an active pinned Director, an inbox-linked permission-request opening event and the matching unclosed interaction/run. Validate the expected epoch, event/message association and answer profile before inserting the input, immutable audit and claim. Other input kinds have no audit row. The composite claim foreign key binds its input to the same interaction; same-run/event and recorded ownership relationships are also checked on reads while preserving closed/inactive history; active/current eligibility applies to new attempts only.
+In the same immediate transaction, require input kind `permission_response`, an active pinned Director, an inbox-linked permission-request opening event and the matching unclosed interaction/run. Validate the expected epoch, event/message association and answer capability binding before inserting the input, immutable audit and claim. Other input kinds have no audit row. The composite claim foreign key binds its input to the same interaction; same-run/event and recorded ownership relationships are also checked on reads while preserving closed/inactive history; active/current eligibility applies to new attempts only.
 
-The canonical payload digest covers `run_id,owner_epoch,interaction_id,event_id,director_member_id,request_token,decision,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id`. Encode this metadata as canonical JSON with sorted keys before SHA-256; `input_id`, timestamps, operation key and literal native keys are excluded. Validate a matching key against this digest before any new action.
+The canonical payload digest covers `run_id,owner_epoch,interaction_id,event_id,director_member_id,request_token,decision,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id`. Encode this metadata as canonical JSON with sorted keys before SHA-256; `input_id`, timestamps, operation key and literal native keys are excluded. Validate a matching key against this digest before any new action.
 
 Retain a claim after possible submission, accepted submission, uncertain settlement or `abandoned_uncertain`. Release it only in the synchronized transaction that proves zero bytes, no active writer and `ready` or settled `not_submitted`; a disposition label alone supplies no zero-byte evidence. Audit rows and consumed operation keys remain retained after claim release.
 
@@ -3116,7 +3103,7 @@ Acceptance additionally covers the transport, lifecycle and persistence cases be
 
 ### 7.1 Configuration & environment
 
-Expand HOME only for the default `sqlite:///` URL ending in `cafleet_v8.db`. Explicit `sqlite:///<path>` overrides preserve their path text; relative file paths resolve against the invoking working directory before canonical database-file identity supplies shared pane locking. Validate supplied values and required state at their boundary. Config-directory relocation is resolved lazily per selected backend.
+Expand HOME only for the default `sqlite:///` URL ending in `cafleet_v9.db`. Explicit `sqlite:///<path>` overrides preserve their path text; relative file paths resolve against the invoking working directory before canonical database-file identity supplies shared pane locking. Validate supplied values and required state at their boundary. Config-directory relocation is resolved lazily per selected backend.
 
 ### 7.2 Error handling & exit-code policy
 
@@ -3144,7 +3131,7 @@ Agents run each CAFleet process as the only command in its shell-tool invocation
 
 ## 8. Database schema
 
-The baseline is version 1 in the current distinct format family. The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Known versions use their recorded migration shape; newer versions are diagnosed before any head-shape comparison. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
+The baseline is version 1 in the current distinct format family, `cafleet_v9.db`, whose application identity is `PRAGMA application_id` `1128351289` (`0x43414639`, ASCII `CAF9`). The binary embeds one migration, `V1__baseline.sql`, so its head is 1. Any other identified or populated file, including a `cafleet_v8.db` file selected through `CAFLEET_DATABASE_URL`, is an incompatible format whose bytes are preserved, and `cafleet doctor` reports the default v9 file as absent until `cafleet setup` creates it. The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Known versions use their recorded migration shape; newer versions are diagnosed before any head-shape comparison. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
 
 | Table | Responsibility |
 |---|---|
@@ -3153,7 +3140,7 @@ The baseline is version 1 in the current distinct format family. The fresh basel
 | `member_placements` | Multiplexer and coding-agent association |
 | `messages` | Point-to-point delivery, acknowledgement and preview stamp |
 | `runtime_database_identity` | Singleton database-instance identity for runtime namespaces |
-| `member_runs` | Launch intent, ownership, lifecycle, recorded coverage, selected profile and observed effective policy |
+| `member_runs` | Launch intent, ownership, lifecycle, recorded coverage and observed effective policy |
 | `member_interactions` | Observed interactive episodes and visibility closure |
 | `member_runtime_events` | Sequenced events with atomic Director inbox association or archival |
 | `member_input_operations` | Durable submission receipts, delivery method/deferral metadata, payload digest versions and settled replay protection |
@@ -3165,7 +3152,7 @@ The baseline is version 1 in the current distinct format family. The fresh basel
 Exact baseline DDL:
 
 ```sql
-PRAGMA application_id = 1128351288;
+PRAGMA application_id = 1128351289;
 
 CREATE TABLE members (
     member_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -3216,31 +3203,7 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_to_member_status_ts ON messages (to_member_id, status_timestamp);
 CREATE INDEX idx_messages_from_member_status_ts ON messages (from_member_id, status_timestamp);
-```
 
-Baseline column semantics:
-
-| Table | Semantics |
-|---|---|
-| `fleets` | `director_member_id` is backfilled inside the bootstrap transaction. A live fleet has null `deleted_at` and an active valid Director with placement |
-| `members` | `status` decodes as `active` or `deregistered`; unknown values fail. Deregistration is soft and keeps the row |
-| `member_placements` | `mux_pane_id` is null while member creation is pending. A concrete placement selects the shared pane input lock, and duplicate entries targeting the same backend/session/pane share it |
-| `messages` | `status_state` decodes as `input_required` or `completed`. `notified_at` is internal preview state that the public message record omits; a self-send stamps it on insertion and stays pending for reception and explicit ACK. Inbox streaming ignores it, and native handles and emitted-ID tracking belong to the receiver process with no durable consumer state |
-| `asset_installs` | Each successful backend asset installation upserts its CLI version and timestamp at `(coding_agent, path)`, independently of member registration |
-
-Runtime records keep their run/member/fleet/Director references after soft deregistration, so history survives member and fleet closure.
-
-Runtime schema extensions retain the application identity and existing data through contiguous embedded migrations. Section 6.9 specifies every additional runtime table field, enum, nullability constraint, foreign-key association and uniqueness invariant, including database-instance identity and settled receipt retention.
-
-### V2 and V3 preview migrations
-
-`V2__preview_attempts.sql` adds the nullable `messages.preview_started_at TEXT` column, and `V3__drop_preview_claims.sql` drops it again, so from V3 on `messages` has the baseline shape.
-
-### V4 member runtime migration
-
-The current-family V4 migration preserves existing rows and creates the runtime records:
-
-```sql
 CREATE TABLE runtime_database_identity (
     singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
     instance_id TEXT NOT NULL CHECK(length(instance_id) = 32 AND instance_id NOT GLOB '*[^0-9a-f]*')
@@ -3265,7 +3228,6 @@ CREATE TABLE member_runs (
     status TEXT NOT NULL CHECK(status IN ('starting','prepared','running','degraded','stopping','recovering','exited','failed','lost')),
     created_at TEXT NOT NULL,
     native_version TEXT,
-    profile_version TEXT,
     effective_policy_json TEXT CHECK(effective_policy_json IS NULL OR (json_valid(effective_policy_json) AND json_type(effective_policy_json) = 'object')),
     owner_epoch INTEGER NOT NULL CHECK(owner_epoch > 0),
     owner_kind TEXT NOT NULL CHECK(owner_kind IN ('creator','runner','reconciler')),
@@ -3312,7 +3274,7 @@ CREATE TABLE member_runtime_events (
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
     event_seq INTEGER NOT NULL CHECK(event_seq > 0),
     interaction_id INTEGER REFERENCES member_interactions(interaction_id) ON DELETE RESTRICT,
-    kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','permission_denied_observed','runner_degraded','runner_lost','runner_exited')),
+    kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','permission_denied_observed','automatic_refusal_observed','automatic_review_unavailable','input_delivery_result','runner_degraded','runner_lost','runner_exited')),
     observed_at TEXT NOT NULL,
     committed_at TEXT NOT NULL,
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json) AND json_type(payload_json) = 'object'),
@@ -3328,7 +3290,7 @@ CREATE TABLE member_input_operations (
     input_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
     operation_key TEXT NOT NULL CHECK(length(trim(operation_key)) > 0),
-    kind TEXT NOT NULL CHECK(kind IN ('preview','prompt','exec')),
+    kind TEXT NOT NULL CHECK(kind IN ('preview','prompt','exec','permission_response')),
     payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64 AND payload_digest NOT GLOB '*[^0-9a-f]*'),
     state TEXT NOT NULL CHECK(state IN ('ready','in_progress','accepted','uncertain','settled')),
     created_at TEXT NOT NULL,
@@ -3336,17 +3298,24 @@ CREATE TABLE member_input_operations (
     message_id INTEGER REFERENCES messages(message_id) ON DELETE RESTRICT,
     disposition TEXT CHECK(disposition IS NULL OR disposition IN ('submitted','not_submitted','abandoned_uncertain')),
     evidence_ref TEXT,
+    delivery_method TEXT CHECK(delivery_method IS NULL OR delivery_method IN ('profile','fallback')),
+    delivery_reason TEXT CHECK(delivery_reason IS NULL OR length(trim(delivery_reason)) > 0),
+    deferred_at TEXT,
+    defer_reason TEXT CHECK((deferred_at IS NULL AND defer_reason IS NULL)
+        OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
+            AND kind IN ('preview','prompt','exec'))),
+    payload_digest_version INTEGER NOT NULL DEFAULT 1
+        CHECK(payload_digest_version IN (1,2) AND (payload_digest_version = 1 OR kind = 'preview')),
+    uncertain_cause TEXT CHECK(uncertain_cause IS NULL
+        OR (uncertain_cause IN ('manual_input','manual_accounting_failed','interaction_candidate',
+                                'interaction_open','observer_unavailable','short_write','write_failed',
+                                'runner_stopped')
+            AND state IN ('uncertain','settled'))),
     UNIQUE(run_id, operation_key),
     CHECK(kind != 'preview' OR message_id IS NOT NULL),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
 );
-```
 
-### V5 permission response migration
-
-The contiguous V5 migration preserves V4 rows and IDs, expands the `member_input_operations.kind` check to `preview,prompt,exec,permission_response`, retains its existing columns/foreign keys/receipt constraints, and creates the following required tables. Section 6.9 fixes transactional same-run/event/Director checks, privacy, zero-byte claim release and immutable audit semantics.
-
-```sql
 CREATE TABLE member_permission_responses (
     input_id INTEGER PRIMARY KEY REFERENCES member_input_operations(input_id) ON DELETE RESTRICT,
     event_id INTEGER NOT NULL REFERENCES member_runtime_events(event_id) ON DELETE RESTRICT,
@@ -3359,7 +3328,6 @@ CREATE TABLE member_permission_responses (
     decision_source TEXT NOT NULL CHECK(decision_source IN ('director-auto','user')),
     mode_evidence_ref TEXT NOT NULL CHECK(length(CAST(mode_evidence_ref AS BLOB)) BETWEEN 1 AND 2048),
     decision_evidence_ref TEXT NOT NULL CHECK(length(CAST(decision_evidence_ref AS BLOB)) BETWEEN 1 AND 2048),
-    answer_profile_version TEXT NOT NULL CHECK(length(trim(answer_profile_version)) > 0),
     answer_rule_id TEXT NOT NULL CHECK(length(trim(answer_rule_id)) > 0),
     decided_at TEXT NOT NULL CHECK(length(trim(decided_at)) > 0),
     UNIQUE(interaction_id, input_id),
@@ -3374,88 +3342,19 @@ CREATE TABLE member_permission_response_claims (
 );
 ```
 
-### V6 automatic review migration
+Baseline column semantics:
 
-The contiguous V6 migration `V6__automatic_review_events.sql` preserves V5 rows and IDs. It rebuilds `member_runtime_events` with its `kind` CHECK widened to:
+| Table | Semantics |
+|---|---|
+| `fleets` | `director_member_id` is backfilled inside the bootstrap transaction. A live fleet has null `deleted_at` and an active valid Director with placement |
+| `members` | `status` decodes as `active` or `deregistered`; unknown values fail. Deregistration is soft and keeps the row |
+| `member_placements` | `mux_pane_id` is null while member creation is pending. A concrete placement selects the shared pane input lock, and duplicate entries targeting the same backend/session/pane share it |
+| `messages` | `status_state` decodes as `input_required` or `completed`. `notified_at` is internal preview state that the public message record omits; a self-send stamps it on insertion and stays pending for reception and explicit ACK. Inbox streaming ignores it, and native handles and emitted-ID tracking belong to the receiver process with no durable consumer state |
+| `asset_installs` | Each successful backend asset installation upserts its CLI version and timestamp at `(coding_agent, path)`, independently of member registration |
 
-```sql
-CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','permission_denied_observed','automatic_refusal_observed','automatic_review_unavailable','runner_degraded','runner_lost','runner_exited'))
-```
+Runtime records keep their run/member/fleet/Director references after soft deregistration, so history survives member and fleet closure.
 
-The grouped migration transaction runs with `foreign_keys=ON`, and `member_permission_responses.event_id` references `member_runtime_events` while `member_permission_response_claims` references `member_permission_responses` with `ON DELETE RESTRICT`, so the three tables are rebuilt in dependency order:
-
-1. Create `member_runtime_events_v6` with the widened CHECK and every other column, constraint and foreign key unchanged, copy all rows, and carry its `sqlite_sequence` row from `member_runtime_events` before any drop, so event IDs are never reused.
-2. Create `member_permission_responses_v6` with `event_id REFERENCES member_runtime_events_v6(event_id)` and otherwise the V5 definition; copy all rows.
-3. Create `member_permission_response_claims_v6` with its composite foreign key referencing `member_permission_responses_v6(interaction_id, input_id)` and otherwise the V5 definition; copy all rows.
-4. Drop `member_permission_response_claims`, then `member_permission_responses`, then `member_runtime_events`.
-5. Rename `member_runtime_events_v6`, `member_permission_responses_v6` and `member_permission_response_claims_v6` to their final names in that order; the non-legacy rename rewrites the referencing foreign keys and renames the `_v6` sequence row with its table.
-6. Add the profile-match column in place and backfill existing runs, which all selected their profile by exact version. SQLite tests an added column's CHECK against existing rows, and a NULL `profile_match` makes `IN` NULL rather than false, so the CHECK names `IS NOT NULL` explicitly and the profiled runs are stashed and their `profile_version` cleared while the column is added:
-
-```sql
-CREATE TEMP TABLE v6_profiled_runs AS
-  SELECT run_id, profile_version FROM member_runs WHERE profile_version IS NOT NULL;
-UPDATE member_runs SET profile_version = NULL WHERE profile_version IS NOT NULL;
-ALTER TABLE member_runs ADD COLUMN profile_match TEXT
-  CHECK((profile_version IS NULL AND profile_match IS NULL)
-     OR (profile_version IS NOT NULL AND profile_match IS NOT NULL
-         AND profile_match IN ('exact','fallback')));
-UPDATE member_runs SET
-  profile_version = (SELECT p.profile_version FROM v6_profiled_runs p WHERE p.run_id = member_runs.run_id),
-  profile_match = 'exact'
-  WHERE run_id IN (SELECT run_id FROM v6_profiled_runs);
-DROP TABLE v6_profiled_runs;
-```
-
-The derived chain guard and schema-shape guard pass at head V6.
-
-### V7 minimum-version delivery migration
-
-The contiguous V7 migration `V7__minimum_version_delivery.sql` preserves V6 rows, IDs, sequences, foreign keys and audit relationships, and the application and instance identities. It applies these changes in one grouped transaction with `foreign_keys=ON`:
-
-1. Drop the run's profile-match column together with its column-local CHECK:
-
-```sql
-ALTER TABLE member_runs DROP COLUMN profile_match;
-```
-
-2. Add the ordinary-delivery and digest-version columns to `member_input_operations` in place. Existing rows receive `payload_digest_version=1`, keep their digest bytes and have null delivery/deferred metadata:
-
-```sql
-ALTER TABLE member_input_operations ADD COLUMN delivery_method TEXT
-  CHECK(delivery_method IS NULL OR delivery_method IN ('profile','fallback'));
-ALTER TABLE member_input_operations ADD COLUMN delivery_reason TEXT
-  CHECK(delivery_reason IS NULL OR length(trim(delivery_reason)) > 0);
-ALTER TABLE member_input_operations ADD COLUMN deferred_at TEXT;
-ALTER TABLE member_input_operations ADD COLUMN defer_reason TEXT
-  CHECK((deferred_at IS NULL AND defer_reason IS NULL)
-     OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
-         AND kind IN ('preview','prompt','exec')));
-ALTER TABLE member_input_operations ADD COLUMN payload_digest_version INTEGER NOT NULL DEFAULT 1
-  CHECK(payload_digest_version IN (1,2) AND (payload_digest_version = 1 OR kind = 'preview'));
-```
-
-3. Rebuild `member_runtime_events`, `member_permission_responses` and `member_permission_response_claims` in the V6 dependency order with `_v7` staging names, carrying the event `sqlite_sequence` row before any drop, and widen the event kind CHECK to:
-
-```sql
-CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','permission_denied_observed','automatic_refusal_observed','automatic_review_unavailable','input_delivery_result','runner_degraded','runner_lost','runner_exited'))
-```
-
-Every other column, constraint, index and foreign key of the rebuilt tables is unchanged. The derived chain guard and schema-shape guard pass at head V7.
-
-### V8 uncertain cause migration
-
-The contiguous V8 migration `V8__uncertain_cause.sql` preserves V7 rows, IDs, sequences, foreign keys and audit relationships, and the application and instance identities. It adds the uncertain-cause column to `member_input_operations` in place, and existing rows receive null:
-
-```sql
-ALTER TABLE member_input_operations ADD COLUMN uncertain_cause TEXT
-  CHECK(uncertain_cause IS NULL
-     OR (uncertain_cause IN ('manual_input','manual_accounting_failed','interaction_candidate',
-                             'interaction_open','observer_unavailable','short_write','write_failed',
-                             'runner_stopped')
-         AND state IN ('uncertain','settled')));
-```
-
-No table is rebuilt. The derived chain guard and schema-shape guard pass at head V8.
+Section 6.9 specifies every runtime table field, enum, nullability constraint, foreign-key association and uniqueness invariant, including database-instance identity, settled receipt retention, transactional same-run/event/Director response checks, privacy, zero-byte claim release and immutable audit semantics. Later schema changes within the family extend the chain with contiguous embedded migrations that retain the application identity and existing data.
 
 ## 9. Testing strategy
 

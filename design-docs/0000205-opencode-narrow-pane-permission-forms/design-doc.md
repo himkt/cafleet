@@ -1,7 +1,7 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
 **Status**: Approved
-**Progress**: 2/22 tasks complete
+**Progress**: 5/22 tasks complete
 **Last Updated**: 2026-11-01
 
 ## Overview
@@ -390,9 +390,9 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 ### Step 2: Document the identifier removal and the v9 format
 
-- [ ] Apply the `SPEC.md` profile, runtime and storage changes in § Documentation targets, including the v9 baseline DDL in §8. <!-- completed: -->
-- [ ] Update `docs/docs/concepts/storage.md`, and confirm by repository search that no other `docs/` page names a profile identifier or the OpenCode form-layout limits. <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/cli.md`, the Role-eligibility rows in `skills/cafleet/reference/coding-agents.md` and `.claude/rules/database-migrations.md`. <!-- completed: -->
+- [x] Apply the `SPEC.md` profile, runtime and storage changes in § Documentation targets, including the v9 baseline DDL in §8. <!-- completed: 2026-11-01T00:53 -->
+- [x] Update `docs/docs/concepts/storage.md`, and confirm by repository search that no other `docs/` page names a profile identifier or the OpenCode form-layout limits. <!-- completed: 2026-11-01T00:53 -->
+- [x] Update `skills/cafleet/reference/cli.md`, the Role-eligibility rows in `skills/cafleet/reference/coding-agents.md` and `.claude/rules/database-migrations.md`. <!-- completed: 2026-11-01T00:53 -->
 
 ### Step 3: Capture narrow native evidence
 
