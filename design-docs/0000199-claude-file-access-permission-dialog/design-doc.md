@@ -255,8 +255,6 @@ Unchanged. The Director consumes `interaction_opened`, verifies it with `event s
 | Probe-set tools that produced no dialog, and tools outside the probe set | No rule; an outside-working-directory dialog from them is an `unknown` frame with no event, answered on the native surface |
 | Digit check failure for a dialog | That rule is detection-only; both of its answers are manual |
 
-COMMENT(programmer): Observation for the once-per-configuration finding: none of the Step 1 private configurations recorded `hasSeenAutoModeOutsideReadPrompt` — the cells, allow and deny cases all show the same 29 changed key paths, and none names it. Each case stopped the native child with SIGTERM (exit 143) about 5 s after the answer, so Claude may write the flag only at a later point or on a graceful exit. The documented wording relies on your live observation only; please confirm whether the flag appears after the dialog is shown or only after it is answered, if the wording should say which.
-
 ### Documentation targets
 
 | Target | Change |
@@ -349,7 +347,7 @@ Run 2026-10-31 with the release build of commit `73ba45a2` (`mise //cafleet:buil
 | herdr manual answer | `member press 20 3` closed the dialog; `permission respond` with the earlier token failed `permission inspection current event/interaction/message mismatch` before any byte, and the composer stayed empty |
 | herdr capture | `member capture --lines 40` showed every dialog line and matched `herdr pane read --format text --source recent-unwrapped --lines 1040` after trimming trailing whitespace; `--ansi --json` kept the raw `\r\n` |
 | herdr short pane | With three member panes open, member 20's pane hid the heading row and no event was published; after two panes closed, the redraw showed the full dialog and `interaction_opened` followed |
-| tmux (private database, member 2) | Not observed: Claude read the file without a dialog. The operator configuration now holds `hasSeenAutoModeOutsideReadPrompt: true`, so in `auto` Claude shows this dialog once per configuration. The digits `4` and `3` on tmux rest on the Step 1 driver cases, which ran under the runner on a dedicated tmux server |
+| tmux (private database, member 2) | Not observed: Claude read the file without a dialog. The operator configuration now holds `hasSeenAutoModeOutsideReadPrompt: true`, after which `auto` reads outside the working directories proceed without asking; when Claude writes the flag is not established. The digits `4` and `3` on tmux rest on the Step 1 driver cases, which ran under the runner on a dedicated tmux server |
 
 ---
 
