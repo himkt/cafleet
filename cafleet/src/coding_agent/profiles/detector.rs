@@ -2489,6 +2489,97 @@ mod tests {
                 assert_ne!(typed.rule_id, GATED_REASON_RULE, "{reason}");
             }
         }
+
+        const ROW_SGR: &str = "\x1b[48;2;30;30;30m";
+
+        /// The gated form on a `cols`-wide screen whose choice row is `row`, written from
+        /// column 0 after the screen is cleared to the default background.
+        fn sized_form(cols: u16, row: &str) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize { rows: 24, cols }).unwrap();
+            state
+                .feed(
+                    format!(
+                        "\x1b[0m\x1b[2J\x1b[19;1HSynthetic gated request\r\nOperation: write disposable.txt\r\n{row}\x1b[0m\r\nSelection: "
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            state.snapshot()
+        }
+
+        fn focused_on(screen: &ScreenSnapshot) -> Option<String> {
+            let allow = detector()
+                .match_answer(screen, &gated_plan(PermissionDecision::Allow))
+                .unwrap()
+                .expect("the gated form matches regardless of its focus");
+            allow.focused_choice_id().map(str::to_owned)
+        }
+
+        #[test]
+        fn focus_row_background_is_the_majority_background_not_the_left_edge() {
+            let edge = sized_form(
+                80,
+                &format!(
+                    "{ROW_SGR}\x1b[K{FOCUS_SGR}  Allow once {ROW_SGR}  Always allow   Deny once"
+                ),
+            );
+            assert_eq!(
+                focused_on(&edge).as_deref(),
+                Some("allow-once"),
+                "a highlight over column 0 leaves the row background to the majority"
+            );
+            let last_column = sized_form(
+                39,
+                &format!("{ROW_SGR}\x1b[K  Allow once   Always allow   {FOCUS_SGR}Deny once"),
+            );
+            assert_eq!(
+                focused_on(&last_column).as_deref(),
+                Some("deny-once"),
+                "a focused label may reach the last column"
+            );
+        }
+
+        #[test]
+        fn focus_resolves_no_choice_without_a_background_covering_more_than_half_the_row() {
+            let half = "\x1b[48;5;236m";
+            let split_row = |painted: usize| {
+                sized_form(
+                    80,
+                    &format!(
+                        "{half}\x1b[K  {FOCUS_SGR}Allow once{half}   Always allow   Deny once\x1b[{}G\x1b[0m\x1b[K",
+                        painted + 1
+                    ),
+                )
+            };
+            assert_eq!(
+                focused_on(&split_row(40)),
+                None,
+                "40 painted cells of 80 are not a majority"
+            );
+            assert_eq!(
+                focused_on(&split_row(51)).as_deref(),
+                Some("allow-once"),
+                "41 cells of the painted background are a majority"
+            );
+        }
+
+        #[test]
+        fn focus_requires_every_cell_of_the_label_to_differ_from_the_row_background() {
+            let partial = sized_form(
+                80,
+                &format!(
+                    "{ROW_SGR}\x1b[K  {FOCUS_SGR}Allow{ROW_SGR} once   Always allow   Deny once"
+                ),
+            );
+            assert_eq!(focused_on(&partial), None);
+            let whole = sized_form(
+                80,
+                &format!(
+                    "{ROW_SGR}\x1b[K  {FOCUS_SGR}Allow once{ROW_SGR}   Always allow   Deny once"
+                ),
+            );
+            assert_eq!(focused_on(&whole).as_deref(), Some("allow-once"));
+        }
     }
 
     fn assert_permission(value: &ScreenObservation) {
@@ -3138,7 +3229,7 @@ mod tests {
             let rule = &mut value["profiles"][0]["rules"][0];
             rule["matchers"][0] = json!({
                 "id":"operation","scope":"region",
-                "pattern":"(?m)^Operation: (?P<operation>[^\\n]+(?:\\n(?!> )[^\\n]*)*)\\n> Allow once$"
+                "pattern":"(?m)^Operation: (?P<operation>[^\\n]+(?:\\n[^>\\n][^\\n]*)*)\\n> Allow once$"
             });
             let operation = &mut rule["extract"]["operation"];
             operation["row_margin"] = json!(MARGIN);
@@ -3215,7 +3306,7 @@ mod tests {
         fn the_default_margin_rows_keep_the_shipped_all_rows_extraction() {
             let mut definition = rowed(None, None);
             definition["profiles"][0]["rules"][0]["matchers"][0]["pattern"] = json!(
-                "(?m)^Operation:(?P<operation> [^\\n]+(?:\\n(?!> )[^\\n]*)*)\\n> Allow once$"
+                "(?m)^Operation:(?P<operation> [^\\n]+(?:\\n[^>\\n][^\\n]*)*)\\n> Allow once$"
             );
             definition["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] =
                 json!(" ");

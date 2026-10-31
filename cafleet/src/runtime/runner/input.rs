@@ -11816,6 +11816,74 @@ mod tests {
                 });
             }
 
+            /// The bundled OpenCode fixture `id` with the command box row `row` showing `command`.
+            fn opencode_command(
+                id: &str,
+                row: usize,
+                command: &str,
+                trailer_col: usize,
+            ) -> Vec<u8> {
+                let mut screen: serde_json::Value = serde_json::from_str(
+                    crate::coding_agent::profiles::detector::test_support::bundled_screen(id),
+                )
+                .unwrap();
+                let cols = usize::try_from(screen["cols"].as_u64().unwrap()).unwrap();
+                for (offset, text) in [command, ""].into_iter().enumerate() {
+                    let line = &mut screen["lines"][row + offset];
+                    assert_eq!(line.as_str().unwrap().chars().nth(trailer_col), Some('█'));
+                    *line = serde_json::json!(format!(
+                        "{text:<trailer_col$}█{}",
+                        " ".repeat(cols - trailer_col - 1)
+                    ));
+                }
+                native_fixture_bytes(&screen.to_string())
+            }
+
+            #[test]
+            fn opencode_resize_across_w_split_between_deny_stages_fails_uncertain() {
+                with_opencode_inspection(|h, _, _| {
+                    let command = "  $ /tmp/x/permission-probe deny";
+                    h.show(opencode_command(
+                        "opencode-2.1.4-deny-pre-stage-1",
+                        14,
+                        command,
+                        116,
+                    ));
+                    let ids = settled_ids(h);
+                    let deadline = soon(3000);
+                    admit(
+                        h,
+                        ids,
+                        "response:opencode-resize",
+                        PermissionDecision::Deny,
+                        deadline,
+                    );
+                    let id = write_stage(h, 1);
+                    let generation = h.controller.request_generation();
+                    h.transport
+                        .resize(
+                            &mut h.pty,
+                            crate::runtime::runner::TerminalSize { rows: 36, cols: 57 },
+                        )
+                        .unwrap();
+                    h.show(opencode_command(
+                        "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
+                        17,
+                        command,
+                        53,
+                    ));
+                    let outcome = settle(h, deadline);
+                    assert_uncertain(h, id, outcome);
+                    assert_eq!(
+                        h.pty.offers,
+                        offers(&[b"h"]),
+                        "the second stage is never written after the layout changes"
+                    );
+                    assert!(h.controller.request_generation() > generation);
+                    assert_eq!(opened(h), 1, "unchanged command rows keep the episode");
+                });
+            }
+
             #[test]
             fn opencode_reject_dialog_reached_by_human_input_offers_no_token() {
                 with_opencode_inspection(|h, _, _| {

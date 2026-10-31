@@ -410,15 +410,20 @@ mod tests {
         ] {
             assert!(tables.iter().any(|name| name == table), "{table}");
         }
-        for (table, removed) in [
-            ("member_runs", "profile_version"),
-            ("member_permission_responses", "answer_profile_version"),
+        for (table, columns) in [
+            (
+                "member_runs",
+                "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status",
+            ),
+            (
+                "member_permission_responses",
+                "input_id event_id interaction_id expected_owner_epoch request_token decision director_member_id director_mode decision_source mode_evidence_ref decision_evidence_ref answer_rule_id decided_at",
+            ),
         ] {
-            let columns = column_names(&conn, table);
-            assert!(!columns.is_empty(), "{table}");
-            assert!(
-                !columns.iter().any(|name| name == removed),
-                "{table}.{removed}"
+            assert_eq!(
+                column_names(&conn, table),
+                columns.split_whitespace().collect::<Vec<_>>(),
+                "{table}"
             );
         }
         assert_eq!(
@@ -443,8 +448,6 @@ mod tests {
         {
             let mut conn = connect(&url).unwrap();
             migrate_to_head(&mut conn).unwrap();
-            conn.execute_batch("ALTER TABLE member_runs ADD COLUMN profile_version TEXT")
-                .unwrap();
             conn.pragma_update(None, "application_id", V8_APPLICATION_ID)
                 .unwrap();
             conn.execute(

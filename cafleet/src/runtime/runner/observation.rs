@@ -8797,6 +8797,172 @@ mod tests {
             }
         }
 
+        /// The bundled OpenCode fixture `id` with its command rows replaced by `command`, each
+        /// padded to the command box with the scrollbar column `trailer_col` cells in.
+        fn opencode_form(
+            id: &str,
+            first_row: usize,
+            command: [&str; 2],
+            trailer_col: usize,
+        ) -> Vec<u8> {
+            use crate::coding_agent::profiles::detector::test_support::{
+                bundled_screen, native_fixture_bytes,
+            };
+            let mut screen: serde_json::Value = serde_json::from_str(bundled_screen(id)).unwrap();
+            let cols = usize::try_from(screen["cols"].as_u64().unwrap()).unwrap();
+            for (offset, text) in command.iter().enumerate() {
+                let row = &mut screen["lines"][first_row + offset];
+                assert!(
+                    row.as_str().unwrap().chars().nth(trailer_col) == Some('█'),
+                    "{id} row {} carries the command box",
+                    first_row + offset
+                );
+                *row = serde_json::json!(format!(
+                    "{text:<trailer_col$}█{}",
+                    " ".repeat(cols - trailer_col - 1)
+                ));
+            }
+            native_fixture_bytes(&screen.to_string())
+        }
+
+        #[test]
+        fn opencode_resize_across_w_split_starts_a_new_generation_and_a_rewrap_a_new_episode() {
+            use crate::runtime::system::test_support::TestChild;
+            use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+            use std::sync::Arc;
+
+            let until = Instant::now() + Duration::from_secs(5);
+            let mut fixture = Fixture::new();
+            let artifacts = fixture.artifacts();
+            let lock = Arc::new(
+                RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                    .unwrap()
+                    .unwrap(),
+            );
+            lock.transfer_to_runner(
+                &mut fixture.conn,
+                &fixture.run.owner(),
+                ProcessIdentity::current().unwrap(),
+            )
+            .unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
+            fixture.conn.execute("UPDATE member_runs SET backend='opencode',native_version='2.1.4',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let catalog = ProfileCatalog::bundled().unwrap();
+            let mut controller = ObservationController::new(
+                &fixture.run,
+                &catalog,
+                EvidencePolicy::metadata(),
+                1..=256,
+            )
+            .unwrap();
+            let mut writer = EventWriter::start(
+                format!("sqlite:///{}", fixture.conn.path().unwrap()),
+                fixture.run.clone(),
+                lock,
+                artifacts.paths.outbox.clone(),
+            )
+            .unwrap();
+            writer.set_deadline(until);
+            let mut child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+            let identity = child.identity();
+            assert!(identity.matches().unwrap());
+            fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::now_stamp(),fixture.run.run_id]).unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let command = ["  $ /tmp/x/permission-probe allow", ""];
+            let wide = opencode_form("opencode-2.1.4-ask-permission-1", 14, command, 116);
+            let split = opencode_form("opencode-2.1.4-narrow-permission-057-1", 27, command, 53);
+            let rewrapped = opencode_form(
+                "opencode-2.1.4-narrow-permission-057-1",
+                27,
+                ["  $ /tmp/x/", "  permission-probe allow"],
+                53,
+            );
+            let mut terminal = TerminalState::new(TerminalSize {
+                rows: 36,
+                cols: 120,
+            })
+            .unwrap();
+            let primary = catch_unwind(AssertUnwindSafe(|| {
+                controller
+                    .started(
+                        &fixture.run,
+                        &terminal.snapshot(),
+                        &writer,
+                        &RealObservationClock,
+                    )
+                    .unwrap();
+                let mut show =
+                    |terminal: &mut TerminalState,
+                     bytes: &[u8],
+                     until_state: &dyn Fn(&ObservationController) -> bool| {
+                        terminal.feed(bytes).unwrap();
+                        controller
+                            .observer(&writer, &RealObservationClock)
+                            .observe(&terminal.snapshot())
+                            .unwrap();
+                        loop {
+                            controller
+                                .poll(&terminal.snapshot(), &writer, &RealObservationClock)
+                                .unwrap();
+                            if until_state(&controller) {
+                                break;
+                            }
+                            assert!(Instant::now() < until, "the observed state settles in time");
+                            std::thread::sleep(Duration::from_millis(2));
+                        }
+                        (
+                            controller.request_generation(),
+                            controller.tracker.active_episode().map(|(seq, _)| seq),
+                        )
+                    };
+                let (wide_generation, wide_episode) =
+                    show(&mut terminal, &wide, &|c| c.current_request().is_some());
+                assert!(wide_episode.is_some());
+                terminal
+                    .resize(TerminalSize { rows: 36, cols: 57 })
+                    .unwrap();
+                let (split_generation, split_episode) = show(&mut terminal, &split, &|c| {
+                    c.current_request().is_some() && c.request_generation() > wide_generation
+                });
+                assert!(
+                    split_generation > wide_generation,
+                    "the resize starts a new request generation"
+                );
+                assert_eq!(
+                    split_episode, wide_episode,
+                    "unchanged command rows keep the episode across the resize"
+                );
+                let (rewrap_generation, rewrap_episode) = show(&mut terminal, &rewrapped, &|c| {
+                    c.current_request().is_some()
+                        && c.tracker.active_episode().map(|(seq, _)| seq) > wide_episode
+                });
+                assert!(rewrap_generation > split_generation);
+                assert!(
+                    rewrap_episode > split_episode,
+                    "a moved row break opens a new episode"
+                );
+            }));
+            let cleanup = catch_unwind(AssertUnwindSafe(|| {
+                writer.finish(until);
+                child.terminate_until(until);
+                assert!(
+                    child.try_wait().unwrap().is_some(),
+                    "owned synthetic child reap confirmed"
+                );
+            }));
+            if let Err(primary) = primary {
+                if let Err(cleanup) = &cleanup {
+                    eprintln!("resize cleanup also failed: {cleanup:?}");
+                }
+                resume_unwind(primary);
+            }
+            if let Err(cleanup) = cleanup {
+                resume_unwind(cleanup);
+            }
+        }
+
         #[test]
         fn permission_inspection_observed_authority_has_no_debug_or_serialized_representation() {
             assert_no_debug_or_serialize!(ObservedRequest);

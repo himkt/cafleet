@@ -1813,7 +1813,8 @@ pub(crate) mod test_support {
         } else {
             &["Allow once", "Deny once"]
         };
-        let mut row = format!("{row_sgr}  ");
+        // The erase paints the whole row in its background, as the native form does.
+        let mut row = format!("{row_sgr}\x1b[K  ");
         for (index, label) in labels.iter().enumerate() {
             if index > 0 {
                 row.push_str("   ");
@@ -5645,6 +5646,75 @@ mod tests {
         const DENY_3_FIXTURE: &str = "opencode-2.1.4-deny-pre-stage-3";
         const ALWAYS_FIXTURE: &str = "opencode-2.1.4-focus-always-1";
         const IDLE_FIXTURE: &str = "opencode-2.1.4-idle-composer-1";
+        const NARROW_FIXTURE: &str = "opencode-2.1.4-narrow-permission-057-1";
+        const NARROW_DENY_2_FIXTURE: &str = "opencode-2.1.4-narrow-deny-pre-stage-2-057-1";
+        const NARROW_DENY_3_FIXTURE: &str = "opencode-2.1.4-narrow-deny-pre-stage-3-057-1";
+        const NARROW_LONG_FIXTURE: &str = "opencode-2.1.4-narrow-long-command-057-1";
+        const NARROW_IDLE_FIXTURE: &str = "opencode-2.1.4-narrow-idle-composer-057-1";
+        const COMPACT_FIXTURE: &str = "opencode-2.1.4-compact-permission-055-1";
+        const COMPACT_DENY_2_FIXTURE: &str = "opencode-2.1.4-compact-deny-pre-stage-2-055-1";
+        const COMPACT_DENY_3_FIXTURE: &str = "opencode-2.1.4-compact-deny-pre-stage-3-055-1";
+        const MIN_FIXTURE: &str = "opencode-2.1.4-narrow-permission-min-1";
+        const MIN_DENY_2_FIXTURE: &str = "opencode-2.1.4-narrow-deny-pre-stage-2-min-1";
+        const MIN_DENY_3_FIXTURE: &str = "opencode-2.1.4-narrow-deny-pre-stage-3-min-1";
+        /// Each narrow form fixture, the request rule it matches, its displayed command rows and
+        /// the choice its captured backgrounds focus.
+        const NARROW_FORMS: [(&str, &str, [&str; 2], &str); 6] = [
+            (
+                NARROW_FIXTURE,
+                PERMISSION_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-narrow-cells-057/",
+                    "permission-probe allow",
+                ],
+                "allow-once",
+            ),
+            (
+                NARROW_DENY_2_FIXTURE,
+                PERMISSION_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-narrow-deny-002-057/",
+                    "permission-probe deny",
+                ],
+                "deny-once",
+            ),
+            (
+                COMPACT_FIXTURE,
+                COMPACT_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-compact-cells-055/",
+                    "permission-probe allow",
+                ],
+                "allow-once",
+            ),
+            (
+                COMPACT_DENY_2_FIXTURE,
+                COMPACT_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-compact-deny-002-055/",
+                    "permission-probe deny",
+                ],
+                "deny-once",
+            ),
+            (
+                MIN_FIXTURE,
+                COMPACT_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-narrow-",
+                    "cells-min/permission-probe allow",
+                ],
+                "allow-once",
+            ),
+            (
+                MIN_DENY_2_FIXTURE,
+                COMPACT_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-narrow-",
+                    "deny-002-min/permission-probe deny",
+                ],
+                "deny-once",
+            ),
+        ];
         const FORM_FIXTURES: [(&str, &str, &str); 5] = [
             (PERMISSION_FIXTURE, "opencode-cells-001", "allow"),
             (ALLOW_FIXTURE, "opencode-ans-allow-001", "allow"),
@@ -5803,13 +5873,18 @@ mod tests {
                 "detection lists both request rules"
             );
             assert_eq!(
-                capabilities["detection"]["fixture_ids"],
-                json!([PERMISSION_FIXTURE])
+                id_set(&capabilities["detection"]["fixture_ids"]),
+                BTreeSet::from([
+                    PERMISSION_FIXTURE,
+                    NARROW_FIXTURE,
+                    COMPACT_FIXTURE,
+                    MIN_FIXTURE
+                ])
             );
             assert_eq!(capabilities["composer"]["rule_ids"], json!([IDLE_RULE]));
             assert_eq!(
-                capabilities["composer"]["fixture_ids"],
-                json!([IDLE_FIXTURE])
+                id_set(&capabilities["composer"]["fixture_ids"]),
+                BTreeSet::from([IDLE_FIXTURE, NARROW_IDLE_FIXTURE])
             );
             assert_eq!(
                 capabilities["composer"]["submission"],
@@ -5830,7 +5905,14 @@ mod tests {
             assert_eq!(reason["observation"], "permission_continuation");
             assert_eq!(reason["continues_rule_id"], PERMISSION_RULE);
             assert_eq!(reason["continues_choice_id"], "deny-once");
-            assert_eq!(reason["fixture_ids"], json!([DENY_3_FIXTURE]));
+            assert_eq!(
+                id_set(&reason["fixture_ids"]),
+                BTreeSet::from([DENY_3_FIXTURE, NARROW_DENY_3_FIXTURE])
+            );
+            assert_eq!(
+                id_set(&rule(&definitions, COMPACT_REASON_RULE)["fixture_ids"]),
+                BTreeSet::from([COMPACT_DENY_3_FIXTURE, MIN_DENY_3_FIXTURE])
+            );
             assert_eq!(
                 reason["extract"],
                 json!({"operation":null,"choices":[],"native_request_id":null})
@@ -6033,7 +6115,27 @@ mod tests {
                 let capability = plan.capability();
                 assert_eq!(capability.request_rule_id(), COMPACT_RULE);
                 assert_eq!(capability.decision(), decision);
-                assert!(!capability.fixture_ids().is_empty());
+                let fixtures = if decision == PermissionDecision::Allow {
+                    BTreeSet::from([COMPACT_FIXTURE, MIN_FIXTURE])
+                } else {
+                    BTreeSet::from([
+                        COMPACT_FIXTURE,
+                        COMPACT_DENY_2_FIXTURE,
+                        COMPACT_DENY_3_FIXTURE,
+                        MIN_FIXTURE,
+                        MIN_DENY_2_FIXTURE,
+                        MIN_DENY_3_FIXTURE,
+                    ])
+                };
+                assert_eq!(
+                    capability
+                        .fixture_ids()
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<BTreeSet<_>>(),
+                    fixtures,
+                    "{decision:?}"
+                );
                 let wide = plan_for(PERMISSION_RULE, decision);
                 assert_ne!(
                     capability.answer_rule_id(),
@@ -6050,6 +6152,196 @@ mod tests {
                 .unwrap()
         }
 
+        fn id_set(ids: &Value) -> BTreeSet<&str> {
+            ids.as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap())
+                .collect()
+        }
+
+        fn focused_on(request: &str, screen: &ScreenSnapshot) -> Option<String> {
+            let detector = detector();
+            let mut resolved = BTreeSet::new();
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                let matched = detector
+                    .match_answer(screen, &plan_for(request, decision))
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("the {request} form matches the {decision:?} plan"));
+                resolved.insert(matched.focused_choice_id().map(str::to_owned));
+            }
+            assert_eq!(resolved.len(), 1, "both plans share the focus matcher");
+            resolved.pop_first().unwrap()
+        }
+
+        #[test]
+        fn bundled_opencode_detects_every_narrow_and_compact_form_fixture() {
+            for (id, request, rows, focus) in NARROW_FORMS {
+                let observed = observe(&replay(fixture(id)));
+                assert_eq!(
+                    observed.kind,
+                    ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                    "{id}"
+                );
+                assert_eq!(observed.rule_id, request, "{id}");
+                assert_eq!(observed.match_evidence, MatchEvidence::Complete, "{id}");
+                assert!(!observed.verified_noninteraction, "{id}");
+                assert_eq!(observed.raw_evidence["operation"], rows.join("\n"), "{id}");
+                assert_eq!(observed.raw_evidence["operation_rows"], 2, "{id}");
+                assert_eq!(
+                    observed.raw_evidence["choices"],
+                    json!(["Allow once", "Reject"]),
+                    "{id}"
+                );
+                assert_eq!(
+                    observed.raw_evidence["native_request_id"],
+                    Value::Null,
+                    "{id}"
+                );
+                assert!(observed.fingerprint.is_some(), "{id}");
+                assert_eq!(
+                    focused_on(request, &replay(fixture(id))).as_deref(),
+                    Some(focus),
+                    "{id}"
+                );
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_narrow_stage_gates_hold_on_their_pre_stage_fixtures() {
+            for (request, reason, cells, deny_2, deny_3) in [
+                (
+                    PERMISSION_RULE,
+                    REASON_RULE,
+                    NARROW_FIXTURE,
+                    NARROW_DENY_2_FIXTURE,
+                    NARROW_DENY_3_FIXTURE,
+                ),
+                (
+                    COMPACT_RULE,
+                    COMPACT_REASON_RULE,
+                    COMPACT_FIXTURE,
+                    COMPACT_DENY_2_FIXTURE,
+                    COMPACT_DENY_3_FIXTURE,
+                ),
+                (
+                    COMPACT_RULE,
+                    COMPACT_REASON_RULE,
+                    MIN_FIXTURE,
+                    MIN_DENY_2_FIXTURE,
+                    MIN_DENY_3_FIXTURE,
+                ),
+            ] {
+                let allow = plan_for(request, PermissionDecision::Allow);
+                let deny = plan_for(request, PermissionDecision::Deny);
+                let cells_focus = focused_on(request, &replay(fixture(cells)));
+                assert_eq!(
+                    cells_focus.as_deref(),
+                    allow.stages()[0].required_focus_choice_id(),
+                    "{cells} allow stage 1"
+                );
+                assert_eq!(
+                    cells_focus.as_deref(),
+                    deny.stages()[0].required_focus_choice_id(),
+                    "{cells} deny stage 1"
+                );
+                assert_eq!(
+                    focused_on(request, &replay(fixture(deny_2))).as_deref(),
+                    deny.stages()[1].required_focus_choice_id(),
+                    "{deny_2}"
+                );
+                let dialog = observe(&replay(fixture(deny_3)));
+                assert_eq!(
+                    dialog.kind,
+                    ObservationKind::PermissionContinuation,
+                    "{deny_3}"
+                );
+                assert_eq!(dialog.match_evidence, MatchEvidence::Complete, "{deny_3}");
+                assert_eq!(dialog.rule_id, reason, "{deny_3}");
+                assert_eq!(
+                    Some(dialog.rule_id.as_str()),
+                    deny.stages()[2].required_screen_rule_id(),
+                    "{deny_3}"
+                );
+                assert_eq!(
+                    dialog.continues_rule_id.as_deref(),
+                    Some(request),
+                    "{deny_3}"
+                );
+                for plan in [&allow, &deny] {
+                    assert!(
+                        detector()
+                            .match_answer(&replay(fixture(deny_3)), plan)
+                            .unwrap()
+                            .is_none(),
+                        "{deny_3}: the rejection-reason dialog is not an answerable form"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_narrow_reject_dialogs_require_the_empty_placeholder() {
+            for id in [
+                NARROW_DENY_3_FIXTURE,
+                COMPACT_DENY_3_FIXTURE,
+                MIN_DENY_3_FIXTURE,
+            ] {
+                let placeholder = lines(fixture(id))
+                    .iter()
+                    .rposition(|line| line.contains("Tell OpenCode what to do differently"))
+                    .expect("the dialog shows its placeholder");
+                let typed = observe(&replay_changed(
+                    fixture(id),
+                    |lines| {
+                        lines[placeholder] = lines[placeholder].replacen(
+                            "Tell OpenCode what to do differently",
+                            "run it in the sandbox instead       ",
+                            1,
+                        )
+                    },
+                    None,
+                ));
+                assert_ne!(typed.kind, ObservationKind::PermissionContinuation, "{id}");
+                assert_ne!(typed.rule_id, REASON_RULE, "{id}");
+                assert_ne!(typed.rule_id, COMPACT_REASON_RULE, "{id}");
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_clipped_long_command_yields_no_request() {
+            let observed = observe(&replay(fixture(NARROW_LONG_FIXTURE)));
+            assert_ne!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert_ne!(observed.rule_id, PERMISSION_RULE);
+            assert_ne!(observed.rule_id, COMPACT_RULE);
+            assert!(observed.fingerprint.is_none());
+            for request in [PERMISSION_RULE, COMPACT_RULE] {
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    assert!(
+                        detector()
+                            .match_answer(
+                                &replay(fixture(NARROW_LONG_FIXTURE)),
+                                &plan_for(request, decision)
+                            )
+                            .unwrap()
+                            .is_none(),
+                        "{request} {decision:?}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_narrow_idle_composer_is_a_verified_empty_composer() {
+            let observed = observe(&replay(fixture(NARROW_IDLE_FIXTURE)));
+            assert_eq!(observed.kind, ObservationKind::ComposerEmpty);
+            assert_eq!(observed.rule_id, IDLE_RULE);
+            assert!(observed.verified_noninteraction);
+        }
+
         #[test]
         fn bundled_opencode_answer_plans_are_the_measured_gated_stages() {
             let allow = plan(PermissionDecision::Allow);
@@ -6060,7 +6352,7 @@ mod tests {
                     PermissionDecision::Allow,
                     "allow-once",
                     "opencode-shell-allow-once",
-                    vec![ALLOW_FIXTURE.to_owned()],
+                    BTreeSet::from([ALLOW_FIXTURE, NARROW_FIXTURE]),
                     vec![(vec![0x0d], Some("allow-once"), None)],
                 ),
                 (
@@ -6068,11 +6360,14 @@ mod tests {
                     PermissionDecision::Deny,
                     "deny-once",
                     "opencode-shell-deny-once",
-                    vec![
-                        DENY_1_FIXTURE.to_owned(),
-                        DENY_2_FIXTURE.to_owned(),
-                        DENY_3_FIXTURE.to_owned(),
-                    ],
+                    BTreeSet::from([
+                        DENY_1_FIXTURE,
+                        DENY_2_FIXTURE,
+                        DENY_3_FIXTURE,
+                        NARROW_FIXTURE,
+                        NARROW_DENY_2_FIXTURE,
+                        NARROW_DENY_3_FIXTURE,
+                    ]),
                     vec![
                         (vec![0x68], Some("allow-once"), None),
                         (vec![0x0d], Some("deny-once"), None),
@@ -6103,7 +6398,15 @@ mod tests {
                 assert_eq!(capability.request_rule_id(), PERMISSION_RULE);
                 assert_eq!(capability.answer_rule_id(), answer_rule);
                 assert_eq!(capability.decision(), decision);
-                assert_eq!(capability.fixture_ids(), fixtures.as_slice());
+                assert_eq!(
+                    capability
+                        .fixture_ids()
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<BTreeSet<_>>(),
+                    fixtures,
+                    "{decision:?}"
+                );
                 let bundled = ProfileCatalog::bundled().unwrap();
                 for (backend, version, request) in [
                     (CodingAgent::Opencode, OPENCODE_VERSION, REASON_RULE),
