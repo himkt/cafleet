@@ -945,6 +945,13 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = bundled![
     "opencode-2.1.4-exec-typed-literal-1",
     "opencode-2.1.4-exec-post-submit-1",
     "claude-2.1.308-auto-tip-padded-question-1",
+    "claude-2.1.309-read-outside-permission-1",
+    "claude-2.1.309-read-outside-long-path-1",
+    "claude-2.1.309-read-outside-allow-pre-stage-1",
+    "claude-2.1.309-read-outside-deny-pre-stage-1",
+    "claude-2.1.309-read-outside-allow-continuation-1",
+    "claude-2.1.309-read-outside-deny-continuation-1",
+    "claude-2.1.309-edit-outside-permission-1",
 ];
 
 fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {
@@ -3421,6 +3428,7 @@ mod tests {
         const PERMISSION_RULE: &str = "claude-bash-permission";
         const TIP_RULE: &str = "claude-bash-permission-auto-tip";
         const STARTUP_RULE: &str = "claude-auto-startup";
+        const READ_RULE: &str = "claude-read-outside-permission";
         const IDLE_RULE: &str = "claude-idle-composer";
         const UNMATCHED: &str = "unmatched-screen";
         const NOTICE: &str = "bash denied by auto mode · [Code from External]";
@@ -3458,6 +3466,17 @@ mod tests {
         const STARTUP_OFFER: &str = "claude-2.1.302-auto-env-setup-offer-1";
         const STARTUP_WIZARD: &str = "claude-2.1.302-auto-env-setup-wizard-1";
         const STARTUP_CANCELLED: &str = "claude-2.1.302-auto-env-setup-cancelled-idle-1";
+        const READ_FORM: &str = "claude-2.1.309-read-outside-permission-1";
+        const READ_LONG: &str = "claude-2.1.309-read-outside-long-path-1";
+        const READ_ALLOW_PRE_STAGE: &str = "claude-2.1.309-read-outside-allow-pre-stage-1";
+        const READ_DENY_PRE_STAGE: &str = "claude-2.1.309-read-outside-deny-pre-stage-1";
+        const READ_ALLOW_CONTINUATION: &str = "claude-2.1.309-read-outside-allow-continuation-1";
+        const READ_DENY_CONTINUATION: &str = "claude-2.1.309-read-outside-deny-continuation-1";
+        const EDIT_READ_FORM: &str = "claude-2.1.309-edit-outside-permission-1";
+        const READ_CHOICES: [&str; 2] = [
+            "Yes, but ask again next time",
+            "No, and ask again next time",
+        ];
 
         type Expected = (
             &'static str,
@@ -3473,7 +3492,14 @@ mod tests {
         const UNKNOWN: ObservationKind = ObservationKind::Unknown;
         const INDICATOR: (&str, Option<&str>) = (INDICATOR_RULE, None);
 
-        const CLASSIFICATION: [Expected; 39] = [
+        const CLASSIFICATION: [Expected; 46] = [
+            (READ_ALLOW_CONTINUATION, COMPOSER, IDLE_RULE, &[INDICATOR]),
+            (READ_DENY_CONTINUATION, COMPOSER, IDLE_RULE, &[INDICATOR]),
+            (READ_FORM, FORM, READ_RULE, &[]),
+            (READ_LONG, FORM, READ_RULE, &[]),
+            (READ_ALLOW_PRE_STAGE, FORM, READ_RULE, &[]),
+            (READ_DENY_PRE_STAGE, FORM, READ_RULE, &[]),
+            (EDIT_READ_FORM, FORM, READ_RULE, &[]),
             (
                 "claude-2.1.302-access-allow-continuation-1",
                 COMPOSER,
@@ -4014,6 +4040,293 @@ mod tests {
                 observe("claude-2.1.302-default-permission-1").rule_id,
                 PERMISSION_RULE
             );
+        }
+
+        fn bundled_claude_profile() -> Value {
+            bundled_definitions()["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|profile| profile["profile_version"] == PROFILE_VERSION)
+                .expect("bundled automatic-mode Claude profile")
+                .clone()
+        }
+
+        fn ids(values: &Value) -> BTreeSet<String> {
+            values
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap().to_owned())
+                .collect()
+        }
+
+        #[test]
+        fn bundled_claude_read_outside_dialogs_are_complete_permission_requests_with_their_operation()
+         {
+            let read = |path: &str| format!("Read(/tmp/cafleet-194/{path})");
+            let long = "Read(/tmp/cafleet-194/claude-read-outside-long-001-outside/a-deeply-nested-directory-for-the-long-read-operation/secon\nd-level-directory-that-wraps-the-displayed-path/probe.txt)";
+            let cases = [
+                (
+                    READ_FORM,
+                    read("claude-read-outside-cells-001-outside/probe.txt"),
+                    1,
+                ),
+                (READ_LONG, long.to_owned(), 2),
+                (
+                    READ_ALLOW_PRE_STAGE,
+                    read("claude-read-outside-allow-001-outside/probe.txt"),
+                    1,
+                ),
+                (
+                    READ_DENY_PRE_STAGE,
+                    read("claude-read-outside-deny-001-outside/probe.txt"),
+                    1,
+                ),
+                (
+                    EDIT_READ_FORM,
+                    read("claude-edit-outside-cells-001-outside/edit-target.txt"),
+                    1,
+                ),
+            ];
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for (id, operation, rows) in cases {
+                for version in [CLAUDE_VERSION, "2.1.309"] {
+                    let form = Detector::new(&catalog, CodingAgent::Claude, Some(version))
+                        .observe(&screen(id))
+                        .unwrap();
+                    assert_eq!(form.kind, FORM, "{id} {version}");
+                    assert_eq!(form.rule_id, READ_RULE, "{id} {version}");
+                    assert_eq!(
+                        form.profile_version.as_deref(),
+                        Some(PROFILE_VERSION),
+                        "{id} {version}"
+                    );
+                    assert_eq!(form.match_evidence, MatchEvidence::Complete, "{id}");
+                    assert!(!form.verified_noninteraction, "{id}");
+                    assert!(form.native_correlation.is_none(), "{id}");
+                    assert!(form.fingerprint.is_some(), "{id}");
+                    assert_eq!(form.raw_evidence["operation"], operation, "{id}");
+                    assert_eq!(form.raw_evidence["operation_rows"], rows, "{id}");
+                    assert_eq!(form.raw_evidence["choices"], json!(READ_CHOICES), "{id}");
+                    assert_eq!(form.raw_evidence["native_request_id"], Value::Null, "{id}");
+                }
+            }
+            for (id, top, bottom) in [(READ_FORM, 16, 34), (READ_LONG, 17, 36)] {
+                let region = observe(id)
+                    .matched_region
+                    .expect("the dialog locates its live region");
+                assert_eq!(
+                    (region.top, region.bottom),
+                    (top, bottom),
+                    "{id}: the region runs from the heading to the closing line"
+                );
+            }
+            assert!(
+                observe(READ_FORM).fingerprint != observe(EDIT_READ_FORM).fingerprint,
+                "a different displayed path is a different request"
+            );
+        }
+
+        #[test]
+        fn bundled_claude_read_outside_rule_joins_detection_with_its_detection_fixtures() {
+            let profile = bundled_claude_profile();
+            let detection = &profile["capabilities"]["detection"];
+            assert!(ids(&detection["rule_ids"]).contains(READ_RULE));
+            let cited = ids(&detection["fixture_ids"]);
+            for id in [READ_FORM, READ_LONG, EDIT_READ_FORM] {
+                assert!(cited.contains(id), "{id} is a detection fixture");
+            }
+            let answer_fixtures = profile["capabilities"]["answers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|answer| ids(&answer["fixture_ids"]))
+                .collect::<BTreeSet<_>>();
+            for id in [READ_ALLOW_CONTINUATION, READ_DENY_CONTINUATION] {
+                assert!(
+                    !cited.contains(id) && !answer_fixtures.contains(id),
+                    "{id} is a classification-test fixture only"
+                );
+            }
+            let outside_rules = profile["rules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|rule| rule["id"].as_str().unwrap())
+                .filter(|id| id.ends_with("-outside-permission"))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                outside_rules,
+                [READ_RULE],
+                "no sibling tool showed its own outside-the-working-directories dialog"
+            );
+            let rule = profile["rules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|rule| rule["id"] == READ_RULE)
+                .unwrap();
+            assert_eq!(rule["observation"], "permission_request");
+            assert_eq!(rule["region"]["screen"], "alternate");
+            assert_eq!(rule["region"]["cursor"], "inside");
+            assert_eq!(rule["region"]["max_rows"], 24);
+            assert_eq!(rule["verified_noninteraction"], false);
+            assert_eq!(rule["sensitive"], false);
+            let matchers = rule["matchers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|matcher| matcher["id"].as_str().unwrap().to_owned())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                matchers,
+                BTreeSet::from(
+                    [
+                        "heading",
+                        "operation",
+                        "question",
+                        "focus",
+                        "keep_allowing",
+                        "block_from_now",
+                        "deny",
+                        "allow"
+                    ]
+                    .map(String::from)
+                )
+            );
+            assert_eq!(
+                rule["extract"]["choices"],
+                json!([
+                    {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+                    {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+                ]),
+                "the persistent choices are matched but declare no choice"
+            );
+        }
+
+        #[test]
+        fn bundled_claude_read_outside_dialog_answers_allow_with_4_and_deny_with_3_ungated() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            let other_forms = [
+                ("claude-2.1.302-default-permission-1", PERMISSION_RULE),
+                (ASK_FORM, ASK_RULE),
+                (TIP_FORM, TIP_RULE),
+            ];
+            for (decision, choice, byte, pre_stage) in [
+                (
+                    PermissionDecision::Allow,
+                    "allow-once",
+                    b"4",
+                    READ_ALLOW_PRE_STAGE,
+                ),
+                (
+                    PermissionDecision::Deny,
+                    "deny-once",
+                    b"3",
+                    READ_DENY_PRE_STAGE,
+                ),
+            ] {
+                let plan = catalog
+                    .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, READ_RULE, decision)
+                    .expect("read-outside answer plan");
+                assert_eq!(plan.choice_id(), choice);
+                assert_eq!(plan.stages().len(), 1, "{decision:?}");
+                let stage = &plan.stages()[0];
+                assert_eq!(stage.bytes(), byte);
+                assert_eq!(stage.required_rule_id(), READ_RULE);
+                assert_eq!(stage.required_choice_id(), choice);
+                assert!(stage.gate().is_none(), "{decision:?} is ungated");
+                let capability = plan.capability();
+                assert_eq!(capability.profile_version(), PROFILE_VERSION);
+                assert_eq!(capability.request_rule_id(), READ_RULE);
+                assert_eq!(capability.decision(), decision);
+                assert_eq!(
+                    capability.fixture_ids(),
+                    [pre_stage.to_owned()].as_slice(),
+                    "{decision:?} rests on its pre-stage capture"
+                );
+                let matched = detector(&catalog)
+                    .match_answer(&screen(pre_stage), &plan)
+                    .unwrap()
+                    .expect("the pre-stage dialog matches its plan");
+                assert_eq!(matched.choices(), READ_CHOICES.map(String::from).as_slice());
+                assert!(Some(matched.semantic()) == observe(pre_stage).fingerprint.as_ref());
+                for (other, rule) in other_forms {
+                    assert!(
+                        detector(&catalog)
+                            .match_answer(&screen(other), &plan)
+                            .unwrap()
+                            .is_none(),
+                        "{decision:?} read-outside plan on {other}"
+                    );
+                    let foreign = catalog
+                        .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, rule, decision)
+                        .unwrap();
+                    assert!(
+                        detector(&catalog)
+                            .match_answer(&screen(pre_stage), &foreign)
+                            .unwrap()
+                            .is_none(),
+                        "{decision:?} {rule} plan on the read-outside dialog"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_claude_read_outside_answers_never_select_a_persistent_choice() {
+            let profile = bundled_claude_profile();
+            let answers = profile["capabilities"]["answers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|answer| answer["request_rule_id"] == READ_RULE)
+                .map(|answer| {
+                    (
+                        answer["decision"].as_str().unwrap().to_owned(),
+                        answer["answer_rule_id"].as_str().unwrap().to_owned(),
+                        answer["choice_id"].as_str().unwrap().to_owned(),
+                        answer["focus_matcher_id"].as_str().unwrap().to_owned(),
+                        answer["stages"].clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let stage = |hex: &str, choice: &str| json!([{"bytes_hex": hex, "required_rule_id": READ_RULE, "required_choice_id": choice}]);
+            assert_eq!(
+                answers,
+                [
+                    (
+                        "allow".to_owned(),
+                        "claude-read-outside-allow-digit".to_owned(),
+                        "allow-once".to_owned(),
+                        "focus".to_owned(),
+                        stage("34", "allow-once"),
+                    ),
+                    (
+                        "deny".to_owned(),
+                        "claude-read-outside-deny-digit".to_owned(),
+                        "deny-once".to_owned(),
+                        "focus".to_owned(),
+                        stage("33", "deny-once"),
+                    ),
+                ]
+            );
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                let plan = catalog
+                    .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, READ_RULE, decision)
+                    .unwrap();
+                for stage in plan.stages() {
+                    for refused in [b'1', b'2', b'\r', b'\t', 0x1b] {
+                        assert!(
+                            !stage.bytes().contains(&refused),
+                            "{decision:?} stage {:?} sends no persistent-choice, Enter, Tab or Escape byte",
+                            stage.bytes()
+                        );
+                    }
+                }
+            }
         }
 
         #[test]

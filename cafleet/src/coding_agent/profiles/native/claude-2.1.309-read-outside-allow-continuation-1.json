@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.309-read-outside-allow-continuation-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.309",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 12443,
+  "cursor_row": 33,
+  "cursor_col": 2,
+  "lines": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "  Read 1 file",
+    "",
+    "● The Read succeeded and returned one line: cafleet-199-read-probe. No permission prompt appeared, so there was no",
+    "  native decision to relay. I'm stopping here.",
+    "",
+    "✻ Worked for 4s · done 1:29 AM",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "                                                       ◐ medium · /effort · Update available! Run: mise upgrade claude",
+    "──────────────────────────────────────────────────────────────────────────── cafleet-194-claude-read-outside-allow-001 ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⏵⏵ auto mode on (shift+tab to cycle)"
+  ],
+  "masked_rows": [
+    {
+      "row": 0,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 1,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 3,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 4,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 5,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 6,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 7,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 8,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 9,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 10,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 11,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}
