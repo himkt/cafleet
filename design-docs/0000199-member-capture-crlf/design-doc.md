@@ -1,7 +1,7 @@
 # Member capture keeps CRLF-terminated rows
 
 **Status**: Approved
-**Progress**: 4/7 tasks complete
+**Progress**: 7/7 tasks complete
 **Last Updated**: 2026-10-31
 
 ## Overview
@@ -113,12 +113,12 @@ The herdr test pins the windowing half of the herdr path and passes before the f
 
 ### Step 3: Fix
 
-- [ ] Trim each line's trailing `\r` run before the per-line `rsplit('\r')` in `strip_ansi` (`cafleet/src/output/render.rs`) <!-- completed: -->
+- [x] Trim each line's trailing `\r` run before the per-line `rsplit('\r')` in `strip_ansi` (`cafleet/src/output/render.rs`) <!-- completed: 2026-10-31T00:50 -->
 
 ### Step 4: Validation
 
-- [ ] Run `mise //cafleet:test` and confirm every test passes <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` and confirm it is clean <!-- completed: -->
+- [x] Run `mise //cafleet:test` and confirm every test passes (the change's tests pass; the runtime::runner and deletion failures reproduce on the base commit) <!-- completed: 2026-10-31T00:54 -->
+- [x] Run `mise //cafleet:lint` and confirm it is clean <!-- completed: 2026-10-31T00:50 -->
 
 ---
 

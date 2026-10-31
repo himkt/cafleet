@@ -14,7 +14,12 @@ pub(crate) fn strip_ansi(text: &str) -> String {
     let cleaned = ANSI_ESCAPE_RE.replace_all(text, "");
     cleaned
         .split('\n')
-        .map(|line| line.rsplit('\r').next().expect("rsplit yields a segment"))
+        .map(|line| {
+            line.trim_end_matches('\r')
+                .rsplit('\r')
+                .next()
+                .expect("rsplit yields a segment")
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
