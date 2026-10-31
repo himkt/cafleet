@@ -22,6 +22,7 @@ fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
         deferred_at: row.get("deferred_at")?,
         defer_reason: row.get("defer_reason")?,
         payload_digest_version: row.get("payload_digest_version")?,
+        uncertain_cause: row.get("uncertain_cause")?,
     })
 }
 
@@ -133,6 +134,12 @@ fn validate_input(
         (input.state == InputState::Settled) == input.disposition.is_some(),
         "member_input_operations.disposition",
         "settlement requires exactly one disposition",
+    )?;
+    require(
+        input.uncertain_cause.is_none()
+            || matches!(input.state, InputState::Uncertain | InputState::Settled),
+        "member_input_operations.uncertain_cause",
+        "an uncertain cause requires an uncertain or settled receipt",
     )?;
     let run = get_run(conn, input.run_id)?;
     if input.kind == InputKind::Preview {
@@ -284,12 +291,15 @@ pub(crate) fn requeue_zero_byte_immediate(
     })
 }
 
+pub(crate) type UnpublishedDeliveryResult = (i64, &'static str, Option<UncertainCause>);
+
 /// The deferred inputs of a run whose first result is durable but whose result event is not, with
-/// the stage that event reports. Recovery publishes these after the live writer is gone.
+/// the stage and recorded uncertain cause that event reports. Recovery publishes these after the
+/// live writer is gone.
 pub(crate) fn unpublished_delivery_results(
     conn: &Connection,
     run_id: i64,
-) -> Result<Vec<(i64, &'static str)>, CafleetError> {
+) -> Result<Vec<UnpublishedDeliveryResult>, CafleetError> {
     let mut statement = conn.prepare(
         "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND deferred_at IS NOT NULL AND input_id NOT IN (SELECT json_extract(payload_json,'$.input_id') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result') ORDER BY input_id",
     )?;
@@ -298,7 +308,8 @@ pub(crate) fn unpublished_delivery_results(
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut results = Vec::new();
     for input_id in ids {
-        let delivery = get_input(conn, input_id)?
+        let input = get_input(conn, input_id)?;
+        let delivery = input
             .delivery()
             .expect("a deferred input is an ordinary input");
         let stage = match delivery.status {
@@ -309,7 +320,7 @@ pub(crate) fn unpublished_delivery_results(
                 continue;
             }
         };
-        results.push((input_id, stage));
+        results.push((input_id, stage, input.uncertain_cause));
     }
     Ok(results)
 }
@@ -519,7 +530,7 @@ pub(crate) fn record_input_state(
             (InputState::Ready, InputState::InProgress)
                 | (
                     InputState::InProgress,
-                    InputState::Ready | InputState::Accepted | InputState::Uncertain
+                    InputState::Ready | InputState::Accepted
                 )
         ),
         "member_input_operations.state",
@@ -548,6 +559,32 @@ pub(crate) fn record_input_state(
                 params![next.as_str(),now_stamp(),input_id,expected.as_str()],
             )?
         };
+        require(
+            changed == 1,
+            "member_input_operations.state",
+            "input CAS failed",
+        )?;
+        get_input(conn, input_id)
+    })
+}
+
+pub(crate) fn record_input_uncertain(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    cause: UncertainCause,
+) -> Result<InputOperation, CafleetError> {
+    owned_transaction(conn, owner, |conn, run| {
+        let input = owned_input(conn, run, input_id)?;
+        require(
+            input.state == InputState::InProgress,
+            "member_input_operations.state",
+            "input state changed",
+        )?;
+        let changed = conn.execute(
+            "UPDATE member_input_operations SET state='uncertain',updated_at=?1,uncertain_cause=?2 WHERE input_id=?3 AND state='in_progress'",
+            params![now_stamp(), cause.as_str(), input_id],
+        )?;
         require(
             changed == 1,
             "member_input_operations.state",

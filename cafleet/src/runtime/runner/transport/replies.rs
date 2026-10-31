@@ -1,3 +1,245 @@
+use std::time::{Duration, Instant};
+
+pub(super) const REPLY_PREFIX_BOUND: Duration = Duration::from_millis(100);
+const CSI_PARAMETER_LIMIT: usize = 64;
+const STRING_BODY_LIMIT: usize = 4096;
+
+const ESC: u8 = 0x1b;
+const BEL: u8 = 0x07;
+const PASTE_END: &[u8] = b"\x1b[201~";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StringKind {
+    Osc,
+    Dcs,
+    Apc,
+}
+
+#[derive(Default)]
+enum State {
+    #[default]
+    Ground,
+    Escape,
+    Csi {
+        parameters: Vec<u8>,
+        intermediate: bool,
+    },
+    StringBody {
+        kind: StringKind,
+        length: usize,
+    },
+    StringEscape,
+}
+
+/// Decides how many forwarded outer-terminal bytes count as manual input.
+/// It never holds bytes: forwarding happens before and independently of it.
+#[derive(Default)]
+pub(super) struct ReplyClassifier {
+    state: State,
+    pending: usize,
+    last_byte: Option<Instant>,
+    paste_end_matched: Option<usize>,
+}
+
+pub(super) struct Classified {
+    pub(super) manual: usize,
+}
+
+impl ReplyClassifier {
+    pub(super) fn feed(&mut self, bytes: &[u8], now: Instant) -> Classified {
+        let manual = bytes.iter().map(|&byte| self.classify(byte, now)).sum();
+        Classified { manual }
+    }
+
+    pub(super) fn expire(&mut self, now: Instant) -> Classified {
+        let manual = match self.last_byte {
+            Some(last) if now.saturating_duration_since(last) >= REPLY_PREFIX_BOUND => {
+                self.resolve_manual()
+            }
+            _ => 0,
+        };
+        Classified { manual }
+    }
+
+    pub(super) fn finish(&mut self) -> Classified {
+        Classified {
+            manual: self.resolve_manual(),
+        }
+    }
+
+    pub(super) fn pending(&self) -> bool {
+        self.pending > 0
+    }
+
+    fn classify(&mut self, byte: u8, now: Instant) -> usize {
+        let manual = match self.paste_end_matched {
+            Some(matched) => {
+                self.advance_paste(matched, byte);
+                1
+            }
+            None => self.step(byte),
+        };
+        self.last_byte = self.pending().then_some(now);
+        manual
+    }
+
+    fn advance_paste(&mut self, matched: usize, byte: u8) {
+        let matched = if byte == PASTE_END[matched] {
+            matched + 1
+        } else if byte == ESC {
+            1
+        } else {
+            0
+        };
+        self.paste_end_matched = (matched < PASTE_END.len()).then_some(matched);
+    }
+
+    fn step(&mut self, byte: u8) -> usize {
+        match std::mem::take(&mut self.state) {
+            State::Ground => self.ground(byte),
+            State::Escape => match byte {
+                b'[' => self.extend(State::Csi {
+                    parameters: Vec::new(),
+                    intermediate: false,
+                }),
+                b']' => self.open_string(StringKind::Osc),
+                b'P' => self.open_string(StringKind::Dcs),
+                b'_' => self.open_string(StringKind::Apc),
+                _ => self.invalid(byte),
+            },
+            State::Csi {
+                mut parameters,
+                intermediate,
+            } => match byte {
+                0x20..=0x3f if parameters.len() == CSI_PARAMETER_LIMIT => self.invalid(byte),
+                0x30..=0x3f if !intermediate => {
+                    parameters.push(byte);
+                    self.extend(State::Csi {
+                        parameters,
+                        intermediate,
+                    })
+                }
+                0x20..=0x2f => {
+                    parameters.push(byte);
+                    self.extend(State::Csi {
+                        parameters,
+                        intermediate: true,
+                    })
+                }
+                0x40..=0x7e => self.complete_csi(&parameters, byte),
+                _ => self.invalid(byte),
+            },
+            State::StringBody { kind, length } => match byte {
+                0x20..=0x7e | 0x80..=0xff if length == STRING_BODY_LIMIT => self.invalid(byte),
+                0x20..=0x7e | 0x80..=0xff => self.extend(State::StringBody {
+                    kind,
+                    length: length + 1,
+                }),
+                BEL if kind == StringKind::Osc => self.complete_reply(),
+                ESC => self.extend(State::StringEscape),
+                _ => self.invalid(byte),
+            },
+            State::StringEscape => match byte {
+                b'\\' => self.complete_reply(),
+                _ => self.invalid(byte),
+            },
+        }
+    }
+
+    fn ground(&mut self, byte: u8) -> usize {
+        if byte == ESC {
+            self.state = State::Escape;
+            self.pending = 1;
+            0
+        } else {
+            1
+        }
+    }
+
+    fn open_string(&mut self, kind: StringKind) -> usize {
+        self.extend(State::StringBody { kind, length: 0 })
+    }
+
+    fn extend(&mut self, state: State) -> usize {
+        self.state = state;
+        self.pending += 1;
+        0
+    }
+
+    fn invalid(&mut self, byte: u8) -> usize {
+        self.resolve_manual() + self.ground(byte)
+    }
+
+    fn resolve_manual(&mut self) -> usize {
+        self.state = State::Ground;
+        self.last_byte = None;
+        std::mem::take(&mut self.pending)
+    }
+
+    fn complete_reply(&mut self) -> usize {
+        self.pending = 0;
+        0
+    }
+
+    fn complete_csi(&mut self, parameters: &[u8], final_byte: u8) -> usize {
+        let length = std::mem::take(&mut self.pending) + 1;
+        if is_csi_reply(parameters, final_byte) {
+            return 0;
+        }
+        if parameters == b"200" && final_byte == b'~' {
+            self.paste_end_matched = Some(0);
+        }
+        length
+    }
+}
+
+fn is_csi_reply(parameters: &[u8], final_byte: u8) -> bool {
+    let (marker, rest) = match parameters.split_first() {
+        Some((&marker @ (b'?' | b'>'), rest)) => (Some(marker), rest),
+        _ => (None, parameters),
+    };
+    let split = rest
+        .iter()
+        .position(|byte| (0x20..=0x2f).contains(byte))
+        .unwrap_or(rest.len());
+    let (list, intermediates) = rest.split_at(split);
+    let arity = |min, max| parameter_count(list).is_some_and(|count| (min..=max).contains(&count));
+    match (marker, intermediates, final_byte) {
+        (None, b"", b'R') => arity(2, 2),
+        (Some(b'?'), b"", b'R') => arity(2, 3),
+        (None, b"", b'n') => list == b"0" || list == b"3",
+        (Some(b'?'), b"", b'n') => arity(1, 4),
+        (Some(b'?'), b"", b'c') => arity(1, 32),
+        (Some(b'>'), b"", b'c') => arity(1, 4),
+        (Some(b'?') | None, b"$", b'y') => arity(2, 2),
+        (None, b"", b't') => arity(1, 3),
+        (Some(b'?'), b"", b'u') => arity(1, 1),
+        (None, b"", b'I' | b'O') => list.is_empty(),
+        _ => false,
+    }
+}
+
+/// Counts `;`-joined digit parameters, or `None` when any parameter is empty
+/// or holds a non-digit byte.
+fn parameter_count(list: &[u8]) -> Option<usize> {
+    list.split(|&byte| byte == b';')
+        .map(|parameter| !parameter.is_empty() && parameter.iter().all(u8::is_ascii_digit))
+        .try_fold(0, |count, valid| valid.then_some(count + 1))
+}
+
+#[cfg(test)]
+impl ReplyClassifier {
+    pub(super) fn backdate(&mut self, by: Duration) {
+        let last = self
+            .last_byte
+            .expect("backdating requires a pending reply prefix");
+        self.last_byte = Some(
+            last.checked_sub(by)
+                .expect("backdated reply prefix instant is representable"),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

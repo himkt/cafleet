@@ -67,6 +67,7 @@ impl Transport {
         };
         for _ in 0..ROUND_LIMIT {
             check_deadline(Instant::now(), deadline)?;
+            self.expire_reply_prefix();
             let human_read = if self.outer_eof {
                 AvailableRead::Skipped
             } else {
@@ -85,7 +86,7 @@ impl Transport {
                     remaining.human -= bytes.len();
                     self.retain_human(bytes);
                 }
-                AvailableRead::Eof => self.outer_eof = true,
+                AvailableRead::Eof => self.close_outer(),
                 _ => {}
             }
             check_deadline(Instant::now(), deadline)?;
@@ -144,6 +145,9 @@ impl Transport {
                 && self.input.is_empty()
                 && self.display.len() < self.limits.display_bytes
             {
+                if self.replies.pending() {
+                    return Ok(self.pending("terminal reply pending".into()));
+                }
                 if !self.observation_complete {
                     return Ok(self.pending("observation incomplete".into()));
                 }

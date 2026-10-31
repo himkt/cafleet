@@ -5,7 +5,10 @@ use std::io::{self, ErrorKind};
 use std::sync::Arc;
 use std::time::Instant;
 
+use replies::{Classified, ReplyClassifier};
+
 mod drain;
+mod replies;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InputDrain {
     Pending,
@@ -86,6 +89,7 @@ pub(crate) struct Transport {
     outer_eof: bool,
     child_eof: bool,
     human_generation: u64,
+    replies: ReplyClassifier,
     input_turn: u64,
     input_instance: Arc<()>,
     input_drain: Option<DrainedInput>,
@@ -173,6 +177,7 @@ impl Transport {
             outer_eof: false,
             child_eof: false,
             human_generation: 0,
+            replies: ReplyClassifier::default(),
             input_turn: 0,
             input_instance: Arc::new(()),
             input_drain: None,
@@ -246,6 +251,7 @@ impl Transport {
     /// a longer terminal reply must reach the child within the same tick: a
     /// child that sees only its first part may parse the rest as keys.
     fn drain_outer(&mut self, human: &mut impl ByteInput) -> Result<usize> {
+        self.expire_reply_prefix();
         let mut forwarded = 0;
         while !self.outer_eof {
             let capacity =
@@ -253,9 +259,12 @@ impl Transport {
             let Some(bytes) = read_available(human, capacity).map_err(io_error)? else {
                 break;
             };
-            self.outer_eof = bytes.is_empty();
-            forwarded += bytes.len();
-            self.retain_human(bytes);
+            if bytes.is_empty() {
+                self.close_outer();
+            } else {
+                forwarded += bytes.len();
+                self.retain_human(bytes);
+            }
         }
         Ok(forwarded)
     }
@@ -316,14 +325,31 @@ impl Transport {
             .expect("input drain turn fits u64");
     }
     fn retain_human(&mut self, bytes: Vec<u8>) {
+        let classified = self.replies.feed(&bytes, Instant::now());
+        self.count_manual(classified);
+        self.input.extend(bytes);
+    }
+    fn expire_reply_prefix(&mut self) {
+        let classified = self.replies.expire(Instant::now());
+        self.count_manual(classified);
+    }
+    fn close_outer(&mut self) {
+        let classified = self.replies.finish();
+        self.count_manual(classified);
+        self.outer_eof = true;
+    }
+    fn count_manual(&mut self, classified: Classified) {
         self.human_generation = self
             .human_generation
-            .checked_add(u64::try_from(bytes.len()).expect("human read count fits u64"))
+            .checked_add(u64::try_from(classified.manual).expect("manual byte count fits u64"))
             .expect("human input generation fits u64");
-        self.input.extend(bytes);
     }
     pub(super) fn human_generation(&self) -> u64 {
         self.human_generation
+    }
+    #[cfg(test)]
+    pub(super) fn backdate_reply_prefix(&mut self, by: std::time::Duration) {
+        self.replies.backdate(by);
     }
     pub(super) fn take_input_drain(&mut self) -> Option<DrainedInput> {
         self.input_drain.take()
@@ -359,6 +385,7 @@ impl Transport {
         )?;
         ensure(
             self.observation_complete
+                && !self.replies.pending()
                 && !self.outer_eof
                 && !self.child_eof
                 && self.input.is_empty()

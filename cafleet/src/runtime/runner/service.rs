@@ -1187,7 +1187,7 @@ pub(crate) fn run_service(
             storage::unpublished_delivery_results(conn, run.run_id)
         });
         if let Ok(unpublished) = &unpublished {
-            for &(input_id, stage) in unpublished {
+            for &(input_id, stage, _) in unpublished {
                 controller.publish_delivery_result(storage::input_delivery_result_cause(
                     input_id, stage, None,
                 ));
@@ -1289,7 +1289,7 @@ fn publish_stopped_results(
     let unpublished = with_database_deadline(conn, deadline, |conn| {
         storage::unpublished_delivery_results(conn, run_id)
     })?;
-    for (input_id, stage) in unpublished {
+    for (input_id, stage, _) in unpublished {
         controller
             .publish_delivery_result(storage::input_delivery_result_cause(input_id, stage, None));
     }

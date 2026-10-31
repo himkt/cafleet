@@ -1514,17 +1514,22 @@ pub(crate) mod test_support {
             let input_id = receipt.input.input_id;
             match state {
                 Retained::InProgress => {}
-                Retained::Accepted | Retained::Uncertain => {
+                Retained::Accepted => {
                     storage::record_input_state(
                         &mut fixture.conn,
                         &owner,
                         input_id,
                         InputState::InProgress,
-                        if matches!(state, Retained::Accepted) {
-                            InputState::Accepted
-                        } else {
-                            InputState::Uncertain
-                        },
+                        InputState::Accepted,
+                    )
+                    .unwrap();
+                }
+                Retained::Uncertain => {
+                    storage::record_input_uncertain(
+                        &mut fixture.conn,
+                        &owner,
+                        input_id,
+                        storage::UncertainCause::WriteFailed,
                     )
                     .unwrap();
                 }
@@ -3797,6 +3802,14 @@ mod tests {
                     InputState::InProgress,
                     disposition,
                     "fixture:external-history",
+                )
+                .unwrap();
+            } else if state == InputState::Uncertain {
+                storage::record_input_uncertain(
+                    &mut fixture.conn,
+                    &owner,
+                    row.input_id,
+                    storage::UncertainCause::WriteFailed,
                 )
                 .unwrap();
             } else if state != InputState::InProgress {

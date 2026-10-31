@@ -84,7 +84,7 @@ pub(super) fn reconcile(
             )?;
             run = storage::get_run(&tx, run.run_id)?;
             let evidence = storage::evidence::run_metadata(&run, "runtime-recovery", 0)?;
-            for (event_seq, (input_id, stage)) in (ceiling + 1..=reserved).zip(unpublished) {
+            for (event_seq, (input_id, stage, _)) in (ceiling + 1..=reserved).zip(unpublished) {
                 let transition = ObservedTransition {
                     run_id: run.run_id,
                     event_seq,

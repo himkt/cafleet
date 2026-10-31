@@ -327,6 +327,21 @@ fn ordinary_blocker(status: &super::ObservationStatus) -> Option<OrdinaryBlocker
     None
 }
 
+fn interaction_cause(status: &super::ObservationStatus) -> storage::UncertainCause {
+    if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
+        storage::UncertainCause::InteractionCandidate
+    } else {
+        storage::UncertainCause::InteractionOpen
+    }
+}
+
+fn blocker_cause(status: &super::ObservationStatus) -> Option<storage::UncertainCause> {
+    ordinary_blocker(status).map(|blocker| match blocker {
+        OrdinaryBlocker::Interaction => interaction_cause(status),
+        OrdinaryBlocker::ObserverUnavailable => storage::UncertainCause::ObserverUnavailable,
+    })
+}
+
 fn fallback_stages(prefix: &[u8], literal: &str) -> Result<Arc<[Arc<[u8]>]>> {
     let size = prefix
         .len()
@@ -825,7 +840,12 @@ impl InputCoordinator {
             self.pending = None;
             let mut conn = crate::db::connect(&self.database_url)?;
             if written {
-                self.record_deferred_uncertain(&mut conn, id, deadline)?;
+                self.record_deferred_uncertain(
+                    &mut conn,
+                    id,
+                    storage::UncertainCause::RunnerStopped,
+                    deadline,
+                )?;
             } else {
                 let operation = with_database_deadline(&mut conn, deadline, |conn| {
                     storage::settle_zero_byte_deferred(
@@ -1941,13 +1961,7 @@ impl InputCoordinator {
                         "observer_unavailable",
                     ))));
                 }
-                Some(OrdinaryBlocker::Interaction) => Some(
-                    if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
-                        "interaction_candidate"
-                    } else {
-                        "interaction_open"
-                    },
-                ),
+                Some(OrdinaryBlocker::Interaction) => Some(interaction_cause(&status).as_str()),
                 None if self.pending.is_some()
                     || !self.queue.is_empty()
                     || self.finalization.is_some()
@@ -2558,13 +2572,7 @@ impl InputCoordinator {
         }
         let status = observation.status();
         let defer_reason = match ordinary_blocker(&status) {
-            Some(OrdinaryBlocker::Interaction) => {
-                if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
-                    "interaction_candidate"
-                } else {
-                    "interaction_open"
-                }
-            }
+            Some(OrdinaryBlocker::Interaction) => interaction_cause(&status).as_str(),
             None if composer.requires_empty_composer() && !Self::composer_eligible(observation) => {
                 "composer_busy"
             }
@@ -3180,13 +3188,17 @@ impl InputCoordinator {
                 if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer.as_ref())
                     && let Some(settle_until) = composer.settle_until
                 {
-                    let interrupted = composer.manual_generation != Some(self.manual_generation)
-                        || self.manual_accounting_failed
-                        || ordinary_blocker(&observation.status()).is_some();
-                    if interrupted {
+                    let interruption = if self.manual_accounting_failed {
+                        Some(storage::UncertainCause::ManualAccountingFailed)
+                    } else if composer.manual_generation != Some(self.manual_generation) {
+                        Some(storage::UncertainCause::ManualInput)
+                    } else {
+                        blocker_cause(&observation.status())
+                    };
+                    if let Some(cause) = interruption {
                         terminal_bookkeeping = true;
                         let deferred = composer.deferred.is_some();
-                        let reply = self.stop_composer_stages(conn, run, id, effective)?;
+                        let reply = self.stop_composer_stages(conn, run, id, effective, cause)?;
                         if deferred {
                             Self::publish_result(observation, id, SubmissionStage::Partial);
                             return Ok(None);
@@ -3210,16 +3222,23 @@ impl InputCoordinator {
                 self.checkpoint(id, InputBoundary::BeforeWrite, effective)?;
                 return Ok(None);
             }
+            let status = observation.status();
             if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer.as_ref())
                 && composer.written_stages > 0
                 && matches!(
-                    ordinary_blocker(&observation.status()),
+                    ordinary_blocker(&status),
                     Some(OrdinaryBlocker::Interaction)
                 )
             {
                 terminal_bookkeeping = true;
                 let deferred = composer.deferred.is_some();
-                let reply = self.stop_composer_stages(conn, run, id, effective)?;
+                let reply = self.stop_composer_stages(
+                    conn,
+                    run,
+                    id,
+                    effective,
+                    interaction_cause(&status),
+                )?;
                 if deferred {
                     Self::publish_result(observation, id, SubmissionStage::Partial);
                     return Ok(None);
@@ -3330,20 +3349,31 @@ impl InputCoordinator {
                     .phase = InputPhase::AwaitBeforeWrite;
                 return Ok(None);
             }
-            let retained = self
+            let stage = self
                 .operations
                 .get(&id)
-                .expect("actual input outcome retained");
-            let next = match retained.stage {
-                SubmissionStage::Submitted => storage::InputState::Accepted,
-                SubmissionStage::Partial | SubmissionStage::Unknown => {
-                    storage::InputState::Uncertain
-                }
-                SubmissionStage::ZeroBytes => storage::InputState::Ready,
+                .expect("actual input outcome retained")
+                .stage;
+            let uncertain_cause = if matches!(&write, Ok(ProgrammaticWrite::Partial { .. })) {
+                storage::UncertainCause::ShortWrite
+            } else {
+                storage::UncertainCause::WriteFailed
             };
             terminal_bookkeeping = true;
             let persisted = with_database_deadline(conn, effective, |conn| {
                 self.validate_live(conn, run)?;
+                let next = match stage {
+                    SubmissionStage::Submitted => storage::InputState::Accepted,
+                    SubmissionStage::ZeroBytes => storage::InputState::Ready,
+                    SubmissionStage::Partial | SubmissionStage::Unknown => {
+                        return storage::record_input_uncertain(
+                            conn,
+                            &self.run.owner(),
+                            id,
+                            uncertain_cause,
+                        );
+                    }
+                };
                 storage::record_input_state(
                     conn,
                     &self.run.owner(),
@@ -3424,18 +3454,13 @@ impl InputCoordinator {
         &mut self,
         conn: &mut Connection,
         id: i64,
+        cause: storage::UncertainCause,
         deadline: Instant,
     ) -> Result<storage::InputOperation> {
         let current = with_database_deadline(conn, deadline, |conn| storage::get_input(conn, id))?;
         let operation = if current.state == storage::InputState::InProgress {
             with_database_deadline(conn, deadline, |conn| {
-                storage::record_input_state(
-                    conn,
-                    &self.run.owner(),
-                    id,
-                    storage::InputState::InProgress,
-                    storage::InputState::Uncertain,
-                )
+                storage::record_input_uncertain(conn, &self.run.owner(), id, cause)
             })?
         } else {
             current
@@ -3464,7 +3489,12 @@ impl InputCoordinator {
             return;
         }
         self.pending = None;
-        match self.record_deferred_uncertain(conn, id, Instant::now() + DEFERRED_FINALIZATION) {
+        match self.record_deferred_uncertain(
+            conn,
+            id,
+            storage::UncertainCause::WriteFailed,
+            Instant::now() + DEFERRED_FINALIZATION,
+        ) {
             Ok(operation) if operation.state == storage::InputState::Uncertain => {
                 Self::publish_result(observation, id, stage);
             }
@@ -3489,6 +3519,7 @@ impl InputCoordinator {
         run: &RunRecord,
         id: i64,
         effective: Instant,
+        cause: storage::UncertainCause,
     ) -> Result<InputControlReply> {
         let pending = self.pending.as_mut().expect("staged composer input");
         pending.phase = InputPhase::Blocked;
@@ -3497,13 +3528,7 @@ impl InputCoordinator {
         }
         let operation = with_database_deadline(conn, effective, |conn| {
             self.validate_live(conn, run)?;
-            storage::record_input_state(
-                conn,
-                &self.run.owner(),
-                id,
-                storage::InputState::InProgress,
-                storage::InputState::Uncertain,
-            )
+            storage::record_input_uncertain(conn, &self.run.owner(), id, cause)
         })?;
         let retained = self.operations.get_mut(&id).expect("staged input retained");
         retained.operation = operation.clone();
@@ -3540,23 +3565,28 @@ impl InputCoordinator {
         if retained.operation.state != storage::InputState::InProgress {
             return source;
         }
-        let next = if retained.stage == SubmissionStage::ZeroBytes {
-            storage::InputState::Ready
-        } else {
-            storage::InputState::Uncertain
-        };
+        let zero_bytes = retained.stage == SubmissionStage::ZeroBytes;
         let Ok(effective) = self.effective_deadline(conn, deadline) else {
             return source;
         };
         let persisted = with_database_deadline(conn, effective, |conn| {
             self.validate_live(conn, run)?;
-            storage::record_input_state(
-                conn,
-                &self.run.owner(),
-                id,
-                storage::InputState::InProgress,
-                next,
-            )
+            if zero_bytes {
+                storage::record_input_state(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    storage::InputState::InProgress,
+                    storage::InputState::Ready,
+                )
+            } else {
+                storage::record_input_uncertain(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    storage::UncertainCause::WriteFailed,
+                )
+            }
         });
         match persisted {
             Ok(operation) => {

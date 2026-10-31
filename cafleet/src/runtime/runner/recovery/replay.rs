@@ -145,7 +145,7 @@ fn publish_delivery_results<S: OutboxIo>(
         })?;
         refresh(conn, result, until)?;
         let evidence = storage::evidence::run_metadata(&result.run, "runtime-recovery", 0)?;
-        for (event_seq, &(input_id, stage)) in sequences.zip(chunk) {
+        for (event_seq, &(input_id, stage, _)) in sequences.zip(chunk) {
             let transition = ObservedTransition {
                 run_id: result.run.run_id,
                 event_seq,
