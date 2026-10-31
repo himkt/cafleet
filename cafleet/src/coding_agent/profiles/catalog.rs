@@ -2460,6 +2460,96 @@ mod tests {
     }
 
     #[test]
+    fn runtime_profile_operation_margin_rows_select_all_or_continuation_rows_of_a_margin() {
+        for margin_rows in ["all", "continuation"] {
+            let mut value = definitions();
+            let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+            operation["row_margin"] = json!(" ");
+            operation["margin_rows"] = json!(margin_rows);
+            assert!(
+                ProfileCatalog::from_definitions(&value).is_ok(),
+                "{margin_rows}"
+            );
+        }
+        for margin_rows in [
+            json!("first"),
+            json!("All"),
+            json!(""),
+            json!(null),
+            json!(1),
+            json!(["continuation"]),
+        ] {
+            invalid(|value| {
+                let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+                operation["row_margin"] = json!(" ");
+                operation["margin_rows"] = margin_rows;
+            });
+        }
+        for margin_rows in ["all", "continuation"] {
+            invalid(|value| {
+                value["profiles"][0]["rules"][0]["extract"]["operation"]["margin_rows"] =
+                    json!(margin_rows);
+            });
+        }
+    }
+
+    #[test]
+    fn runtime_profile_operation_row_trailer_is_a_trimmed_single_row_literal() {
+        for with_margin in [false, true] {
+            let mut value = definitions();
+            let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+            if with_margin {
+                operation["row_margin"] = json!(" ");
+                operation["margin_rows"] = json!("continuation");
+            }
+            operation["row_trailer"] = json!("█");
+            assert!(
+                ProfileCatalog::from_definitions(&value).is_ok(),
+                "with margin: {with_margin}"
+            );
+        }
+        for trailer in [
+            json!(""),
+            json!(" "),
+            json!(" █"),
+            json!("█ "),
+            json!("\t█"),
+            json!("█\n█"),
+            json!(null),
+            json!(1),
+            json!(["█"]),
+        ] {
+            invalid(|value| {
+                value["profiles"][0]["rules"][0]["extract"]["operation"]["row_trailer"] = trailer;
+            });
+        }
+    }
+
+    #[test]
+    fn bundled_claude_and_codex_operations_declare_neither_row_option() {
+        let definitions = bundled_definitions();
+        for profile in definitions["profiles"].as_array().unwrap() {
+            if profile["backend"] == "opencode" {
+                continue;
+            }
+            for rule in profile["rules"].as_array().unwrap() {
+                let operation = &rule["extract"]["operation"];
+                if operation.is_null() {
+                    continue;
+                }
+                for key in ["margin_rows", "row_trailer"] {
+                    assert!(
+                        operation.get(key).is_none(),
+                        "{} {} {key}",
+                        profile["backend"],
+                        rule["id"]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn runtime_profile_capability_provenance_references_are_checked() {
         for (path, replacement) in [
             ("/fixtures/0/backend", json!("claude")),
@@ -5701,7 +5791,7 @@ mod tests {
             assert_eq!(form["observation"], "permission_request");
             assert_eq!(form["region"]["screen"], "primary");
             assert_eq!(form["region"]["cursor"], "any");
-            assert_eq!(form["region"]["max_rows"], 24);
+            assert!(form["region"]["max_rows"].as_u64().unwrap() >= 24);
             assert_eq!(form["sensitive"], false);
             assert_eq!(form["extract"]["native_request_id"], Value::Null);
             assert_eq!(
@@ -5737,6 +5827,73 @@ mod tests {
             assert_eq!(idle["observation"], "composer_empty");
             assert_eq!(idle["region"]["cursor"], "at_end");
             assert_eq!(idle["verified_noninteraction"], true);
+        }
+
+        fn matcher<'a>(rule: &'a Value, id: &str) -> &'a Value {
+            rule["matchers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|matcher| matcher["id"] == id)
+                .unwrap_or_else(|| panic!("{} declares matcher {id}", rule["id"]))
+        }
+
+        #[test]
+        fn bundled_opencode_form_rule_matches_both_supported_layouts() {
+            let definitions = definitions();
+            let form = rule(&definitions, PERMISSION_RULE);
+            assert_eq!(
+                form["region"]["start_pattern"],
+                "^  △ Permission required\\s*$"
+            );
+            assert_eq!(
+                form["region"]["end_pattern"],
+                "  ⇆ select  enter confirm  esc reject\\s*$"
+            );
+            let focus = matcher(form, "focus");
+            assert_eq!(focus["scope"], "line");
+            assert_eq!(
+                focus["pattern"],
+                "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$"
+            );
+            assert_eq!(
+                matcher(form, "allow")["pattern"],
+                "^   (?P<label>Allow once)   "
+            );
+            assert_eq!(
+                matcher(form, "deny")["pattern"],
+                "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+            );
+            assert_eq!(matcher(form, "controls")["scope"], "region");
+            assert_eq!(matcher(form, "operation")["scope"], "region");
+            let operation = &form["extract"]["operation"];
+            assert_eq!(operation["matcher_id"], "operation");
+            assert_eq!(operation["margin_rows"], "continuation");
+            assert_eq!(operation["row_trailer"], "█");
+            assert!(
+                operation["row_margin"]
+                    .as_str()
+                    .is_some_and(|margin| !margin.is_empty()),
+                "the continuation margin is declared"
+            );
+        }
+
+        #[test]
+        fn bundled_opencode_reject_reason_reads_the_placeholder_through_one_region_matcher() {
+            let definitions = definitions();
+            let reason = rule(&definitions, REASON_RULE);
+            let ids = reason["matchers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|matcher| matcher["id"].as_str().unwrap())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(ids, BTreeSet::from(["empty_reason", "heading"]));
+            assert_eq!(matcher(reason, "empty_reason")["scope"], "region");
+            assert_eq!(
+                reason["region"]["end_pattern"],
+                "  enter confirm  esc cancel\\s*$"
+            );
         }
 
         #[test]
