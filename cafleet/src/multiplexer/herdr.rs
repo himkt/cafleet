@@ -814,6 +814,20 @@ mod tests {
     }
 
     #[test]
+    fn capture_pane_keeps_crlf_rows_and_drops_the_crlf_blank_tail() {
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Ok(
+            "scrollback\r\nprompt> ls\r\nstatus bar\r\n\r\n \r\n".to_string()
+        ));
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        assert_eq!(
+            mux.capture_pane("w1:p2", 2).unwrap(),
+            "prompt> ls\r\nstatus bar\r"
+        );
+        assert_styled_read(&runner, "w1:p2", "1002");
+    }
+
+    #[test]
     fn kill_pane_restores_the_director_full_width_after_the_last_member() {
         let runner = FakeRunner::with_binary("herdr");
         runner.respond(Ok(herdr_envelope(

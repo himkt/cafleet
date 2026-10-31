@@ -80,6 +80,18 @@ mod tests {
         );
     }
     #[test]
+    fn snapshot_treats_crlf_row_terminators_as_line_endings() {
+        let snapshot = CaptureSnapshot::from_raw("old\r\x1b[31m雪\x1b[0m\r\n緑\r", false, now());
+        assert_eq!(
+            snapshot,
+            CaptureSnapshot {
+                content: "雪\n緑".into(),
+                captured_at: WHEN.into(),
+                content_sha256: PLAIN_HASH.into()
+            }
+        );
+    }
+    #[test]
     fn snapshot_ansi_preserves_every_raw_byte_and_hashes_that_content() {
         let raw = "old\r\x1b[31m雪\x1b[0m\nold\r緑";
         let snapshot = CaptureSnapshot::from_raw(raw, true, now());
