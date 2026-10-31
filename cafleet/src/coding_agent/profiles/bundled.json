@@ -643,6 +643,38 @@
           "sensitive": false
         },
         {
+          "id": "claude-read-outside-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ Read outside the working directories\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^ Read outside the working directories\\s*$"},
+            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
+            {"id": "question", "scope": "line", "pattern": "^ Allow this read outside the working directories\\?\\s*$"},
+            {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
+            {"id": "keep_allowing", "scope": "line", "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories\\s*$"},
+            {"id": "block_from_now", "scope": "line", "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on\\s*$"},
+            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)\\s*$"},
+            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)\\s*$"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
+            "choices": [
+              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
           "id": "claude-auto-startup",
           "priority": 100,
           "observation": "question",
@@ -788,6 +820,7 @@
             "claude-bash-permission",
             "claude-auto-ask-permission",
             "claude-bash-permission-auto-tip",
+            "claude-read-outside-permission",
             "claude-auto-startup"
           ],
           "fixture_ids": [
@@ -806,7 +839,10 @@
             "claude-2.1.302-auto-verbose-refusal-above-form-1",
             "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1",
             "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1",
-            "claude-2.1.308-auto-tip-padded-question-1"
+            "claude-2.1.308-auto-tip-padded-question-1",
+            "claude-2.1.309-read-outside-permission-1",
+            "claude-2.1.309-read-outside-long-path-1",
+            "claude-2.1.309-edit-outside-permission-1"
           ]
         },
         "composer": {
@@ -903,6 +939,28 @@
               {"bytes_hex": "34", "required_rule_id": "claude-bash-permission-auto-tip", "required_choice_id": "deny-once"}
             ],
             "fixture_ids": ["claude-2.1.302-access-deny-pre-stage-1"]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-read-outside-permission",
+            "answer_rule_id": "claude-read-outside-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "34", "required_rule_id": "claude-read-outside-permission", "required_choice_id": "allow-once"}
+            ],
+            "fixture_ids": ["claude-2.1.309-read-outside-allow-pre-stage-1"]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-read-outside-permission",
+            "answer_rule_id": "claude-read-outside-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "33", "required_rule_id": "claude-read-outside-permission", "required_choice_id": "deny-once"}
+            ],
+            "fixture_ids": ["claude-2.1.309-read-outside-deny-pre-stage-1"]
           }
         ]
       }
