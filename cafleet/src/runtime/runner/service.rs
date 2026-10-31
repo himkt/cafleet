@@ -1187,9 +1187,9 @@ pub(crate) fn run_service(
             storage::unpublished_delivery_results(conn, run.run_id)
         });
         if let Ok(unpublished) = &unpublished {
-            for &(input_id, stage, _) in unpublished {
+            for &(input_id, stage, cause) in unpublished {
                 controller.publish_delivery_result(storage::input_delivery_result_cause(
-                    input_id, stage, None,
+                    input_id, stage, cause,
                 ));
             }
         }
@@ -1289,9 +1289,9 @@ fn publish_stopped_results(
     let unpublished = with_database_deadline(conn, deadline, |conn| {
         storage::unpublished_delivery_results(conn, run_id)
     })?;
-    for (input_id, stage, _) in unpublished {
+    for (input_id, stage, cause) in unpublished {
         controller
-            .publish_delivery_result(storage::input_delivery_result_cause(input_id, stage, None));
+            .publish_delivery_result(storage::input_delivery_result_cause(input_id, stage, cause));
     }
     Ok(())
 }
@@ -3590,6 +3590,20 @@ mod tests {
             let input = storage::get_input(&fixture.fixture.conn, input_id).unwrap();
             assert_eq!(input.disposition, Some(InputDisposition::NotSubmitted));
             assert_eq!(input.delivery_reason.as_deref(), Some("runner_stopped"));
+            assert_eq!(input.uncertain_cause, None);
+            let published_cause: Option<String> = fixture
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT json_extract(payload_json,'$.cause') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                    rusqlite::params![fixture.fixture.run.run_id, input_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                published_cause, None,
+                "a not-submitted result publishes no uncertain cause"
+            );
             let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
             assert_eq!(run.status, RunStatus::Exited);
             assert_eq!(

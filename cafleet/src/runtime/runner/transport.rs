@@ -5,6 +5,8 @@ use std::io::{self, ErrorKind};
 use std::sync::Arc;
 use std::time::Instant;
 
+#[cfg(test)]
+pub(super) use replies::REPLY_PREFIX_BOUND;
 use replies::{Classified, ReplyClassifier};
 
 mod drain;

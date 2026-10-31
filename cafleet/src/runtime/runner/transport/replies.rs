@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-pub(super) const REPLY_PREFIX_BOUND: Duration = Duration::from_millis(100);
+pub(crate) const REPLY_PREFIX_BOUND: Duration = Duration::from_millis(100);
 const CSI_PARAMETER_LIMIT: usize = 64;
 const STRING_BODY_LIMIT: usize = 4096;
 

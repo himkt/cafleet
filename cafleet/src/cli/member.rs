@@ -671,6 +671,35 @@ pub(super) fn press(
     Ok(())
 }
 
+fn wrapped_delivery_refusal(
+    label: &str,
+    member_id: i64,
+    result: &crate::runtime::runner::SubmissionResult,
+) -> String {
+    use crate::runtime::runner::SubmissionStatus;
+    let description = match result.status {
+        SubmissionStatus::Held => "held",
+        SubmissionStatus::Rejected => "rejected",
+        SubmissionStatus::Uncertain => "uncertain",
+        SubmissionStatus::Accepted | SubmissionStatus::Queued => {
+            unreachable!("submitted and queued results are not refusals")
+        }
+    };
+    let mut reason = format!("{label} delivery to member {member_id} is {description}");
+    if let Some(detail) = &result.reason {
+        reason.push_str(": ");
+        reason.push_str(detail);
+    }
+    if let Some(method) = result
+        .delivery
+        .as_ref()
+        .and_then(|delivery| delivery.method)
+    {
+        reason.push_str(&format!(" (method={})", method.as_str()));
+    }
+    reason
+}
+
 fn dispatch_input(
     conn: &mut Connection,
     settings: &Settings,
@@ -703,28 +732,8 @@ fn dispatch_input(
             result.status,
             SubmissionStatus::Accepted | SubmissionStatus::Queued
         ) {
-            let description = match result.status {
-                SubmissionStatus::Held => "held",
-                SubmissionStatus::Rejected => "rejected",
-                SubmissionStatus::Uncertain => "uncertain",
-                SubmissionStatus::Accepted | SubmissionStatus::Queued => {
-                    unreachable!("submitted and queued results return below")
-                }
-            };
-            let mut reason = format!("{label} delivery to member {id} is {description}");
-            if let Some(detail) = result.reason {
-                reason.push_str(": ");
-                reason.push_str(&detail);
-            }
-            if let Some(method) = result
-                .delivery
-                .as_ref()
-                .and_then(|delivery| delivery.method)
-            {
-                reason.push_str(&format!(" (method={})", method.as_str()));
-            }
             return Err(InputFailure {
-                source: CafleetError::App(reason),
+                source: CafleetError::App(wrapped_delivery_refusal(label, id, &result)),
                 run_id: Some(run.run_id),
                 interaction_id: runtime.current_interaction_id,
                 input_id: result.input_id,
@@ -1405,6 +1414,48 @@ mod tests {
                 .expect("actual member JSON output"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn wrapped_uncertain_prompt_and_exec_errors_name_the_recorded_cause_and_method() {
+        use crate::runtime::runner::{SubmissionResult, SubmissionStage, SubmissionStatus};
+        let uncertain = |cause: Option<&str>, method| SubmissionResult {
+            status: SubmissionStatus::Uncertain,
+            input_id: Some(9),
+            stage: SubmissionStage::Partial,
+            output_seq: Some(4),
+            reason: cause.map(str::to_owned),
+            delivery: Some(DeliveryProjection {
+                status: DeliveryStatus::Uncertain,
+                method,
+                reason: None,
+            }),
+        };
+        for label in ["prompt", "native command"] {
+            assert_eq!(
+                wrapped_delivery_refusal(
+                    label,
+                    110,
+                    &uncertain(Some("manual_input"), Some(DeliveryMethod::Profile))
+                ),
+                format!(
+                    "{label} delivery to member 110 is uncertain: manual_input (method=profile)"
+                )
+            );
+        }
+        assert_eq!(
+            wrapped_delivery_refusal(
+                "native command",
+                110,
+                &uncertain(Some("write_failed"), Some(DeliveryMethod::Fallback))
+            ),
+            "native command delivery to member 110 is uncertain: write_failed (method=fallback)"
+        );
+        assert_eq!(
+            wrapped_delivery_refusal("prompt", 110, &uncertain(None, None)),
+            "prompt delivery to member 110 is uncertain",
+            "a cause-less receipt without a recorded method adds neither"
+        );
     }
 
     #[test]

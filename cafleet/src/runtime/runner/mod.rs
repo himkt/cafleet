@@ -1,6 +1,8 @@
 mod input_protocol;
 pub(crate) use input_protocol::*;
 mod input_client;
+#[cfg(test)]
+pub(crate) use input_client::test_support as input_client_test_support;
 pub(crate) use input_client::*;
 mod input_clock;
 mod input_recovery;

@@ -292,23 +292,23 @@ The live permission reply goes through `durable_outcome`, which returns null for
 
 - [x] Add `interaction_cause` and the ordered settle-check selection; pass a cause through `stop_composer_stages` at both call sites <!-- completed: 2026-10-31T01:17 -->
 - [x] Record `short_write` / `write_failed` at the write-outcome site and `write_failed` in `retain_permission_failure`; give `record_deferred_uncertain` a cause parameter, with `write_failed` from `retire_failed_deferred` and `runner_stopped` from `fence` <!-- completed: 2026-10-31T01:17 -->
-- [ ] `input.rs` tests: a staged profile delivery that receives `ESC[I`, `ESC[24;80R` or an OSC reply during the settle writes the submit key and ends `accepted` <!-- completed: -->
-- [ ] `input.rs` tests: a keystroke during the settle ends `uncertain` with `manual_input` and reply reason `manual_input`; a lone Escape during the settle ends `uncertain` with `manual_input` after `backdate_reply_prefix(REPLY_PREFIX_BOUND)` and the next drain <!-- completed: -->
-- [ ] `input.rs` tests, one per remaining cause:
+- [x] `input.rs` tests: a staged profile delivery that receives `ESC[I`, `ESC[24;80R` or an OSC reply during the settle writes the submit key and ends `accepted` <!-- completed: 2026-10-31T01:49 -->
+- [x] `input.rs` tests: a keystroke during the settle ends `uncertain` with `manual_input` and reply reason `manual_input`; a lone Escape during the settle ends `uncertain` with `manual_input` after `backdate_reply_prefix(REPLY_PREFIX_BOUND)` and the next drain <!-- completed: 2026-10-31T01:49 -->
+- [x] `input.rs` tests, one per remaining cause:
   - accounting failure (`manual_generation = u64::MAX`), candidate, open interaction and observer unavailable;
   - short write (PTY `max_write`) and failed write;
   - failed deferred attempt and failed permission response;
-  - `fence` during a written deferred attempt (`runner_stopped`). <!-- completed: -->
+  - `fence` during a written deferred attempt (`runner_stopped`). <!-- completed: 2026-10-31T01:49 -->
 
 ### Step 8: Surfaces
 
-- [ ] `presentation.rs`: append `uncertain_cause` to the input JSON; extend the key-order test <!-- completed: -->
-- [ ] `input_client.rs`: `durable_outcome` reason for uncertain rows and the `validate_reply_against_durable` reason check; in-file tests for both <!-- completed: -->
-- [ ] `cli/member.rs`: test that a wrapped uncertain prompt/exec error names the cause and the method <!-- completed: -->
-- [ ] `cli/runtime.rs`: test that an uncertain `permission respond` reply reports `write_failed` as its reason <!-- completed: -->
-- [ ] `input_client.rs` `projection`: return the recorded cause as the uncertain reason when non-null, otherwise `prior transmission remains uncertain`; in-file tests show that a live and a repeated reply for the same uncertain permission receipt report the same reason, and that a cause-less receipt keeps the fixed string <!-- completed: -->
-- [ ] `events.rs`: derive the uncertain `cause` from the receipt in `input_delivery_result_cause` callers; validate payload `cause` against the receipt; in-file tests for presence, absence and mismatch rejection <!-- completed: -->
-- [ ] Pass the receipt cause through every publisher: `input.rs` `publish_result`, `service.rs`, `recovery/replay.rs`, `recovery/exceptional.rs`; extend their existing publication tests with a cause assertion <!-- completed: -->
+- [x] `presentation.rs`: append `uncertain_cause` to the input JSON; extend the key-order test <!-- completed: 2026-10-31T01:49 -->
+- [x] `input_client.rs`: `durable_outcome` reason for uncertain rows and the `validate_reply_against_durable` reason check; in-file tests for both <!-- completed: 2026-10-31T01:49 -->
+- [x] `cli/member.rs`: test that a wrapped uncertain prompt/exec error names the cause and the method <!-- completed: 2026-10-31T01:49 -->
+- [x] `cli/runtime.rs`: test that an uncertain `permission respond` reply reports `write_failed` as its reason <!-- completed: 2026-10-31T01:49 -->
+- [x] `input_client.rs` `projection`: return the recorded cause as the uncertain reason when non-null, otherwise `prior transmission remains uncertain`; in-file tests show that a live and a repeated reply for the same uncertain permission receipt report the same reason, and that a cause-less receipt keeps the fixed string <!-- completed: 2026-10-31T01:49 -->
+- [x] `events.rs`: derive the uncertain `cause` from the receipt in `input_delivery_result_cause` callers; validate payload `cause` against the receipt; in-file tests for presence, absence and mismatch rejection <!-- completed: 2026-10-31T01:49 -->
+- [x] Pass the receipt cause through every publisher: `input.rs` `publish_result`, `service.rs`, `recovery/replay.rs`, `recovery/exceptional.rs`; extend their existing publication tests with a cause assertion <!-- completed: 2026-10-31T01:49 -->
 
 ### Step 9: Verification
 

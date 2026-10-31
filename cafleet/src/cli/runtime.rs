@@ -444,6 +444,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn uncertain_permission_respond_reply_reports_the_recorded_write_failed_reason() {
+        use crate::runtime::runner::input_client_test_support::{Case, Retained};
+        let mut case = Case::new(Retained::Uncertain);
+        let input = case.command();
+        let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+        assert_eq!(
+            receipt.input.uncertain_cause,
+            Some(storage::UncertainCause::WriteFailed)
+        );
+        let error = permission(
+            &mut case.fixture.conn,
+            &case.settings,
+            PermissionCommand::Respond {
+                interaction_id: input.interaction_id,
+                event_id: input.event_id,
+                director_member_id: input.director_member_id,
+                expected_run_id: input.expected_run_id,
+                expected_owner_epoch: input.expected_owner_epoch,
+                request_token: input.request_token.clone(),
+                decision: input.decision,
+                decision_source: input.decision_source,
+                director_mode: input.director_mode,
+                mode_evidence_ref: input.mode_evidence_ref.clone(),
+                decision_evidence_ref: input.decision_evidence_ref.clone(),
+                operation_key: input.operation_key.clone(),
+                json: true,
+            },
+            Deadline::until(Instant::now() + Duration::from_secs(1)),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            format!(
+                "permission response uncertain for interaction {}: write_failed (input_id={})",
+                input.interaction_id, case.input_id
+            )
+        );
+        assert_eq!(
+            storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
+            receipt,
+            "a repeated reply leaves the receipt unchanged"
+        );
+    }
+
     mod permission_entry {
         use super::*;
 

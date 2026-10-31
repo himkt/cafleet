@@ -326,10 +326,14 @@ fn validate_delivery_result(
         "payload_json.stage",
         "stage outside its domain",
     )?;
+    let expected_cause = input
+        .uncertain_cause
+        .filter(|_| published.status == DeliveryStatus::Uncertain)
+        .map(uncertain_cause_payload);
     require(
-        payload.get("cause").is_none() || delivery.status == DeliveryStatus::Uncertain,
+        payload.get("cause") == expected_cause.as_ref(),
         "payload_json.cause",
-        "only an uncertain delivery result carries a cause",
+        "an uncertain delivery result carries its receipt's recorded cause",
     )
 }
 
@@ -378,17 +382,21 @@ pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, Ca
 }
 
 /// The runner's internal record of a deferred input's first result: its input, its stage and
-/// an optional diagnostic cause, carried through the outbox as the transition's cause.
+/// the receipt's recorded uncertain cause, carried through the outbox as the transition's cause.
 pub(crate) fn input_delivery_result_cause(
     input_id: i64,
     stage: &str,
-    diagnostic: Option<Value>,
+    uncertain_cause: Option<UncertainCause>,
 ) -> Value {
     let mut cause = json!({"kind":"input_delivery_result","input_id":input_id,"stage":stage});
-    if let Some(diagnostic) = diagnostic {
-        cause["cause"] = diagnostic;
+    if let Some(uncertain_cause) = uncertain_cause {
+        cause["cause"] = uncertain_cause_payload(uncertain_cause);
     }
     cause
+}
+
+fn uncertain_cause_payload(cause: UncertainCause) -> Value {
+    json!({"kind":cause.as_str()})
 }
 
 pub(crate) fn validate_transition(
@@ -489,14 +497,16 @@ fn validate_delivery_cause(transition: &ObservedTransition) -> Result<(), Caflee
         "cause_json",
         "a delivery result names its input and stage",
     )?;
-    if let Some(diagnostic) = cause.get("cause") {
+    if let Some(uncertain) = cause.get("cause") {
+        let kind = uncertain
+            .as_object()
+            .filter(|object| object.len() == 1)
+            .and_then(|object| object.get("kind"))
+            .and_then(Value::as_str);
         require(
-            diagnostic
-                .get("kind")
-                .and_then(Value::as_str)
-                .is_some_and(|kind| !kind.trim().is_empty()),
+            kind.is_some_and(|kind| UncertainCause::try_from(kind).is_ok()),
             "cause_json.cause.kind",
-            "a delivery result cause names its kind",
+            "a delivery result cause is a recorded uncertain cause",
         )?;
     }
     Ok(())
@@ -3478,6 +3488,136 @@ mod tests {
             ] {
                 let mut forged = payload.clone();
                 forged[change.0] = change.1;
+                replace_public_payload(&mut fixture.conn, &event, forged);
+                assert!(
+                    storage::get_event(&fixture.conn, event.event_id).is_err(),
+                    "{label}"
+                );
+            }
+            replace_public_payload(&mut fixture.conn, &event, payload);
+            storage::get_event(&fixture.conn, event.event_id).unwrap();
+        }
+
+        const UNCERTAIN: &str = r#"{"status":"uncertain","method":"profile","reason":null}"#;
+
+        fn uncertain_result(
+            fixture: &mut Fixture,
+            cause: Option<&str>,
+        ) -> (RuntimeEventRecord, i64, Value) {
+            let (event, input_id, base) = deferred_result(fixture);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET state='uncertain',disposition=NULL,uncertain_cause=?1 WHERE input_id=?2",
+                    params![cause, input_id],
+                )
+                .unwrap();
+            let mut payload = envelope(
+                &base,
+                input_id,
+                Value::Null,
+                serde_json::from_str(UNCERTAIN).unwrap(),
+                "unknown",
+            );
+            if let Some(cause) = cause {
+                payload["cause"] = json!({ "kind": cause });
+            }
+            replace_public_payload(&mut fixture.conn, &event, payload.clone());
+            (event, input_id, payload)
+        }
+
+        #[test]
+        fn input_delivery_result_cause_carries_the_receipt_cause_only_when_recorded() {
+            assert_eq!(
+                storage::input_delivery_result_cause(
+                    7,
+                    "unknown",
+                    Some(UncertainCause::WriteFailed)
+                ),
+                json!({"kind":"input_delivery_result","input_id":7,"stage":"unknown","cause":{"kind":"write_failed"}})
+            );
+            let plain = storage::input_delivery_result_cause(7, "submitted", None);
+            assert_eq!(
+                plain,
+                json!({"kind":"input_delivery_result","input_id":7,"stage":"submitted"})
+            );
+            assert!(plain.get("cause").is_none());
+        }
+
+        #[test]
+        fn input_delivery_result_transition_admits_only_a_recorded_cause_kind() {
+            let transition = |cause_json: Value| ObservedTransition {
+                kind: RuntimeEventKind::InputDeliveryResult,
+                cause_json: Some(cause_json),
+                ..native_exit(1, 1)
+            };
+            for cause in [
+                storage::input_delivery_result_cause(
+                    3,
+                    "unknown",
+                    Some(UncertainCause::RunnerStopped),
+                ),
+                storage::input_delivery_result_cause(3, "submitted", None),
+            ] {
+                super::super::validate_delivery_cause(&transition(cause.clone()))
+                    .unwrap_or_else(|error| panic!("{cause}: {}", error.message()));
+            }
+            for forged in [
+                json!({"kind":"input_delivery_result","input_id":3,"stage":"unknown","cause":{"kind":"terminal_reply"}}),
+                json!({"kind":"input_delivery_result","input_id":3,"stage":"unknown","cause":{"kind":"write_failed","detail":"x"}}),
+                json!({"kind":"input_delivery_result","input_id":3,"stage":"unknown","cause":"write_failed"}),
+            ] {
+                assert!(
+                    super::super::validate_delivery_cause(&transition(forged.clone())).is_err(),
+                    "{forged}"
+                );
+            }
+        }
+
+        #[test]
+        fn input_delivery_result_reader_accepts_the_receipt_cause_on_an_uncertain_result() {
+            let mut fixture = Fixture::new();
+            let (event, _, payload) = uncertain_result(&mut fixture, Some("manual_input"));
+            let view = storage::get_event(&fixture.conn, event.event_id)
+                .unwrap_or_else(|error| panic!("{}", error.message()));
+            assert_eq!(view.event.payload_json, payload);
+            assert_eq!(
+                view.event.payload_json["cause"],
+                json!({"kind":"manual_input"})
+            );
+            assert_eq!(
+                super::super::original(&view).unwrap().cause_json,
+                Some(
+                    json!({"kind":"input_delivery_result","input_id":payload["input_id"],"stage":"unknown","cause":{"kind":"manual_input"}})
+                )
+            );
+        }
+
+        #[test]
+        fn input_delivery_result_reader_accepts_an_absent_cause_for_a_causeless_receipt() {
+            let mut fixture = Fixture::new();
+            let (event, _, payload) = uncertain_result(&mut fixture, None);
+            let view = storage::get_event(&fixture.conn, event.event_id)
+                .unwrap_or_else(|error| panic!("{}", error.message()));
+            assert!(view.event.payload_json.get("cause").is_none());
+            let mut forged = payload;
+            forged["cause"] = json!({"kind":"write_failed"});
+            replace_public_payload(&mut fixture.conn, &event, forged);
+            assert!(
+                storage::get_event(&fixture.conn, event.event_id).is_err(),
+                "a cause the receipt never recorded is rejected"
+            );
+        }
+
+        #[test]
+        fn input_delivery_result_reader_rejects_a_cause_that_disagrees_with_the_receipt() {
+            let mut fixture = Fixture::new();
+            let (event, _, payload) = uncertain_result(&mut fixture, Some("manual_input"));
+            let mut mismatched = payload.clone();
+            mismatched["cause"] = json!({"kind":"write_failed"});
+            let mut missing = payload.clone();
+            missing.as_object_mut().unwrap().remove("cause");
+            for (label, forged) in [("mismatched cause", mismatched), ("missing cause", missing)] {
                 replace_public_payload(&mut fixture.conn, &event, forged);
                 assert!(
                     storage::get_event(&fixture.conn, event.event_id).is_err(),
