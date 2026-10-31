@@ -535,6 +535,7 @@ Execution summary (2026-11-01, macOS, Rust 1.99.1, working tree on top of `HEAD`
 | `mise //cafleet:lint` | Pass: clippy with `-D warnings` and `cargo fmt --check` |
 | `mise //cafleet:test` | 1499 passed, 3 failed, 7 ignored at the default thread count. The three failures (`opencode_deny_moves_the_focus_selects_reject_and_submits_the_empty_reason`, `opencode_focus_on_always_allow_after_the_first_deny_stage_fails_uncertain`, `service_quiet_timer_persists_one_opening_without_changing_output_sequence`) each pass in isolation. |
 | `mise //cafleet:test -- -- --test-threads=4` | 1502 passed, 0 failed, 7 ignored |
+| Default-thread failures against `main` | A detached worktree of `main` (`5c82e613`) at the default thread count fails `opencode_deny_moves_the_focus_selects_reject_and_submits_the_empty_reason` and `opencode_focus_on_always_allow_after_the_first_deny_stage_fails_uncertain` at the same fixture-deadline assertion, so both predate this branch; `service_quiet_timer_persists_one_opening_without_changing_output_sequence` passed there and passes in isolation here. That run shared the host with a feature-tree build. |
 | `mise //docs:build` | Pass |
 | Success Criteria `git grep` outside `design-docs/` | No match; the same pattern matches inside `design-docs/`, so the pattern itself works |
 | Baseline against `SPEC.md` §8 | `cafleet/migrations/V1__baseline.sql` equals the §8 DDL line for line, and it is the only embedded migration |
