@@ -400,7 +400,7 @@ A pending pane uses `member ID has no pane yet (pending placement) — nothing t
 
 ### `member capture`
 
-`cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` reads a pane tail. `--lines` is the number of trailing lines (default **20**); `--ansi` preserves ANSI escapes, and the default strips them and cleans carriage-return redraws. JSON stamps `captured_at` at the capture read and sets `content_sha256` to the lowercase SHA-256 hex of the exact emitted `content`. Text prints content without adding a newline. Read-only capture needs no input lock; a pending placement is an error.
+`cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` reads a pane tail. `--lines` is the number of trailing lines (default **20**); `--ansi` preserves ANSI escapes, and the default strips them, treats a carriage return directly before a line feed as part of the line ending, and cleans the remaining carriage-return redraws. JSON stamps `captured_at` at the capture read and sets `content_sha256` to the lowercase SHA-256 hex of the exact emitted `content`. Text prints content without adding a newline. Read-only capture needs no input lock; a pending placement is an error.
 
 ## Pane input and previews
 

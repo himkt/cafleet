@@ -794,7 +794,7 @@ Missing member/placement and native process errors retain their existing primary
 positional `MEMBER_ID` names the target member.
 
 - `--lines`: Number of trailing lines to capture (default: **20**).
-- `--ansi`: Preserve ANSI escapes in the raw capture. The default strips ANSI escapes and cleans carriage-return redraws.
+- `--ansi`: Preserve ANSI escapes in the raw capture. The default strips ANSI escapes, treats a carriage return directly before a line feed as part of the line ending, and cleans the remaining carriage-return redraws.
 
 Output shapes are in §6.3 Output shapes; target resolution is
 shared with the `member` keystroke verbs — see
@@ -1963,15 +1963,15 @@ Profile `claude-2.1.302-auto-1`, with `min_version` `2.1.302`, applies to Claude
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | Rule `claude-bash-permission`: the native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen, with a plain or boxed operation, unwrapped or wrapped, within 24 rows from its heading to its `Esc to cancel · Tab to amend` line. Rules `claude-bash-permission-auto-tip`, `claude-auto-ask-permission` and the question rule `claude-auto-startup`: described below |
-| Allow answer | `tested` | One stage, byte `31` (digit `1`), selecting `Yes` as `allow-once`, for each permission request rule |
-| Deny answer | `tested` | One stage, byte `34` (digit `4`) for `claude-bash-permission` and `claude-bash-permission-auto-tip`, and byte `32` (digit `2`) for `claude-auto-ask-permission`, selecting `No` as `deny-once` |
+| Detection | `tested` | Rule `claude-bash-permission`: the native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen, with a plain or boxed operation, unwrapped or wrapped, within 24 rows from its heading to its `Esc to cancel · Tab to amend` line. Rules `claude-bash-permission-auto-tip`, `claude-auto-ask-permission`, `claude-read-outside-permission` and the question rule `claude-auto-startup`: described below |
+| Allow answer | `tested` | One stage selecting the single-request allow choice as `allow-once`: byte `31` (digit `1`, `Yes`) for each Bash permission request rule, and byte `34` (digit `4`, `Yes, but ask again next time`) for `claude-read-outside-permission` |
+| Deny answer | `tested` | One stage selecting the single-request deny choice as `deny-once`: byte `34` (digit `4`, `No`) for `claude-bash-permission` and `claude-bash-permission-auto-tip`, byte `32` (digit `2`, `No`) for `claude-auto-ask-permission`, and byte `33` (digit `3`, `No, and ask again next time`) for `claude-read-outside-permission` |
 | Empty-composer observation | `tested` | The idle prompt line with the terminal cursor immediately after the prompt prefix; a verified non-interaction boundary |
 | Annotations | `tested` | `claude-auto-refusal`, `claude-auto-refusal-notice`, `claude-auto-unavailable` and `claude-auto-mode-indicator`, described below |
 | Prompt submission | `tested` | Empty prefix and the measured native submit key, as separate literal and submit stages (§ Measured submission plans and settle intervals) |
 | Native-exec submission | `tested` | Prefix `2120` (`! `) and the measured native submit key, as separate literal and submit stages with independent native-shell provenance |
 
-Every answer selects its choice by its number, so it does not depend on which choice is focused. The broadened choices 2 and 3 have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. Every Claude version at or above `2.1.302` selects this profile until a later boundary is added (§ Profile selection by minimum version).
+Every answer selects its choice by its number, so it does not depend on which choice is focused. The broadened choices 2 and 3 of the Bash forms and the persistent choices 1 and 2 of the read dialog have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. Every Claude version at or above `2.1.302` selects this profile until a later boundary is added (§ Profile selection by minimum version).
 
 Detection rests on native captures of the form unwrapped at 120 columns, wrapped plain at 52 columns, and boxed at 89 and 120 columns; both answers rest on the 120-column and the 52-column plain captures. A narrow pane or a long command makes Claude wrap the form: the tip, the description and the choice labels continue on further rows, and the operation between the dashed rules spans several rows. The operation rows take one of two native shapes:
 
@@ -2010,6 +2010,21 @@ In `auto`, Claude Code 2.1.302 can show `Teach auto mode about your environment?
 - line matchers for the heading, the footer and the focus `^ {2,3}❯ \S`
 
 The rule declares no operation and no choices. Offer and wizard therefore share one fingerprint, and the wizard continues the offer's episode, which closes when the idle composer returns. The rule has no answer plan; the Director asks the user to answer the dialog on the member's native surface. To avoid it, answer the dialog once in an interactive session of the pinned version with the member's configuration directory; `3. Don't show again` persists.
+
+Claude Code 2.1.309 asks before a file tool reads outside the working directories, also in `auto`. The dialog shows the read operation between dashed rules, an explanatory paragraph, the question `Allow this read outside the working directories?` and four choices. `1. Yes, and keep allowing any reads outside the working directories` and `2. No, and block reads outside the working directories from now on` change a persistent setting; `3. No, and ask again next time` and `4. Yes, but ask again next time` apply to this read only. The dialog opens focused on choice 1. Rule `claude-read-outside-permission` (priority 100, alternate screen, cursor inside) spans from `^ Read outside the working directories\s*$` to `^ Esc to cancel · Tab to amend\s*$` within 24 rows and requires the shared operation matcher with its one-space `row_margin` and these line matchers:
+
+- `^ Read outside the working directories\s*$` for the heading, `^ Allow this read outside the working directories\?\s*$` for the question and `^ ❯ [1-9]\. ` for the focus
+- `^ [❯ ] 4\. (?P<label>Yes, but ask again next time)\s*$` as `allow-once` and `^ [❯ ] 3\. (?P<label>No, and ask again next time)\s*$` as `deny-once`, the single-request choices
+- `^ [❯ ] 1\. Yes, and keep allowing any reads outside the working directories\s*$` and `^ [❯ ] 2\. No, and block reads outside the working directories from now on\s*$` for the persistent choices, which have no answer plan
+
+The operation is the displayed `Read(<path>)` rows. A long path continues on a further row with the one-space margin, so the evidence reports it with `operation_rows` above 1. The explanatory paragraph has no matcher. The rule rests on 2.1.309 captures at 120 columns, each fixture keeping its own `native_version` within this profile's interval; an earlier version that never renders the dialog never matches it. In the captures, allow `4` performed the read and deny `3` made the Read tool return `The user did not allow this read outside the working directories`, and neither answer changed a persistent setting.
+
+| Limit | Behavior |
+|---|---|
+| Panes narrower than 120 columns | Only 120-column renderings were captured; a narrower rendering whose rows differ from the matchers is an `unknown` frame, and the dialog is answered on the native surface |
+| Persistent choices 1 and 2 | CAFleet never selects them; they are chosen only on the native surface |
+| `Tab to amend` | CAFleet offers no amend action |
+| Other file tools | In the 2.1.309 captures, Edit first read its target and showed this same dialog, Write ran without a dialog under the auto mode classifier, and the session offered no Glob or Grep tool. An outside-working-directory dialog with other literals is an `unknown` frame with no event |
 
 Claude renders an automatic refusal in one of two native forms, depending on the user's Verbose output setting, and the profile claims both. Every Claude annotation rule (priority 40, alternate screen, cursor any) declares the same frame guard: require `^❯\u{a0}` (the live composer prefix) and reject `^  Showing detailed transcript · ctrl\+o to toggle` (the transcript viewer's footer).
 
