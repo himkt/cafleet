@@ -1031,9 +1031,12 @@ The CSI regex is exactly `\x1b\[[0-?]*[ -/]*[@-~]`: ESC, `[`, any run of
 parameter bytes (`0x30`–`0x3F`), any run of intermediate bytes (`0x20`–`0x2F`),
 then one final byte (`0x40`–`0x7E`). This matches **CSI sequences only** — OSC,
 DCS, and single-character escapes are deliberately **not** stripped. After
-stripping CSI matches, split on `\n` and, per line, keep only the substring after
-the **last** `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps only
-`NEW`), then re-join with `\n`. An empty/falsy input returns unchanged.
+stripping CSI matches, split on `\n` and, per line, trim the trailing run of
+`\r` — a carriage return with nothing written after it, such as the CR of a CRLF
+row terminator, overwrites nothing — then keep only the substring after the
+**last** remaining `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps only
+`NEW`, and a CRLF-terminated `row\r\n` keeps `row`), then re-join with `\n`. An
+empty/falsy input returns unchanged.
 
 
 #### Formatter helper semantics
