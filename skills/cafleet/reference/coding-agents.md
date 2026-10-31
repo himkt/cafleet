@@ -5,11 +5,11 @@ Each backend section is self-contained. Select the backend by the subject of the
 | Purpose | Backend selector | Read and apply |
 |---|---|---|
 | Execute current instructions | The executing agent's `CODING AGENT:` identity, or its own identity when standalone | Its Runtime bindings and corresponding notes for decision surface, skill loader, and local execution tools. Required-reading row one gates this lookup; an ordinary member needs only its own runtime section. |
-| Select/configure a spawned member | The backend selected under [Director model-selection policy](../roles/director.md#model-selection) | Its Model catalog and Role defaults; validate target effort and launch capabilities against its Runtime bindings. |
+| Select/configure a spawned member | The backend selected under [Director model-selection policy](../roles/director.md#model-selection) | Its Model catalog, Role defaults and Role eligibility; validate target effort and launch capabilities against its Runtime bindings. |
 
 Apply the core skill's [Resolve your overlay](../SKILL.md#resolve-your-overlay) procedure.
 
-Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-25). Runtime bindings, bound runtime notes, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
+Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-25). Runtime bindings, bound runtime notes, Role eligibility, and worked resolutions belong to runtime documentation maintenance. Re-check a backend's Role eligibility whenever its bundled profile boundary or `Evidence:` line changes. The freshness date applies to model data; structural reorganization preserves that date.
 
 Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and reviewer/member rules, lives in [Director model selection](../roles/director.md#model-selection).
 
@@ -17,14 +17,17 @@ Prices are standard provider USD rates per MTok and are planning estimates, not 
 
 ## Role requirements
 
-| Role | Required backend capability |
-|---|---|
-| Director | Native goal lifecycle controls, such as a goal command, and background execution while supervision continues. Both capabilities are required. |
-| Member | Runner-compatible PTY lifecycle and an explicit detection-coverage declaration, with launch, detection and safe composer input treated separately. |
+| Role | Tier | Required backend capability |
+|---|---|---|
+| Director | Eligible | Native goal lifecycle controls, such as a goal command, and background execution while supervision continues. Both capabilities are required. |
+| Member | Eligible | A runner-compatible PTY lifecycle and an explicit detection-coverage declaration. A launch-policy catalog whose omitted policy is non-interactive: native automatic review where the backend offers one, otherwise a fixed allow/deny policy that runs the spawn-allowed broker commands. |
+| Member | Bundled support | A native version the version probe parses, selecting a bundled profile that declares detection, automatic review annotations, composer plans and request-bound answers independently from native evidence. A failed probe or an undeclared capability is `unknown` coverage or unsupported, and the backend stays Member-eligible. |
 
-Evaluate roles independently. A backend's native automatic review is its omitted Member policy where the backend offers one; interactive and fixed allow/deny policies remain explicit choices. Preserve native guards, managed policy, explicit denies and sandbox boundaries. Unknown detection/composer coverage permits manual native terminal work; ordinary CAFleet input then uses Escape-first delivery fallback, and semantic permission answers stay unavailable. The [member runtime procedure](member-runtime.md) owns event, input and continuation handling.
+Evaluate roles independently; a backend ships for the roles it meets. A verdict is `yes` only when recorded evidence establishes every Eligible-tier requirement for that role; otherwise it is `no`, with "not established" or the observed failure as its evidence. Bundled-support capabilities never change a verdict. Each requirement group's evidence holds for its own recorded native version, and a newer installed version carries the verdict forward until the next re-check. Each backend section's Role eligibility records its verdicts.
 
-Goal support is a host capability; retain supplied activation, pause, completion and budget authority. Evaluate native reception separately: a host satisfying both Director prerequisites can use explicit manual `poll` or finite `wait` when no verified receive adapter is available. Background execution alone establishes no unsolicited wake or per-record reception guarantee.
+Interactive native policies remain explicit `--permission-mode` choices on an eligible backend; an interactive-only backend is not Member-eligible. Preserve native guards, managed policy, explicit denies and sandbox boundaries. Unknown detection/composer coverage permits manual native terminal work; ordinary CAFleet input then uses Escape-first delivery fallback, and semantic permission answers stay unavailable. The [member runtime procedure](member-runtime.md) owns event, input and continuation handling.
+
+Goal support is a host capability; retain supplied activation, pause, completion and budget authority. Evaluate the decision surface and native reception separately from Director eligibility: a backend without a structured decision surface uses its documented default, and a host satisfying both Director prerequisites can use explicit manual `poll` or finite `wait` when no verified receive adapter is available. Background execution alone establishes no unsolicited wake or per-record reception guarantee.
 
 ## claude
 
@@ -97,6 +100,13 @@ Use verified native cancellation with observed child cleanup, or stop renewal an
 
 Evidence: Claude Code 2.1.301 stream probes established separate event turns from one process. Actual Monitor expiry, cancellation, child cleanup and independently observed goal/decision preservation require acceptance evidence; the invocation shape alone establishes none of them.
 
+### Role eligibility
+
+| Role | Eligible | Evidence |
+|---|---|---|
+| Director | `yes` | Goal lifecycle: [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. Background execution: Monitor stream probes, 2.1.301, checked 2026-10-25. |
+| Member | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: profile `claude-2.1.302-auto-1`. |
+
 ## codex
 
 ### Runtime bindings
@@ -156,6 +166,13 @@ On `closed`/exit, establish termination and follow [receiver recovery](supervisi
 Reception, ACK and renewal preserve the supplied goal's activation, pause, completion and budget authority. They never call a goal lifecycle tool, start a goal, resume a paused goal or change its budget. Required user decisions gate dependent work while independent authorized work may continue. Automatic Director reception uses stdout and broker reads only, with no pane controls or queue bridge.
 
 Evidence: Codex CLI 0.162.1 stream probes established one retained session/process across receive–act–receive. Independently observed goal-state and open-decision preservation require acceptance evidence; absence of goal lifecycle calls alone proves no state preservation.
+
+### Role eligibility
+
+| Role | Eligible | Evidence |
+|---|---|---|
+| Director | `yes` | Goal lifecycle: [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Background execution: retained `exec_command` session stream probes, 0.162.1, checked 2026-10-25. |
+| Member | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: profile `codex-0.163.0-approve-for-me-1`. |
 
 ## opencode
 
@@ -402,7 +419,7 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 | Note | Applies at |
 |---|---|
 | A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
-| Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. A host satisfying the [Director requirements](#role-requirements) without a verified native stream adapter uses explicit manual `poll`/finite `wait` and states that reception limit. | [Director wake](supervision.md#director-wake) |
+| Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. OpenCode's Director verdict is `no` (Role eligibility below), so an OpenCode session follows the Director role's ineligible-backend rule. | [Director wake](supervision.md#director-wake) |
 | OpenCode 2.1.4 loads presets from `~/.config/opencode`, the default preset base, and from `OPENCODE_CONFIG_DIR`. `member create` forwards a set `OPENCODE_CONFIG_DIR` into the member's environment, so the member loads the preset setup installed and spawn checked. Same-name agent definitions can merge across sources; inspect the effective configuration when customizing a preset. | `{permission_flags}`; preset discovery; member spawn |
 | The preset uses the last matching permission rule, so specific denies for Director-owned explicit pane-input commands, including `member press`, win over the broad `cafleet *` allow. Denied member commands receive no permission prompt, while permitted broker commands run normally. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 | MCP tools' participation in preset permission evaluation and compound-shell permission matching are unverified on opencode 2.1.4. Keep loaded configurations free of MCP servers and submit one command per invocation. | `{permission_flags}`; [command isolation](../SKILL.md#one-shot-command-isolation) |
@@ -412,6 +429,15 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 | The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup under `cafleet` is an issue to capture and relay. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 | The `cafleet-ask` preset keeps the same allowlist and Director-only denies and asks for every other shell command. Its native permission form is a runtime decision: the member waits while the Director answers it through the [runtime procedure](member-runtime.md), then continues from the result OpenCode returns. | `{permission_flags}`; [runtime procedure](member-runtime.md#consume-observed-interactions) |
 | On OpenCode 2.1.4 and later a deny submits an empty rejection reason and ends the member's turn with `Step interrupted`; after verifying that nothing ran, continue the member with a Director message, which its runner delivers into the idle composer. A wrapped command or a reason to give is answered manually on the native surface. | [Runtime procedure](member-runtime.md#consume-observed-interactions) step 7 |
+
+### Role eligibility
+
+| Role | Eligible | Evidence |
+|---|---|---|
+| Director | `no` | Goal lifecycle controls: not established for 2.1.4, with no goal evidence recorded, checked 2026-10-31. Background execution while supervision continues: not established for 2.1.4, checked 2026-10-31. |
+| Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: profile `opencode-2.1.4-cafleet-ask-1`. |
+
+To change the Director verdict, a maintainer establishes, for an installed OpenCode version, native goal lifecycle controls, such as a goal command, from official documentation or installed help, and background execution while supervision continues from a CAFleet stream probe. Record the version, source and date in this table, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
 
 ## Template
 
@@ -432,3 +458,7 @@ List exact spawn tokens, valid aliases, reviewed most-to-least capability orderi
 ### Note → applies at
 
 Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, prompt-routing, Director, and supervision instructions that point at it.
+
+### Role eligibility
+
+Use a `Role | Eligible | Evidence` table with one Director row and one Member row. Mark `yes` only when every Eligible-tier requirement in § Role requirements is established; otherwise `no` with "not established" or the observed failure. Each Evidence cell names the source, native version and `checked YYYY-MM-DD` for each requirement group in at most two sentences, and a Member row names its bundled profile instead of listing its capabilities.

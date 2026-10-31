@@ -4,14 +4,15 @@ Write CAFleet base instructions so they read the same on every backend: family `
 
 ## Where backend specifics live
 
-`skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained backend section contains these four subsections in order:
+`skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained backend section contains these five subsections in order:
 
 1. **Runtime bindings**: the five runtime placeholders for decision surface, permission flags, pane title, skill loader, and effort levels.
 2. **Role defaults**: the concrete model and effort assignments for reviewers and other members; models come from the backend catalog and effort matches its runtime capability.
 3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
+5. **Role eligibility**: per-role `yes`/`no` verdicts for Director and Member, each with checked native version, source and date.
 
-Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at. Add a backend by copying `## Template` and supplying all four subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections.
+Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying `## Template` and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections, including Role eligibility, and re-checks a backend's Role eligibility whenever its bundled profile boundary or `Evidence:` line changes.
 
 ## How the base and overlay connect
 
@@ -21,7 +22,7 @@ Each reader entry point places its runtime overlay first in its Required-reading
 
 | Home | Audience | Content |
 |---|---|---|
-| `SPEC.md` §6.7 Coding-agent backends | Everything (contract) | Backend argv, model/effort validation, permission posture, presets and host evidence |
+| `SPEC.md` §6.7 Coding-agent backends | Everything (contract) | Role requirements and per-backend role eligibility, backend argv, model/effort validation, permission posture, presets and host evidence |
 | `skills/cafleet/reference/coding-agents.md` | Agents | The runtime overlay above |
 | `docs/docs/concepts/coding-agents.md` | Users | How backends differ and how to choose and configure them |
 

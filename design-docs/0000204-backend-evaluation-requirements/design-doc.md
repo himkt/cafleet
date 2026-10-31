@@ -1,7 +1,7 @@
 # Backend Evaluation Requirements by Role
 
 **Status**: Approved
-**Progress**: 0/17 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-10-31
 
 ## Overview
@@ -231,38 +231,38 @@ The CLI is unchanged: `fleet create --coding-agent` still accepts every backend.
 
 ### Step 1: SPEC.md
 
-- [ ] Replace §6.7 `#### Role requirements` content with its final text from § The bar. <!-- completed: -->
-- [ ] Add §6.7 `#### Role eligibility` with the six verdict rows and the OpenCode flip check. <!-- completed: -->
-- [ ] Append the OpenCode Director-verdict sentence to §6.7 Host evidence and native-input authorization. <!-- completed: -->
+- [x] Replace §6.7 `#### Role requirements` content with its final text from § The bar. <!-- completed: 2026-10-31T05:03 -->
+- [x] Add §6.7 `#### Role eligibility` with the six verdict rows and the OpenCode flip check. <!-- completed: 2026-10-31T05:03 -->
+- [x] Append the OpenCode Director-verdict sentence to §6.7 Host evidence and native-input authorization. <!-- completed: 2026-10-31T05:03 -->
 
 ### Step 2: docs/
 
-- [ ] Apply both `docs/docs/concepts/coding-agents.md` edits (Director-selection paragraph, interactive-policies rewording). <!-- completed: -->
-- [ ] Update `docs/docs/how-to/mixed-backend-team.md` line 80 to the Director-verdict link. <!-- completed: -->
-- [ ] Add the evaluation procedure, capability → evidence table and recording rule to `docs/docs/contributing.md` § Extend a coding-agent backend, absorbing the existing evidence paragraph. <!-- completed: -->
+- [x] Apply both `docs/docs/concepts/coding-agents.md` edits (Director-selection paragraph, interactive-policies rewording). <!-- completed: 2026-10-31T05:04 -->
+- [x] Update `docs/docs/how-to/mixed-backend-team.md` line 80 to the Director-verdict link. <!-- completed: 2026-10-31T05:04 -->
+- [x] Add the evaluation procedure, capability → evidence table and recording rule to `docs/docs/contributing.md` § Extend a coding-agent backend, absorbing the existing evidence paragraph. <!-- completed: 2026-10-31T05:04 -->
 
 ### Step 3: README.md
 
-- [ ] Verify `README.md` needs no change (pitch, install commands and section list unaffected). <!-- completed: -->
+- [x] Verify `README.md` needs no change (pitch, install commands and section list unaffected). <!-- completed: 2026-10-31T05:04 -->
 
 ### Step 4: skills/
 
-- [ ] Apply `coding-agents.md` edits 1–3 (preamble, selector table, § Role requirements). <!-- completed: -->
-- [ ] Apply `coding-agents.md` edit 4: the three `### Role eligibility` subsections and the OpenCode flip check. <!-- completed: -->
-- [ ] Apply `coding-agents.md` edits 5–6 (OpenCode note, Template guidance). <!-- completed: -->
-- [ ] Update `skills/cafleet/roles/director.md` intro (including the ineligible-backend rule) and § Model selection. <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md` § Resolve your overlay step 1. <!-- completed: -->
+- [x] Apply `coding-agents.md` edits 1–3 (preamble, selector table, § Role requirements). <!-- completed: 2026-10-31T05:05 -->
+- [x] Apply `coding-agents.md` edit 4: the three `### Role eligibility` subsections and the OpenCode flip check. <!-- completed: 2026-10-31T05:05 -->
+- [x] Apply `coding-agents.md` edits 5–6 (OpenCode note, Template guidance). <!-- completed: 2026-10-31T05:05 -->
+- [x] Update `skills/cafleet/roles/director.md` intro (including the ineligible-backend rule) and § Model selection. <!-- completed: 2026-10-31T05:05 -->
+- [x] Update `skills/cafleet/SKILL.md` § Resolve your overlay step 1. <!-- completed: 2026-10-31T05:05 -->
 
 ### Step 5: Project rules and skills
 
-- [ ] Apply the five `.claude/rules/coding-agent-overlay.md` edits. <!-- completed: -->
-- [ ] Add Role eligibility to the preserved list in `.claude/skills/cafleet-model-list-refresh/SKILL.md`. <!-- completed: -->
+- [x] Apply the five `.claude/rules/coding-agent-overlay.md` edits. <!-- completed: 2026-10-31T05:06 -->
+- [x] Add Role eligibility to the preserved list in `.claude/skills/cafleet-model-list-refresh/SKILL.md`. <!-- completed: 2026-10-31T05:06 -->
 
 ### Step 6: Validate
 
-- [ ] Run `mise //docs:build` and confirm it passes. <!-- completed: -->
-- [ ] Review every new or changed link and anchor (`SPEC.md#role-requirements`, `SPEC.md#role-eligibility`, `coding-agents.md#role-requirements`, intra-file references) and confirm table cells keep at most two sentences. <!-- completed: -->
-- [ ] Review the diff: Markdown only, files limited to § Placement, identical verdict text in both homes, every shipped sentence handled per § Shipped sentence dispositions, skills link no `docs/` or `SPEC.md`. <!-- completed: -->
+- [x] Run `mise //docs:build` and confirm it passes. <!-- completed: 2026-10-31T05:06 -->
+- [x] Review every new or changed link and anchor (`SPEC.md#role-requirements`, `SPEC.md#role-eligibility`, `coding-agents.md#role-requirements`, intra-file references) and confirm table cells keep at most two sentences. <!-- completed: 2026-10-31T05:06 -->
+- [x] Review the diff: Markdown only, files limited to § Placement, identical verdict text in both homes, every shipped sentence handled per § Shipped sentence dispositions, skills link no `docs/` or `SPEC.md`. <!-- completed: 2026-10-31T05:06 -->
 
 ---
 
