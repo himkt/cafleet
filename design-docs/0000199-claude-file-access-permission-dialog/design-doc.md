@@ -1,7 +1,7 @@
 # Claude File-Access Permission Dialog and Multi-Line herdr Capture
 
 **Status**: Approved
-**Progress**: 0/23 tasks complete
+**Progress**: 9/23 tasks complete
 **Last Updated**: 2026-10-31
 
 ## Overview
@@ -186,11 +186,13 @@ Captures use the test-only native-capture driver that produced the existing fixt
 1. Create `<DRIVER_PRIVATE_ROOT>/claude-seed` (`0700`) and copy only the operator's `.credentials.json` into it (`0600`).
 2. Start Claude Code 2.1.309 interactively with `CLAUDE_CONFIG_DIR` set to the seed, `--permission-mode auto`, in a disposable cwd under `DRIVER_NEUTRAL_ROOT`. Complete first-launch onboarding on the native surface and send one tool-free prompt.
 3. When `Teach auto mode about your environment?` appears, answer `3. Don't show again`; confirm a second launch shows neither onboarding nor that dialog.
-4. Perform no file operation outside the cwd and exit. The seed then holds `.credentials.json`, the `.claude.json` Claude wrote (onboarding, auto-mode and account flags) and no `settings.json`.
+4. Perform no file operation outside the cwd and exit. The seed then holds `.credentials.json`, the `.claude.json` Claude wrote (onboarding, auto-mode and account flags) and the theme-only `settings.json` Claude writes during the theme step.
+
+The case setup copies the seed's `settings.json` only when it is exactly a theme-only object, and refuses the case otherwise.
 
 If onboarding or the auto-mode startup dialog still appears in a case, the case sends no bytes and stops unpublished; rebuild the seed and rerun the case. After the last Step 1 case, delete the seed directory.
 
-**Persistent-setting check.** Before each case starts, the driver snapshots every JSON file in the case's private configuration. After the case stops, it compares them and records each changed key path. The cells case of the same dialog sends no answer, so its changed keys are the session-bookkeeping baseline. An allow or deny case passes only when its changed keys equal that baseline and no `settings.json` or `settings.local.json` appeared; any other change fails the digit check for that dialog and is reported to the Director.
+**Persistent-setting check.** Before each case starts, the driver snapshots every JSON file in the case's private configuration. After the case stops, it compares them and records each changed key path. The cells case of the same dialog sends no answer, so its changed keys are the session-bookkeeping baseline. An allow or deny case passes only when its changed key paths across every JSON file of the private configuration, `settings.json` included, equal that baseline and no `settings.local.json` and no project `<cwd>/.claude/settings*.json` appeared; any other change fails the digit check for that dialog and is reported to the Director.
 
 **Teardown.** Each case's stop removes its private configuration directory, which holds a credential copy, after the persistent-setting check, including when the case fails.
 
@@ -271,12 +273,15 @@ Unchanged. The Director consumes `interaction_opened`, verifies it with `event s
 
 ### Step 1: Capture native evidence
 
-- [ ] Extend the native-capture driver in `cafleet/src/runtime/runner/observation.rs` per § Native capture procedure: the file-tool binding, outside-directory setup and validation, the file-tool prompt branch, the private `CLAUDE_CONFIG_DIR` copied from the seed, the persistent-setting check, the private-configuration teardown, and the Read and sibling `cells` cases in `APPROVED_CASES`. <!-- completed: -->
-- [ ] Build the seed configuration per § Native capture procedure and confirm a second launch shows neither onboarding nor the auto-mode startup dialog. <!-- completed: -->
-- [ ] Run `claude-read-outside-cells-001` and `claude-read-outside-long-001` on Claude Code 2.1.309; pin every matcher literal and `region.screen`, `region.cursor` and `region.max_rows` per § Detection rule `claude-read-outside-permission`, and confirm one logical line per matched row. Report `blocked` if no Read dialog appears. <!-- completed: -->
-- [ ] Run `claude-read-outside-allow-001` and `claude-read-outside-deny-001`, recording the digit check outcome, pre-stage fixtures, continuation screens and native results. <!-- completed: -->
-- [ ] Run `claude-<tool>-outside-cells-001` for Edit, Write, Glob and Grep and apply the § Sibling file-access dialogs table; for each tool with its own dialog, register its allow/deny cases with the reviewed digits and run them. <!-- completed: -->
-- [ ] Review masking, convert each capture into a native fixture, and report the capture outcomes (including any digit-check failure or unproduced dialog) to the Director before Step 2. <!-- completed: -->
+COMMENT(programmer): Step 1 outcomes are in § Execution record > Step 1 native captures: both digit checks passed, no sibling dialog has its own literals (Edit reused the Read dialog; Write, Glob and Grep produced none), so the Read rule ships with allow `34` / deny `33` and no sibling rule. The seven fixtures are staged under `.capture/fixtures/` in this folder (not yet in `cafleet/src/coding_agent/profiles/native/`, which is Step 4), and the operator harness is `.capture/native_driver.py`; decide whether either is committed. Driver fixes found while running: Claude writes the seed `settings.json` with mode 0644 (I set it to 0600 in the seed), the 2.1.309 policy catalog rejects an explicit `auto`, so file-tool cases launch under the omitted default and assert it resolves to `auto`, and a post-shutdown tmux race now waits for the pane to settle. A full parallel `mise //cafleet:test` run failed 13 tests in `deletion`, `runner::health`, `runner::input`, `runner::input_client`, `runner::recovery` and `observation::tests::controller_tests`; each passes in isolation and the `recovery` group passes serially (137 tests), so these look load-dependent and outside the test-only driver change.
+
+
+- [x] Extend the native-capture driver in `cafleet/src/runtime/runner/observation.rs` per § Native capture procedure: the file-tool binding, outside-directory setup and validation, the file-tool prompt branch, the private `CLAUDE_CONFIG_DIR` copied from the seed, the persistent-setting check, the private-configuration teardown, and the Read and sibling `cells` cases in `APPROVED_CASES`. <!-- completed: 2026-10-31T01:44 -->
+- [x] Build the seed configuration per § Native capture procedure and confirm a second launch shows neither onboarding nor the auto-mode startup dialog. <!-- completed: 2026-10-31T01:44 -->
+- [x] Run `claude-read-outside-cells-001` and `claude-read-outside-long-001` on Claude Code 2.1.309; pin every matcher literal and `region.screen`, `region.cursor` and `region.max_rows` per § Detection rule `claude-read-outside-permission`, and confirm one logical line per matched row. Report `blocked` if no Read dialog appears. <!-- completed: 2026-10-31T01:44 -->
+- [x] Run `claude-read-outside-allow-001` and `claude-read-outside-deny-001`, recording the digit check outcome, pre-stage fixtures, continuation screens and native results. <!-- completed: 2026-10-31T01:44 -->
+- [x] Run `claude-<tool>-outside-cells-001` for Edit, Write, Glob and Grep and apply the § Sibling file-access dialogs table; for each tool with its own dialog, register its allow/deny cases with the reviewed digits and run them. <!-- completed: 2026-10-31T01:44 -->
+- [x] Review masking, convert each capture into a native fixture, and report the capture outcomes (including any digit-check failure or unproduced dialog) to the Director before Step 2. <!-- completed: 2026-10-31T01:44 -->
 
 ### Step 2: Update documentation
 
@@ -286,9 +291,9 @@ Unchanged. The Director consumes `interaction_opened`, verifies it with `event s
 
 ### Step 3: Fix capture line endings
 
-- [ ] Extend the `strip_ansi` test in `cafleet/src/output/render.rs` with the § Capture line endings table rows, and add a `CaptureSnapshot::from_raw` test in `cafleet/src/capture.rs` with CRLF input asserting every line survives in plain mode and the raw bytes survive with `ansi`. <!-- completed: -->
-- [ ] Add a herdr `capture_pane` test in `cafleet/src/multiplexer/herdr.rs` whose fake reply uses CRLF lines and a blank CRLF tail, asserting the kept window. <!-- completed: -->
-- [ ] Implement the `strip_ansi` change. <!-- completed: -->
+- [x] Extend the `strip_ansi` test in `cafleet/src/output/render.rs` with the § Capture line endings table rows, and add a `CaptureSnapshot::from_raw` test in `cafleet/src/capture.rs` with CRLF input asserting every line survives in plain mode and the raw bytes survive with `ansi`. <!-- completed: 2026-10-31T01:07 -->
+- [x] Add a herdr `capture_pane` test in `cafleet/src/multiplexer/herdr.rs` whose fake reply uses CRLF lines and a blank CRLF tail, asserting the kept window. <!-- completed: 2026-10-31T01:07 -->
+- [x] Implement the `strip_ansi` change. <!-- completed: 2026-10-31T01:07 -->
 
 ### Step 4: Add the profile rule
 
@@ -306,6 +311,28 @@ Unchanged. The Director consumes `interaction_opened`, verifies it with `event s
 - [ ] On one multiplexer, answer a fresh dialog manually on the native surface and confirm a later `permission respond` with the earlier token is refused before any byte. <!-- completed: -->
 - [ ] On herdr, confirm `cafleet member capture <id> --lines 40` shows every line of the open dialog, matches the § Success Criteria comparison against `herdr pane read <pane> --format text --source recent-unwrapped --lines 1040`, and that `--ansi` still emits the raw bytes. <!-- completed: -->
 - [ ] Record versions, geometry, latencies, outcomes and every unobserved case in an Execution record section of this document and as limits in `SPEC.md`. <!-- completed: -->
+
+---
+
+## Execution record
+
+### Step 1 native captures
+
+Captured 2026-10-31 on Linux with Claude Code 2.1.309 (mise `aqua-anthropics-claude-code` install), the omitted `auto` policy and model Haiku 5.5 as shown in the banner, under the runner in a dedicated tmux 3.6a server at 36x120. The libtest was built from commit `7658116d` plus the working-tree driver changes (source-manifest diff digest `4cad679b`, libtest `ada4ae5a`). Each case used a fresh driver-created private configuration copied from the seed, removed after its persistent-setting check; the seed was deleted after the last case.
+
+| Case | Outcome |
+|---|---|
+| `claude-read-outside-cells-001` | Read dialog with exactly the § Detection rule literals; heading row 16 to `Esc to cancel · Tab to amend` row 33 (18 rows); cursor (28, 1) inside the region; alternate screen; no soft-wrapped row |
+| `claude-read-outside-long-001` | Operation over two hard-broken rows, each with the one-space margin; heading row 17 to row 35 (19 rows); cursor (30, 1) inside; no soft-wrapped row |
+| `claude-read-outside-allow-001` | Byte `34` alone closed the dialog within 0.2 s; the read ran and the member reported `cafleet-199-read-probe`; changed key paths equal the cells baseline and no settings file appeared. Digit check passed |
+| `claude-read-outside-deny-001` | Byte `33` alone closed the dialog within 0.2 s; the Read tool returned `The user did not allow this read outside the working directories` and no content was reported; changed key paths equal the baseline. Digit check passed |
+| `claude-edit-outside-cells-001` | Claude ran Read on `edit-target.txt` before editing, so the Read dialog appeared with its own literals; the Edit tool's own request was not reached and `edit-target.txt` stayed `before` |
+| `claude-write-outside-cells-001` | No dialog: the write ran, `Allowed by auto mode classifier` |
+| `claude-glob-outside-cells-001`, `claude-grep-outside-cells-001` | No dialog: the session offers no Glob or Grep tool, and Claude ran the search through Bash (`find`, `grep -rn`) without a prompt |
+
+The pinned values equal the § Detection rule starting point: `region.screen` `alternate`, `region.cursor` `inside`, `region.max_rows` `24`. Every heading, question and choice row is one logical line at 120 columns. No sibling dialog has its own literals, so no sibling rule or sibling answer case was added; Write, Glob and Grep are documented limits, and the Edit capture is a further detection fixture of the Read rule.
+
+Fixtures: the dialog and pre-stage fixtures come from the exporter's complete capture pair (second sample); the continuation fixtures come from a `tmux capture-pane` of the runner pane 5 s after closure, with `screen_seq` set to the runner's output sequence at stop. Masking review: rows 0–11 (banner with model and plan, and the prompt) are masked in every fixture; the remaining rows hold only `/tmp/cafleet-194` paths and native text.
 
 ---
 

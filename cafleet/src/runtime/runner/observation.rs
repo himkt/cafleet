@@ -5723,6 +5723,8 @@ pub(crate) mod native_capture {
         use crate::multiplexer::{CommandRunner, MultiplexerContext, resolve_multiplexer};
         use crate::runtime::system::SystemRunner;
         use rusqlite::Connection;
+        use serde_json::Map;
+        use std::collections::{BTreeMap, BTreeSet};
         use std::os::unix::fs::MetadataExt;
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
         use std::path::Path;
@@ -5807,10 +5809,58 @@ pub(crate) mod native_capture {
         const DRIVER_ANSWER_WINDOW_MS: u64 = 60_000;
         const DRIVER_TOOL_FREE_PROMPT: &str = "Reply with the single word ready and then wait.";
 
+        const DRIVER_READ_PROBE_CONTENT: &str = "cafleet-199-read-probe";
+        const DRIVER_EDIT_TARGET_CONTENT: &str = "before";
+        const DRIVER_CLAUDE_SEED: &str = "claude-seed";
+        // Long enough that the displayed `Read(<path>)` operation exceeds one 120-column row.
+        const DRIVER_LONG_READ_PROBE: &str = "a-deeply-nested-directory-for-the-long-read-operation/second-level-directory-that-wraps-the-displayed-path/probe.txt";
+
         #[derive(PartialEq, Eq)]
         enum DriverMode {
             NoAnswer,
             AnswerStage,
+        }
+        #[derive(Clone, Copy)]
+        enum FileProbe {
+            Read { probe: &'static str },
+            Edit,
+            Write,
+            Glob,
+            Grep,
+        }
+        impl FileProbe {
+            fn tool(self) -> &'static str {
+                match self {
+                    Self::Read { .. } => "Read",
+                    Self::Edit => "Edit",
+                    Self::Write => "Write",
+                    Self::Glob => "Glob",
+                    Self::Grep => "Grep",
+                }
+            }
+            fn operation(self) -> &'static str {
+                match self {
+                    Self::Read { .. } => "read the file",
+                    Self::Edit => "replace the text before with after in the file",
+                    Self::Write => "write the content cafleet-199-write-probe to the file",
+                    Self::Glob => "match the pattern *.txt in the directory",
+                    Self::Grep => "search for the pattern cafleet-199-read-probe in the directory",
+                }
+            }
+            fn target(self) -> &'static str {
+                match self {
+                    Self::Read { probe } => probe,
+                    Self::Edit => "edit-target.txt",
+                    Self::Write => "write-target.txt",
+                    Self::Glob | Self::Grep => "",
+                }
+            }
+            fn probe(self) -> &'static str {
+                match self {
+                    Self::Read { probe } => probe,
+                    _ => "probe.txt",
+                }
+            }
         }
         struct ApprovedCase {
             id: &'static str,
@@ -5821,6 +5871,7 @@ pub(crate) mod native_capture {
             prefix_hex: &'static [&'static str],
             stage_hex: &'static [&'static str],
             probe_argument: Option<&'static str>,
+            file_probe: Option<FileProbe>,
             database: &'static str,
             socket: &'static str,
             size: TerminalSize,
@@ -5844,7 +5895,7 @@ pub(crate) mod native_capture {
             ("TERM_PROGRAM_VERSION", "0.9.5"),
             ("HERDR_ENV", "1"),
         ];
-        const APPROVED_CASES: [ApprovedCase; 23] = [
+        const APPROVED_CASES: [ApprovedCase; 31] = [
             ApprovedCase {
                 id: "cells-002",
                 backend: CodingAgent::Claude,
@@ -5854,6 +5905,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "nc02.db",
                 socket: "tc02",
                 size: DRIVER_FULL_SIZE,
@@ -5867,6 +5919,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &["31"],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "na01.db",
                 socket: "ta01",
                 size: DRIVER_FULL_SIZE,
@@ -5880,6 +5933,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &["34"],
                 probe_argument: Some("deny"),
+                file_probe: None,
                 database: "nd01.db",
                 socket: "td01",
                 size: DRIVER_FULL_SIZE,
@@ -5893,6 +5947,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: None,
+                file_probe: None,
                 database: "ni01.db",
                 socket: "ti01",
                 size: DRIVER_FULL_SIZE,
@@ -5906,6 +5961,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: None,
+                file_probe: None,
                 database: "xt01.db",
                 socket: "xt01",
                 size: DRIVER_FULL_SIZE,
@@ -5919,6 +5975,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "xc01.db",
                 socket: "xc01",
                 size: DRIVER_FULL_SIZE,
@@ -5932,6 +5989,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &["79"],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "xa01.db",
                 socket: "xa01",
                 size: DRIVER_FULL_SIZE,
@@ -5945,6 +6003,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &["33"],
                 probe_argument: Some("deny"),
+                file_probe: None,
                 database: "xd01.db",
                 socket: "xd01",
                 size: DRIVER_FULL_SIZE,
@@ -5958,6 +6017,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: None,
+                file_probe: None,
                 database: "xi01.db",
                 socket: "xi01",
                 size: DRIVER_FULL_SIZE,
@@ -5971,6 +6031,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "nwc1.db",
                 socket: "twc1",
                 size: DRIVER_WRAPPED_SIZE,
@@ -5984,6 +6045,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &["31"],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "nwa1.db",
                 socket: "twa1",
                 size: DRIVER_WRAPPED_SIZE,
@@ -5997,6 +6059,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &["34"],
                 probe_argument: Some("deny"),
+                file_probe: None,
                 database: "nwd1.db",
                 socket: "twd1",
                 size: DRIVER_WRAPPED_SIZE,
@@ -6010,6 +6073,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "nb89.db",
                 socket: "tb89",
                 size: DRIVER_BOXED_WRAP_SIZE,
@@ -6023,6 +6087,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "nb12.db",
                 socket: "tb12",
                 size: DRIVER_FULL_SIZE,
@@ -6036,6 +6101,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "oc01.db",
                 socket: "oc01",
                 size: DRIVER_FULL_SIZE,
@@ -6049,6 +6115,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &["0d"],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "oa01.db",
                 socket: "oa01",
                 size: DRIVER_FULL_SIZE,
@@ -6062,6 +6129,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &["68", "0d"],
                 probe_argument: Some("deny"),
+                file_probe: None,
                 database: "od01.db",
                 socket: "od01",
                 size: DRIVER_FULL_SIZE,
@@ -6075,6 +6143,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &["68"],
                 stage_hex: &["0d", "0d"],
                 probe_argument: Some("deny"),
+                file_probe: None,
                 database: "od02.db",
                 socket: "od02",
                 size: DRIVER_FULL_SIZE,
@@ -6088,6 +6157,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &["68", "0d"],
                 stage_hex: &["0d"],
                 probe_argument: Some("deny"),
+                file_probe: None,
                 database: "od03.db",
                 socket: "od03",
                 size: DRIVER_FULL_SIZE,
@@ -6101,6 +6171,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &["6c"],
                 stage_hex: &[],
                 probe_argument: Some("deny"),
+                file_probe: None,
                 database: "of01.db",
                 socket: "of01",
                 size: DRIVER_FULL_SIZE,
@@ -6114,6 +6185,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &["6c"],
                 stage_hex: &[],
                 probe_argument: Some("deny"),
+                file_probe: None,
                 database: "of02.db",
                 socket: "of02",
                 size: DRIVER_FULL_SIZE,
@@ -6127,6 +6199,7 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: None,
+                file_probe: None,
                 database: "oi01.db",
                 socket: "oi01",
                 size: DRIVER_FULL_SIZE,
@@ -6140,12 +6213,107 @@ pub(crate) mod native_capture {
                 prefix_hex: &[],
                 stage_hex: &[],
                 probe_argument: Some("allow"),
+                file_probe: None,
                 database: "oh01.db",
                 socket: "oh01",
                 size: DRIVER_HERDR_ENV_SIZE,
             },
+            ApprovedCase::claude_file(
+                "claude-read-outside-cells-001",
+                None,
+                &[],
+                DRIVER_READ,
+                "rc01.db",
+                "rc01",
+            ),
+            ApprovedCase::claude_file(
+                "claude-read-outside-long-001",
+                None,
+                &[],
+                FileProbe::Read {
+                    probe: DRIVER_LONG_READ_PROBE,
+                },
+                "rl01.db",
+                "rl01",
+            ),
+            ApprovedCase::claude_file(
+                "claude-read-outside-allow-001",
+                Some("allow"),
+                &["34"],
+                DRIVER_READ,
+                "ra01.db",
+                "ra01",
+            ),
+            ApprovedCase::claude_file(
+                "claude-read-outside-deny-001",
+                Some("deny"),
+                &["33"],
+                DRIVER_READ,
+                "rd01.db",
+                "rd01",
+            ),
+            ApprovedCase::claude_file(
+                "claude-edit-outside-cells-001",
+                None,
+                &[],
+                FileProbe::Edit,
+                "ec01.db",
+                "ec01",
+            ),
+            ApprovedCase::claude_file(
+                "claude-write-outside-cells-001",
+                None,
+                &[],
+                FileProbe::Write,
+                "wc01.db",
+                "wc01",
+            ),
+            ApprovedCase::claude_file(
+                "claude-glob-outside-cells-001",
+                None,
+                &[],
+                FileProbe::Glob,
+                "gc01.db",
+                "gc01",
+            ),
+            ApprovedCase::claude_file(
+                "claude-grep-outside-cells-001",
+                None,
+                &[],
+                FileProbe::Grep,
+                "sc01.db",
+                "sc01",
+            ),
         ];
+        const DRIVER_READ: FileProbe = FileProbe::Read { probe: "probe.txt" };
         impl ApprovedCase {
+            const fn claude_file(
+                id: &'static str,
+                decision: Option<&'static str>,
+                stage_hex: &'static [&'static str],
+                file_probe: FileProbe,
+                database: &'static str,
+                socket: &'static str,
+            ) -> Self {
+                Self {
+                    id,
+                    backend: CodingAgent::Claude,
+                    permission_mode: "auto",
+                    mode: if decision.is_some() {
+                        DriverMode::AnswerStage
+                    } else {
+                        DriverMode::NoAnswer
+                    },
+                    decision,
+                    prefix_hex: &[],
+                    stage_hex,
+                    probe_argument: None,
+                    file_probe: Some(file_probe),
+                    database,
+                    socket,
+                    size: DRIVER_FULL_SIZE,
+                }
+            }
             fn select(case: &DriverCase) -> Result<&'static Self> {
                 let approved = APPROVED_CASES
                     .iter()
@@ -6160,6 +6328,16 @@ pub(crate) mod native_capture {
                             .chain(approved.stage_hex)
                             .all(|stage| stage.as_bytes().chunks(2).all(|byte| byte != b"1b")),
                     "reviewed case stages differ from its driver mode or contain Escape",
+                )?;
+                ensure(
+                    approved.file_probe.is_none()
+                        || approved.stage_hex.iter().all(|stage| {
+                            stage
+                                .as_bytes()
+                                .chunks(2)
+                                .all(|byte| !matches!(byte, b"31" | b"32" | b"0d" | b"0a" | b"09"))
+                        }),
+                    "a file-tool case stage selects a persistent choice, Enter or Tab",
                 )?;
                 let (mode, window) = match approved.mode {
                     DriverMode::NoAnswer => ("no_answer", 0),
@@ -6176,10 +6354,36 @@ pub(crate) mod native_capture {
                 )?;
                 Ok(approved)
             }
-            fn child_environment(&self) -> &'static [(&'static str, &'static str)] {
-                match self.id {
+            fn child_environment(&self) -> Vec<(String, String)> {
+                let herdr: &[(&str, &str)] = match self.id {
                     "opencode-herdr-env-cells-001" => &DRIVER_HERDR_CHILD_ENVIRONMENT,
                     _ => &[],
+                };
+                herdr
+                    .iter()
+                    .map(|&(name, value)| (name.into(), value.into()))
+                    .chain(self.claude_config_directory().map(|directory| {
+                        (
+                            "CLAUDE_CONFIG_DIR".into(),
+                            directory.to_string_lossy().into_owned(),
+                        )
+                    }))
+                    .collect()
+            }
+            fn outside_directory(&self) -> Option<PathBuf> {
+                self.file_probe
+                    .map(|_| Path::new(DRIVER_NEUTRAL_ROOT).join(format!("{}-outside", self.id)))
+            }
+            fn claude_config_directory(&self) -> Option<PathBuf> {
+                self.file_probe
+                    .map(|_| Path::new(DRIVER_PRIVATE_ROOT).join(format!("{}-claude", self.id)))
+            }
+            // File-tool cases run on a native version outside the explicit-mode catalog, so they
+            // launch under the omitted default, which resolves to their `permission_mode`.
+            fn requested_mode(&self) -> Option<&'static str> {
+                match self.file_probe {
+                    Some(_) => None,
+                    None => Some(self.permission_mode),
                 }
             }
             fn member_name(&self) -> String {
@@ -6192,7 +6396,16 @@ pub(crate) mod native_capture {
                 self.probe_argument
                     .map(|argument| format!("{argument}.executed"))
             }
-            fn prompt(&self, helper: &Path) -> String {
+            fn prompt(&self, helper: Option<&Path>) -> String {
+                if let (Some(probe), Some(outside)) = (self.file_probe, self.outside_directory()) {
+                    return format!(
+                        "Use the {} tool to {} on exactly {}. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
+                        probe.tool(),
+                        probe.operation(),
+                        outside.join(probe.target()).display()
+                    );
+                }
+                let helper = helper.expect("a shell-probe case binds its helper");
                 match (self.probe_argument, self.backend) {
                     (Some(argument), CodingAgent::Codex) => format!(
                         "Use the shell tool to run exactly {} {argument} as one command with sandbox_permissions set to require_escalated and the justification \"CAFleet permission probe\". Preserve any native approval request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
@@ -6281,7 +6494,7 @@ pub(crate) mod native_capture {
             native_version: String,
             director_backend: String,
             native_executable: DriverReference,
-            helper: DriverReference,
+            helper: Option<DriverReference>,
             libtest: DriverReference,
             source_manifest: DriverReference,
             version_evidence: DriverReference,
@@ -6700,8 +6913,12 @@ pub(crate) mod native_capture {
             let artifacts = RunArtifacts::create_with_deadline(conn, pending.run.run_id, until)?;
             let policy = approved
                 .backend
-                .resolve_policy(Some(&case.native_version), Some(approved.permission_mode))?;
-            let prompt = approved.prompt(&case.helper.path);
+                .resolve_policy(Some(&case.native_version), approved.requested_mode())?;
+            ensure(
+                policy.resolved_mode == approved.permission_mode,
+                "resolved native policy differs from the reviewed case",
+            )?;
+            let prompt = approved.prompt(case.helper.as_ref().map(|helper| helper.path.as_path()));
             let mut argv = approved.backend.build_spawn_argv_with_policy(
                 &prompt,
                 &approved.member_name(),
@@ -6736,12 +6953,7 @@ pub(crate) mod native_capture {
                     "CAFLEET_DATABASE_URL".into(),
                     case.database_url.clone(),
                 ))
-                .chain(
-                    approved
-                        .child_environment()
-                        .iter()
-                        .map(|&(name, value)| (name.into(), value.into())),
-                )
+                .chain(approved.child_environment())
                 .collect(),
                 evidence_policy: json!({"mode":"redacted","config":config}),
                 size: approved.size,
@@ -6778,6 +6990,250 @@ pub(crate) mod native_capture {
             Ok((artifacts, spawn))
         }
 
+        fn driver_private_directory(path: &Path) -> Result<()> {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(path)
+                .map_err(|cause| error(format!("{}: {cause}", path.display())))?;
+            let metadata = std::fs::symlink_metadata(path).map_err(io_error)?;
+            ensure(
+                metadata.is_dir()
+                    && metadata.uid() == nix::unistd::geteuid().as_raw()
+                    && metadata.mode() & 0o777 == 0o700,
+                "fresh private owned directory required",
+            )
+        }
+        fn driver_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(nix::libc::O_NOFOLLOW)
+                .open(path)
+                .map_err(|cause| error(format!("{}: {cause}", path.display())))?;
+            file.write_all(bytes).map_err(io_error)?;
+            file.sync_all().map_err(io_error)
+        }
+
+        fn driver_create_outside(case: &DriverCase, approved: &ApprovedCase) -> Result<()> {
+            let (Some(probe), Some(outside)) = (approved.file_probe, approved.outside_directory())
+            else {
+                return Ok(());
+            };
+            ensure(
+                !outside.starts_with(&case.cwd) && !case.cwd.starts_with(&outside),
+                "the outside directory lies inside the case cwd",
+            )?;
+            driver_private_directory(&outside)?;
+            let probe_path = outside.join(probe.probe());
+            let mut directory = outside.clone();
+            for component in Path::new(probe.probe())
+                .parent()
+                .expect("a relative probe path has a parent")
+                .components()
+            {
+                directory.push(component);
+                driver_private_directory(&directory)?;
+            }
+            driver_private_file(&probe_path, DRIVER_READ_PROBE_CONTENT.as_bytes())?;
+            driver_private_file(
+                &outside.join("edit-target.txt"),
+                DRIVER_EDIT_TARGET_CONTENT.as_bytes(),
+            )
+        }
+
+        fn driver_outside_state(approved: &ApprovedCase) -> Result<Value> {
+            fn visit(root: &Path, directory: &Path, state: &mut Map<String, Value>) -> Result<()> {
+                for entry in std::fs::read_dir(directory).map_err(io_error)? {
+                    let path = entry.map_err(io_error)?.path();
+                    let metadata = std::fs::symlink_metadata(&path).map_err(io_error)?;
+                    let name = path
+                        .strip_prefix(root)
+                        .expect("entries lie below the outside directory")
+                        .to_string_lossy()
+                        .into_owned();
+                    if metadata.is_dir() {
+                        visit(root, &path, state)?;
+                    } else {
+                        ensure(
+                            metadata.is_file() && metadata.len() <= 4096,
+                            "bounded regular outside file required",
+                        )?;
+                        let bytes = std::fs::read(&path).map_err(io_error)?;
+                        state.insert(name, json!(String::from_utf8_lossy(&bytes)));
+                    }
+                }
+                Ok(())
+            }
+            let Some(outside) = approved.outside_directory() else {
+                return Ok(Value::Null);
+            };
+            let mut state = Map::new();
+            visit(&outside, &outside, &mut state)?;
+            Ok(Value::Object(state))
+        }
+
+        fn driver_seed_configuration(case: &DriverCase) -> Result<Vec<(&'static str, Vec<u8>)>> {
+            let seed = Path::new(DRIVER_PRIVATE_ROOT).join(DRIVER_CLAUDE_SEED);
+            ensure(
+                !seed
+                    .join("settings.local.json")
+                    .try_exists()
+                    .map_err(io_error)?,
+                "the Claude seed configuration must hold no local settings file",
+            )?;
+            let settings = super::files::read_private(&seed.join("settings.json"), 4096)?;
+            let theme_only: Value = serde_json::from_slice(&settings).map_err(io_error)?;
+            ensure(
+                theme_only
+                    .as_object()
+                    .is_some_and(|object| object.len() == 1 && object["theme"].is_string()),
+                "the seed settings.json must be exactly a theme-only object",
+            )?;
+            let credentials = super::files::read_private(&seed.join(".credentials.json"), 65536)?;
+            let global = super::files::read_private(&seed.join(".claude.json"), 4 * 1024 * 1024)?;
+            let mut global: Value = serde_json::from_slice(&global).map_err(io_error)?;
+            let projects = global
+                .as_object_mut()
+                .ok_or_else(|| error("seed .claude.json must be an object"))?
+                .entry("projects")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .ok_or_else(|| error("seed projects must be an object"))?;
+            ensure(
+                !projects.contains_key(case.cwd.to_string_lossy().as_ref()),
+                "the seed already names the case cwd",
+            )?;
+            projects.insert(
+                case.cwd.to_string_lossy().into_owned(),
+                json!({"hasTrustDialogAccepted": true}),
+            );
+            Ok(vec![
+                (".credentials.json", credentials),
+                (
+                    ".claude.json",
+                    serde_json::to_vec_pretty(&global).map_err(io_error)?,
+                ),
+                ("settings.json", settings),
+            ])
+        }
+
+        fn driver_config_snapshot(directory: &Path) -> Result<BTreeMap<String, Value>> {
+            fn visit(
+                root: &Path,
+                directory: &Path,
+                snapshot: &mut BTreeMap<String, Value>,
+            ) -> Result<()> {
+                for entry in std::fs::read_dir(directory).map_err(io_error)? {
+                    let path = entry.map_err(io_error)?.path();
+                    let metadata = std::fs::symlink_metadata(&path).map_err(io_error)?;
+                    if metadata.is_dir() {
+                        visit(root, &path, snapshot)?;
+                    } else if path
+                        .extension()
+                        .is_some_and(|extension| extension == "json")
+                    {
+                        let bytes = std::fs::read(&path).map_err(io_error)?;
+                        let value = serde_json::from_slice(&bytes).unwrap_or_else(
+                            |_| json!({"unparsed_sha256": crate::digest::sha256_hex(&bytes)}),
+                        );
+                        snapshot.insert(
+                            path.strip_prefix(root)
+                                .expect("entries lie below the configuration")
+                                .to_string_lossy()
+                                .into_owned(),
+                            value,
+                        );
+                    }
+                }
+                Ok(())
+            }
+            let mut snapshot = BTreeMap::new();
+            visit(directory, directory, &mut snapshot)?;
+            Ok(snapshot)
+        }
+
+        fn driver_changed_key_paths(
+            before: &Value,
+            after: &Value,
+            path: &mut Vec<String>,
+            changed: &mut Vec<Vec<String>>,
+        ) {
+            match (before, after) {
+                (Value::Object(left), Value::Object(right)) => {
+                    let keys: BTreeSet<&String> = left.keys().chain(right.keys()).collect();
+                    for key in keys {
+                        path.push(key.clone());
+                        driver_changed_key_paths(
+                            left.get(key).unwrap_or(&Value::Null),
+                            right.get(key).unwrap_or(&Value::Null),
+                            path,
+                            changed,
+                        );
+                        path.pop();
+                    }
+                }
+                (left, right) if left != right => changed.push(path.clone()),
+                _ => {}
+            }
+        }
+
+        fn driver_persistent_setting_check(
+            case: &DriverCase,
+            approved: &ApprovedCase,
+            before: &BTreeMap<String, Value>,
+        ) -> Result<()> {
+            let config = approved
+                .claude_config_directory()
+                .expect("file-tool cases own a private configuration");
+            let after = driver_config_snapshot(&config)?;
+            let cwd = case.cwd.to_string_lossy().into_owned();
+            let mut changed = Vec::new();
+            for file in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
+                let mut path = vec![file.clone()];
+                driver_changed_key_paths(
+                    before.get(file).unwrap_or(&Value::Null),
+                    after.get(file).unwrap_or(&Value::Null),
+                    &mut path,
+                    &mut changed,
+                );
+            }
+            let changed: Vec<Vec<String>> = changed
+                .into_iter()
+                .map(|path| {
+                    path.into_iter()
+                        .map(|segment| {
+                            if segment == cwd {
+                                "<cwd>".into()
+                            } else {
+                                segment
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            let mut settings_files = Vec::new();
+            let project = case.cwd.join(".claude");
+            for path in [
+                config.join("settings.local.json"),
+                project.join("settings.json"),
+                project.join("settings.local.json"),
+            ] {
+                if path.try_exists().map_err(io_error)? {
+                    settings_files.push(path);
+                }
+            }
+            driver_publish(
+                &case.cwd.join("claude-config-check.json"),
+                &json!({"schema_version":1,"case_id":approved.id,"changed_key_paths":changed,
+                    "settings_files":settings_files}),
+                Instant::now() + Duration::from_secs(5),
+            )
+        }
+
         fn driver_output_seq(
             conn: &Connection,
             launched: &LaunchOutcome,
@@ -6810,15 +7266,22 @@ pub(crate) mod native_capture {
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(io_error)?;
             events.reverse();
-            let marker = case.cwd.join(
-                approved
-                    .requested_marker()
-                    .expect("answer-stage cases name their probe"),
-            );
-            let marker_sha256 = if marker.try_exists().map_err(io_error)? {
-                Some(super::files::file_digest(&marker)?)
-            } else {
-                None
+            let marker_sha256 = match approved.requested_marker() {
+                Some(marker) => {
+                    let marker = case.cwd.join(marker);
+                    if marker.try_exists().map_err(io_error)? {
+                        Some(super::files::file_digest(&marker)?)
+                    } else {
+                        None
+                    }
+                }
+                None => {
+                    ensure(
+                        approved.file_probe.is_some(),
+                        "answer-stage cases name their probe",
+                    )?;
+                    None
+                }
             };
             Ok(
                 json!({"decision":approved.decision,"prefix_hex":approved.prefix_hex,"stage_hex":approved.stage_hex,
@@ -6827,7 +7290,7 @@ pub(crate) mod native_capture {
         "output_seq_error":stop_output_seq.as_ref().err().map(|e|e.message().into_owned()),
         "manual_input_count":"unavailable: runner health exposes no manual-input counter",
         "events":events,"requested_marker":approved.requested_marker(),
-        "requested_marker_sha256":marker_sha256}),
+        "requested_marker_sha256":marker_sha256,"outside_state":driver_outside_state(approved)?}),
             )
         }
 
@@ -6998,7 +7461,13 @@ pub(crate) mod native_capture {
                         == format!("sqlite:///{}", private.join(approved.database).display())
                     && case.tmux.socket_path == private.join(approved.socket)
                     && case.output_directory == neutral.join(format!("{}-capture", approved.id))
-                    && case.helper.path == case.cwd.join("permission-probe"),
+                    && match approved.file_probe {
+                        Some(_) => case.helper.is_none(),
+                        None => case
+                            .helper
+                            .as_ref()
+                            .is_some_and(|helper| helper.path == case.cwd.join("permission-probe")),
+                    },
                 "case resources differ from approved isolated paths",
             )?;
             for path in [
@@ -7053,14 +7522,16 @@ pub(crate) mod native_capture {
                 .ok_or_else(|| error("case cleanup reserve"))?;
             for reference in [
                 &case.native_executable,
-                &case.helper,
                 &case.libtest,
                 &case.source_manifest,
                 &case.version_evidence,
                 &case.environment_evidence,
                 &case.event_redaction,
                 &case.capture_policy,
-            ] {
+            ]
+            .into_iter()
+            .chain(case.helper.as_ref())
+            {
                 reference.verify()?;
             }
             let version: DriverVersion = driver_read(&case.version_evidence.path)?;
@@ -7097,9 +7568,44 @@ pub(crate) mod native_capture {
                     && !case.arm_path.try_exists().map_err(io_error)?,
                 "fresh case without probe markers or arm required",
             )?;
+            driver_create_outside(&case, approved)?;
+            let Some(config) = approved.claude_config_directory() else {
+                return driver_launch_case(&case, approved, &case_bytes, case_until, work_until);
+            };
+            let files = driver_seed_configuration(&case)?;
+            driver_private_directory(&config)?;
+            let outcome = files
+                .iter()
+                .try_for_each(|(name, bytes)| driver_private_file(&config.join(name), bytes))
+                .and_then(|()| driver_config_snapshot(&config))
+                .and_then(|before| {
+                    let launched =
+                        driver_launch_case(&case, approved, &case_bytes, case_until, work_until);
+                    let check = driver_persistent_setting_check(&case, approved, &before);
+                    match (launched, check) {
+                        (Ok(()), check) => check,
+                        (Err(primary), Ok(())) => Err(primary),
+                        (Err(primary), Err(cause)) => Err(primary.with_cleanup(cause.message())),
+                    }
+                });
+            let teardown = std::fs::remove_dir_all(&config).map_err(io_error);
+            match (outcome, teardown) {
+                (outcome, Ok(())) => outcome,
+                (Ok(()), Err(cause)) => Err(cause),
+                (Err(primary), Err(cause)) => Err(primary.with_cleanup(cause.message())),
+            }
+        }
+
+        fn driver_launch_case(
+            case: &DriverCase,
+            approved: &'static ApprovedCase,
+            case_bytes: &[u8],
+            case_until: Instant,
+            work_until: Instant,
+        ) -> Result<()> {
             let ownership = DriverOwnership {
                 schema_version: 1,
-                case_manifest_sha256: crate::digest::sha256_hex(&case_bytes),
+                case_manifest_sha256: crate::digest::sha256_hex(case_bytes),
                 case_nonce: case.case_nonce.clone(),
                 driver: ProcessIdentity::current()?,
                 server: ProcessIdentity::read(case.tmux.server_pid)?
@@ -7107,7 +7613,7 @@ pub(crate) mod native_capture {
                 tmux: case.tmux.clone(),
                 expires_at_mono_ns: case.expires_at_mono_ns,
             };
-            driver_validate_tmux(&case, &ownership, work_until)?;
+            driver_validate_tmux(case, &ownership, work_until)?;
             driver_publish(&case.driver_ownership_path, &ownership, work_until)?;
             let runner: Rc<dyn CommandRunner> = Rc::new(SystemRunner);
             let mux = resolve_multiplexer(Some("tmux"), std::env::vars().collect(), runner)
@@ -7119,7 +7625,7 @@ pub(crate) mod native_capture {
             };
             let mut host = CaptureVerificationLaunchHost {
                 inner: NativeLaunchHost::new(&mux, &context),
-                case: &case,
+                case,
                 case_until,
             };
             let mut conn = crate::db::connect(&case.database_url)?;
@@ -7136,7 +7642,7 @@ pub(crate) mod native_capture {
                 )?;
                 let policy = approved
                     .backend
-                    .resolve_policy(Some(&case.native_version), Some(approved.permission_mode))?;
+                    .resolve_policy(Some(&case.native_version), approved.requested_mode())?;
                 let capabilities = ProfileCatalog::bundled()?
                     .capabilities(approved.backend, Some(&case.native_version));
                 let settings = RunSettings {
@@ -7169,12 +7675,12 @@ pub(crate) mod native_capture {
                     conn,
                     &member,
                     &settings,
-                    |conn, pending| driver_prepare(conn, pending, &case, launch_until),
+                    |conn, pending| driver_prepare(conn, pending, case, launch_until),
                     &mut host,
                     launch_until,
                 )?;
                 let work = catch_unwind(AssertUnwindSafe(|| {
-                    driver_work(conn, &case, &ownership, &launched, work_until)
+                    driver_work(conn, case, &ownership, &launched, work_until)
                 }));
                 let (work_error, post_stage) = match &work {
                     Ok(Ok(post_stage)) => (None, post_stage.clone()),
@@ -7194,15 +7700,21 @@ pub(crate) mod native_capture {
                         .as_deref()
                         .expect("launched pane");
                     let observed = (|| {
-                        driver_validate_pane(
-                            &case,
-                            &ownership,
-                            &launched,
-                            clock.storage_deadline(),
-                        )?;
                         while launched.started.runner.matches()?
                             && Instant::now() < clock.storage_deadline()
                         {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        // tmux reports the pane live for a moment after the runner exits.
+                        while let Err(cause) = driver_validate_pane(
+                            case,
+                            &ownership,
+                            &launched,
+                            clock.storage_deadline(),
+                        ) {
+                            if Instant::now() >= clock.storage_deadline() {
+                                return Err(cause);
+                            }
                             std::thread::sleep(Duration::from_millis(10));
                         }
                         let service: Value =
@@ -7215,14 +7727,13 @@ pub(crate) mod native_capture {
                             "service outcome binding differs",
                         )?;
                         ensure(
-                            driver_armed(&case)?,
+                            driver_armed(case)?,
                             "not_armed: the capture was never armed",
                         )?;
-                        driver_validate_privacy(&case, approved, &ownership)?;
-                        let capture =
-                            driver_complete_capture(&case, approved, &launched, &service)?;
+                        driver_validate_privacy(case, approved, &ownership)?;
+                        let capture = driver_complete_capture(case, approved, &launched, &service)?;
                         let pane_status = driver_tmux(
-                            &case,
+                            case,
                             &[
                                 "display-message",
                                 "-p",
@@ -7244,22 +7755,14 @@ pub(crate) mod native_capture {
                             json!({"service":service,"pane_status":pane_status,"capture":capture}),
                         )
                     })();
-                    let pane_capture = driver_validate_pane(
-                        &case,
-                        &ownership,
-                        &launched,
-                        clock.storage_deadline(),
-                    )
-                    .and_then(|()| {
-                        driver_capture_runner_pane(&case, pane, clock.storage_deadline())
-                    });
-                    let close = driver_validate_pane(
-                        &case,
-                        &ownership,
-                        &launched,
-                        clock.storage_deadline(),
-                    )
-                    .and_then(|()| host.close_pane(pane, clock.storage_deadline()));
+                    let pane_capture =
+                        driver_validate_pane(case, &ownership, &launched, clock.storage_deadline())
+                            .and_then(|()| {
+                                driver_capture_runner_pane(case, pane, clock.storage_deadline())
+                            });
+                    let close =
+                        driver_validate_pane(case, &ownership, &launched, clock.storage_deadline())
+                            .and_then(|()| host.close_pane(pane, clock.storage_deadline()));
                     let runner_absent = launched.started.runner.matches().map(|exists| !exists);
                     let native_absent = launched.started.child.matches().map(|exists| !exists);
                     let summary = json!({"schema_version":1,"case_manifest_sha256":ownership.case_manifest_sha256,"work_error":work_error,
@@ -7272,6 +7775,7 @@ pub(crate) mod native_capture {
                 "runner_identity_error":runner_absent.as_ref().err().map(|e|e.message().into_owned()),
                 "native_identity_error":native_absent.as_ref().err().map(|e|e.message().into_owned()),
                 "case_id":approved.id,"post_stage":post_stage,
+                "outside_state":driver_outside_state(approved)?,
                 "requested_marker":approved.requested_marker(),
                 "requested_marker_present":match approved.requested_marker() {
                     Some(marker) => Some(case.cwd.join(marker).try_exists().map_err(io_error)?),
