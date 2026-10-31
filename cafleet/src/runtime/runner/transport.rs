@@ -497,6 +497,7 @@ mod tests {
     use std::io::{self, ErrorKind};
     use std::rc::Rc;
 
+    use super::replies::REPLY_PREFIX_BOUND;
     use super::test_support::*;
     use super::*;
     use crate::error::CafleetError;
@@ -791,6 +792,19 @@ mod tests {
             "an unterminated sequence is forwarded, not held"
         );
         assert_eq!(transport.pending_input_bytes(), 0);
+        assert_eq!(
+            transport.human_generation(),
+            0,
+            "complete OSC replies and a pending prefix are not yet manual"
+        );
+        transport.backdate_reply_prefix(REPLY_PREFIX_BOUND);
+        one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(pty.input, reply);
+        assert_eq!(
+            transport.human_generation(),
+            2,
+            "the trailing ESC [ counts as manual once its bound passes"
+        );
     }
 
     #[test]
@@ -939,6 +953,114 @@ mod tests {
         }
         assert_eq!(pty.input, b"\x1b[1;1R");
         assert_eq!(display.bytes, b"\x1b[6n");
+        assert_eq!(
+            transport.human_generation(),
+            0,
+            "a cursor-position report is not manual input"
+        );
+    }
+
+    #[test]
+    fn runner_transport_forwards_a_terminal_reply_burst_unchanged_without_manual_generation() {
+        let mut transport = service_transport();
+        let burst = b"\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b[O"
+            .to_vec();
+        let mut human = Bytes::new(&burst, 5);
+        let mut pty = Pty::new(b"", 1);
+        let progress = one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(
+            pty.input, burst,
+            "replies are forwarded byte-for-byte in order"
+        );
+        assert_eq!(
+            progress.human_bytes,
+            burst.len(),
+            "pacing counts bytes read"
+        );
+        assert_eq!(transport.pending_input_bytes(), 0);
+        assert_eq!(transport.human_generation(), 0);
+    }
+
+    #[test]
+    fn runner_transport_reply_split_across_ticks_stays_out_of_manual_generation() {
+        let mut transport = service_transport();
+        let mut human = Bytes::new(b"\x1b[24", 16);
+        let mut pty = Pty::new(b"", 1);
+        one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(pty.input, b"\x1b[24", "the prefix is forwarded, not held");
+        assert_eq!(transport.human_generation(), 0);
+        human.chunks.push_back(b";80R".to_vec());
+        one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(pty.input, b"\x1b[24;80R");
+        assert_eq!(transport.human_generation(), 0);
+    }
+
+    #[test]
+    fn runner_transport_counts_only_manual_bytes_around_a_reply() {
+        let mut transport = service_transport();
+        let input = b"ab\x1b[Icd".to_vec();
+        let mut human = Bytes::new(&input, 16);
+        let mut pty = Pty::new(b"", 1);
+        let progress = one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(pty.input, input);
+        assert_eq!(progress.human_bytes, input.len());
+        assert_eq!(transport.human_generation(), 4);
+    }
+
+    #[test]
+    fn runner_transport_keystrokes_still_advance_manual_generation() {
+        let mut transport = service_transport();
+        let input = b"yes\r\x1b[A\x03".to_vec();
+        let mut human = Bytes::new(&input, 1);
+        let mut pty = Pty::new(b"", 1);
+        one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(pty.input, input);
+        assert_eq!(
+            transport.human_generation(),
+            u64::try_from(input.len()).unwrap()
+        );
+    }
+
+    #[test]
+    fn runner_transport_outer_eof_counts_a_pending_reply_prefix_as_manual() {
+        let mut transport = service_transport();
+        let mut human = Bytes::new(b"ab\x1b[", 16);
+        human.eof = true;
+        let mut pty = Pty::new(b"", 1);
+        let progress = one_tick(&mut transport, &mut human, &mut pty);
+        assert!(progress.outer_eof);
+        assert_eq!(pty.input, b"ab\x1b[");
+        assert_eq!(
+            transport.human_generation(),
+            4,
+            "outer EOF resolves the pending prefix as manual before EOF is reported"
+        );
+    }
+
+    #[test]
+    fn runner_transport_outer_eof_after_a_complete_reply_adds_no_manual_generation() {
+        let mut transport = service_transport();
+        let mut human = Bytes::new(b"\x1b[I", 16);
+        human.eof = true;
+        let mut pty = Pty::new(b"", 1);
+        let progress = one_tick(&mut transport, &mut human, &mut pty);
+        assert!(progress.outer_eof);
+        assert_eq!(transport.human_generation(), 0);
+    }
+
+    #[test]
+    fn runner_transport_lone_escape_counts_as_manual_once_its_prefix_bound_passes() {
+        let mut transport = service_transport();
+        let mut human = Bytes::new(b"\x1b", 16);
+        let mut pty = Pty::new(b"", 1);
+        one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(pty.input, b"\x1b", "a lone Escape is forwarded immediately");
+        assert_eq!(transport.human_generation(), 0);
+        transport.backdate_reply_prefix(REPLY_PREFIX_BOUND);
+        let progress = one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(progress.human_bytes, 0);
+        assert_eq!(transport.human_generation(), 1);
+        assert_eq!(pty.input, b"\x1b", "classification never synthesizes bytes");
     }
 
     #[test]
