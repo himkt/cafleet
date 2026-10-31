@@ -88,6 +88,13 @@ pub(super) struct Capture {
     pub(crate) matcher: String,
     pub(crate) name: String,
     pub(crate) row_margin: Option<String>,
+    pub(crate) margin_rows: MarginRows,
+    pub(crate) row_trailer: Option<String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum MarginRows {
+    All,
+    Continuation,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChoiceScope {
@@ -330,6 +337,8 @@ fn capture(value: &Value, matchers: &[Matcher]) -> Result<Capture> {
         matcher,
         name,
         row_margin: None,
+        margin_rows: MarginRows::All,
+        row_trailer: None,
     })
 }
 fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
@@ -340,18 +349,50 @@ fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Captur
     }
 }
 fn operation_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
-    let Some(row_margin) = value.get("row_margin") else {
-        return optional_capture(value, matchers);
+    if value.is_null() {
+        return Ok(None);
+    }
+    let mut plain = value
+        .as_object()
+        .ok_or_else(|| invalid("object required"))?
+        .clone();
+    let row_margin = plain
+        .remove("row_margin")
+        .map(|margin| {
+            margin
+                .as_str()
+                .filter(|margin| !margin.is_empty() && !margin.contains('\n'))
+                .map(str::to_owned)
+                .ok_or_else(|| invalid("nonempty single-row margin required"))
+        })
+        .transpose()?;
+    let margin_rows = match plain.remove("margin_rows") {
+        None => MarginRows::All,
+        Some(rows) => {
+            require(row_margin.is_some(), "margin_rows requires row_margin")?;
+            match rows.as_str() {
+                Some("all") => MarginRows::All,
+                Some("continuation") => MarginRows::Continuation,
+                _ => return Err(invalid("margin_rows must be all or continuation")),
+            }
+        }
     };
-    let row_margin = row_margin
-        .as_str()
-        .filter(|margin| !margin.is_empty() && !margin.contains('\n'))
-        .ok_or_else(|| invalid("nonempty single-row margin required"))?
-        .to_owned();
-    let mut plain = object(value, &["matcher_id", "capture", "row_margin"])?.clone();
-    plain.remove("row_margin");
+    let row_trailer = plain
+        .remove("row_trailer")
+        .map(|trailer| {
+            trailer
+                .as_str()
+                .filter(|trailer| {
+                    !trailer.is_empty() && !trailer.contains('\n') && trailer.trim() == *trailer
+                })
+                .map(str::to_owned)
+                .ok_or_else(|| invalid("trimmed nonempty single-row trailer required"))
+        })
+        .transpose()?;
     Ok(Some(Capture {
-        row_margin: Some(row_margin),
+        row_margin,
+        margin_rows,
+        row_trailer,
         ..capture(&Value::Object(plain), matchers)?
     }))
 }
@@ -951,6 +992,17 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = bundled![
     "claude-2.1.309-read-outside-allow-continuation-1",
     "claude-2.1.309-read-outside-deny-continuation-1",
     "claude-2.1.309-edit-outside-permission-1",
+    "opencode-2.1.4-narrow-permission-057-1",
+    "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
+    "opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
+    "opencode-2.1.4-narrow-long-command-057-1",
+    "opencode-2.1.4-narrow-idle-composer-057-1",
+    "opencode-2.1.4-compact-permission-055-1",
+    "opencode-2.1.4-compact-deny-pre-stage-2-055-1",
+    "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+    "opencode-2.1.4-narrow-permission-min-1",
+    "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
+    "opencode-2.1.4-narrow-deny-pre-stage-3-min-1",
 ];
 
 fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {

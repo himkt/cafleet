@@ -2255,8 +2255,10 @@ A stage without a gate is focus-independent; the bundled Claude and Codex stages
 A focus matcher with `focus_style: "background"` resolves the focused choice from cell styling, without depending on the theme:
 
 1. Locate each choice label's cells through its line's cell boundaries.
-2. Take the choice row background from the choice line's cell at the live region's left edge.
+2. Take the choice row background as the background that covers more than half of the choice line's cells. When no background does, no choice resolves.
 3. Resolve the focused choice as the one choice whose label cells all carry a single background that differs from the row background, provided no other choice label carries a differing background.
+
+The majority rule holds in every layout: the OpenCode compact layout has no left margin and its highlight covers the focused label plus one cell on each side, so with a focused first or last choice neither edge cell carries the row background.
 
 A focus on an option without a choice entry, on several options or on none resolves to no choice, and a gate that does not hold is never written. The focus text alone does not change when a styling-only focus moves. The focus value compared in the observed request, the answer match and the write-time binding is therefore the resolved focused choice id (or none) together with the matcher's capture, so a styling-only focus change starts a new request generation.
 

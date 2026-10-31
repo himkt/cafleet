@@ -439,6 +439,116 @@
       "sha256": "6c9d577c6faa488da3ba88f94c0c6690154dcc549d3563e4abffa161ffeaefec"
     },
     {
+      "id": "opencode-2.1.4-narrow-permission-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode-2.1.4-narrow-permission-057-1.json",
+      "sha256": "a7085d984d8fca560c0996996de144b654c3766a06bbb84e387b3effe6a34df9"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode-2.1.4-narrow-deny-pre-stage-2-057-1.json",
+      "sha256": "fb731b1eebaaab736018be64b5bc1099f1803db87876697473933cf16b0487a2"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode-2.1.4-narrow-deny-pre-stage-3-057-1.json",
+      "sha256": "bd3c00ec1cdd930d960b28bfd85d3ab53826bf861a8a831ecbe051f7618f08f6"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-long-command-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode-2.1.4-narrow-long-command-057-1.json",
+      "sha256": "1ba505df087beffb1c6351a86401d7ef467c8fe963a232478d0782448c973cab"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-idle-composer-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode-2.1.4-narrow-idle-composer-057-1.json",
+      "sha256": "20735e881d0befc46ffffa66429f2ac7e5dd6263845c1117b6aed9dde2978e1f"
+    },
+    {
+      "id": "opencode-2.1.4-compact-permission-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode-2.1.4-compact-permission-055-1.json",
+      "sha256": "9150de0d5fee4b94824ba6cb45dd14b7fdb3bf48fdb07306781d2a98b2662fc6"
+    },
+    {
+      "id": "opencode-2.1.4-compact-deny-pre-stage-2-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode-2.1.4-compact-deny-pre-stage-2-055-1.json",
+      "sha256": "323483fa5f965c096d50f03fcfef0115bfd3b292b99637d06353a33378dd1a01"
+    },
+    {
+      "id": "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode-2.1.4-compact-deny-pre-stage-3-055-1.json",
+      "sha256": "27a41af0b1b6eee76cc987e65175388164e5e81f97fbbaa53031ef29b845ca8d"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-permission-min-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode-2.1.4-narrow-permission-min-1.json",
+      "sha256": "41c5d247d69ffd2d37779563941bf1b3f0b405cd193a331921fada45dd21d551"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode-2.1.4-narrow-deny-pre-stage-2-min-1.json",
+      "sha256": "cc366ac7736137e623e5e629ec9a8acdac0b680da0c69eb7e230cbefd6fb82ce"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-deny-pre-stage-3-min-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode-2.1.4-narrow-deny-pre-stage-3-min-1.json",
+      "sha256": "9717287c8a06acfdb0455c6ee3899e679731af28fd5928798271e4c25463b85b"
+    },
+    {
       "id": "claude-2.1.308-auto-tip-padded-question-1",
       "kind": "native",
       "backend": "claude",
@@ -1164,13 +1274,15 @@
           "matchers": [
             {"id": "heading", "scope": "line", "pattern": "^  △ Permission required\\s*$"},
             {"id": "shell", "scope": "line", "pattern": "^   # Shell command(?:\\s|$)"},
-            {"id": "operation", "scope": "line", "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*(?:█\\s*)?$"},
-            {"id": "focus", "scope": "line", "pattern": "^   Allow once   (?:Always allow   )?Reject +⇆ select  enter confirm  esc reject\\s*$", "focus_style": "background"},
+            {"id": "operation", "scope": "region", "pattern": "(?m)^  \\$ (?P<operation>\\S[^\\n]*(?:\\n  \\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "},
+            {"id": "unclipped", "scope": "region", "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  \\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "},
+            {"id": "controls", "scope": "region", "pattern": "(?m)^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject *| *(?:\\n *)*\\n  ⇆ select  enter confirm  esc reject *)\\z"},
+            {"id": "focus", "scope": "line", "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$", "focus_style": "background"},
             {"id": "allow", "scope": "line", "pattern": "^   (?P<label>Allow once)   "},
-            {"id": "deny", "scope": "line", "pattern": "(?:Allow once|Always allow)   (?P<label>Reject) "}
+            {"id": "deny", "scope": "line", "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"}
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": "  ", "margin_rows": "continuation", "row_trailer": "█"},
             "choices": [
               {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
               {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
@@ -1193,8 +1305,7 @@
           },
           "matchers": [
             {"id": "heading", "scope": "line", "pattern": "^  △ Reject permission\\s*$"},
-            {"id": "prompt", "scope": "line", "pattern": "^  Tell OpenCode what to do differently\\s*$"},
-            {"id": "empty", "scope": "line", "pattern": "^  Tell OpenCode what to do differently {2,}enter confirm  esc cancel\\s*$"}
+            {"id": "empty_reason", "scope": "region", "pattern": "(?m)^  △ Reject permission *(?:\\n *)*\\n  Tell OpenCode what to do differently *(?:\\n *)*\\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *| *(?:\\n *)*\\n  enter confirm  esc cancel *)\\z"}
           ],
           "extract": {
             "operation": null,
@@ -1205,7 +1316,65 @@
           "sensitive": false,
           "continues_rule_id": "opencode-shell-permission",
           "continues_choice_id": "deny-once",
-          "fixture_ids": ["opencode-2.1.4-deny-pre-stage-3"]
+          "fixture_ids": ["opencode-2.1.4-deny-pre-stage-3", "opencode-2.1.4-narrow-deny-pre-stage-3-057-1"]
+        },
+        {
+          "id": "opencode-shell-permission-compact",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^△ Permission required\\s*$",
+            "end_pattern": "pgup/pgdn scroll\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^△ Permission required\\s*$"},
+            {"id": "shell", "scope": "line", "pattern": "^# Shell command(?:\\s|$)"},
+            {"id": "operation", "scope": "region", "pattern": "(?m)^\\$ (?P<operation>\\S[^\\n]*(?:\\n\\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "},
+            {"id": "unclipped", "scope": "region", "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n\\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "},
+            {"id": "controls", "scope": "region", "pattern": "(?m)^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll *| *(?:\\n *)*\\npgup/pgdn scroll *)\\z"},
+            {"id": "focus", "scope": "line", "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\\s*$", "focus_style": "background"},
+            {"id": "allow", "scope": "line", "pattern": "^ (?P<label>Allow once)   "},
+            {"id": "deny", "scope": "line", "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation", "row_trailer": "█"},
+            "choices": [
+              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "opencode-reject-reason-compact",
+          "priority": 100,
+          "observation": "permission_continuation",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^△ Reject permission\\s*$",
+            "end_pattern": "^enter reject esc back\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^△ Reject permission\\s*$"},
+            {"id": "empty_reason", "scope": "region", "pattern": "(?m)^△ Reject permission *(?:\\n *)*\\nTell OpenCode what to do differently *(?:\\n *)*\\nenter reject esc back *\\z"}
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false,
+          "continues_rule_id": "opencode-shell-permission-compact",
+          "continues_choice_id": "deny-once",
+          "fixture_ids": ["opencode-2.1.4-compact-deny-pre-stage-3-055-1", "opencode-2.1.4-narrow-deny-pre-stage-3-min-1"]
         },
         {
           "id": "opencode-idle-composer",
@@ -1233,12 +1402,17 @@
       "capabilities": {
         "annotations": null,
         "detection": {
-          "rule_ids": ["opencode-shell-permission"],
-          "fixture_ids": ["opencode-2.1.4-ask-permission-1"]
+          "rule_ids": ["opencode-shell-permission", "opencode-shell-permission-compact"],
+          "fixture_ids": [
+            "opencode-2.1.4-ask-permission-1",
+            "opencode-2.1.4-narrow-permission-057-1",
+            "opencode-2.1.4-compact-permission-055-1",
+            "opencode-2.1.4-narrow-permission-min-1"
+          ]
         },
         "composer": {
           "rule_ids": ["opencode-idle-composer"],
-          "fixture_ids": ["opencode-2.1.4-idle-composer-1"],
+          "fixture_ids": ["opencode-2.1.4-idle-composer-1", "opencode-2.1.4-narrow-idle-composer-057-1"],
           "submission": {
             "prompt": {
               "prefix_hex": "",
@@ -1270,7 +1444,7 @@
             "stages": [
               {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission", "required_choice_id": "allow-once", "required_focus_choice_id": "allow-once"}
             ],
-            "fixture_ids": ["opencode-2.1.4-allow-pre-stage-1"]
+            "fixture_ids": ["opencode-2.1.4-allow-pre-stage-1", "opencode-2.1.4-narrow-permission-057-1"]
           },
           {
             "decision": "deny",
@@ -1283,7 +1457,45 @@
               {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission", "required_choice_id": "deny-once", "required_focus_choice_id": "deny-once"},
               {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission", "required_choice_id": "deny-once", "required_screen_rule_id": "opencode-reject-reason"}
             ],
-            "fixture_ids": ["opencode-2.1.4-deny-pre-stage-1", "opencode-2.1.4-deny-pre-stage-2", "opencode-2.1.4-deny-pre-stage-3"]
+            "fixture_ids": [
+              "opencode-2.1.4-deny-pre-stage-1",
+              "opencode-2.1.4-deny-pre-stage-2",
+              "opencode-2.1.4-deny-pre-stage-3",
+              "opencode-2.1.4-narrow-permission-057-1",
+              "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
+              "opencode-2.1.4-narrow-deny-pre-stage-3-057-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "opencode-shell-permission-compact",
+            "answer_rule_id": "opencode-shell-compact-allow-once",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission-compact", "required_choice_id": "allow-once", "required_focus_choice_id": "allow-once"}
+            ],
+            "fixture_ids": ["opencode-2.1.4-compact-permission-055-1", "opencode-2.1.4-narrow-permission-min-1"]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "opencode-shell-permission-compact",
+            "answer_rule_id": "opencode-shell-compact-deny-once",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "68", "required_rule_id": "opencode-shell-permission-compact", "required_choice_id": "deny-once", "required_focus_choice_id": "allow-once"},
+              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission-compact", "required_choice_id": "deny-once", "required_focus_choice_id": "deny-once"},
+              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission-compact", "required_choice_id": "deny-once", "required_screen_rule_id": "opencode-reject-reason-compact"}
+            ],
+            "fixture_ids": [
+              "opencode-2.1.4-compact-permission-055-1",
+              "opencode-2.1.4-compact-deny-pre-stage-2-055-1",
+              "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+              "opencode-2.1.4-narrow-permission-min-1",
+              "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
+              "opencode-2.1.4-narrow-deny-pre-stage-3-min-1"
+            ]
           }
         ]
       }

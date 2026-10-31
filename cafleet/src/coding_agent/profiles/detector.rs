@@ -1,6 +1,6 @@
 use super::CodingAgent;
 use super::catalog::{
-    Capture, CursorRule, MatcherScope, Profile, ProfileCatalog, Rule, ScreenSelector,
+    Capture, CursorRule, MarginRows, MatcherScope, Profile, ProfileCatalog, Rule, ScreenSelector,
 };
 use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
@@ -336,6 +336,30 @@ fn qualifying_regions(
     }
     regions
 }
+/// Removes the trailer, then the margin from the rows `margin_rows` selects, then trailing
+/// whitespace; trimming last keeps a whitespace-only margined row a match.
+fn displayed_rows(value: &str, capture: &Capture) -> Option<String> {
+    value
+        .split('\n')
+        .enumerate()
+        .map(|(index, row)| {
+            let row = match &capture.row_trailer {
+                Some(trailer) => row
+                    .trim_end()
+                    .strip_suffix(trailer.as_str())
+                    .map_or(row, str::trim_end),
+                None => row,
+            };
+            let margined = index > 0 || capture.margin_rows == MarginRows::All;
+            let row = match capture.row_margin.as_deref().filter(|_| margined) {
+                Some(margin) => row.strip_prefix(margin)?,
+                None => row,
+            };
+            Some(row.trim_end())
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|rows| rows.join("\n"))
+}
 fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) -> Option<Matched> {
     let selected = &lines[start..=end];
     let region_text = selected
@@ -401,14 +425,11 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
     let operation = match &rule.operation {
         Some(reference) => {
             let value = captured(reference, &values)?;
-            Some(match &reference.row_margin {
-                None => value,
-                Some(_) if rule.kind.is_annotation() => value,
-                Some(margin) => value
-                    .split('\n')
-                    .map(|row| row.strip_prefix(margin.as_str()).map(str::trim_end))
-                    .collect::<Option<Vec<_>>>()?
-                    .join("\n"),
+            let plain = reference.row_margin.is_none() && reference.row_trailer.is_none();
+            Some(if plain || rule.kind.is_annotation() {
+                value
+            } else {
+                displayed_rows(&value, reference)?
             })
         }
         None => None,
@@ -439,13 +460,29 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
         label_cells,
     })
 }
+/// The background covering more than half of the row's cells; a layout without a left margin
+/// paints its highlight over the edge cells, so no single edge cell is the row background.
+fn majority_background(screen: &ScreenSnapshot, row: u16) -> Option<vt100::Color> {
+    let mut counts: Vec<(vt100::Color, usize)> = Vec::new();
+    for col in 0..screen.cols {
+        let background = screen.screen.cell(row, col)?.bgcolor();
+        match counts.iter_mut().find(|(seen, _)| *seen == background) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((background, 1)),
+        }
+    }
+    counts
+        .into_iter()
+        .find(|&(_, count)| count * 2 > usize::from(screen.cols))
+        .map(|(background, _)| background)
+}
 /// The focused choice is the one label painted on a single background that differs from its
-/// row's background at the region's left edge, with no other label carrying such a background.
+/// row's majority background, with no other label carrying such a background.
 fn background_focus(screen: &ScreenSnapshot, matched: &Matched) -> Option<String> {
     let mut focused = Vec::new();
     for (choice, cells) in &matched.label_cells {
         let &(row, _) = cells.first()?;
-        let row_background = screen.screen.cell(row, matched.region.left)?.bgcolor();
+        let row_background = majority_background(screen, row)?;
         let backgrounds = cells
             .iter()
             .map(|&(row, col)| screen.screen.cell(row, col).map(|cell| cell.bgcolor()))
