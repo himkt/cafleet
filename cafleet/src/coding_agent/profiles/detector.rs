@@ -135,12 +135,18 @@ pub(crate) struct AnswerMatch {
     semantic: SemanticFingerprint,
     choices: Vec<String>,
     focus: String,
+    focus_capture: String,
     focused_choice: Option<String>,
     output_seq: u64,
 }
 impl AnswerMatch {
     pub(crate) fn focused_choice_id(&self) -> Option<&str> {
         self.focused_choice.as_deref()
+    }
+    /// The focus matcher's capture without the resolved focus, so it stays equal while only the
+    /// styling-only focus moves and changes when the choice row's layout does.
+    pub(crate) fn focus_capture(&self) -> &str {
+        &self.focus_capture
     }
     pub(crate) fn plan(&self) -> &AnswerPlan {
         &self.plan
@@ -555,7 +561,7 @@ impl Detector {
         let focus = if background {
             serde_json::to_string(&(&capture, &focused_choice)).expect("focus strings serialize")
         } else {
-            capture
+            capture.clone()
         };
         Ok(Some(AnswerMatch {
             plan: plan.clone(),
@@ -564,6 +570,7 @@ impl Detector {
                 .expect("complete permission fingerprint"),
             choices: matched.choices,
             focus,
+            focus_capture: capture,
             focused_choice,
             output_seq: screen.screen_seq,
         }))

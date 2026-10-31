@@ -997,14 +997,12 @@ impl InputCoordinator {
             return Ok(StageGateProgress::Ready);
         };
         let bound = &selection.binding;
-        let bound_focus = || {
-            bound
-                .observed
-                .answer_matches
-                .iter()
-                .find(|matched| matched.plan() == &selection.plan)
-                .and_then(AnswerMatch::focused_choice_id)
-        };
+        let bound_match = bound
+            .observed
+            .answer_matches
+            .iter()
+            .find(|matched| matched.plan() == &selection.plan);
+        let bound_focus = || bound_match.and_then(AnswerMatch::focused_choice_id);
         let holds = match (&gate, &selection.continuation) {
             (StageGate::Focus(choice), None) => bound_focus() == Some(choice.as_str()),
             (StageGate::Screen(rule), Some(continuation)) => &continuation.rule_id == rule,
@@ -1054,18 +1052,20 @@ impl InputCoordinator {
                 let Some(observed) = observed.filter(|_| !unchanged) else {
                     return waiting();
                 };
-                let focused = observed
+                let observed_match = observed
                     .answer_matches
                     .iter()
-                    .find(|matched| matched.plan() == &selection.plan)
-                    .and_then(AnswerMatch::focused_choice_id);
+                    .find(|matched| matched.plan() == &selection.plan);
                 ensure(
                     observed.episode_seq == bound.observed.episode_seq
                         && observed.request_rule_id == bound.observed.request_rule_id
                         && observed.semantic == bound.observed.semantic
                         && observed.choices == bound.observed.choices
                         && observed.native_correlation == bound.observed.native_correlation
-                        && focused == Some(choice.as_str()),
+                        && observed_match.map(AnswerMatch::focus_capture)
+                            == bound_match.map(AnswerMatch::focus_capture)
+                        && observed_match.and_then(AnswerMatch::focused_choice_id)
+                            == Some(choice.as_str()),
                     "the request changed other than to the next stage's focus",
                 )?;
                 PermissionSelection {
