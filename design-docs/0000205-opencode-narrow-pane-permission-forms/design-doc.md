@@ -60,7 +60,7 @@ Stored interaction evidence and event payloads carry the label inside the eviden
 
 | In scope | Out of scope |
 |---|---|
-| The OpenCode split layout, at every width where the three choices fit on one row | Layouts where the choice row itself wraps or truncates; they stay manual |
+| The OpenCode split and compact layouts, at every width where the three choices fit on one row | Layouts where the choice row itself wraps or truncates; they stay manual |
 | A command wrapped across several rows of the command box | A command clipped by the command box; it stays manual |
 | The narrow rejection-reason dialog | Typed rejection reasons; non-shell `ask` forms |
 | Two operation-extract options, `margin_rows` and `row_trailer` (§ Operation extraction) | Changes to the Claude or Codex rules, plans or fixtures |
@@ -74,37 +74,38 @@ The payload digest versions keep their current meaning in the new family, includ
 
 ### Layouts and supported widths
 
-OpenCode 2.1.4 `mini` renders the shell permission form in one of three layouts, by pane width:
+OpenCode 2.1.4 `mini` renders the shell permission form in one of four layouts, by pane width (Step 3 survey, 36 rows):
 
-| Layout | Choice row | Control line | Detection |
-|---|---|---|---|
-| Wide | `   Allow once   Always allow   Reject` with the control line on the same row | Shares the choice row | Supported (shipped) |
-| Split | The three choices on one row | `  ⇆ select  enter confirm  esc reject` on its own row below | Supported (this design) |
-| Broken | The choices wrap or truncate | Any | Unsupported: no detection, manual answer |
+| Layout | Widths | Choice row | Control line | Detection |
+|---|---|---|---|---|
+| Wide | 77 and above | `   Allow once   Always allow   Reject` with the control line on the same row | `⇆ select  enter confirm  esc reject`, sharing the choice row | Supported (shipped) |
+| Split | 56–76 | The three choices on one row | `  ⇆ select  enter confirm  esc reject` on its own row below | Supported (this design) |
+| Compact | 36–55 | ` Allow once   Always allow   Reject`, one-space margin; the heading, `# Shell command` and `$ ` rows start at column 0 | `pgup/pgdn scroll`, sharing the choice row from 53 to 55 and on its own row from 36 to 52 | Supported (this design) |
+| Broken | 35 and below | The choices wrap (`Reject` moves to its own row) | Any | Unsupported: no detection, manual answer |
 
-Two breakpoints separate the layouts: `W_split`, the widest width that uses the split layout, and `W_min`, the narrowest width that still renders the three choices on one row. Step 3 measures both with the survey cases (§ Native capture procedure). It records them in this document, `SPEC.md` and the skill overlay. The supported range is every width at or above `W_min`.
+Three breakpoints separate the layouts: `W_split` = 76, the widest split width; `W_compact` = 55, the widest compact width; and `W_min` = 36, the narrowest width that still renders the three choices on one row. The supported range is every width at or above `W_min`. Step 3 records the survey evidence in this document, and Step 4 records the breakpoints in `SPEC.md` and the skill overlay.
 
 The two-option layout (`Allow once` / `Reject`) follows the same rule because the patterns already accept it; its breakpoints are not measured separately.
 
 ### Request rule `opencode-shell-permission`
 
-One request rule matches both supported layouts; there is no second rule. Its answers, choices, `native_request_id` and sensitivity are unchanged.
+One request rule matches all three supported layouts; there is no second rule. Its answers, choices, `native_request_id` and sensitivity are unchanged. Every matcher below also accepts the compact layout's margins (no margin on the heading, `# Shell command` and `$ ` rows; a one-space margin on the choice row), with the exact compact patterns pinned from the Step 3 compact captures.
 
-| Element | Shipped | Both layouts |
+| Element | Shipped | All supported layouts |
 |---|---|---|
-| Region start | `^  △ Permission required\s*$` | Unchanged |
-| Region end | `  ⇆ select  enter confirm  esc reject\s*$`, not anchored at the row start | Unchanged: it matches the control line in either layout |
+| Region start | `^  △ Permission required\s*$` | The heading with a two-space (wide, split) or no (compact) margin |
+| Region end | `  ⇆ select  enter confirm  esc reject\s*$`, not anchored at the row start | The `⇆ select  enter confirm  esc reject` control line (wide, split) or the compact `pgup/pgdn scroll` control text, in either case sharing the choice row or on its own row |
 | `max_rows` | 24 | The largest form height among the supported captures, including the long-command capture when its box grows (§ Clipped commands), and at least 24 |
 | `focus` (line, `focus_style: "background"`) | Choices and control line on one row | `^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\s*$`, the choice row in either layout |
 | `allow` (line) | `^   (?P<label>Allow once)   ` | Unchanged |
 | `deny` (line) | <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject) </code> | <code>(?:Allow once&#124;Always allow)   (?P&lt;label&gt;Reject)(?: &#124;$)</code>, so a choice row ending at `Reject` matches |
-| `controls` (region, new) | — | Either the wide choice-and-control row ends the region, or the split control row ends it with the choice row as the last non-blank row above it; the exact pattern is pinned from the Step 3 captures |
+| `controls` (region, new) | — | Either a choice-and-control row ends the region, or a control-only row ends it with the choice row as the last non-blank row above it, for the wide/split control line and the compact `pgup/pgdn scroll` text alike; the exact pattern is pinned from the Step 3 captures |
 | `operation` | Line-scoped, single row | Region-scoped, multi-row (§ Operation extraction) |
 | `unclipped` (new, conditional) | — | Holds only when the command box shows the whole command (§ Clipped commands) |
 
 The `focus` matcher still resolves the focused choice from cell backgrounds. Its labels come from the line-scoped `allow` and `deny` matchers, as catalog validation requires. The split control row carries no label, so it takes no part in focus resolution.
 
-The focus matcher's full capture is part of the request identity. The wide and split layouts capture different text, so a resize across `W_split` starts a new request generation, as a focus change does today. An earlier request token stops validating, and a response in flight fails before its next byte (`uncertain` once a byte was written). This is the shipped behavior; a synthetic test covers it.
+The focus matcher's full capture is part of the request identity. The layouts capture different text, so a resize across `W_split` or `W_compact` starts a new request generation, as a focus change does today. An earlier request token stops validating, and a response in flight fails before its next byte (`uncertain` once a byte was written). This is the shipped behavior; a synthetic test covers it.
 
 ### Operation extraction
 
@@ -117,7 +118,7 @@ The operation is read from every displayed row of the command, not only the firs
 
 Extraction applies, per row: remove the trailer, then remove the margin from the rows `margin_rows` selects, then remove trailing whitespace. A selected row without the margin fails the match, as today. This keeps the shipped margin-then-trim order, so a whitespace-only margined row, such as a blank line inside a multi-line Claude command, still matches. The Claude and Codex rules declare neither key, so their extraction is unchanged.
 
-The OpenCode `operation` matcher becomes region-scoped. It captures from after `  $ ` on the first command row through each following row that starts with the continuation margin and then a non-space character. Its extract declares `row_margin` equal to the continuation margin the Step 3 captures show, `margin_rows: "continuation"` and `row_trailer: "█"`, the glyph the 120-column capture shows in a column beside the command box. A one-row command extracts the same text as today, with `operation_rows` 1.
+The OpenCode `operation` matcher becomes region-scoped. It captures from after the `$ ` prefix (two-space margin, or none in the compact layout) on the first command row through each following row that starts with the continuation margin and then a non-space character. Its extract declares `row_margin` equal to the continuation margin the Step 3 captures show, `margin_rows: "continuation"` and `row_trailer: "█"`, the glyph the 120-column capture shows in a column beside the command box. A one-row command extracts the same text as today, with `operation_rows` 1.
 
 The capture is anchored at both ends, so it cannot drop command rows. After the last captured row, only rows that are blank or hold only the trailer may follow until the choice row. Any other row in between fails the match, so the request is not observed. Examples are a continuation row whose text begins with a space after the margin, such as an indented second line of a multi-line command, or a row without the margin. Such a form is answered manually (§ Limits).
 
@@ -141,8 +142,8 @@ In the split layout, the rejection-reason dialog's control line `enter confirm  
 
 | Element | Shipped | Both layouts |
 |---|---|---|
-| Region | `△ Reject permission` to `enter confirm  esc cancel\s*$` within 24 rows | Unchanged |
-| `prompt` and `empty` (line) | `prompt` matches the prompt row; `empty` matches the placeholder sharing the control-line row | Replaced by one region matcher `empty_reason`. It requires the prompt row, then the placeholder either sharing the control-line row (wide) or on the last non-blank row above a control-only row (split). The exact pattern is pinned from the Step 3 captures. |
+| Region | `△ Reject permission` to `enter confirm  esc cancel\s*$` within 24 rows | The heading with its wide/split or compact margin, to the dialog's control text in each layout, as the Step 3 captures show |
+| `prompt` and `empty` (line) | `prompt` matches the prompt row; `empty` matches the placeholder sharing the control-line row | Replaced by one region matcher `empty_reason`. It requires the prompt row, then the placeholder either sharing the control-line row (wide) or on the last non-blank row above a control-only row (split, compact). The exact pattern, including the compact margins, is pinned from the Step 3 captures. |
 
 The empty-reason meaning is unchanged. The textarea must show exactly the placeholder; typed text replaces it and fails the stage-3 gate, and a typed copy of the placeholder remains a documented limit.
 
@@ -159,7 +160,7 @@ The 0000196 bytes, gates and native effects apply in both layouts:
 
 Each answer entry's `fixture_ids` gains the narrow pre-stage fixtures (§ Fixtures). Step 3 stops at a blocker when a narrow measurement contradicts the table. The blocker is a Programmer blocker marker at `paragraph-Implementation > Step 3`, paired with a `blocked (paragraph-Implementation > Step 3)` message to the Director. Each of these measurements is a blocker:
 
-- the focused choice cannot be resolved from cell backgrounds in the split layout;
+- the focused choice cannot be resolved from cell backgrounds in the split or compact layout;
 - `h` from `Allow once` focuses an option other than `Reject`;
 - Enter on `Reject` shows anything other than the empty rejection-reason dialog;
 - Enter in the empty dialog does not reject the request without text.
@@ -191,7 +192,7 @@ Each breakpoint needs an observed layout on both sides of it. The Programmer add
 2. **Lower edge of `W_min`.** If 40 still renders the choices on one row, add narrower cases (32, then 4 columns narrower each time) until a broken layout is observed.
 3. **Exact breakpoints.** Bisect between each bracketing pair until `W_split` (the widest split width) and `W_min` (the narrowest one-row-choice width) are exact column counts.
 
-The fixture cases run at 57 columns, the demo width, and at `W_min`:
+The fixture cases run at 57 columns (split, the demo width), at `W_compact` = 55 (compact with a shared control row) and at `W_min` = 36 (compact with a control-only row):
 
 | Case ID | Columns | Driver mode | Decision | Prefix bytes | Stage bytes | Probe argument | Supplies |
 |---|---|---|---|---|---|---|---|
@@ -201,6 +202,9 @@ The fixture cases run at 57 columns, the demo width, and at `W_min`:
 | `opencode-narrow-deny-003-057` | 57 | `answer_stage` | `deny` | `68`, then `0d` | `0d` | `deny` | The deny stage-3 pre-stage: the split empty rejection-reason dialog |
 | `opencode-narrow-long-057` | 57 | `no_answer` | — | — | — | `allow`, one space and 400 `x` characters | The long-command screen for § Clipped commands |
 | `opencode-narrow-idle-057` | 57 | `no_answer` | — | — | — | — | The idle composer at 57 columns, the screen after an answer |
+| `opencode-compact-cells-055` | 55 | `no_answer` | — | — | — | `allow` | The compact form with its control text sharing the choice row; the allow and deny stage-1 pre-stage |
+| `opencode-compact-deny-002-055` | 55 | `answer_stage` | `deny` | `68` | `0d`, then `0d` | `deny` | The deny stage-2 pre-stage at 55 |
+| `opencode-compact-deny-003-055` | 55 | `answer_stage` | `deny` | `68`, then `0d` | `0d` | `deny` | The deny stage-3 pre-stage: the compact rejection-reason dialog at 55 |
 | `opencode-narrow-cells-min` | `W_min` | `no_answer` | — | — | — | `allow` | The form at the lowest supported width |
 | `opencode-narrow-deny-002-min` | `W_min` | `answer_stage` | `deny` | `68` | `0d`, then `0d` | `deny` | The deny stage-2 pre-stage at `W_min` |
 | `opencode-narrow-deny-003-min` | `W_min` | `answer_stage` | `deny` | `68`, then `0d` | `0d` | `deny` | The deny stage-3 pre-stage at `W_min` |
@@ -216,6 +220,9 @@ The long-command case never answers, so the helper never runs and its argument n
 | `opencode-2.1.4-narrow-deny-pre-stage-3-057-1` | `opencode-narrow-deny-003-057` | Deny stage 3; `opencode-reject-reason` |
 | `opencode-2.1.4-narrow-long-command-057-1` | `opencode-narrow-long-057` | Clipped-command tests: no match when clipped, or full extraction when the box grows |
 | `opencode-2.1.4-narrow-idle-composer-057-1` | `opencode-narrow-idle-057` | Empty-composer observation at 57 columns |
+| `opencode-2.1.4-compact-permission-055-1` | `opencode-compact-cells-055` | Detection; allow stage 1; deny stage 1 |
+| `opencode-2.1.4-compact-deny-pre-stage-2-055-1` | `opencode-compact-deny-002-055` | Deny stage 2 |
+| `opencode-2.1.4-compact-deny-pre-stage-3-055-1` | `opencode-compact-deny-003-055` | Deny stage 3; `opencode-reject-reason` |
 | `opencode-2.1.4-narrow-permission-min-1` | `opencode-narrow-cells-min` | Detection; allow stage 1; deny stage 1 |
 | `opencode-2.1.4-narrow-deny-pre-stage-2-min-1` | `opencode-narrow-deny-002-min` | Deny stage 2 |
 | `opencode-2.1.4-narrow-deny-pre-stage-3-min-1` | `opencode-narrow-deny-003-min` | Deny stage 3; `opencode-reject-reason` |
