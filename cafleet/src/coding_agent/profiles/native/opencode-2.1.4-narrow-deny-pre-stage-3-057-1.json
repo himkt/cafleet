@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "fixture_id": "opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
+  "provenance": "native",
+  "backend": "opencode",
+  "native_version": "2.1.4",
+  "rows": 36,
+  "cols": 57,
+  "alternate_screen": false,
+  "screen_seq": 20507,
+  "cursor_row": 32,
+  "cursor_col": 2,
+  "lines": [
+    "opencode-narrow-deny-003-057/permission-probe deny as one",
+    "command. Preserve any native permission request for the ",
+    "operator. After the native decision, report the actual ",
+    "result and stop. Keep work inside this disposable ",
+    "operation.",
+    "                                            with the shel",
+    "l tool. But wait — I'm in the \"opencode\" context with Cod",
+    "e Mode. The tools available to me in code",
+    "mode are only the opencode tools listed. The shell tool ",
+    "is a listed tool in my function list (outside code mode?)",
+    "Hmm. The instructions say \"Use the execute tool to call t",
+    "he tools listed below\" — but the shell tool is listed in",
+    "my tools. Let me just try running the shell command.",
+    "",
+    "Note: I should preserve any native permission request. ",
+    "The command is exactly `/tmp/cafleet-194/opencode-narrow-",
+    "deny-003-057/permission-probe deny as one command.",
+    "",
+    "Let me run it with the shell tool.                      1",
+    "94/opencode-narrow-deny-003-057. So the path /tmp/... ",
+    "",
+    "                                                         ",
+    "                                                         ",
+    "  △ Reject permission                                    ",
+    "                                                         ",
+    "  Tell OpenCode what to do differently                   ",
+    "                                                         ",
+    "                                                         ",
+    "                                                         ",
+    "                                                         ",
+    "                                                         ",
+    "                                                         ",
+    "  Tell OpenCode what to do differently                   ",
+    "                                                         ",
+    "  enter confirm  esc cancel                              ",
+    ""
+  ],
+  "masked_rows": [
+    {
+      "row": 35,
+      "reason": "reviewed_privacy"
+    }
+  ],
+  "cell_backgrounds": [
+    {
+      "row": 22,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 23,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 24,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 25,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 26,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 27,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 28,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 29,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 30,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 31,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    },
+    {
+      "row": 32,
+      "start_col": 0,
+      "end_col": 2,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    },
+    {
+      "row": 32,
+      "start_col": 2,
+      "end_col": 54,
+      "bg": {
+        "kind": "rgb",
+        "r": 10,
+        "g": 10,
+        "b": 10
+      }
+    },
+    {
+      "row": 32,
+      "start_col": 54,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    },
+    {
+      "row": 33,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    },
+    {
+      "row": 34,
+      "start_col": 0,
+      "end_col": 57,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    }
+  ]
+}

@@ -5827,7 +5827,12 @@ pub(crate) mod native_capture {
         const DRIVER_NEUTRAL_ROOT: &str = "/tmp/cafleet-194";
         // The repository mount reports root-created files as owned by another user, which the private
         // ownership checks refuse, so case databases and sockets live on the local filesystem.
+        #[cfg(not(target_os = "macos"))]
         const DRIVER_PRIVATE_ROOT: &str = "/tmp/cafleet-194-p";
+        // macOS reaches /tmp through the /private/tmp symlink, and the runner launch passes the
+        // canonical database path, so the private root is named canonically there.
+        #[cfg(target_os = "macos")]
+        const DRIVER_PRIVATE_ROOT: &str = "/private/tmp/cafleet-194-p";
         const DRIVER_ANSWER_WINDOW_MS: u64 = 60_000;
         const DRIVER_TOOL_FREE_PROMPT: &str = "Reply with the single word ready and then wait.";
 
@@ -5904,6 +5909,21 @@ pub(crate) mod native_capture {
         };
         const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
         const DRIVER_BOXED_WRAP_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
+        const DRIVER_NARROW_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 57 };
+        const DRIVER_COMPACT_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 55 };
+        const DRIVER_MIN_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 36 };
+        // One space and 400 `x` characters, so the command outgrows the form's command box at 57 columns.
+        const DRIVER_LONG_COMMAND_ARGUMENT: &str = concat!(
+            "allow ",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        );
         const DRIVER_HERDR_ENV_SIZE: TerminalSize = TerminalSize {
             rows: 36,
             cols: 166,
@@ -5917,7 +5937,7 @@ pub(crate) mod native_capture {
             ("TERM_PROGRAM_VERSION", "0.9.5"),
             ("HERDR_ENV", "1"),
         ];
-        const APPROVED_CASES: [ApprovedCase; 31] = [
+        const APPROVED_CASES: [ApprovedCase; 69] = [
             ApprovedCase {
                 id: "cells-002",
                 backend: CodingAgent::Claude,
@@ -6240,6 +6260,152 @@ pub(crate) mod native_capture {
                 socket: "oh01",
                 size: DRIVER_HERDR_ENV_SIZE,
             },
+            ApprovedCase::opencode_survey("opencode-survey-096", "os096.db", "os096", 96),
+            ApprovedCase::opencode_survey("opencode-survey-080", "os080.db", "os080", 80),
+            ApprovedCase::opencode_survey("opencode-survey-064", "os064.db", "os064", 64),
+            ApprovedCase::opencode_survey("opencode-survey-048", "os048.db", "os048", 48),
+            ApprovedCase::opencode_survey("opencode-survey-040", "os040.db", "os040", 40),
+            ApprovedCase::opencode_survey("opencode-survey-076", "os076.db", "os076", 76),
+            ApprovedCase::opencode_survey("opencode-survey-072", "os072.db", "os072", 72),
+            ApprovedCase::opencode_survey("opencode-survey-068", "os068.db", "os068", 68),
+            ApprovedCase::opencode_survey("opencode-survey-060", "os060.db", "os060", 60),
+            ApprovedCase::opencode_survey("opencode-survey-056", "os056.db", "os056", 56),
+            ApprovedCase::opencode_survey("opencode-survey-052", "os052.db", "os052", 52),
+            ApprovedCase::opencode_survey("opencode-survey-032", "os032.db", "os032", 32),
+            ApprovedCase::opencode_survey("opencode-survey-024", "os024.db", "os024", 24),
+            ApprovedCase::opencode_survey("opencode-survey-079", "os079.db", "os079", 79),
+            ApprovedCase::opencode_survey("opencode-survey-078", "os078.db", "os078", 78),
+            ApprovedCase::opencode_survey("opencode-survey-077", "os077.db", "os077", 77),
+            ApprovedCase::opencode_survey("opencode-survey-055", "os055.db", "os055", 55),
+            ApprovedCase::opencode_survey("opencode-survey-054", "os054.db", "os054", 54),
+            ApprovedCase::opencode_survey("opencode-survey-053", "os053.db", "os053", 53),
+            ApprovedCase::opencode_survey("opencode-survey-039", "os039.db", "os039", 39),
+            ApprovedCase::opencode_survey("opencode-survey-038", "os038.db", "os038", 38),
+            ApprovedCase::opencode_survey("opencode-survey-037", "os037.db", "os037", 37),
+            ApprovedCase::opencode_survey("opencode-survey-036", "os036.db", "os036", 36),
+            ApprovedCase::opencode_survey("opencode-survey-035", "os035.db", "os035", 35),
+            ApprovedCase::opencode_survey("opencode-survey-034", "os034.db", "os034", 34),
+            ApprovedCase::opencode_survey("opencode-survey-033", "os033.db", "os033", 33),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-cells-057",
+                None,
+                &[],
+                &[],
+                Some("allow"),
+                "opencode-narrow-cells-057.db",
+                "opencode-narrow-cells-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-allow-057",
+                Some("allow"),
+                &[],
+                &["0d"],
+                Some("allow"),
+                "opencode-narrow-allow-057.db",
+                "opencode-narrow-allow-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-deny-002-057",
+                Some("deny"),
+                &["68"],
+                &["0d", "0d"],
+                Some("deny"),
+                "opencode-narrow-deny-002-057.db",
+                "opencode-narrow-deny-002-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-deny-003-057",
+                Some("deny"),
+                &["68", "0d"],
+                &["0d"],
+                Some("deny"),
+                "opencode-narrow-deny-003-057.db",
+                "opencode-narrow-deny-003-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-long-057",
+                None,
+                &[],
+                &[],
+                Some(DRIVER_LONG_COMMAND_ARGUMENT),
+                "opencode-narrow-long-057.db",
+                "opencode-narrow-long-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-idle-057",
+                None,
+                &[],
+                &[],
+                None,
+                "opencode-narrow-idle-057.db",
+                "opencode-narrow-idle-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-compact-cells-055",
+                None,
+                &[],
+                &[],
+                Some("allow"),
+                "opencode-compact-cells-055.db",
+                "opencode-compact-cells-055",
+                DRIVER_COMPACT_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-compact-deny-002-055",
+                Some("deny"),
+                &["68"],
+                &["0d", "0d"],
+                Some("deny"),
+                "opencode-compact-deny-002-055.db",
+                "opencode-compact-deny-002-055",
+                DRIVER_COMPACT_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-compact-deny-003-055",
+                Some("deny"),
+                &["68", "0d"],
+                &["0d"],
+                Some("deny"),
+                "opencode-compact-deny-003-055.db",
+                "opencode-compact-deny-003-055",
+                DRIVER_COMPACT_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-cells-min",
+                None,
+                &[],
+                &[],
+                Some("allow"),
+                "opencode-narrow-cells-min.db",
+                "opencode-narrow-cells-min",
+                DRIVER_MIN_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-deny-002-min",
+                Some("deny"),
+                &["68"],
+                &["0d", "0d"],
+                Some("deny"),
+                "opencode-narrow-deny-002-min.db",
+                "opencode-narrow-deny-002-min",
+                DRIVER_MIN_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-deny-003-min",
+                Some("deny"),
+                &["68", "0d"],
+                &["0d"],
+                Some("deny"),
+                "opencode-narrow-deny-003-min.db",
+                "opencode-narrow-deny-003-min",
+                DRIVER_MIN_SIZE,
+            ),
             ApprovedCase::claude_file(
                 "claude-read-outside-cells-001",
                 None,
@@ -6309,6 +6475,53 @@ pub(crate) mod native_capture {
         ];
         const DRIVER_READ: FileProbe = FileProbe::Read { probe: "probe.txt" };
         impl ApprovedCase {
+            const fn opencode_survey(
+                id: &'static str,
+                database: &'static str,
+                socket: &'static str,
+                cols: u16,
+            ) -> Self {
+                Self::opencode_narrow(
+                    id,
+                    None,
+                    &[],
+                    &[],
+                    Some("allow"),
+                    database,
+                    socket,
+                    TerminalSize { rows: 36, cols },
+                )
+            }
+            #[allow(clippy::too_many_arguments)]
+            const fn opencode_narrow(
+                id: &'static str,
+                decision: Option<&'static str>,
+                prefix_hex: &'static [&'static str],
+                stage_hex: &'static [&'static str],
+                probe_argument: Option<&'static str>,
+                database: &'static str,
+                socket: &'static str,
+                size: TerminalSize,
+            ) -> Self {
+                Self {
+                    id,
+                    backend: CodingAgent::Opencode,
+                    permission_mode: "cafleet-ask",
+                    mode: if decision.is_some() {
+                        DriverMode::AnswerStage
+                    } else {
+                        DriverMode::NoAnswer
+                    },
+                    decision,
+                    prefix_hex,
+                    stage_hex,
+                    probe_argument,
+                    file_probe: None,
+                    database,
+                    socket,
+                    size,
+                }
+            }
             const fn claude_file(
                 id: &'static str,
                 decision: Option<&'static str>,
@@ -6416,7 +6629,8 @@ pub(crate) mod native_capture {
             }
             fn requested_marker(&self) -> Option<String> {
                 self.probe_argument
-                    .map(|argument| format!("{argument}.executed"))
+                    .and_then(|argument| argument.split(' ').next())
+                    .map(|label| format!("{label}.executed"))
             }
             fn prompt(&self, helper: Option<&Path>) -> String {
                 if let (Some(probe), Some(outside)) = (self.file_probe, self.outside_directory()) {

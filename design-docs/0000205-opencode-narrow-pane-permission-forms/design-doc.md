@@ -1,7 +1,7 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
 **Status**: Approved
-**Progress**: 7/22 tasks complete
+**Progress**: 11/22 tasks complete
 **Last Updated**: 2026-11-01
 
 ## Overview
@@ -231,14 +231,66 @@ The long-command case never answers, so the helper never runs and its argument n
 | `opencode-2.1.4-narrow-deny-pre-stage-3-057-1` | `opencode-narrow-deny-003-057` | Deny stage 3; `opencode-reject-reason` |
 | `opencode-2.1.4-narrow-long-command-057-1` | `opencode-narrow-long-057` | Clipped-command tests: no match when clipped, or full extraction when the box grows |
 | `opencode-2.1.4-narrow-idle-composer-057-1` | `opencode-narrow-idle-057` | Empty-composer observation at 57 columns |
-| `opencode-2.1.4-compact-permission-055-1` | `opencode-compact-cells-055` | Detection; allow stage 1; deny stage 1 |
-| `opencode-2.1.4-compact-deny-pre-stage-2-055-1` | `opencode-compact-deny-002-055` | Deny stage 2 |
-| `opencode-2.1.4-compact-deny-pre-stage-3-055-1` | `opencode-compact-deny-003-055` | Deny stage 3; `opencode-reject-reason` |
-| `opencode-2.1.4-narrow-permission-min-1` | `opencode-narrow-cells-min` | Detection; allow stage 1; deny stage 1 |
-| `opencode-2.1.4-narrow-deny-pre-stage-2-min-1` | `opencode-narrow-deny-002-min` | Deny stage 2 |
-| `opencode-2.1.4-narrow-deny-pre-stage-3-min-1` | `opencode-narrow-deny-003-min` | Deny stage 3; `opencode-reject-reason` |
+| `opencode-2.1.4-compact-permission-055-1` | `opencode-compact-cells-055` | `opencode-shell-permission-compact` detection; its allow stage 1 and deny stage 1 |
+| `opencode-2.1.4-compact-deny-pre-stage-2-055-1` | `opencode-compact-deny-002-055` | `opencode-shell-permission-compact` deny stage 2 |
+| `opencode-2.1.4-compact-deny-pre-stage-3-055-1` | `opencode-compact-deny-003-055` | `opencode-shell-permission-compact` deny stage 3; `opencode-reject-reason-compact` |
+| `opencode-2.1.4-narrow-permission-min-1` | `opencode-narrow-cells-min` | `opencode-shell-permission-compact` detection; its allow stage 1 and deny stage 1 |
+| `opencode-2.1.4-narrow-deny-pre-stage-2-min-1` | `opencode-narrow-deny-002-min` | `opencode-shell-permission-compact` deny stage 2 |
+| `opencode-2.1.4-narrow-deny-pre-stage-3-min-1` | `opencode-narrow-deny-003-min` | `opencode-shell-permission-compact` deny stage 3; `opencode-reject-reason-compact` |
 
 The 0000196 fixtures stay, with their citations. Fixture IDs name captures, not profiles, so they keep their native-version prefix.
+
+### Captured evidence
+
+Step 3 ran on 2026-11-01 on macOS with OpenCode 2.1.4 `mini` (`opencode v2.1.4`), the `cafleet-ask` preset from a private `OPENCODE_CONFIG_DIR`, a dedicated tmux 3.6a server per case, 36 rows and the primary screen. The capture libtest was built from commit `4e6cae41` exported into an isolated tree, plus the working-tree driver changes: the approved-case registry entries, a macOS private root `/private/tmp/cafleet-194-p` (the runner launch passes the canonical database path, which the `/tmp` spelling fails), and a requested marker taken from the probe argument's first word. The survey cases use short database and socket names (`osNNN`); every fixture case uses its case ID.
+
+The private configuration selected the model. Every survey case and eight fixture cases ran on `opencode/big-pickle`. After that free model reached its usage limit, `opencode-narrow-cells-min`, `opencode-compact-deny-003-055` and `opencode-narrow-deny-003-min` ran on the user-selected `opencode-go/glm-5.3`.
+
+| Measurement | Observed |
+|---|---|
+| Layouts | Wide at 77 columns and above, split 56–76, compact 36–55 (`pgup/pgdn scroll` shares the choice row at 53–55), broken at 35 and below (`Reject` wraps) |
+| Focus | The focused label sits on rgb(250,178,131) and the other labels on rgb(30,30,30) in the split and compact layouts |
+| Deny stages | `h` from `Allow once` focused `Reject`, Enter on `Reject` opened the empty rejection-reason dialog, and Enter there printed `Step interrupted` with no marker, at 57, 55 and 36 columns. No blocker in § Answer stages was observed. |
+| Allow stage | Enter on `Allow once` ran the command once at 57 columns (`allow.executed` present) |
+| Long command | At 57 columns the command box keeps its height and clips the command; the track shows `▀` on its first row and is blank below. § Clipped commands therefore uses the `unclipped` matcher. |
+| Compact rejection dialog | `△ Reject permission` at column 0, no prompt row, the placeholder `Tell OpenCode what to do differently` at column 0 and the control text `enter reject esc back` at column 0 on the next row |
+| Continuation margin | Two spaces in the wide and split layouts; none in the compact layout |
+| Region height | At most 14 rows (compact), so `max_rows` stays 24 for every rule |
+
+Masking: every capture masked one reviewed row. The 0000196 row 35 is masked in every fixture except `opencode-2.1.4-compact-deny-pre-stage-3-055-1`, `opencode-2.1.4-narrow-permission-min-1` and `opencode-2.1.4-narrow-deny-pre-stage-3-min-1`, whose compact control text sits on row 35; those mask row 0, a transcript row. No fixture shows an account, home path or plan text. The idle fixture shows the model name and a context-usage counter, as the 0000196 idle fixture does, and the footer that names the workspace appears only after an answer, in no fixture.
+
+The patterns below were checked with an emulation of the detector's region and matcher semantics against every OpenCode fixture and every survey capture. Every 120-column fixture keeps its operation, every width from 36 to 96 matches exactly one request rule, widths of 35 and below match none, and the long-command fixture fails only `unclipped`.
+
+| Rule | Element | Pattern |
+|---|---|---|
+| `opencode-shell-permission` | `operation` (region) | `(?m)^  \$ (?P<operation>\S[^\n]*(?:\n  \S[^\n]*)*)(?:\n *(?:█ *)?)*\n   Allow once   ` with `row_margin` two spaces, `margin_rows: "continuation"`, `row_trailer: "█"` |
+| `opencode-shell-permission` | `unclipped` (region) | `(?m)^   # Shell command +█ *\n(?: *█ *\n)*  \$ [^\n]*█ *(?:\n  \S[^\n]*█ *)*(?:\n *(?:█ *)?)*\n   Allow once   ` |
+| `opencode-shell-permission` | `controls` (region) | `(?m)^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject *&#124; *(?:\n *)*\n  ⇆ select  enter confirm  esc reject *)\z` |
+| `opencode-shell-permission-compact` | Region | Start `^△ Permission required\s*$`, end `pgup/pgdn scroll\s*$`, 24 rows |
+| `opencode-shell-permission-compact` | `heading`, `shell` (line) | `^△ Permission required\s*$`, `^# Shell command(?:\s&#124;$)` |
+| `opencode-shell-permission-compact` | `operation` (region) | `(?m)^\$ (?P<operation>\S[^\n]*(?:\n\S[^\n]*)*)(?:\n *(?:█ *)?)*\n Allow once   ` with `row_trailer: "█"` and no `row_margin` |
+| `opencode-shell-permission-compact` | `unclipped` (region) | `(?m)^# Shell command +█ *\n(?: *█ *\n)*\$ [^\n]*█ *(?:\n\S[^\n]*█ *)*(?:\n *(?:█ *)?)*\n Allow once   ` |
+| `opencode-shell-permission-compact` | `controls` (region) | `(?m)^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll *&#124; *(?:\n *)*\npgup/pgdn scroll *)\z` |
+| `opencode-shell-permission-compact` | `focus`, `allow`, `deny` (line) | `^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\s*$` with `focus_style: "background"`, `^ (?P<label>Allow once)   `, `(?:Allow once&#124;Always allow)   (?P<label>Reject)(?: &#124;$)` |
+| `opencode-reject-reason` | `empty_reason` (region) | `(?m)^  △ Reject permission *(?:\n *)*\n  Tell OpenCode what to do differently *(?:\n *)*\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *&#124; *(?:\n *)*\n  enter confirm  esc cancel *)\z` |
+| `opencode-reject-reason-compact` | Region | Start `^△ Reject permission\s*$`, end `^enter reject esc back\s*$`, 24 rows |
+| `opencode-reject-reason-compact` | `heading`, `empty_reason` | Line `^△ Reject permission\s*$`; region `(?m)^△ Reject permission *(?:\n *)*\nTell OpenCode what to do differently *(?:\n *)*\nenter reject esc back *\z` |
+
+In the table, `&#124;` stands for the regex alternation bar. The wide/split `focus` and `deny` patterns are those of § Request rule `opencode-shell-permission`.
+
+| Fixture ID | SHA-256 |
+|---|---|
+| `opencode-2.1.4-narrow-permission-057-1` | `a7085d984d8fca560c0996996de144b654c3766a06bbb84e387b3effe6a34df9` |
+| `opencode-2.1.4-narrow-deny-pre-stage-2-057-1` | `fb731b1eebaaab736018be64b5bc1099f1803db87876697473933cf16b0487a2` |
+| `opencode-2.1.4-narrow-deny-pre-stage-3-057-1` | `bd3c00ec1cdd930d960b28bfd85d3ab53826bf861a8a831ecbe051f7618f08f6` |
+| `opencode-2.1.4-narrow-long-command-057-1` | `1ba505df087beffb1c6351a86401d7ef467c8fe963a232478d0782448c973cab` |
+| `opencode-2.1.4-narrow-idle-composer-057-1` | `20735e881d0befc46ffffa66429f2ac7e5dd6263845c1117b6aed9dde2978e1f` |
+| `opencode-2.1.4-compact-permission-055-1` | `9150de0d5fee4b94824ba6cb45dd14b7fdb3bf48fdb07306781d2a98b2662fc6` |
+| `opencode-2.1.4-compact-deny-pre-stage-2-055-1` | `323483fa5f965c096d50f03fcfef0115bfd3b292b99637d06353a33378dd1a01` |
+| `opencode-2.1.4-compact-deny-pre-stage-3-055-1` | `27a41af0b1b6eee76cc987e65175388164e5e81f97fbbaa53031ef29b845ca8d` |
+| `opencode-2.1.4-narrow-permission-min-1` | `41c5d247d69ffd2d37779563941bf1b3f0b405cd193a331921fada45dd21d551` |
+| `opencode-2.1.4-narrow-deny-pre-stage-2-min-1` | `cc366ac7736137e623e5e629ec9a8acdac0b680da0c69eb7e230cbefd6fb82ce` |
+| `opencode-2.1.4-narrow-deny-pre-stage-3-min-1` | `9717287c8a06acfdb0455c6ee3899e679731af28fd5928798271e4c25463b85b` |
 
 ### Profile identity after removal
 
@@ -414,10 +466,10 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 ### Step 3: Capture narrow native evidence
 
-- [ ] Add the survey cases to the approved-case registry and run them, extend and bisect the survey per § Native capture procedure until `W_split` and `W_min` are exact, and record both in this document. <!-- completed: -->
-- [ ] Add and run the 57-column and `W_min` fixture cases, confirming each stage's gate in a fresh pane capture before its byte and applying the blocker list in § Answer stages. <!-- completed: -->
-- [ ] Pin the exact `controls`, `operation`, `unclipped` and `empty_reason` patterns, the continuation margin and `max_rows` from the captures, applying § Clipped commands. <!-- completed: -->
-- [ ] Review masking, convert the captures into fixtures with `cell_backgrounds`, add them to the native fixture directory with their SHA-256 digests, and record the evidence. <!-- completed: -->
+- [x] Add the survey cases to the approved-case registry and run them, extend and bisect the survey per § Native capture procedure until `W_split` and `W_min` are exact, and record both in this document. <!-- completed: 2026-11-01T02:18 -->
+- [x] Add and run the 57-column and `W_min` fixture cases, confirming each stage's gate in a fresh pane capture before its byte and applying the blocker list in § Answer stages. <!-- completed: 2026-11-01T02:18 -->
+- [x] Pin the exact `controls`, `operation`, `unclipped` and `empty_reason` patterns, the continuation margin and `max_rows` from the captures, applying § Clipped commands. <!-- completed: 2026-11-01T02:18 -->
+- [x] Review masking, convert the captures into fixtures with `cell_backgrounds`, add them to the native fixture directory with their SHA-256 digests, and record the evidence. <!-- completed: 2026-11-01T02:18 -->
 
 ### Step 4: Document the measured profile
 
@@ -434,6 +486,7 @@ Record the confirmed width output, the CAFleet commit, versions, latency and eve
 
 - [x] Rewrite the tests that set or assert a profile identifier to the identifier-free shapes in § Output and record contracts, and add the shape, respond-binding and identifier-free invariant tests in § Tests. <!-- completed: 2026-11-01T01:13 -->
 - [ ] Remove `profile_version` from `bundled.json` and every surface in § Profile identity after removal, replace the three runtime invariants with their identifier-free forms, and remove the identifier comparison in § Respond-time binding. <!-- completed: -->
+
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck` once Step 7's v9 baseline has landed, because the v8 head keeps `answer_profile_version` NOT NULL. <!-- completed: -->
 
 ### Step 7: Start the v9 format family
