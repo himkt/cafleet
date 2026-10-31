@@ -1,6 +1,6 @@
 # Claude File-Access Permission Dialog and Multi-Line herdr Capture
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 23/23 tasks complete
 **Last Updated**: 2026-10-31
 
@@ -359,3 +359,4 @@ Run 2026-10-31 with the release build of commit `73ba45a2` (`mise //cafleet:buil
 | 2026-10-31 | Review round 1: scoped the no-persistent-key guarantee to CAFleet answer and queued-input paths; specified the herdr capture comparison; pinned region screen, cursor and row span from captures and required one logical line per matched row; fixed the sibling probe set to Edit, Write, Glob and Grep with per-sibling answer cases; located the native-capture driver and specified its file-tool cases, outside directory and private Claude configuration; `blocked` when no Read dialog appears; named the runner input test file and fixtures |
 | 2026-10-31 | Review round 2: the private Claude configuration is copied from a natively built seed holding only the credential and Claude's own `.claude.json`; a startup dialog in a case stops it with no bytes; a per-case persistent-setting check against the cells baseline; teardown removes each private configuration and the seed |
 | 2026-10-31 | Approved by the Reviewer and the user |
+| 2026-10-31 | Implemented: Read rule and single-request answers, CRLF capture fix, short-pane and outside-read-flag limits, live acceptance on herdr (tmux waived by the user) |
