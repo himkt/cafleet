@@ -1,7 +1,7 @@
 # Runner terminal-reply classification and uncertain-cause recording
 
 **Status**: Approved
-**Progress**: 30/43 tasks complete
+**Progress**: 43/43 tasks complete
 **Last Updated**: 2026-10-31
 
 ## Overview
@@ -312,9 +312,9 @@ The live permission reply goes through `durable_outcome`, which returns null for
 
 ### Step 9: Verification
 
-- [ ] Run `mise //cafleet:test` and `mise //cafleet:lint`; both pass <!-- completed: -->
-- [ ] Run `mise //docs:build`; it passes <!-- completed: -->
-- [ ] Grep `SPEC.md`, `docs/` and `skills/` for "every read advances", "bytes actually read" and the `input show` key list, and confirm each matches the new contract <!-- completed: -->
+- [x] Run `mise //cafleet:test` and `mise //cafleet:lint`; both pass <!-- completed: 2026-10-31T01:57 -->
+- [x] Run `mise //docs:build`; it passes <!-- completed: 2026-10-31T01:57 -->
+- [x] Grep `SPEC.md`, `docs/` and `skills/` for "every read advances", "bytes actually read" and the `input show` key list, and confirm each matches the new contract <!-- completed: 2026-10-31T01:57 -->
 
 ---
 
