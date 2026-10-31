@@ -2024,6 +2024,7 @@ The operation is the displayed `Read(<path>)` rows. A long path continues on a f
 | Panes narrower than 120 columns | Only 120-column renderings were captured; a narrower rendering whose rows differ from the matchers is an `unknown` frame, and the dialog is answered on the native surface |
 | Persistent choices 1 and 2 | CAFleet never selects them; they are chosen only on the native surface |
 | `Tab to amend` | CAFleet offers no amend action |
+| Panes too short to show the heading row | The region has no start row, so the frame is `unknown` until a resize redraws the dialog in full |
 | Other file tools | In the 2.1.309 captures, Edit first read its target and showed this same dialog, Write ran without a dialog under the auto mode classifier, and the session offered no Glob or Grep tool. An outside-working-directory dialog with other literals is an `unknown` frame with no event |
 
 Claude renders an automatic refusal in one of two native forms, depending on the user's Verbose output setting, and the profile claims both. Every Claude annotation rule (priority 40, alternate screen, cursor any) declares the same frame guard: require `^❯\u{a0}` (the live composer prefix) and reject `^  Showing detailed transcript · ctrl\+o to toggle` (the transcript viewer's footer).
