@@ -970,6 +970,109 @@ mod tests {
         );
     }
 
+    const READ_OUTSIDE: &str = "claude-2.1.309-read-outside-permission-1";
+    const READ_OUTSIDE_RULE: &str = "claude-read-outside-permission";
+    const AUTO_IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
+
+    fn read_outside_observation(screen: &ScreenSnapshot) -> ScreenObservation {
+        let catalog = ProfileCatalog::bundled().unwrap();
+        Detector::new(&catalog, CodingAgent::Claude, Some("2.1.309"))
+            .observe(screen)
+            .unwrap()
+    }
+
+    fn read_outside_screen(
+        change: impl FnOnce(&mut Vec<String>),
+        alternate: bool,
+    ) -> ScreenSnapshot {
+        replay_native_fixture(bundled_screen(READ_OUTSIDE), change, alternate, None)
+    }
+
+    #[test]
+    fn bundled_claude_read_outside_dialog_with_trailing_repaint_padding_keeps_its_request_identity()
+    {
+        let clean = read_outside_observation(&read_outside_screen(|_| {}, true));
+        assert_eq!(
+            clean.kind,
+            ObservationKind::Interaction(InteractionClass::PermissionRequest)
+        );
+        assert_eq!(clean.rule_id, READ_OUTSIDE_RULE);
+        assert_eq!(clean.match_evidence, MatchEvidence::Complete);
+        let padded = read_outside_observation(&read_outside_screen(
+            |lines| {
+                for row in [16, 18, 27, 28, 29, 30, 31, 33] {
+                    lines[row].push_str(&" ".repeat(40));
+                }
+            },
+            true,
+        ));
+        assert_eq!(padded.kind, clean.kind, "padding keeps the dialog detected");
+        assert_eq!(padded.rule_id, clean.rule_id);
+        assert_eq!(padded.match_evidence, MatchEvidence::Complete);
+        for field in ["operation", "operation_rows", "choices"] {
+            assert_eq!(
+                padded.raw_evidence[field], clean.raw_evidence[field],
+                "{field}"
+            );
+        }
+        assert!(
+            padded.fingerprint == clean.fingerprint,
+            "written padding does not change the request identity"
+        );
+    }
+
+    #[test]
+    fn bundled_claude_read_outside_dialog_outside_a_live_region_or_on_the_idle_composer_is_no_request()
+     {
+        let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
+        let dialog: Vec<String> = serde_json::from_str::<Value>(bundled_screen(READ_OUTSIDE))
+            .unwrap()["lines"]
+            .as_array()
+            .unwrap()[16..=33]
+            .iter()
+            .map(|line| line.as_str().unwrap().to_owned())
+            .collect();
+        let quoted = read_outside_observation(&replay_native_fixture(
+            bundled_screen(AUTO_IDLE),
+            |lines| {
+                for (offset, row) in dialog.iter().enumerate() {
+                    lines[12 + offset] = row.clone();
+                }
+            },
+            true,
+            None,
+        ));
+        assert_ne!(quoted.kind, permission, "dialog quoted above the composer");
+        assert_ne!(quoted.rule_id, READ_OUTSIDE_RULE);
+        assert_eq!(quoted.kind, ObservationKind::ComposerEmpty);
+        assert!(quoted.fingerprint.is_none());
+
+        let primary = read_outside_observation(&read_outside_screen(|_| {}, false));
+        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
+        assert_ne!(primary.rule_id, READ_OUTSIDE_RULE);
+
+        let cursor_outside = read_outside_observation(&replay_native_fixture(
+            bundled_screen(READ_OUTSIDE),
+            |_| {},
+            true,
+            Some((2, 0)),
+        ));
+        assert_ne!(
+            cursor_outside.rule_id, READ_OUTSIDE_RULE,
+            "the cursor lies outside the dialog region"
+        );
+
+        let idle = read_outside_observation(&replay_native_fixture(
+            bundled_screen(AUTO_IDLE),
+            |_| {},
+            true,
+            None,
+        ));
+        assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
+        assert_eq!(idle.rule_id, "claude-idle-composer");
+        assert!(idle.fingerprint.is_none());
+    }
+
     #[test]
     fn permission_inspection_answer_match_uses_complete_current_rule_choice_and_focus() {
         let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();

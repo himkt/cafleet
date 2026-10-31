@@ -7758,6 +7758,14 @@ mod tests {
         pub(super) fn with_claude_inspection(
             body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
         ) {
+            with_claude_host("2.1.302", "claude-2.1.302-idle-composer-1", body);
+        }
+
+        pub(super) fn with_claude_host(
+            native_version: &'static str,
+            idle_fixture: &str,
+            body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
+        ) {
             with_profile_host(
                 ProfileCatalog::bundled().unwrap(),
                 b"unused-program~".to_vec(),
@@ -7765,7 +7773,7 @@ mod tests {
                     policy: storage::evidence::EvidencePolicy::metadata(),
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Claude,
-                    native_version: "2.1.302",
+                    native_version,
                     profile_version: Some("claude-2.1.302-auto-1"),
                     size: crate::runtime::runner::TerminalSize {
                         rows: 36,
@@ -7773,7 +7781,7 @@ mod tests {
                     },
                     screen: native_fixture_bytes(
                         crate::coding_agent::profiles::detector::test_support::bundled_screen(
-                            "claude-2.1.302-idle-composer-1",
+                            idle_fixture,
                         ),
                     ),
                 },
@@ -8395,7 +8403,8 @@ mod tests {
         use super::permission_inspection_contracts::{
             counts, detail_rewrite, form, inspect, inspect_request, native_fixture_bytes,
             request as inspection_target, settled_ids, stable_detailed_form, stable_form,
-            with_claude_inspection, with_definition, with_inspection, with_redacted_inspection,
+            with_claude_host, with_claude_inspection, with_definition, with_inspection,
+            with_redacted_inspection,
         };
         use crate::broker::runtime::{DecisionSource, DirectorMode, PermissionDecision};
         use crate::coding_agent::CodingAgent;
@@ -8829,6 +8838,92 @@ mod tests {
                     );
                 });
             }
+        }
+
+        #[test]
+        fn a_preview_during_the_claude_read_outside_dialog_queues_with_zero_bytes_and_drains_once_on_the_idle_composer()
+         {
+            use super::ordinary_prompt::support::{canonical_preview, preview_request};
+            const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
+            let idle = || {
+                native_fixture_bytes(
+                    crate::coding_agent::profiles::detector::test_support::bundled_screen(IDLE),
+                )
+            };
+            with_claude_host("2.1.309", IDLE, |h, _, _| {
+                h.pty.child.bytes.extend(native_fixture_bytes(
+                    crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        "claude-2.1.309-read-outside-permission-1",
+                    ),
+                ));
+                settled_ids(h);
+                assert!(matches!(
+                    h.controller.health(&h.writer).eligibility,
+                    InputEligibility::Hold(_)
+                ));
+                let run = h.fixture.run.clone();
+                let message = crate::broker::send_message(
+                    &mut h.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    "preview during the read-outside dialog",
+                )
+                .unwrap();
+                let literal = canonical_preview(&message);
+                let mut program = literal.as_bytes().to_vec();
+                program.push(b'\r');
+                h.pty.expect_program(program.clone());
+                let request = preview_request(h, &message, &literal);
+                let Some(InputControlReply::Submission(queued)) = h.handle(request).unwrap() else {
+                    panic!("a preview during the dialog returns a Submission reply")
+                };
+                assert_eq!(
+                    (queued.status, queued.stage),
+                    (SubmissionStatus::Queued, SubmissionStage::ZeroBytes)
+                );
+                assert_eq!(
+                    queued
+                        .delivery
+                        .as_ref()
+                        .and_then(|delivery| delivery.reason.as_deref()),
+                    Some("interaction_open")
+                );
+                let input_id = queued.input_id.expect("queued work has a durable input ID");
+                for _ in 0..20 {
+                    h.drain();
+                    h.advance();
+                }
+                assert!(
+                    h.pty.offers.is_empty(),
+                    "no byte, Escape included, reaches the dialog: {:?}",
+                    h.pty.offers
+                );
+                h.show(idle());
+                while !matches!(
+                    storage::get_input(&h.fixture.conn, input_id).unwrap().state,
+                    storage::InputState::Accepted | storage::InputState::Settled
+                ) {
+                    assert!(
+                        Instant::now() < h.until,
+                        "the queued preview drains in time"
+                    );
+                    h.drain();
+                    h.advance();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                for _ in 0..20 {
+                    h.drain();
+                    h.advance();
+                }
+                assert_eq!(h.pty.program, vec![program], "delivered exactly once");
+                assert!(h.pty.manual.is_empty(), "{:?}", h.pty.manual);
+                let input = storage::get_input(&h.fixture.conn, input_id).unwrap();
+                assert_eq!(
+                    input.delivery_method,
+                    Some(crate::broker::runtime::DeliveryMethod::Profile)
+                );
+                assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+            });
         }
 
         #[test]
