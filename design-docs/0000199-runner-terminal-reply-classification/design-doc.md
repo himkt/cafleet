@@ -1,6 +1,6 @@
 # Runner terminal-reply classification and uncertain-cause recording
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 43/43 tasks complete
 **Last Updated**: 2026-10-31
 
@@ -10,14 +10,14 @@ The wrapped-member runner counts every byte read from the outer terminal as manu
 
 ## Success Criteria
 
-- [ ] A complete allowlisted terminal reply read from the outer terminal is forwarded to the child byte-for-byte and in order, and leaves `human_generation` unchanged.
-- [ ] A profile delivery whose 500 ms settle receives only terminal replies writes its submit key and its receipt reaches `accepted`.
-- [ ] A keystroke during the settle still stops the remaining stages, and the receipt is `uncertain` with `uncertain_cause = manual_input`.
-- [ ] A read ending inside a possible reply prefix keeps the transport non-quiescent until the sequence completes or 100 ms pass since its last byte; an unresolved prefix (including a lone Escape key) then counts as manual input.
-- [ ] Every runner-recorded `in_progress → uncertain` transition stores one `uncertain_cause` value from the enumerated set, and `record_input_state` refuses that transition without a cause.
-- [ ] `input show` / `input reconcile` JSON append `uncertain_cause`; wrapped prompt/exec uncertain errors name the cause; an uncertain `input_delivery_result` event carries `cause: {"kind": UNCERTAIN_CAUSE}` derived from the durable receipt.
-- [ ] `V8__uncertain_cause.sql` is the contiguous successor of V7 and preserves every row; the chain guard, head-shape guard and a successor test pass.
-- [ ] `SPEC.md`, the affected `docs/` page and `skills/cafleet/reference/{cli,member-runtime}.md` describe the new contracts before code lands; `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` pass.
+- [x] A complete allowlisted terminal reply read from the outer terminal is forwarded to the child byte-for-byte and in order, and leaves `human_generation` unchanged.
+- [x] A profile delivery whose 500 ms settle receives only terminal replies writes its submit key and its receipt reaches `accepted`.
+- [x] A keystroke during the settle still stops the remaining stages, and the receipt is `uncertain` with `uncertain_cause = manual_input`.
+- [x] A read ending inside a possible reply prefix keeps the transport non-quiescent until the sequence completes or 100 ms pass since its last byte; an unresolved prefix (including a lone Escape key) then counts as manual input.
+- [x] Every runner-recorded `in_progress → uncertain` transition stores one `uncertain_cause` value from the enumerated set, and `record_input_state` refuses that transition without a cause.
+- [x] `input show` / `input reconcile` JSON append `uncertain_cause`; wrapped prompt/exec uncertain errors name the cause; an uncertain `input_delivery_result` event carries `cause: {"kind": UNCERTAIN_CAUSE}` derived from the durable receipt.
+- [x] `V8__uncertain_cause.sql` is the contiguous successor of V7 and preserves every row; the chain guard, head-shape guard and a successor test pass.
+- [x] `SPEC.md`, the affected `docs/` page and `skills/cafleet/reference/{cli,member-runtime}.md` describe the new contracts before code lands; `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` pass.
 
 ---
 
