@@ -17,7 +17,7 @@ rustix = { version = "1", features = ["termios", "time"] }
 signal-hook = "0.4"
 refinery = { version = "0.10", features = ["rusqlite"] }
 regex = "1"
-rusqlite = { version = "0.39", features = ["bundled", "hooks"] }
+rusqlite = { version = "0.41", features = ["bundled", "hooks"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

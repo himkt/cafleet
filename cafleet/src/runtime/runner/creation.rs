@@ -772,7 +772,7 @@ mod tests {
         assert!(!paths.descriptor.exists());
     }
 
-    fn count_registration_cleanup(conn: &Connection) -> Arc<AtomicUsize> {
+    fn count_registration_cleanup(conn: &mut Connection) -> Arc<AtomicUsize> {
         let attempts = Arc::new(AtomicUsize::new(0));
         let observed = attempts.clone();
         conn.authorizer(Some(move |context: AuthContext<'_>| {
@@ -913,7 +913,7 @@ mod tests {
     #[test]
     fn runner_creation_publishes_prepared_placement_before_one_start_and_unlinks_the_descriptor() {
         let mut fixture = Fixture::new();
-        let cleanup_attempts = count_registration_cleanup(&fixture.conn);
+        let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
         let mut host = Host::new(&fixture);
         let deadline = host.now + Duration::from_secs(10);
         let outcome = launch(&mut fixture, &mut host, deadline).unwrap();
@@ -965,7 +965,7 @@ mod tests {
     fn runner_creation_missing_or_rejected_publication_compensates_the_owned_pane_once() {
         for failure in [PublicationFailure::Missing, PublicationFailure::Rejected] {
             let mut fixture = Fixture::new();
-            let cleanup_attempts = count_registration_cleanup(&fixture.conn);
+            let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
             let mut host = Host::new(&fixture);
             host.publication_failure = Some(failure);
             let deadline = host.now + Duration::from_secs(10);
@@ -988,7 +988,7 @@ mod tests {
         for phase in ["preparation", "start"] {
             for cleanup_fails in [false, true] {
                 let mut fixture = Fixture::new();
-                let cleanup_attempts = count_registration_cleanup(&fixture.conn);
+                let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
                 if cleanup_fails {
                     reject_registration_cleanup(&fixture.conn);
                 }
@@ -1056,7 +1056,7 @@ mod tests {
     #[test]
     fn runner_creation_preserves_publication_failure_and_combined_cleanup_errors_once() {
         let mut fixture = Fixture::new();
-        let cleanup_attempts = count_registration_cleanup(&fixture.conn);
+        let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
         reject_registration_cleanup(&fixture.conn);
         let mut host = Host::new(&fixture);
         host.publication_failure = Some(PublicationFailure::Rejected);
@@ -1101,7 +1101,7 @@ mod tests {
     fn runner_creation_unwind_during_preparation_compensates_registration_and_descriptor_once() {
         for stage in ["before-artifacts", "after-artifacts", "after-descriptor"] {
             let mut fixture = Fixture::new();
-            let cleanup_attempts = count_registration_cleanup(&fixture.conn);
+            let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
             let (member, settings) = inputs(&fixture);
             let spec = fixture.spec();
             let mut host = Host::new(&fixture);
@@ -1137,7 +1137,7 @@ mod tests {
 
     fn assert_launch_unwind_compensates(phase: &'static str) {
         let mut fixture = Fixture::new();
-        let cleanup_attempts = count_registration_cleanup(&fixture.conn);
+        let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
         let mut host = Host::new(&fixture);
         host.panic_at = Some(phase);
         let deadline = host.now + Duration::from_secs(10);
