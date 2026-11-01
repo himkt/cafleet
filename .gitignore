@@ -11,3 +11,5 @@
 /docs/doc_build/
 /docs/node_modules/
 /researches/
+/design-docs/*/*
+!/design-docs/*/design-doc.md

@@ -4,9 +4,9 @@ This file overrides the host's Git Workflow rule for this project only. The host
 
 ## design-docs/ is committed in this project
 
-**Override**: The global rule says `NEVER commit files from design-docs/`. In this project, design docs **MUST** be committed as part of the same feature branch that implements them.
+**Override**: Commit only `design-doc.md` from each design folder as part of the feature branch that implements it.
 
 - Stage `design-docs/NNNNNNN-<slug>/design-doc.md` alongside the implementation commits.
 - A dedicated `docs: add design doc NNNNNNN-<slug>` commit at the end of the implementation sequence is acceptable, as is including the design doc in the first implementation commit.
-- Do **not** rely on the user's global gitignore — the file is tracked here.
-- `researches/` (the other half of the global rule) remains gitignored and is NOT committed.
+- The repository's `.gitignore` keeps every other path inside a design folder local, including prompts, audits, screenshots, scans and clarification files.
+- `researches/` remains gitignored and local.
