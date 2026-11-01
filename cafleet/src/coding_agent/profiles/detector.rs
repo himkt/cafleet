@@ -767,8 +767,8 @@ pub(crate) mod test_support {
     };
     use crate::runtime::runner::{TerminalSize, TerminalState};
 
-    pub(crate) fn bundled_screen(id: &str) -> &'static str {
-        std::str::from_utf8(bundled_fixture(id).1).expect("bundled fixtures are UTF-8 JSON")
+    pub(crate) fn bundled_screen(id: &str) -> String {
+        bundled_fixture(id)
     }
 
     pub(crate) fn bundled_observe(
@@ -776,7 +776,7 @@ pub(crate) mod test_support {
         version: &str,
         id: &str,
     ) -> ScreenObservation {
-        let screen = replay_native_fixture(bundled_screen(id), |_| {}, true, None);
+        let screen = replay_native_fixture(&bundled_screen(id), |_| {}, true, None);
         Detector::new(&ProfileCatalog::bundled().unwrap(), backend, Some(version))
             .observe(&screen)
             .unwrap()
@@ -1023,7 +1023,7 @@ mod tests {
         change: impl FnOnce(&mut Vec<String>),
         alternate: bool,
     ) -> ScreenSnapshot {
-        replay_native_fixture(bundled_screen(READ_OUTSIDE), change, alternate, None)
+        replay_native_fixture(&bundled_screen(READ_OUTSIDE), change, alternate, None)
     }
 
     #[test]
@@ -1063,7 +1063,7 @@ mod tests {
     fn bundled_claude_read_outside_dialog_outside_a_live_region_or_on_the_idle_composer_is_no_request()
      {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
-        let dialog: Vec<String> = serde_json::from_str::<Value>(bundled_screen(READ_OUTSIDE))
+        let dialog: Vec<String> = serde_json::from_str::<Value>(&bundled_screen(READ_OUTSIDE))
             .unwrap()["lines"]
             .as_array()
             .unwrap()[16..=33]
@@ -1071,7 +1071,7 @@ mod tests {
             .map(|line| line.as_str().unwrap().to_owned())
             .collect();
         let quoted = read_outside_observation(&replay_native_fixture(
-            bundled_screen(AUTO_IDLE),
+            &bundled_screen(AUTO_IDLE),
             |lines| {
                 for (offset, row) in dialog.iter().enumerate() {
                     lines[12 + offset] = row.clone();
@@ -1090,7 +1090,7 @@ mod tests {
         assert_ne!(primary.rule_id, READ_OUTSIDE_RULE);
 
         let cursor_outside = read_outside_observation(&replay_native_fixture(
-            bundled_screen(READ_OUTSIDE),
+            &bundled_screen(READ_OUTSIDE),
             |_| {},
             true,
             Some((2, 0)),
@@ -1101,7 +1101,7 @@ mod tests {
         );
 
         let idle = read_outside_observation(&replay_native_fixture(
-            bundled_screen(AUTO_IDLE),
+            &bundled_screen(AUTO_IDLE),
             |_| {},
             true,
             None,
@@ -1188,7 +1188,7 @@ mod tests {
 
     fn native_screen(change: impl FnOnce(&mut Vec<String>), alternate: bool) -> ScreenSnapshot {
         replay_native_fixture(
-            bundled_screen("claude-2.1.302-default-permission-1"),
+            &bundled_screen("claude-2.1.302-default-permission-1"),
             change,
             alternate,
             None,
@@ -1285,7 +1285,7 @@ mod tests {
 
     fn wrapped_screen(change: impl FnOnce(&mut Vec<String>), alternate: bool) -> ScreenSnapshot {
         replay_native_fixture(
-            bundled_screen("claude-2.1.302-wrapped-permission-1"),
+            &bundled_screen("claude-2.1.302-wrapped-permission-1"),
             change,
             alternate,
             None,
@@ -1354,11 +1354,11 @@ mod tests {
         );
         for (fixture, operation) in [
             (
-                bundled_screen("claude-2.1.302-wrapped-allow-pre-stage-1"),
+                &bundled_screen("claude-2.1.302-wrapped-allow-pre-stage-1"),
                 "/tmp/cafleet-194/claude-wrap-ans-allow-001/permiss\nion-probe allow",
             ),
             (
-                bundled_screen("claude-2.1.302-wrapped-deny-pre-stage-1"),
+                &bundled_screen("claude-2.1.302-wrapped-deny-pre-stage-1"),
                 "/tmp/cafleet-194/claude-wrap-ans-deny-001/permissi\non-probe deny",
             ),
         ] {
@@ -1385,11 +1385,11 @@ mod tests {
         );
         for (fixture, operation) in [
             (
-                bundled_screen("claude-2.1.302-allow-pre-stage-1"),
+                &bundled_screen("claude-2.1.302-allow-pre-stage-1"),
                 "/private/tmp/cafleet-194/ans-allow-001/permission-probe allow",
             ),
             (
-                bundled_screen("claude-2.1.302-deny-pre-stage-1"),
+                &bundled_screen("claude-2.1.302-deny-pre-stage-1"),
                 "/private/tmp/cafleet-194/ans-deny-001/permission-probe deny",
             ),
         ] {
@@ -1516,7 +1516,7 @@ mod tests {
     #[test]
     fn bundled_claude_operation_is_only_the_rows_between_the_dashed_rules() {
         let screen =
-            serde_json::from_str::<Value>(bundled_screen("claude-2.1.302-wrapped-permission-1"))
+            serde_json::from_str::<Value>(&bundled_screen("claude-2.1.302-wrapped-permission-1"))
                 .unwrap();
         let transcript = screen["lines"][13].as_str().unwrap();
         assert!(transcript.starts_with("  ⎿  $ "));
@@ -1645,7 +1645,7 @@ mod tests {
     #[test]
     fn bundled_claude_detects_the_native_boxed_form_and_reports_its_displayed_gutter_rows() {
         let screen = replay_native_fixture(
-            bundled_screen("claude-2.1.302-boxed-permission-1"),
+            &bundled_screen("claude-2.1.302-boxed-permission-1"),
             |_| {},
             true,
             None,
@@ -1670,7 +1670,7 @@ mod tests {
     #[test]
     fn bundled_claude_boxed_form_tolerates_the_written_spaces_before_its_closing_line() {
         let fixture =
-            serde_json::from_str::<Value>(bundled_screen("claude-2.1.302-boxed-permission-1"))
+            serde_json::from_str::<Value>(&bundled_screen("claude-2.1.302-boxed-permission-1"))
                 .unwrap();
         assert_eq!(fixture["lines"][32], "   4. No");
         assert_eq!(
@@ -1680,7 +1680,7 @@ mod tests {
         assert_eq!(fixture["lines"][34], " Esc to cancel · Tab to amend");
         let operation = format!("│ {BOXED_PATH}\n│ allow");
         let cleared = claude_observation(&replay_native_fixture(
-            bundled_screen("claude-2.1.302-boxed-permission-1"),
+            &bundled_screen("claude-2.1.302-boxed-permission-1"),
             |lines| lines[33].clear(),
             true,
             None,
@@ -1689,7 +1689,7 @@ mod tests {
         assert!(
             cleared.fingerprint
                 == claude_observation(&replay_native_fixture(
-                    bundled_screen("claude-2.1.302-boxed-permission-1"),
+                    &bundled_screen("claude-2.1.302-boxed-permission-1"),
                     |_| {},
                     true,
                     None
@@ -1701,7 +1701,7 @@ mod tests {
     #[test]
     fn bundled_claude_detects_the_native_single_row_box_and_keeps_its_gutter() {
         let screen = replay_native_fixture(
-            bundled_screen("claude-2.1.302-boxed-single-row-permission-1"),
+            &bundled_screen("claude-2.1.302-boxed-single-row-permission-1"),
             |_| {},
             true,
             None,
@@ -1745,7 +1745,7 @@ mod tests {
         let headless = claude_observation(&wrapped_screen(|lines| lines[17].clear(), true));
         assert_ne!(headless.kind, permission, "form without its heading");
         let outside = claude_observation(&replay_native_fixture(
-            bundled_screen("claude-2.1.302-wrapped-permission-1"),
+            &bundled_screen("claude-2.1.302-wrapped-permission-1"),
             |_| {},
             true,
             Some((12, 0)),
@@ -1787,7 +1787,7 @@ mod tests {
         cursor: Option<(u16, u16)>,
     ) -> ScreenSnapshot {
         replay_native_fixture(
-            bundled_screen("codex-0.163.0-on-request-permission-1"),
+            &bundled_screen("codex-0.163.0-on-request-permission-1"),
             change,
             true,
             cursor,
@@ -1897,7 +1897,7 @@ mod tests {
     fn bundled_codex_detection_counts_a_pending_wrap_cursor_on_the_full_width_closing_row_as_inside()
      {
         let screen = replay_with_pending_wrap(
-            bundled_screen("codex-0.163.0-on-request-permission-1"),
+            &bundled_screen("codex-0.163.0-on-request-permission-1"),
             |_| {},
         );
         assert_eq!(
@@ -1915,8 +1915,8 @@ mod tests {
             observation.fingerprint == codex_observation(&codex_form(|_| {}, None)).fingerprint
         );
         for fixture in [
-            bundled_screen("codex-0.163.0-allow-pre-stage-1"),
-            bundled_screen("codex-0.163.0-deny-pre-stage-1"),
+            &bundled_screen("codex-0.163.0-allow-pre-stage-1"),
+            &bundled_screen("codex-0.163.0-deny-pre-stage-1"),
         ] {
             let pre_stage = codex_observation(&replay_with_pending_wrap(fixture, |_| {}));
             assert_eq!(
@@ -1930,7 +1930,7 @@ mod tests {
     fn bundled_codex_detector_rejects_copies_that_are_not_the_live_approval_form() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
         let primary = codex_observation(&replay_native_fixture(
-            bundled_screen("codex-0.163.0-on-request-permission-1"),
+            &bundled_screen("codex-0.163.0-on-request-permission-1"),
             |_| {},
             false,
             None,
@@ -1982,11 +1982,11 @@ mod tests {
         );
         for (fixture, operation) in [
             (
-                bundled_screen("codex-0.163.0-allow-pre-stage-1"),
+                &bundled_screen("codex-0.163.0-allow-pre-stage-1"),
                 "/tmp/cafleet-194/codex-ans-allow-001/permission-probe allow",
             ),
             (
-                bundled_screen("codex-0.163.0-deny-pre-stage-1"),
+                &bundled_screen("codex-0.163.0-deny-pre-stage-1"),
                 "/tmp/cafleet-194/codex-ans-deny-001/permission-probe deny",
             ),
         ] {
@@ -2107,7 +2107,7 @@ mod tests {
                 assert_eq!(plan.stages().len(), 1, "{id}");
                 assert_eq!(plan.stages()[0].bytes(), &[byte], "{id}");
                 let fixture = bundled_screen(id);
-                let screen = replay_native_fixture(fixture, |_| {}, true, None);
+                let screen = replay_native_fixture(&fixture, |_| {}, true, None);
                 if forms.cursor_follows_focus {
                     assert_eq!((screen.cursor_row, screen.cursor_col), (focus, 1), "{id}");
                 }
@@ -2126,7 +2126,7 @@ mod tests {
                 );
                 let (choice_two, focused_choice_two) = forms.second_choice;
                 let moved = replay_native_fixture(
-                    fixture,
+                    &fixture,
                     |lines| {
                         lines[forms.focus_row] =
                             lines[forms.focus_row].replacen(forms.glyph, " ", 1);
@@ -2145,7 +2145,7 @@ mod tests {
                     "{id}: token binding sees the focus move"
                 );
                 let unfocused = replay_native_fixture(
-                    fixture,
+                    &fixture,
                     |lines| {
                         lines[forms.focus_row] =
                             lines[forms.focus_row].replacen(forms.glyph, " ", 1)
@@ -2157,7 +2157,7 @@ mod tests {
                     answer(&unfocused, &plan).is_none(),
                     "{id} without its focus glyph"
                 );
-                let primary = replay_native_fixture(fixture, |_| {}, false, None);
+                let primary = replay_native_fixture(&fixture, |_| {}, false, None);
                 assert!(answer(&primary, &plan).is_none(), "{id} primary screen");
             }
         }
@@ -2207,7 +2207,7 @@ mod tests {
             let observe = |id: &str| {
                 detector
                     .observe(&replay_native_fixture(
-                        bundled_screen(id),
+                        &bundled_screen(id),
                         |_| {},
                         true,
                         None,
@@ -2276,7 +2276,7 @@ mod tests {
                 |change: &dyn Fn(&mut Vec<String>), alternate: bool, cursor: Option<(u16, u16)>| {
                     detector
                         .observe(&replay_native_fixture(
-                            bundled_screen(composer.idle),
+                            &bundled_screen(composer.idle),
                             change,
                             alternate,
                             cursor,

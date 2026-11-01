@@ -8808,7 +8808,7 @@ mod tests {
             use crate::coding_agent::profiles::detector::test_support::{
                 bundled_screen, native_fixture_bytes,
             };
-            let mut screen: serde_json::Value = serde_json::from_str(bundled_screen(id)).unwrap();
+            let mut screen: serde_json::Value = serde_json::from_str(&bundled_screen(id)).unwrap();
             let cols = usize::try_from(screen["cols"].as_u64().unwrap()).unwrap();
             for (offset, text) in command.iter().enumerate() {
                 let row = &mut screen["lines"][first_row + offset];

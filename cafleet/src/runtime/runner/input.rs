@@ -8160,7 +8160,7 @@ mod tests {
                         cols: 120,
                     },
                     screen: native_fixture_bytes(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             idle_fixture,
                         ),
                     ),
@@ -8185,7 +8185,7 @@ mod tests {
                         cols: 120,
                     },
                     screen: native_fixture_bytes(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-idle-composer-1",
                         ),
                     ),
@@ -9084,7 +9084,7 @@ mod tests {
 
         fn claude_blocked_form(h: &mut Host) -> (i64, i64, i64, i64) {
             h.pty.child.bytes.extend(native_fixture_bytes(
-                crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                     "claude-2.1.302-default-permission-1",
                 ),
             ));
@@ -9093,7 +9093,7 @@ mod tests {
 
         fn claude_boxed_single_row_form(h: &mut Host) -> (i64, i64, i64, i64) {
             h.pty.child.bytes.extend(native_fixture_bytes(
-                crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                     "claude-2.1.302-boxed-single-row-permission-1",
                 ),
             ));
@@ -9217,12 +9217,12 @@ mod tests {
             const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
             let idle = || {
                 native_fixture_bytes(
-                    crate::coding_agent::profiles::detector::test_support::bundled_screen(IDLE),
+                    &crate::coding_agent::profiles::detector::test_support::bundled_screen(IDLE),
                 )
             };
             with_claude_host("2.1.309", IDLE, |h, _, _| {
                 h.pty.child.bytes.extend(native_fixture_bytes(
-                    crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                    &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                         "claude-2.1.309-read-outside-permission-1",
                     ),
                 ));
@@ -11685,7 +11685,7 @@ mod tests {
             fn opencode_allow_enters_on_the_focused_allow_once() {
                 with_opencode_inspection(|h, _, _| {
                     h.show(native_fixture_bytes(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-allow-pre-stage-1",
                         ),
                     ));
@@ -11715,7 +11715,7 @@ mod tests {
             fn opencode_deny_moves_the_focus_selects_reject_and_submits_the_empty_reason() {
                 with_opencode_inspection(|h, calls, _| {
                     h.show(native_fixture_bytes(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
@@ -11732,17 +11732,17 @@ mod tests {
                     write_stage(h, 1);
                     assert_eq!(h.pty.offers, offers(&[b"h"]));
                     h.show(opencode_screen(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-2",
                         ),
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
                     write_stage(h, 2);
                     assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
                     h.show(native_fixture_bytes(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-3",
                         ),
                     ));
@@ -11764,7 +11764,7 @@ mod tests {
             fn opencode_focus_on_always_allow_after_the_first_deny_stage_fails_uncertain() {
                 with_opencode_inspection(|h, _, _| {
                     h.show(native_fixture_bytes(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
@@ -11779,10 +11779,10 @@ mod tests {
                     );
                     let id = write_stage(h, 1);
                     h.show(opencode_screen(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-focus-always-1",
                         ),
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
@@ -11807,7 +11807,7 @@ mod tests {
                 trailer_col: usize,
             ) -> Vec<u8> {
                 let mut screen: serde_json::Value = serde_json::from_str(
-                    crate::coding_agent::profiles::detector::test_support::bundled_screen(id),
+                    &crate::coding_agent::profiles::detector::test_support::bundled_screen(id),
                 )
                 .unwrap();
                 let cols = usize::try_from(screen["cols"].as_u64().unwrap()).unwrap();
@@ -11871,14 +11871,14 @@ mod tests {
             fn opencode_reject_dialog_reached_by_human_input_offers_no_token() {
                 with_opencode_inspection(|h, _, _| {
                     h.show(native_fixture_bytes(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
                     let ids = settled_ids(h);
                     assert!(inspect(h, ids).request_token.is_some());
                     h.show(native_fixture_bytes(
-                        crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-3",
                         ),
                     ));

@@ -1584,13 +1584,30 @@ pub(crate) mod test_support {
         value
     }
 
-    pub(crate) fn bundled_fixture(id: &str) -> (&'static str, &'static [u8]) {
-        let source = format!("native/{id}.json");
-        BUNDLED_FIXTURES
+    fn bundled_file(id: &str) -> (String, Value) {
+        let definitions = bundled_definitions();
+        let entry = definitions["fixtures"]
+            .as_array()
+            .unwrap()
             .iter()
-            .copied()
+            .find(|entry| entry["id"] == id)
+            .unwrap_or_else(|| panic!("the bundled catalog contains {id}"));
+        let source = entry["source_ref"].as_str().unwrap().to_owned();
+        let (_, bytes) = BUNDLED_FIXTURES
+            .iter()
             .find(|(cited, _)| *cited == source)
-            .unwrap_or_else(|| panic!("{id} is a bundled fixture"))
+            .expect("the catalogued backend file is embedded");
+        (source, serde_json::from_slice(bytes).unwrap())
+    }
+
+    pub(crate) fn bundled_fixture(id: &str) -> String {
+        let (_, file) = bundled_file(id);
+        let screen = file["screens"]
+            .as_object()
+            .expect("the backend file contains a screen map")
+            .get(id)
+            .expect("the catalogued screen is embedded");
+        crate::digest::canonical_json(screen)
     }
 
     pub(crate) fn bundled_embedded() -> Vec<(&'static str, &'static [u8])> {
@@ -1639,17 +1656,42 @@ pub(crate) mod test_support {
         change_definitions: impl FnOnce(&mut Value),
         change_screen: impl FnOnce(&mut Value),
     ) -> Result<ProfileCatalog> {
-        let (source, original) = bundled_fixture(id);
-        let mut screen: Value = serde_json::from_slice(original).unwrap();
-        change_screen(&mut screen);
-        let bytes = serde_json::to_vec_pretty(&screen).unwrap();
+        let (source, mut file) = bundled_file(id);
+        let screen = file["screens"]
+            .as_object_mut()
+            .expect("the backend file contains a screen map")
+            .get_mut(id)
+            .expect("the catalogued screen is embedded");
+        change_screen(screen);
+        let digest = crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes());
         let mut definitions = bundled_definitions();
-        bundled_entry(&mut definitions, id)["sha256"] = json!(crate::digest::sha256_hex(&bytes));
+        bundled_entry(&mut definitions, id)["sha256"] = json!(digest);
         change_definitions(&mut definitions);
+        load_bundled_file(&source, &file, &definitions)
+    }
+
+    pub(crate) fn guarded_fixture_file(
+        id: &str,
+        change_definitions: impl FnOnce(&mut Value),
+        change_file: impl FnOnce(&mut Value),
+    ) -> Result<ProfileCatalog> {
+        let (source, mut file) = bundled_file(id);
+        let mut definitions = bundled_definitions();
+        change_file(&mut file);
+        change_definitions(&mut definitions);
+        load_bundled_file(&source, &file, &definitions)
+    }
+
+    fn load_bundled_file(
+        source: &str,
+        file: &Value,
+        definitions: &Value,
+    ) -> Result<ProfileCatalog> {
+        let bytes = serde_json::to_vec_pretty(file).unwrap();
         let mut embedded = bundled_embedded();
         embedded.retain(|&(cited, _)| cited != source);
         embedded.push((source, &bytes));
-        ProfileCatalog::from_bundled_definitions(&definitions, &embedded)
+        ProfileCatalog::from_bundled_definitions(definitions, &embedded)
     }
 
     pub(crate) fn synthetic_definitions() -> Value {
@@ -1945,6 +1987,7 @@ mod tests {
     use crate::runtime::runner::episodes::test_support::*;
     use crate::runtime::runner::*;
     use serde_json::{Value, json};
+    use std::collections::BTreeSet;
     use std::time::{Duration, Instant};
 
     mod bundled_backend_files {
@@ -2182,10 +2225,7 @@ mod tests {
             .push(json!({"row":row,"reason":reason}));
     }
 
-    const SCREEN_CHANGES: [ScreenChange; 15] = [
-        ("synthetic provenance", |s| {
-            s["provenance"] = json!("synthetic")
-        }),
+    const SCREEN_CHANGES: [ScreenChange; 11] = [
         ("extra field", |s| s["note"] = json!("unreviewed")),
         ("missing masked rows", |s| {
             s.as_object_mut().unwrap().remove("masked_rows");
@@ -2228,17 +2268,6 @@ mod tests {
                 s["masked_rows"][0]["reason"] = json!("convenience");
             }
         }),
-        ("fixture id", |s| s["fixture_id"] = json!("other-fixture")),
-        ("backend", |s| {
-            s["backend"] = json!(if s["backend"] == "codex" {
-                "claude"
-            } else {
-                "codex"
-            })
-        }),
-        ("native version", |s| {
-            s["native_version"] = json!("0.0.0-other")
-        }),
         ("rows", |s| {
             s["rows"] = json!(s["rows"].as_u64().unwrap() - 1)
         }),
@@ -2261,40 +2290,87 @@ mod tests {
         let definitions = bundled_definitions();
         let embedded = bundled_embedded();
         let entries = definitions["fixtures"].as_array().unwrap();
-        assert_eq!(entries.len(), super::BUNDLED_FIXTURES.len());
+        ProfileCatalog::from_bundled_definitions(&definitions, &embedded).unwrap();
+        let catalogued = entries
+            .iter()
+            .map(|entry| entry["id"].as_str().unwrap().to_owned())
+            .collect::<BTreeSet<_>>();
+        let screens = embedded
+            .iter()
+            .flat_map(|(_, bytes)| {
+                let file: Value = serde_json::from_slice(bytes).unwrap();
+                file["screens"]
+                    .as_object()
+                    .expect("the backend file contains a screen map")
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(screens, catalogued);
         for entry in entries {
             let id = entry["id"].as_str().unwrap();
-            super::verify_native_screen(entry, &embedded)
-                .unwrap_or_else(|error| panic!("{id}: {}", error.message()));
-            let (source, bytes) = bundled_fixture(id);
-            let rejected = |entry: &Value, bytes: &[u8], case: &str| {
-                let mut changed: Vec<(&str, &[u8])> = embedded.clone();
-                changed.retain(|&(cited, _)| cited != source);
-                changed.push((source, bytes));
+            for (case, change) in SCREEN_CHANGES {
                 assert!(
-                    super::verify_native_screen(entry, &changed).is_err(),
+                    guarded_fixture(id, |_| {}, change).is_err(),
                     "{id}: {case} must be rejected"
                 );
-            };
-            let screen: Value = serde_json::from_slice(bytes).unwrap();
-            for (case, change) in SCREEN_CHANGES {
-                let mut changed = screen.clone();
-                change(&mut changed);
-                let changed = serde_json::to_vec_pretty(&changed).unwrap();
-                let mut digested = entry.clone();
-                digested["sha256"] = json!(crate::digest::sha256_hex(&changed));
-                rejected(&digested, &changed, case);
             }
-            let mut synthetic = entry.clone();
-            synthetic["kind"] = json!("synthetic");
-            rejected(&synthetic, bytes, "synthetic catalog kind");
-            let mut tampered = bytes.to_vec();
-            tampered.push(b'\n');
-            rejected(entry, &tampered, "digest mismatch");
+            for (field, value) in [
+                ("schema_version", json!(2)),
+                ("provenance", json!("synthetic")),
+                (
+                    "backend",
+                    json!(if entry["backend"] == "codex" {
+                        "claude"
+                    } else {
+                        "codex"
+                    }),
+                ),
+            ] {
+                assert!(
+                    guarded_fixture_file(id, |_| {}, |file| file[field] = value).is_err(),
+                    "{id}: {field} must match its catalog entry"
+                );
+            }
+            assert!(
+                guarded_fixture(
+                    id,
+                    |definitions| bundled_entry(definitions, id)["kind"] = json!("synthetic"),
+                    |_| {}
+                )
+                .is_err(),
+                "{id}: bundled fixtures require native catalog provenance"
+            );
+            assert!(
+                guarded_fixture_file(
+                    id,
+                    |_| {},
+                    |file| {
+                        file["screens"].as_object_mut().unwrap().remove(id);
+                    }
+                )
+                .is_err(),
+                "{id}: its catalogued screen must be present"
+            );
+            assert!(
+                guarded_fixture_file(
+                    id,
+                    |_| {},
+                    |file| {
+                        let screen = &mut file["screens"][id];
+                        screen["alternate_screen"] =
+                            json!(!screen["alternate_screen"].as_bool().unwrap());
+                    }
+                )
+                .is_err(),
+                "{id}: changed screen content requires its canonical digest"
+            );
+            let source = entry["source_ref"].as_str().unwrap();
             let mut missing = embedded.clone();
             missing.retain(|&(cited, _)| cited != source);
             assert!(
-                super::verify_native_screen(entry, &missing).is_err(),
+                ProfileCatalog::from_bundled_definitions(&definitions, &missing).is_err(),
                 "{id}: a cited fixture is embedded"
             );
         }
@@ -2303,14 +2379,19 @@ mod tests {
     #[test]
     fn bundled_fixtures_carry_no_personal_paths_or_account_names() {
         for (source, bytes) in bundled_embedded() {
-            let screen: Value = serde_json::from_slice(bytes).unwrap();
-            for (row, line) in screen["lines"].as_array().unwrap().iter().enumerate() {
-                let line = line.as_str().unwrap();
-                for private in ["/Users/", "/root", "/development-pvc", "/home/", "himkt"] {
-                    assert!(
-                        !line.contains(private),
-                        "{source} row {row} carries {private:?}"
-                    );
+            let file: Value = serde_json::from_slice(bytes).unwrap();
+            for (id, screen) in file["screens"]
+                .as_object()
+                .expect("the backend file contains a screen map")
+            {
+                for (row, line) in screen["lines"].as_array().unwrap().iter().enumerate() {
+                    let line = line.as_str().unwrap();
+                    for private in ["/Users/", "/root", "/development-pvc", "/home/", "himkt"] {
+                        assert!(
+                            !line.contains(private),
+                            "{source} screen {id} row {row} carries {private:?}"
+                        );
+                    }
                 }
             }
         }
@@ -3646,8 +3727,8 @@ mod tests {
             BOXED_SINGLE_ROW_FIXTURE,
         ];
 
-        fn bytes(id: &str) -> &'static [u8] {
-            bundled_fixture(id).1
+        fn bytes(id: &str) -> Vec<u8> {
+            bundled_fixture(id).into_bytes()
         }
 
         #[test]
@@ -3713,10 +3794,11 @@ mod tests {
 
         #[test]
         fn bundled_claude_resize_between_wrapped_and_unwrapped_renderings_replaces_the_episode() {
-            let wrapped = |output_seq| sequenced_replay(bytes(WRAPPED_FIXTURE), |_| {}, output_seq);
+            let wrapped =
+                |output_seq| sequenced_replay(&bytes(WRAPPED_FIXTURE), |_| {}, output_seq);
             let unwrapped = |output_seq| {
                 sequenced_replay(
-                    bytes(NATIVE_FIXTURE),
+                    &bytes(NATIVE_FIXTURE),
                     |lines| {
                         lines[18] =
                             " /tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow".into()
@@ -4005,17 +4087,17 @@ mod tests {
             ("claude-2.1.302-trust-dialog-1", UNKNOWN, UNMATCHED, &[]),
         ];
 
-        fn bytes(id: &str) -> &'static [u8] {
-            bundled_fixture(id).1
+        fn bytes(id: &str) -> Vec<u8> {
+            bundled_fixture(id).into_bytes()
         }
 
         fn document(id: &str) -> Value {
-            serde_json::from_slice(bytes(id)).unwrap()
+            serde_json::from_slice(&bytes(id)).unwrap()
         }
 
         fn replay(id: &str, alternate: bool) -> ScreenSnapshot {
             replay_native_fixture(
-                std::str::from_utf8(bytes(id)).unwrap(),
+                std::str::from_utf8(&bytes(id)).unwrap(),
                 |_| {},
                 alternate,
                 None,
@@ -5191,12 +5273,13 @@ mod tests {
             ),
         ];
 
-        fn bytes(id: &str) -> &'static [u8] {
-            bundled_fixture(id).1
+        fn bytes(id: &str) -> Vec<u8> {
+            bundled_fixture(id).into_bytes()
         }
 
         fn screen(id: &str) -> ScreenSnapshot {
-            let text = std::str::from_utf8(bytes(id)).unwrap();
+            let bytes = bytes(id);
+            let text = std::str::from_utf8(&bytes).unwrap();
             let alternate = serde_json::from_str::<Value>(text).unwrap()["alternate_screen"]
                 .as_bool()
                 .unwrap();
@@ -5367,7 +5450,7 @@ mod tests {
             }
             for id in super::bundled_codex::PREDECESSOR_FIXTURES {
                 let screen = replay_native_fixture(
-                    std::str::from_utf8(bytes(id)).unwrap(),
+                    std::str::from_utf8(&bytes(id)).unwrap(),
                     |_| {},
                     true,
                     None,
@@ -5690,10 +5773,9 @@ mod tests {
                             submission_fixture_ids(backend).contains(id),
                             "{id} is declared submission provenance"
                         );
-                        let document: Value =
-                            serde_json::from_slice(bundled_fixture(id).1).unwrap();
+                        let document: Value = serde_json::from_str(&bundled_fixture(id)).unwrap();
                         let screen = replay_native_fixture(
-                            bundled_screen(id),
+                            &bundled_screen(id),
                             |_| {},
                             document["alternate_screen"].as_bool().unwrap(),
                             None,
@@ -5936,8 +6018,8 @@ mod tests {
 
         type LineChange = Box<dyn Fn(&mut Vec<String>)>;
 
-        fn fixture(id: &str) -> &'static [u8] {
-            bundled_fixture(id).1
+        fn fixture(id: &str) -> Vec<u8> {
+            bundled_fixture(id).into_bytes()
         }
 
         fn parsed(bytes: &[u8]) -> Value {
@@ -6386,7 +6468,7 @@ mod tests {
         #[test]
         fn bundled_opencode_detects_every_narrow_and_compact_form_fixture() {
             for (id, request, rows, focus) in NARROW_FORMS {
-                let observed = observe(&replay(fixture(id)));
+                let observed = observe(&replay(&fixture(id)));
                 assert_eq!(
                     observed.kind,
                     ObservationKind::Interaction(InteractionClass::PermissionRequest),
@@ -6409,7 +6491,7 @@ mod tests {
                 );
                 assert!(observed.fingerprint.is_some(), "{id}");
                 assert_eq!(
-                    focused_on(request, &replay(fixture(id))).as_deref(),
+                    focused_on(request, &replay(&fixture(id))).as_deref(),
                     Some(focus),
                     "{id}"
                 );
@@ -6443,7 +6525,7 @@ mod tests {
             ] {
                 let allow = plan_for(request, PermissionDecision::Allow);
                 let deny = plan_for(request, PermissionDecision::Deny);
-                let cells_focus = focused_on(request, &replay(fixture(cells)));
+                let cells_focus = focused_on(request, &replay(&fixture(cells)));
                 assert_eq!(
                     cells_focus.as_deref(),
                     allow.stages()[0].required_focus_choice_id(),
@@ -6455,11 +6537,11 @@ mod tests {
                     "{cells} deny stage 1"
                 );
                 assert_eq!(
-                    focused_on(request, &replay(fixture(deny_2))).as_deref(),
+                    focused_on(request, &replay(&fixture(deny_2))).as_deref(),
                     deny.stages()[1].required_focus_choice_id(),
                     "{deny_2}"
                 );
-                let dialog = observe(&replay(fixture(deny_3)));
+                let dialog = observe(&replay(&fixture(deny_3)));
                 assert_eq!(
                     dialog.kind,
                     ObservationKind::PermissionContinuation,
@@ -6480,7 +6562,7 @@ mod tests {
                 for plan in [&allow, &deny] {
                     assert!(
                         detector()
-                            .match_answer(&replay(fixture(deny_3)), plan)
+                            .match_answer(&replay(&fixture(deny_3)), plan)
                             .unwrap()
                             .is_none(),
                         "{deny_3}: the rejection-reason dialog is not an answerable form"
@@ -6496,12 +6578,12 @@ mod tests {
                 COMPACT_DENY_3_FIXTURE,
                 MIN_DENY_3_FIXTURE,
             ] {
-                let placeholder = lines(fixture(id))
+                let placeholder = lines(&fixture(id))
                     .iter()
                     .rposition(|line| line.contains("Tell OpenCode what to do differently"))
                     .expect("the dialog shows its placeholder");
                 let typed = observe(&replay_changed(
-                    fixture(id),
+                    &fixture(id),
                     |lines| {
                         lines[placeholder] = lines[placeholder].replacen(
                             "Tell OpenCode what to do differently",
@@ -6519,7 +6601,7 @@ mod tests {
 
         #[test]
         fn bundled_opencode_clipped_long_command_yields_no_request() {
-            let observed = observe(&replay(fixture(NARROW_LONG_FIXTURE)));
+            let observed = observe(&replay(&fixture(NARROW_LONG_FIXTURE)));
             assert_ne!(
                 observed.kind,
                 ObservationKind::Interaction(InteractionClass::PermissionRequest)
@@ -6532,7 +6614,7 @@ mod tests {
                     assert!(
                         detector()
                             .match_answer(
-                                &replay(fixture(NARROW_LONG_FIXTURE)),
+                                &replay(&fixture(NARROW_LONG_FIXTURE)),
                                 &plan_for(request, decision)
                             )
                             .unwrap()
@@ -6545,7 +6627,7 @@ mod tests {
 
         #[test]
         fn bundled_opencode_narrow_idle_composer_is_a_verified_empty_composer() {
-            let observed = observe(&replay(fixture(NARROW_IDLE_FIXTURE)));
+            let observed = observe(&replay(&fixture(NARROW_IDLE_FIXTURE)));
             assert_eq!(observed.kind, ObservationKind::ComposerEmpty);
             assert_eq!(observed.rule_id, IDLE_RULE);
             assert!(observed.verified_noninteraction);
@@ -6637,19 +6719,19 @@ mod tests {
         fn bundled_opencode_detects_each_native_form_from_its_live_region() {
             for (form, case, probe) in FORM_FIXTURES {
                 let bytes = fixture(form);
-                let observation = observe(&replay(bytes));
+                let observation = observe(&replay(&bytes));
                 assert_form(&observation, case, probe);
                 assert!(observation.fingerprint.is_some());
             }
             let detector = detector();
-            let a = detector.observe(&replay(fixture(DENY_1_FIXTURE))).unwrap();
-            let b = detector.observe(&replay(fixture(DENY_2_FIXTURE))).unwrap();
+            let a = detector.observe(&replay(&fixture(DENY_1_FIXTURE))).unwrap();
+            let b = detector.observe(&replay(&fixture(DENY_2_FIXTURE))).unwrap();
             assert!(
                 a.fingerprint != b.fingerprint,
                 "different cases carry different operations"
             );
             let cursor_elsewhere = observe(&replay_changed(
-                fixture(DENY_1_FIXTURE),
+                &fixture(DENY_1_FIXTURE),
                 |_| {},
                 Some((5, 0)),
             ));
@@ -6658,21 +6740,17 @@ mod tests {
 
         #[test]
         fn bundled_opencode_focus_resolves_from_the_captured_cell_backgrounds() {
-            for (bytes, expected) in [
-                (fixture(PERMISSION_FIXTURE), Some("allow-once")),
-                (fixture(ALLOW_FIXTURE), Some("allow-once")),
-                (fixture(DENY_1_FIXTURE), Some("allow-once")),
-                (fixture(DENY_2_FIXTURE), Some("deny-once")),
-                (fixture(ALWAYS_FIXTURE), None),
+            for (id, expected) in [
+                (PERMISSION_FIXTURE, Some("allow-once")),
+                (ALLOW_FIXTURE, Some("allow-once")),
+                (DENY_1_FIXTURE, Some("allow-once")),
+                (DENY_2_FIXTURE, Some("deny-once")),
+                (ALWAYS_FIXTURE, None),
             ] {
-                assert_eq!(
-                    focused(&replay(bytes)).as_deref(),
-                    expected,
-                    "{}",
-                    parsed(bytes)["fixture_id"]
-                );
+                let bytes = fixture(id);
+                assert_eq!(focused(&replay(&bytes)).as_deref(), expected, "{id}");
             }
-            let mut text_only = parsed(fixture(PERMISSION_FIXTURE));
+            let mut text_only = parsed(&fixture(PERMISSION_FIXTURE));
             text_only
                 .as_object_mut()
                 .unwrap()
@@ -6690,9 +6768,9 @@ mod tests {
         #[test]
         fn bundled_opencode_focus_resolution_is_independent_of_the_theme_colours() {
             for (bytes, expected) in [
-                (fixture(PERMISSION_FIXTURE), Some("allow-once")),
-                (fixture(DENY_2_FIXTURE), Some("deny-once")),
-                (fixture(ALWAYS_FIXTURE), None),
+                (&fixture(PERMISSION_FIXTURE), Some("allow-once")),
+                (&fixture(DENY_2_FIXTURE), Some("deny-once")),
+                (&fixture(ALWAYS_FIXTURE), None),
             ] {
                 let mut screen = parsed(bytes);
                 for run in screen["cell_backgrounds"].as_array_mut().unwrap() {
@@ -6718,19 +6796,19 @@ mod tests {
         fn bundled_opencode_stage_gates_hold_on_their_pre_stage_fixtures() {
             let allow = plan(PermissionDecision::Allow);
             assert_eq!(
-                focused(&replay(fixture(ALLOW_FIXTURE))).as_deref(),
+                focused(&replay(&fixture(ALLOW_FIXTURE))).as_deref(),
                 allow.stages()[0].required_focus_choice_id()
             );
             let deny = plan(PermissionDecision::Deny);
             assert_eq!(
-                focused(&replay(fixture(DENY_1_FIXTURE))).as_deref(),
+                focused(&replay(&fixture(DENY_1_FIXTURE))).as_deref(),
                 deny.stages()[0].required_focus_choice_id()
             );
             assert_eq!(
-                focused(&replay(fixture(DENY_2_FIXTURE))).as_deref(),
+                focused(&replay(&fixture(DENY_2_FIXTURE))).as_deref(),
                 deny.stages()[1].required_focus_choice_id()
             );
-            let dialog = observe(&replay(fixture(DENY_3_FIXTURE)));
+            let dialog = observe(&replay(&fixture(DENY_3_FIXTURE)));
             assert_eq!(dialog.kind, ObservationKind::PermissionContinuation);
             assert_eq!(dialog.match_evidence, MatchEvidence::Complete);
             assert_eq!(
@@ -6741,13 +6819,13 @@ mod tests {
             for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                 assert!(
                     detector()
-                        .match_answer(&replay(fixture(DENY_3_FIXTURE)), &plan(decision))
+                        .match_answer(&replay(&fixture(DENY_3_FIXTURE)), &plan(decision))
                         .unwrap()
                         .is_none(),
                     "the rejection-reason dialog is not an answerable form"
                 );
             }
-            let always = focused(&replay(fixture(ALWAYS_FIXTURE)));
+            let always = focused(&replay(&fixture(ALWAYS_FIXTURE)));
             for stage in allow.stages().iter().chain(deny.stages()) {
                 if let Some(gate) = stage.required_focus_choice_id() {
                     assert_ne!(
@@ -6762,7 +6840,7 @@ mod tests {
         #[test]
         fn bundled_opencode_reject_reason_requires_the_empty_placeholder_textarea() {
             let typed = observe(&replay_changed(
-                fixture(DENY_3_FIXTURE),
+                &fixture(DENY_3_FIXTURE),
                 |lines| {
                     lines[21] = lines[21].replacen(
                         "Tell OpenCode what to do differently",
@@ -6775,7 +6853,7 @@ mod tests {
             assert_ne!(typed.kind, ObservationKind::PermissionContinuation);
             assert_ne!(typed.rule_id, REASON_RULE);
             let appended = observe(&replay_changed(
-                fixture(DENY_3_FIXTURE),
+                &fixture(DENY_3_FIXTURE),
                 |lines| {
                     lines[21] = lines[21].replacen(
                         "Tell OpenCode what to do differently ",
@@ -6790,7 +6868,7 @@ mod tests {
                 "the span equals the placeholder exactly"
             );
             let without_prompt = observe(&replay_changed(
-                fixture(DENY_3_FIXTURE),
+                &fixture(DENY_3_FIXTURE),
                 |lines| lines[12] = String::new(),
                 None,
             ));
@@ -6799,7 +6877,7 @@ mod tests {
 
         #[test]
         fn bundled_opencode_idle_composer_is_a_verified_non_interaction_boundary() {
-            let idle = observe(&replay(fixture(IDLE_FIXTURE)));
+            let idle = observe(&replay(&fixture(IDLE_FIXTURE)));
             assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
             assert_eq!(idle.match_evidence, MatchEvidence::Complete);
             assert!(idle.verified_noninteraction);
@@ -6807,14 +6885,14 @@ mod tests {
             assert_eq!(idle.raw_evidence["operation"], Value::Null);
             assert!(idle.fingerprint.is_none());
             let draft = observe(&replay_changed(
-                fixture(IDLE_FIXTURE),
+                &fixture(IDLE_FIXTURE),
                 |lines| lines[11] = "┃ hello".into(),
                 Some((11, 7)),
             ));
             assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "typed draft");
             assert!(!draft.verified_noninteraction);
             let away = observe(&replay_changed(
-                fixture(IDLE_FIXTURE),
+                &fixture(IDLE_FIXTURE),
                 |_| {},
                 Some((11, 0)),
             ));
@@ -6824,15 +6902,15 @@ mod tests {
                 "cursor before the prefix end"
             );
             assert!(!away.verified_noninteraction);
-            let working = observe(&replay(fixture(PERMISSION_FIXTURE)));
+            let working = observe(&replay(&fixture(PERMISSION_FIXTURE)));
             assert!(!working.verified_noninteraction);
             assert_ne!(working.kind, ObservationKind::ComposerEmpty);
         }
 
         #[test]
         fn bundled_opencode_detects_nothing_from_form_or_dialog_text_outside_a_live_region() {
-            let form = lines(fixture(PERMISSION_FIXTURE));
-            let dialog = lines(fixture(DENY_3_FIXTURE));
+            let form = lines(&fixture(PERMISSION_FIXTURE));
+            let dialog = lines(&fixture(DENY_3_FIXTURE));
             let cases: [(&str, LineChange); 6] = [
                 ("idle screen", Box::new(|_| {})),
                 (
@@ -6870,7 +6948,7 @@ mod tests {
             ];
             for (case, change) in cases {
                 let observation = observe(&replay_changed(
-                    fixture(IDLE_FIXTURE),
+                    &fixture(IDLE_FIXTURE),
                     |lines| change(lines),
                     None,
                 ));
@@ -6888,7 +6966,7 @@ mod tests {
 
         #[test]
         fn bundled_opencode_replay_paints_each_captured_background_run() {
-            let screen = replay(fixture(PERMISSION_FIXTURE));
+            let screen = replay(&fixture(PERMISSION_FIXTURE));
             let bg = |row: u16, col: u16| screen.screen.cell(row, col).unwrap().bgcolor();
             assert_eq!(bg(21, 0), vt100::Color::Rgb(30, 30, 30));
             for col in 2..14 {
@@ -6903,7 +6981,7 @@ mod tests {
                 "A",
                 "the repaint keeps the captured text"
             );
-            let idle = replay(fixture(IDLE_FIXTURE));
+            let idle = replay(&fixture(IDLE_FIXTURE));
             for row in 0..36 {
                 for col in 0..120 {
                     assert_eq!(
@@ -7020,12 +7098,12 @@ mod tests {
             };
             let origin = Instant::now();
             let mut tracker = tracker();
-            open(&mut tracker, &at(fixture(PERMISSION_FIXTURE), 1), origin);
+            open(&mut tracker, &at(&fixture(PERMISSION_FIXTURE), 1), origin);
             let episode = tracker.active_episode();
             for (index, millis) in [200u64, 400, 3000].into_iter().enumerate() {
                 let update = tracker
                     .observe(
-                        &at(fixture(DENY_3_FIXTURE), 2 + index as u64),
+                        &at(&fixture(DENY_3_FIXTURE), 2 + index as u64),
                         origin + Duration::from_millis(millis),
                         NOW,
                     )
@@ -7040,7 +7118,7 @@ mod tests {
             }
             let first = tracker
                 .observe(
-                    &at(fixture(IDLE_FIXTURE), 10),
+                    &at(&fixture(IDLE_FIXTURE), 10),
                     origin + Duration::from_millis(3100),
                     NOW,
                 )
@@ -7048,7 +7126,7 @@ mod tests {
             assert!(first.transitions.is_empty());
             let held = tracker
                 .observe(
-                    &at(fixture(IDLE_FIXTURE), 11),
+                    &at(&fixture(IDLE_FIXTURE), 11),
                     origin + Duration::from_millis(3350),
                     NOW,
                 )
