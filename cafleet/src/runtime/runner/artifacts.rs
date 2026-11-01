@@ -428,7 +428,7 @@ impl RunLock {
             Err(TryLockError::Error(cause)) => Err(io_error(cause)),
         }
     }
-    /// The run-lock counterpart of [`crate::input::PaneLock::acquire_released`].
+    /// The run-lock counterpart of [`crate::pane_lock::PaneLock::acquire_released`].
     #[cfg(test)]
     pub(crate) fn acquire_released(conn: &Connection, owner: &RunOwner) -> Result<Option<Self>> {
         let until = Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE;
