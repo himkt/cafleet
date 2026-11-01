@@ -469,7 +469,6 @@ fn create(
             .expect("string argv serializes"),
         event_evidence,
         native_version: native.native_version,
-        profile_version: native.profile_version,
         coverage: native.coverage,
     };
     let mut host = runner::NativeLaunchHost::new(&mux, &context);
@@ -1021,7 +1020,6 @@ mod tests {
                     permission_argv_json: json!(["--permission-mode", "default"]),
                     event_evidence: EventEvidence::Metadata,
                     native_version: None,
-                    profile_version: None,
                     coverage: Coverage::Unknown,
                     owner_pid: process.pid,
                     owner_start_identity: process.start_identity.clone(),

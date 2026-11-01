@@ -23,7 +23,7 @@ stored_enum!(InteractionCloseReason, "member_interactions.close_reason", {
     NotVisible => "not_visible", Superseded => "superseded",
     ProcessExited => "process_exited", MonitorLost => "monitor_lost"
 });
-stored_enum!(test_values RuntimeEventKind,"member_runtime_events.kind", {
+stored_enum!(RuntimeEventKind,"member_runtime_events.kind", {
     CoverageUnknown => "coverage_unknown", InteractionOpened => "interaction_opened",
     InteractionObscured => "interaction_obscured", InteractionClosed => "interaction_closed",
     PermissionDeniedObserved => "permission_denied_observed",
@@ -87,7 +87,6 @@ pub(crate) struct NewRun {
     pub(crate) permission_argv_json: Value,
     pub(crate) event_evidence: EventEvidence,
     pub(crate) native_version: Option<String>,
-    pub(crate) profile_version: Option<String>,
     pub(crate) coverage: Coverage,
     pub(crate) owner_pid: i64,
     pub(crate) owner_start_identity: String,
@@ -112,7 +111,6 @@ pub(crate) struct RunRecord {
     pub(crate) status: RunStatus,
     pub(crate) created_at: String,
     pub(crate) native_version: Option<String>,
-    pub(crate) profile_version: Option<String>,
     pub(crate) effective_policy_json: Option<Value>,
     pub(crate) owner_epoch: i64,
     pub(crate) owner_kind: OwnerKind,
@@ -289,7 +287,6 @@ pub(crate) struct PermissionResponseMetadata {
     pub(crate) decision_source: DecisionSource,
     pub(crate) mode_evidence_ref: String,
     pub(crate) decision_evidence_ref: String,
-    pub(crate) answer_profile_version: String,
     pub(crate) answer_rule_id: String,
 }
 #[derive(Debug, Clone, PartialEq)]

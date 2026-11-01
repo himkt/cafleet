@@ -969,7 +969,6 @@ mod tests {
                         permission_argv_json: old_run.permission_argv_json.clone(),
                         event_evidence: old_run.event_evidence,
                         native_version: old_run.native_version.clone(),
-                        profile_version: old_run.profile_version.clone(),
                         coverage: old_run.coverage,
                         owner_pid: old_run.owner_pid,
                         owner_start_identity: old_run.owner_start_identity.clone(),

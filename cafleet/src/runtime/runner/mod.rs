@@ -1,4 +1,6 @@
 mod input_protocol;
+#[cfg(test)]
+pub(crate) use input_protocol::test_support as input_protocol_test_support;
 pub(crate) use input_protocol::*;
 mod input_client;
 #[cfg(test)]
@@ -253,7 +255,6 @@ pub(crate) mod test_support {
                 permission_argv_json: json!(["--approve-for-me"]),
                 event_evidence: EventEvidence::Metadata,
                 native_version: None,
-                profile_version: None,
                 coverage: Coverage::Unknown,
                 owner_pid: process.pid,
                 owner_start_identity: process.start_identity,

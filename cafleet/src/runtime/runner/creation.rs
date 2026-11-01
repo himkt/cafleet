@@ -22,7 +22,6 @@ pub(crate) struct RunSettings {
     pub(crate) permission_argv_json: Value,
     pub(crate) event_evidence: EventEvidence,
     pub(crate) native_version: Option<String>,
-    pub(crate) profile_version: Option<String>,
     pub(crate) coverage: Coverage,
 }
 pub(crate) struct PendingRegistration {
@@ -73,7 +72,6 @@ pub(super) fn register_pending_run(
                 permission_argv_json: settings.permission_argv_json.clone(),
                 event_evidence: settings.event_evidence,
                 native_version: settings.native_version.clone(),
-                profile_version: settings.profile_version.clone(),
                 coverage: settings.coverage,
                 owner_pid: settings.creator.pid,
                 owner_start_identity: settings.creator.start_identity.clone(),
@@ -634,7 +632,7 @@ mod tests {
             if self.fast_exit {
                 let run = storage::get_run(&conn, run.run_id).unwrap();
                 storage::reserve_event_sequences(&mut conn, &run.owner()).unwrap();
-                let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({"backend":"codex","native_version":"0.163.0","profile_version":null,"rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
+                let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
                 storage::persist_event(
                     &mut conn,
                     &run.owner(),
@@ -724,7 +722,6 @@ mod tests {
                 permission_argv_json: fixture.run.permission_argv_json.clone(),
                 event_evidence: EventEvidence::Metadata,
                 native_version: None,
-                profile_version: None,
                 coverage: Coverage::Unknown,
             },
         )
@@ -848,20 +845,15 @@ mod tests {
     }
 
     #[test]
-    fn runner_creation_records_the_probed_version_and_selected_profile_on_the_pending_run() {
-        for (native, profile) in [
-            (None, None),
-            (Some("0.164.0"), Some("codex-0.163.0-approve-for-me-1")),
+    fn runner_creation_records_the_probed_version_and_coverage_on_the_pending_run() {
+        for (native, coverage) in [
+            (None, Coverage::Unknown),
+            (Some("0.164.0"), Coverage::Tested),
         ] {
             let mut fixture = Fixture::new();
             let (member, mut settings) = inputs(&fixture);
             settings.native_version = native.map(str::to_owned);
-            settings.profile_version = profile.map(str::to_owned);
-            settings.coverage = if profile.is_some() {
-                Coverage::Tested
-            } else {
-                Coverage::Unknown
-            };
+            settings.coverage = coverage;
             let pending = register_pending_run(
                 &mut fixture.conn,
                 &member,
@@ -870,10 +862,10 @@ mod tests {
             )
             .unwrap();
             assert_eq!(pending.run.native_version.as_deref(), native);
-            assert_eq!(pending.run.profile_version.as_deref(), profile);
+            assert_eq!(pending.run.coverage, coverage);
             let reread = storage::get_run(&fixture.conn, pending.run.run_id).unwrap();
             assert_eq!(reread.native_version.as_deref(), native);
-            assert_eq!(reread.profile_version.as_deref(), profile);
+            assert_eq!(reread.coverage, coverage);
         }
     }
 

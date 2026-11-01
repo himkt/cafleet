@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "fixture_id": "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
+  "provenance": "native",
+  "backend": "opencode",
+  "native_version": "2.1.4",
+  "rows": 36,
+  "cols": 36,
+  "alternate_screen": false,
+  "screen_seq": 12301,
+  "cursor_row": 27,
+  "cursor_col": 36,
+  "lines": [
+    "",
+    "",
+    "",
+    "▪ oc mini",
+    "",
+    "› Use the shell tool to run exactly ",
+    "/tmp/cafleet-194/opencode-narrow-",
+    "deny-002-min/permission-probe deny ",
+    "as one command. Preserve any native ",
+    "permission request for the operator.",
+    "After the native decision, report ",
+    "the actual result and stop. Keep ",
+    "work inside this disposable ",
+    "operation.",
+    "                                    ",
+    "△ Permission required               ",
+    "# Shell command                    █",
+    "$ /tmp/cafleet-194/opencode-narrow-█",
+    "deny-002-min/permission-probe deny █",
+    "                                   █",
+    "                                   █",
+    "                                   █",
+    "                                   █",
+    "                                   █",
+    "                                   █",
+    "                                   █",
+    "                                   █",
+    " Allow once   Always allow   Reject ",
+    "pgup/pgdn scroll                    ",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "masked_rows": [
+    {
+      "row": 35,
+      "reason": "reviewed_privacy"
+    }
+  ],
+  "cell_backgrounds": [
+    {
+      "row": 15,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 16,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 17,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 18,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 19,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 20,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 21,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 22,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 23,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 24,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 25,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 26,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 27,
+      "start_col": 0,
+      "end_col": 28,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    },
+    {
+      "row": 27,
+      "start_col": 28,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 250,
+        "g": 178,
+        "b": 131
+      }
+    },
+    {
+      "row": 28,
+      "start_col": 0,
+      "end_col": 36,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    }
+  ]
+}

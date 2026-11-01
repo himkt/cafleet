@@ -105,7 +105,7 @@ Evidence: Claude Code 2.1.301 stream probes established separate event turns fro
 | Role | Eligible | Evidence |
 |---|---|---|
 | Director | `yes` | Goal lifecycle: [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. Background execution: Monitor stream probes, 2.1.301, checked 2026-10-25. |
-| Member | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: profile `claude-2.1.302-auto-1`. |
+| Member | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the Claude profile from `2.1.302`. |
 
 ## codex
 
@@ -172,7 +172,7 @@ Evidence: Codex CLI 0.162.1 stream probes established one retained session/proce
 | Role | Eligible | Evidence |
 |---|---|---|
 | Director | `yes` | Goal lifecycle: [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Background execution: retained `exec_command` session stream probes, 0.162.1, checked 2026-10-25. |
-| Member | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: profile `codex-0.163.0-approve-for-me-1`. |
+| Member | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the Codex profile from `0.163.0`. |
 
 ## opencode
 
@@ -428,14 +428,14 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 | Leading-`!` input runs a native shell command in `mini`. Preserve Director authorization and member-tool permissions because the native path's effective boundary and any second permission check remain unestablished. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
 | The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup under `cafleet` is an issue to capture and relay. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 | The `cafleet-ask` preset keeps the same allowlist and Director-only denies and asks for every other shell command. Its native permission form is a runtime decision: the member waits while the Director answers it through the [runtime procedure](member-runtime.md), then continues from the result OpenCode returns. | `{permission_flags}`; [runtime procedure](member-runtime.md#consume-observed-interactions) |
-| On OpenCode 2.1.4 and later a deny submits an empty rejection reason and ends the member's turn with `Step interrupted`; after verifying that nothing ran, continue the member with a Director message, which its runner delivers into the idle composer. A wrapped command or a reason to give is answered manually on the native surface. | [Runtime procedure](member-runtime.md#consume-observed-interactions) step 7 |
+| On OpenCode 2.1.4 and later a deny submits an empty rejection reason and ends the member's turn with `Step interrupted`; after verifying that nothing ran, continue the member with a Director message, which its runner delivers into the idle composer. The OpenCode profile from `2.1.4` detects the form at every pane width of at least `W_min` = 36 columns: rule `opencode-shell-permission` covers the wide (77 and above) and split (56–76) layouts, and `opencode-shell-permission-compact` covers the compact layout (36–55), with the same allow and deny stages; its rejection-reason dialog is `opencode-reject-reason-compact`. A narrower pane, where the choices no longer fit on one row, and a command clipped by the form's command box open no `interaction_opened` event and are answered manually on the native surface, as is a reason to give. A wrapped command that the box shows in full is detected, with `operation_rows` above 1; native fixtures back the layouts at 120, 57, 55 and 36 columns. | [Runtime procedure](member-runtime.md#consume-observed-interactions) step 7 |
 
 ### Role eligibility
 
 | Role | Eligible | Evidence |
 |---|---|---|
 | Director | `no` | Goal lifecycle controls: not established for 2.1.4, with no goal evidence recorded, checked 2026-10-31. Background execution while supervision continues: not established for 2.1.4, checked 2026-10-31. |
-| Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: profile `opencode-2.1.4-cafleet-ask-1`. |
+| Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: the OpenCode profile from `2.1.4`. |
 
 To change the Director verdict, a maintainer establishes, for an installed OpenCode version, native goal lifecycle controls, such as a goal command, from official documentation or installed help, and background execution while supervision continues from a CAFleet stream probe. Record the version, source and date in this table, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
 

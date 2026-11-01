@@ -4,7 +4,7 @@ Use one SQLite file for a fleet's registry and durable messages. The CLI accesse
 
 ## Backend
 
-The default path is `~/.local/share/cafleet/cafleet_v8.db`. Set `CAFLEET_DATABASE_URL` to a `sqlite:///<path>` URL to select another file. Resolve a relative file path against the invoking working directory, then canonicalize the selected database file for shared pane-lock identity. Spawned panes inherit that URL.
+The default path is `~/.local/share/cafleet/cafleet_v9.db`. Set `CAFLEET_DATABASE_URL` to a `sqlite:///<path>` URL to select another file. Resolve a relative file path against the invoking working directory, then canonicalize the selected database file for shared pane-lock identity. Spawned panes inherit that URL.
 
 Connections enforce foreign keys and normally use `PRAGMA busy_timeout=5000`. Bounded receiving caps database waits to its remaining operation budget. Fleet bootstrap writes its registry and current Director placement in one transaction; member creation preserves pending placement and compensation for failed pane creation.
 
@@ -27,6 +27,15 @@ The current format has its own application identity, an embedded migration ledge
 Schema checks run within a consistent read snapshot, and application identity and ledger contents are read on every validation, so a changed version or malformed definition fails at the boundary.
 
 Run `cafleet setup` after installation. The same classifier guards normal commands and feeds doctor's read-only diagnosis. Exact errors are in the [schema-version guard](https://github.com/himkt/cafleet/blob/main/SPEC.md#schema-version-guard).
+
+### Upgrading from `cafleet_v8.db`
+
+The `cafleet_v9.db` format family starts a fresh database. After upgrading the CLI:
+
+1. Run `cafleet setup` once. It creates `~/.local/share/cafleet/cafleet_v9.db` and records the asset installations there; until then `cafleet doctor` reports the database as absent.
+2. Create your fleets anew.
+
+The previous `~/.local/share/cafleet/cafleet_v8.db` stays in place, byte for byte. Its fleets, messages and runtime history remain in that file, and the new CLI neither reads nor migrates it: selecting it through `CAFLEET_DATABASE_URL` reports an incompatible format.
 
 ## Assets-install recording
 

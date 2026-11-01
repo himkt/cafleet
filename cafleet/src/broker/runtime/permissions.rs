@@ -116,7 +116,6 @@ fn validate_metadata(metadata: &PermissionResponseMetadata) -> Result<(), Caflee
             "nonblank reference of 1-2048 UTF-8 bytes without controls required",
         )?;
     }
-    nonblank(&metadata.answer_profile_version, "answer_profile_version")?;
     nonblank(&metadata.answer_rule_id, "answer_rule_id")
 }
 
@@ -130,7 +129,7 @@ pub(crate) fn permission_response_digest(
         "interaction_id":metadata.interaction_id,"event_id":metadata.event_id,"director_member_id":metadata.director_member_id,
         "request_token":metadata.request_token,"decision":metadata.decision,"director_mode":metadata.director_mode,
         "decision_source":metadata.decision_source,"mode_evidence_ref":metadata.mode_evidence_ref,
-        "decision_evidence_ref":metadata.decision_evidence_ref,"answer_profile_version":metadata.answer_profile_version,"answer_rule_id":metadata.answer_rule_id});
+        "decision_evidence_ref":metadata.decision_evidence_ref,"answer_rule_id":metadata.answer_rule_id});
     Ok(crate::digest::sha256_hex(
         crate::digest::canonical_json(&object).as_bytes(),
     ))
@@ -150,7 +149,6 @@ fn map_response(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionResponseR
             decision_source: row.get("decision_source")?,
             mode_evidence_ref: row.get("mode_evidence_ref")?,
             decision_evidence_ref: row.get("decision_evidence_ref")?,
-            answer_profile_version: row.get("answer_profile_version")?,
             answer_rule_id: row.get("answer_rule_id")?,
         },
         decided_at: row.get("decided_at")?,
@@ -362,7 +360,7 @@ pub(crate) fn reserve_permission_response(
         let now = now_stamp();
         tx.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,?2,'permission_response',?3,'in_progress',?4,?4)",params![run.run_id,request.operation_key,digest,now])?;
         let input_id = tx.last_insert_rowid();
-        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.decision.as_str(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_profile_version,metadata.answer_rule_id,now])?;
+        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.decision.as_str(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_rule_id,now])?;
         tx.execute(
             "INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)",
             params![metadata.interaction_id, input_id],
@@ -449,7 +447,6 @@ fn validate_current_capability(
     require(
         cap.backend().name() == run.backend
             && Some(cap.native_version()) == run.native_version.as_deref()
-            && cap.profile_version() == metadata.answer_profile_version
             && cap.answer_rule_id() == metadata.answer_rule_id
             && cap.request_rule_id()
                 == event.event.payload_json["evidence"]["rule_id"]
@@ -667,7 +664,7 @@ mod tests {
             "request_token":metadata.request_token,"decision":metadata.decision,
             "director_mode":metadata.director_mode,"decision_source":metadata.decision_source,
             "mode_evidence_ref":metadata.mode_evidence_ref,"decision_evidence_ref":metadata.decision_evidence_ref,
-            "answer_profile_version":metadata.answer_profile_version,"answer_rule_id":metadata.answer_rule_id,
+            "answer_rule_id":metadata.answer_rule_id,
         });
         let sorted = value
             .as_object()
@@ -734,7 +731,7 @@ mod tests {
             member,
         );
         let run = storage::create_run(&mut fixture.base.conn, &spec).unwrap();
-        fixture.base.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2,coverage='tested',profile_version='fixture-v1' WHERE run_id=?1",[run.run_id]).unwrap();
+        fixture.base.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2,coverage='tested' WHERE run_id=?1",[run.run_id]).unwrap();
         let owner = storage::get_run(&fixture.base.conn, run.run_id)
             .unwrap()
             .owner();
@@ -959,7 +956,7 @@ mod tests {
         let digest = expected_digest(fixture.owner.run_id, &fixture.request.metadata);
         fixture.base.conn.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,'foreign-valid-audit','permission_response',?2,'in_progress',?3,?3)",params![fixture.owner.run_id,digest,NOW]).unwrap();
         let foreign_input = fixture.base.conn.last_insert_rowid();
-        fixture.base.conn.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at) SELECT ?1,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at FROM member_permission_responses WHERE input_id=?2",params![foreign_input,receipt.input.input_id]).unwrap();
+        fixture.base.conn.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at) SELECT ?1,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at FROM member_permission_responses WHERE input_id=?2",params![foreign_input,receipt.input.input_id]).unwrap();
         fixture
             .base
             .conn
@@ -1185,7 +1182,6 @@ mod tests {
             "source",
             "mode-ref",
             "decision-ref",
-            "profile",
             "rule",
         ] {
             let mut changed = metadata.clone();
@@ -1200,7 +1196,6 @@ mod tests {
                 "source" => changed.decision_source = DecisionSource::DirectorAuto,
                 "mode-ref" => changed.mode_evidence_ref = "fixture:other-mode".into(),
                 "decision-ref" => changed.decision_evidence_ref = "fixture:other-decision".into(),
-                "profile" => changed.answer_profile_version = "answer-fixture-v2".into(),
                 "rule" => changed.answer_rule_id = "different-choice".into(),
                 _ => unreachable!(),
             }
@@ -1233,7 +1228,6 @@ mod tests {
             "short-token",
             "uppercase-token",
             "nonhex-token",
-            "profile",
             "rule",
             "auto-source-manual",
             "auto-source-unknown",
@@ -1249,7 +1243,6 @@ mod tests {
                 "short-token" => request.metadata.request_token = "a".repeat(63),
                 "uppercase-token" => request.metadata.request_token = "A".repeat(64),
                 "nonhex-token" => request.metadata.request_token = "g".repeat(64),
-                "profile" => request.metadata.answer_profile_version = " ".into(),
                 "rule" => request.metadata.answer_rule_id = "".into(),
                 "auto-source-manual" => request.metadata.director_mode = DirectorMode::Manual,
                 "auto-source-unknown" => request.metadata.director_mode = DirectorMode::Unknown,
@@ -1408,13 +1401,12 @@ mod tests {
             "absent",
             "backend",
             "version",
-            "profile",
             "request-rule",
             "answer-rule",
             "decision",
         ] {
             let mut fixture = ResponseFixture::new();
-            let (backend, version, profile, request_rule, answer_rule, decision) = (
+            let (backend, version, request_rule, answer_rule, decision) = (
                 if changed == "backend" {
                     CodingAgent::Claude
                 } else {
@@ -1424,11 +1416,6 @@ mod tests {
                     "other-version"
                 } else {
                     "0.163.0"
-                },
-                if changed == "profile" {
-                    "different-profile"
-                } else {
-                    "answer-fixture-v1"
                 },
                 if changed == "request-rule" {
                     "different-request"
@@ -1449,7 +1436,6 @@ mod tests {
             let capability = AnswerCapability::fixture(
                 backend,
                 version,
-                profile,
                 request_rule,
                 answer_rule,
                 decision,

@@ -733,7 +733,6 @@ impl InputCoordinator {
                     self.current_request = None;
                 }
                 let mut supported_decisions = Vec::new();
-                let mut answer_profile_version = None;
                 let mut answer_rule_id = None;
                 let mut request_token = None;
                 let blocker = self.permission_blocker(observation);
@@ -775,7 +774,6 @@ impl InputCoordinator {
                             .as_ref()
                             .expect("matched current request retained");
                         let first = current.observed.answer_matches[0].plan().capability();
-                        answer_profile_version = Some(first.profile_version().to_owned());
                         if current.observed.answer_matches.iter().all(|m| {
                             m.plan().capability().answer_rule_id() == first.answer_rule_id()
                         }) {
@@ -807,8 +805,6 @@ impl InputCoordinator {
                         visibility: observation.status().visibility,
                         backend: self.run.backend.clone(),
                         native_version: self.run.native_version.clone(),
-                        profile_version: self.run.profile_version.clone(),
-                        answer_profile_version,
                         answer_rule_id,
                         answer_capability: if request_token.is_some() {
                             storage::Coverage::Tested
@@ -1001,14 +997,12 @@ impl InputCoordinator {
             return Ok(StageGateProgress::Ready);
         };
         let bound = &selection.binding;
-        let bound_focus = || {
-            bound
-                .observed
-                .answer_matches
-                .iter()
-                .find(|matched| matched.plan() == &selection.plan)
-                .and_then(AnswerMatch::focused_choice_id)
-        };
+        let bound_match = bound
+            .observed
+            .answer_matches
+            .iter()
+            .find(|matched| matched.plan() == &selection.plan);
+        let bound_focus = || bound_match.and_then(AnswerMatch::focused_choice_id);
         let holds = match (&gate, &selection.continuation) {
             (StageGate::Focus(choice), None) => bound_focus() == Some(choice.as_str()),
             (StageGate::Screen(rule), Some(continuation)) => &continuation.rule_id == rule,
@@ -1058,18 +1052,20 @@ impl InputCoordinator {
                 let Some(observed) = observed.filter(|_| !unchanged) else {
                     return waiting();
                 };
-                let focused = observed
+                let observed_match = observed
                     .answer_matches
                     .iter()
-                    .find(|matched| matched.plan() == &selection.plan)
-                    .and_then(AnswerMatch::focused_choice_id);
+                    .find(|matched| matched.plan() == &selection.plan);
                 ensure(
                     observed.episode_seq == bound.observed.episode_seq
                         && observed.request_rule_id == bound.observed.request_rule_id
                         && observed.semantic == bound.observed.semantic
                         && observed.choices == bound.observed.choices
                         && observed.native_correlation == bound.observed.native_correlation
-                        && focused == Some(choice.as_str()),
+                        && observed_match.map(AnswerMatch::focus_capture)
+                            == bound_match.map(AnswerMatch::focus_capture)
+                        && observed_match.and_then(AnswerMatch::focused_choice_id)
+                            == Some(choice.as_str()),
                     "the request changed other than to the next stage's focus",
                 )?;
                 PermissionSelection {
@@ -1283,7 +1279,6 @@ impl InputCoordinator {
                         decision_source: input.decision_source,
                         mode_evidence_ref: input.mode_evidence_ref.clone(),
                         decision_evidence_ref: input.decision_evidence_ref.clone(),
-                        answer_profile_version: cap.profile_version().into(),
                         answer_rule_id: cap.answer_rule_id().into(),
                     },
                 },
@@ -1442,8 +1437,7 @@ impl InputCoordinator {
             stable_run_identity(&current) == stable_run_identity(&self.run)
                 && current.status == RunStatus::Running
                 && current.owner_kind == OwnerKind::Runner
-                && current.native_version == self.run.native_version
-                && current.profile_version == self.run.profile_version,
+                && current.native_version == self.run.native_version,
             "input coordinator current run changed",
         )?;
         ensure(
@@ -2097,7 +2091,6 @@ impl InputCoordinator {
                 ensure(
                     plan.backend() == backend
                         && plan.native_version() == native
-                        && Some(plan.profile_version()) == self.run.profile_version.as_deref()
                         && !plan.rule_ids().is_empty()
                         && !plan.fixture_ids().is_empty(),
                     "composer plan provenance changed",
@@ -2229,7 +2222,6 @@ impl InputCoordinator {
         )?;
         if stable_run_identity(&current) != stable_run_identity(&self.run)
             || current.native_version != self.run.native_version
-            || current.profile_version != self.run.profile_version
         {
             return Ok(Some("target_changed"));
         }
@@ -4760,7 +4752,6 @@ mod tests {
             fn staged_fallback_for_unknown_coverage_uses_the_missing_plan_reason() {
                 let profile = HostProfile {
                     backend: CodingAgent::Claude,
-                    profile_version: None,
                     ..HostProfile::metadata()
                 };
                 with_profile_host(catalog(), fallback_program(b""), profile, |host| {
@@ -7282,7 +7273,6 @@ mod tests {
             pub(super) const LITERAL: &str = "ordinary fixture λ";
             pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
             pub(super) const VERSION: &str = "0.0.1-synthetic";
-            const PROFILE: &str = "synthetic-profile-1";
 
             pub(in crate::runtime::runner::input) fn catalog_definition() -> serde_json::Value {
                 let mut value =
@@ -7381,7 +7371,6 @@ mod tests {
                 pub(crate) event_evidence: &'static str,
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'static str,
-                pub(crate) profile_version: Option<&'static str>,
                 pub(crate) size: TerminalSize,
                 pub(crate) screen: Vec<u8>,
             }
@@ -7395,7 +7384,6 @@ mod tests {
                         event_evidence,
                         backend: crate::coding_agent::CodingAgent::Codex,
                         native_version: VERSION,
-                        profile_version: Some(PROFILE),
                         size: TerminalSize { rows: 24, cols: 80 },
                         screen: SCREEN.to_vec(),
                     }
@@ -7598,7 +7586,6 @@ mod tests {
             pub(in crate::runtime::runner::input) struct RunSelection {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'static str,
-                pub(crate) profile_version: Option<&'static str>,
                 pub(crate) event_evidence: &'static str,
             }
 
@@ -7644,7 +7631,7 @@ mod tests {
                         let selected =
                             catalog.capabilities(selection.backend, Some(selection.native_version));
                         let coverage = selected.detection;
-                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,coverage=?4,event_evidence=?5 WHERE run_id=?6",rusqlite::params![selection.backend.name(),selection.native_version,selection.profile_version,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
+                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,coverage=?3,event_evidence=?4 WHERE run_id=?5",rusqlite::params![selection.backend.name(),selection.native_version,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
                         fixture
                             .conn
                             .execute(
@@ -7792,11 +7779,13 @@ mod tests {
                         event_evidence,
                         backend,
                         native_version,
-                        profile_version,
                         size,
                         screen,
                     } = profile;
                     let catalog = catalog();
+                    let composer_selected =
+                        catalog.capabilities(backend, Some(native_version)).composer
+                            == storage::Coverage::Tested;
                     let RunnerFixture {
                         mut fixture,
                         artifacts,
@@ -7812,7 +7801,6 @@ mod tests {
                         Some(RunSelection {
                             backend,
                             native_version,
-                            profile_version,
                             event_evidence,
                         }),
                         size,
@@ -7872,7 +7860,7 @@ mod tests {
                         child,
                     };
                     host.drain();
-                    if profile_version.is_some() {
+                    if composer_selected {
                         assert!(matches!(
                             host.controller.health(&host.writer).eligibility,
                             InputEligibility::ComposerEmpty
@@ -8184,7 +8172,6 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Claude,
                     native_version,
-                    profile_version: Some("claude-2.1.302-auto-1"),
                     size: crate::runtime::runner::TerminalSize {
                         rows: 36,
                         cols: 120,
@@ -8210,7 +8197,6 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Opencode,
                     native_version: "2.1.4",
-                    profile_version: Some("opencode-2.1.4-cafleet-ask-1"),
                     size: crate::runtime::runner::TerminalSize {
                         rows: 36,
                         cols: 120,
@@ -8363,7 +8349,7 @@ mod tests {
                 moved.observed.output_seq += 1;
                 assert!(current.same_request(&moved), "output_seq stays unbound");
                 type Mutation<'a> = (&'a str, Box<dyn Fn(&mut CurrentRequest) + 'a>);
-                let mutations: [Mutation; 16] = [
+                let mutations: [Mutation; 15] = [
                     (
                         "request_generation",
                         Box::new(|r| r.observed.request_generation += 1),
@@ -8383,10 +8369,6 @@ mod tests {
                     (
                         "native_version",
                         Box::new(|r| r.observed.native_version.push('x')),
-                    ),
-                    (
-                        "detector_profile_version",
-                        Box::new(|r| r.observed.detector_profile_version.push('x')),
                     ),
                     (
                         "request_rule_id",
@@ -8488,10 +8470,6 @@ mod tests {
                 );
                 assert_eq!(value.visibility, Visibility::Visible);
                 assert_eq!(value.answer_capability, Coverage::Tested);
-                assert_eq!(
-                    value.answer_profile_version.as_deref(),
-                    Some("synthetic-profile-1")
-                );
                 assert!(
                     value.answer_rule_id.is_none(),
                     "distinct Allow/Deny rules have no unique common rule"
@@ -8919,7 +8897,6 @@ mod tests {
                 (&m.mode_evidence_ref, &m.decision_evidence_ref),
                 (&input.mode_evidence_ref, &input.decision_evidence_ref)
             );
-            assert_eq!(m.answer_profile_version, "synthetic-profile-1");
             assert_eq!(m.answer_rule_id, rule);
             assert_eq!(
                 receipt
@@ -10822,7 +10799,6 @@ mod tests {
                         decision_source: input.decision_source,
                         mode_evidence_ref: input.mode_evidence_ref.clone(),
                         decision_evidence_ref: input.decision_evidence_ref.clone(),
-                        answer_profile_version: cap.profile_version().into(),
                         answer_rule_id: cap.answer_rule_id().into(),
                     },
                 };
@@ -11837,6 +11813,74 @@ mod tests {
                             .operation_key,
                         input.operation_key
                     );
+                });
+            }
+
+            /// The bundled OpenCode fixture `id` with the command box row `row` showing `command`.
+            fn opencode_command(
+                id: &str,
+                row: usize,
+                command: &str,
+                trailer_col: usize,
+            ) -> Vec<u8> {
+                let mut screen: serde_json::Value = serde_json::from_str(
+                    crate::coding_agent::profiles::detector::test_support::bundled_screen(id),
+                )
+                .unwrap();
+                let cols = usize::try_from(screen["cols"].as_u64().unwrap()).unwrap();
+                for (offset, text) in [command, ""].into_iter().enumerate() {
+                    let line = &mut screen["lines"][row + offset];
+                    assert_eq!(line.as_str().unwrap().chars().nth(trailer_col), Some('█'));
+                    *line = serde_json::json!(format!(
+                        "{text:<trailer_col$}█{}",
+                        " ".repeat(cols - trailer_col - 1)
+                    ));
+                }
+                native_fixture_bytes(&screen.to_string())
+            }
+
+            #[test]
+            fn opencode_resize_across_w_split_between_deny_stages_fails_uncertain() {
+                with_opencode_inspection(|h, _, _| {
+                    let command = "  $ /tmp/x/permission-probe deny";
+                    h.show(opencode_command(
+                        "opencode-2.1.4-deny-pre-stage-1",
+                        14,
+                        command,
+                        116,
+                    ));
+                    let ids = settled_ids(h);
+                    let deadline = soon(3000);
+                    admit(
+                        h,
+                        ids,
+                        "response:opencode-resize",
+                        PermissionDecision::Deny,
+                        deadline,
+                    );
+                    let id = write_stage(h, 1);
+                    let generation = h.controller.request_generation();
+                    h.transport
+                        .resize(
+                            &mut h.pty,
+                            crate::runtime::runner::TerminalSize { rows: 36, cols: 57 },
+                        )
+                        .unwrap();
+                    h.show(opencode_command(
+                        "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
+                        17,
+                        command,
+                        53,
+                    ));
+                    let outcome = settle(h, deadline);
+                    assert_uncertain(h, id, outcome);
+                    assert_eq!(
+                        h.pty.offers,
+                        offers(&[b"h"]),
+                        "the second stage is never written after the layout changes"
+                    );
+                    assert!(h.controller.request_generation() > generation);
+                    assert_eq!(opened(h), 1, "unchanged command rows keep the episode");
                 });
             }
 

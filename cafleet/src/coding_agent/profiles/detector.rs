@@ -1,6 +1,6 @@
 use super::CodingAgent;
 use super::catalog::{
-    Capture, CursorRule, MatcherScope, Profile, ProfileCatalog, Rule, ScreenSelector,
+    Capture, CursorRule, MarginRows, MatcherScope, Profile, ProfileCatalog, Rule, ScreenSelector,
 };
 use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
@@ -74,7 +74,7 @@ pub(crate) enum MatchEvidence {
 pub(crate) struct SemanticFingerprint {
     parts: Vec<SemanticPart>,
 }
-type SemanticPart = (String, String, String, Option<String>, Vec<String>);
+type SemanticPart = (String, String, Option<String>, Vec<String>);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScreenRegion {
@@ -86,7 +86,6 @@ pub(crate) struct ScreenRegion {
 #[derive(Clone)]
 pub(crate) struct ScreenObservation {
     pub(crate) kind: ObservationKind,
-    pub(crate) profile_version: Option<String>,
     pub(crate) rule_id: String,
     pub(crate) match_evidence: MatchEvidence,
     pub(crate) matched_region: Option<ScreenRegion>,
@@ -102,7 +101,6 @@ pub(crate) struct ScreenObservation {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct AnnotationFingerprint {
     backend: String,
-    profile_version: String,
     rule_id: String,
     shown: String,
 }
@@ -137,12 +135,18 @@ pub(crate) struct AnswerMatch {
     semantic: SemanticFingerprint,
     choices: Vec<String>,
     focus: String,
+    focus_capture: String,
     focused_choice: Option<String>,
     output_seq: u64,
 }
 impl AnswerMatch {
     pub(crate) fn focused_choice_id(&self) -> Option<&str> {
         self.focused_choice.as_deref()
+    }
+    /// The focus matcher's capture without the resolved focus, so it stays equal while only the
+    /// styling-only focus moves and changes when the choice row's layout does.
+    pub(crate) fn focus_capture(&self) -> &str {
+        &self.focus_capture
     }
     pub(crate) fn plan(&self) -> &AnswerPlan {
         &self.plan
@@ -338,6 +342,30 @@ fn qualifying_regions(
     }
     regions
 }
+/// Removes the trailer, then the margin from the rows `margin_rows` selects, then trailing
+/// whitespace; trimming last keeps a whitespace-only margined row a match.
+fn displayed_rows(value: &str, capture: &Capture) -> Option<String> {
+    value
+        .split('\n')
+        .enumerate()
+        .map(|(index, row)| {
+            let row = match &capture.row_trailer {
+                Some(trailer) => row
+                    .trim_end()
+                    .strip_suffix(trailer.as_str())
+                    .map_or(row, str::trim_end),
+                None => row,
+            };
+            let margined = index > 0 || capture.margin_rows == MarginRows::All;
+            let row = match capture.row_margin.as_deref().filter(|_| margined) {
+                Some(margin) => row.strip_prefix(margin)?,
+                None => row,
+            };
+            Some(row.trim_end())
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|rows| rows.join("\n"))
+}
 fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) -> Option<Matched> {
     let selected = &lines[start..=end];
     let region_text = selected
@@ -403,14 +431,11 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
     let operation = match &rule.operation {
         Some(reference) => {
             let value = captured(reference, &values)?;
-            Some(match &reference.row_margin {
-                None => value,
-                Some(_) if rule.kind.is_annotation() => value,
-                Some(margin) => value
-                    .split('\n')
-                    .map(|row| row.strip_prefix(margin.as_str()).map(str::trim_end))
-                    .collect::<Option<Vec<_>>>()?
-                    .join("\n"),
+            let plain = reference.row_margin.is_none() && reference.row_trailer.is_none();
+            Some(if plain || rule.kind.is_annotation() {
+                value
+            } else {
+                displayed_rows(&value, reference)?
             })
         }
         None => None,
@@ -441,13 +466,29 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
         label_cells,
     })
 }
+/// The background covering more than half of the row's cells; a layout without a left margin
+/// paints its highlight over the edge cells, so no single edge cell is the row background.
+fn majority_background(screen: &ScreenSnapshot, row: u16) -> Option<vt100::Color> {
+    let mut counts: Vec<(vt100::Color, usize)> = Vec::new();
+    for col in 0..screen.cols {
+        let background = screen.screen.cell(row, col)?.bgcolor();
+        match counts.iter_mut().find(|(seen, _)| *seen == background) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((background, 1)),
+        }
+    }
+    counts
+        .into_iter()
+        .find(|&(_, count)| count * 2 > usize::from(screen.cols))
+        .map(|(background, _)| background)
+}
 /// The focused choice is the one label painted on a single background that differs from its
-/// row's background at the region's left edge, with no other label carrying such a background.
+/// row's majority background, with no other label carrying such a background.
 fn background_focus(screen: &ScreenSnapshot, matched: &Matched) -> Option<String> {
     let mut focused = Vec::new();
     for (choice, cells) in &matched.label_cells {
         let &(row, _) = cells.first()?;
-        let row_background = screen.screen.cell(row, matched.region.left)?.bgcolor();
+        let row_background = majority_background(screen, row)?;
         let backgrounds = cells
             .iter()
             .map(|&(row, col)| screen.screen.cell(row, col).map(|cell| cell.bgcolor()))
@@ -520,7 +561,7 @@ impl Detector {
         let focus = if background {
             serde_json::to_string(&(&capture, &focused_choice)).expect("focus strings serialize")
         } else {
-            capture
+            capture.clone()
         };
         Ok(Some(AnswerMatch {
             plan: plan.clone(),
@@ -529,6 +570,7 @@ impl Detector {
                 .expect("complete permission fingerprint"),
             choices: matched.choices,
             focus,
+            focus_capture: capture,
             focused_choice,
             output_seq: screen.screen_seq,
         }))
@@ -576,7 +618,6 @@ impl Detector {
                     kind: matched.rule.kind,
                     fingerprint: AnnotationFingerprint {
                         backend: self.backend.name().into(),
-                        profile_version: profile.version.clone(),
                         rule_id: matched.rule.id.clone(),
                         shown: normalized_shown(
                             matched.operation.as_deref().unwrap_or(&matched.excerpt),
@@ -597,14 +638,12 @@ impl Detector {
         blocks
     }
     pub(crate) fn observe(&self, screen: &ScreenSnapshot) -> Result<ScreenObservation> {
-        let profile_version = self.profile.as_ref().map(|p| p.version.clone());
         let mut observation = ScreenObservation {
             kind: ObservationKind::Unknown,
-            profile_version: profile_version.clone(),
             rule_id: "unmatched-screen".into(),
             match_evidence: MatchEvidence::Absent,
             matched_region: None,
-            raw_evidence: json!({"backend":self.backend.name(),"native_version":self.version,"profile_version":profile_version,"rule_id":"unmatched-screen","screen_seq":screen.screen_seq,"operation":null,"operation_rows":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}),
+            raw_evidence: json!({"backend":self.backend.name(),"native_version":self.version,"rule_id":"unmatched-screen","screen_seq":screen.screen_seq,"operation":null,"operation_rows":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}),
             fingerprint: None,
             verified_noninteraction: false,
             native_correlation: None,
@@ -653,7 +692,6 @@ impl Detector {
             .map(|m| {
                 (
                     self.backend.name().into(),
-                    profile.version.clone(),
                     m.rule.kind.name().into(),
                     m.operation.clone(),
                     m.choices.clone(),
@@ -1198,7 +1236,7 @@ mod tests {
             .unwrap();
         assert_eq!(reused.kind, observation.kind);
         assert_eq!(reused.rule_id, observation.rule_id);
-        assert_eq!(reused.profile_version, observation.profile_version);
+        assert!(reused.fingerprint == observation.fingerprint);
         assert_eq!(
             reused.raw_evidence["operation"],
             observation.raw_evidence["operation"]
@@ -1208,7 +1246,8 @@ mod tests {
             .observe(&screen)
             .unwrap();
         assert_eq!(below.kind, ObservationKind::Unknown);
-        assert_eq!(below.profile_version, None);
+        assert_eq!(below.match_evidence, MatchEvidence::Absent);
+        assert!(below.fingerprint.is_none());
         let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
             .observe(&screen)
             .unwrap();
@@ -1285,10 +1324,7 @@ mod tests {
             "{operation}"
         );
         assert_eq!(observation.rule_id, "claude-bash-permission");
-        assert_eq!(
-            observation.profile_version.as_deref(),
-            Some("claude-2.1.302-auto-1")
-        );
+        assert_eq!(observation.raw_evidence["native_version"], CLAUDE_VERSION);
         assert_eq!(observation.raw_evidence["operation"], operation);
         assert_eq!(
             observation.raw_evidence["operation_rows"],
@@ -1843,13 +1879,14 @@ mod tests {
             .unwrap();
         assert_eq!(reused.kind, observation.kind);
         assert_eq!(reused.rule_id, observation.rule_id);
-        assert_eq!(reused.profile_version, observation.profile_version);
+        assert!(reused.fingerprint == observation.fingerprint);
         assert_eq!(reused.raw_evidence["native_version"], "0.164.0");
         let below = Detector::new(&catalog, CodingAgent::Codex, Some("0.162.0"))
             .observe(&screen)
             .unwrap();
         assert_eq!(below.kind, ObservationKind::Unknown);
-        assert_eq!(below.profile_version, None);
+        assert_eq!(below.match_evidence, MatchEvidence::Absent);
+        assert!(below.fingerprint.is_none());
         let unprobed = Detector::new(&catalog, CodingAgent::Codex, None)
             .observe(&screen)
             .unwrap();
@@ -2459,6 +2496,97 @@ mod tests {
                 assert_ne!(typed.rule_id, GATED_REASON_RULE, "{reason}");
             }
         }
+
+        const ROW_SGR: &str = "\x1b[48;2;30;30;30m";
+
+        /// The gated form on a `cols`-wide screen whose choice row is `row`, written from
+        /// column 0 after the screen is cleared to the default background.
+        fn sized_form(cols: u16, row: &str) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize { rows: 24, cols }).unwrap();
+            state
+                .feed(
+                    format!(
+                        "\x1b[0m\x1b[2J\x1b[19;1HSynthetic gated request\r\nOperation: write disposable.txt\r\n{row}\x1b[0m\r\nSelection: "
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            state.snapshot()
+        }
+
+        fn focused_on(screen: &ScreenSnapshot) -> Option<String> {
+            let allow = detector()
+                .match_answer(screen, &gated_plan(PermissionDecision::Allow))
+                .unwrap()
+                .expect("the gated form matches regardless of its focus");
+            allow.focused_choice_id().map(str::to_owned)
+        }
+
+        #[test]
+        fn focus_row_background_is_the_majority_background_not_the_left_edge() {
+            let edge = sized_form(
+                80,
+                &format!(
+                    "{ROW_SGR}\x1b[K{FOCUS_SGR}  Allow once {ROW_SGR}  Always allow   Deny once"
+                ),
+            );
+            assert_eq!(
+                focused_on(&edge).as_deref(),
+                Some("allow-once"),
+                "a highlight over column 0 leaves the row background to the majority"
+            );
+            let last_column = sized_form(
+                39,
+                &format!("{ROW_SGR}\x1b[K  Allow once   Always allow   {FOCUS_SGR}Deny once"),
+            );
+            assert_eq!(
+                focused_on(&last_column).as_deref(),
+                Some("deny-once"),
+                "a focused label may reach the last column"
+            );
+        }
+
+        #[test]
+        fn focus_resolves_no_choice_without_a_background_covering_more_than_half_the_row() {
+            let half = "\x1b[48;5;236m";
+            let split_row = |painted: usize| {
+                sized_form(
+                    80,
+                    &format!(
+                        "{half}\x1b[K  {FOCUS_SGR}Allow once{half}   Always allow   Deny once\x1b[{}G\x1b[0m\x1b[K",
+                        painted + 1
+                    ),
+                )
+            };
+            assert_eq!(
+                focused_on(&split_row(40)),
+                None,
+                "40 painted cells of 80 are not a majority"
+            );
+            assert_eq!(
+                focused_on(&split_row(51)).as_deref(),
+                Some("allow-once"),
+                "41 cells of the painted background are a majority"
+            );
+        }
+
+        #[test]
+        fn focus_requires_every_cell_of_the_label_to_differ_from_the_row_background() {
+            let partial = sized_form(
+                80,
+                &format!(
+                    "{ROW_SGR}\x1b[K  {FOCUS_SGR}Allow{ROW_SGR} once   Always allow   Deny once"
+                ),
+            );
+            assert_eq!(focused_on(&partial), None);
+            let whole = sized_form(
+                80,
+                &format!(
+                    "{ROW_SGR}\x1b[K  {FOCUS_SGR}Allow once{ROW_SGR}   Always allow   Deny once"
+                ),
+            );
+            assert_eq!(focused_on(&whole).as_deref(), Some("allow-once"));
+        }
     }
 
     fn assert_permission(value: &ScreenObservation) {
@@ -2490,7 +2618,7 @@ mod tests {
         let screen = terminal(&lines("write disposable.txt"), 80, false).snapshot();
         let value = observation(&definitions(), &screen);
         assert_permission(&value);
-        assert_eq!(value.profile_version.as_deref(), Some(PROFILE));
+        assert_eq!(value.raw_evidence["native_version"], VERSION);
         assert_eq!(value.rule_id, RULE);
         assert_eq!(value.output_seq, screen.screen_seq);
         let region = value.matched_region.unwrap();
@@ -2648,15 +2776,112 @@ mod tests {
         let changed = permission("write another-disposable.txt");
         assert!(value.fingerprint != changed.fingerprint);
         let mut definition = definitions();
-        definition["profiles"][0]["profile_version"] = json!("synthetic-profile-2");
+        definition["profiles"][0]["min_version"] = json!("0.0.0-synthetic");
         assert!(
             value.fingerprint
-                != observation(
+                == observation(
                     &definition,
                     &terminal(&lines("write disposable.txt"), 80, false).snapshot()
                 )
-                .fingerprint
+                .fingerprint,
+            "the selected profile's boundary is not part of the request identity"
         );
+    }
+
+    #[test]
+    fn runtime_detector_semantic_fingerprint_is_backend_class_operation_and_choices() {
+        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
+        let screen = terminal(&lines("write disposable.txt"), 80, false).snapshot();
+        let at_boundary = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
+            .observe(&screen)
+            .unwrap();
+        let later = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.2-synthetic"))
+            .observe(&screen)
+            .unwrap();
+        assert_permission(&later);
+        assert_eq!(later.raw_evidence["native_version"], "0.0.2-synthetic");
+        assert!(
+            at_boundary.fingerprint == later.fingerprint,
+            "a later native version on the same profile keeps the request identity"
+        );
+        let changed = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.2-synthetic"))
+            .observe(&terminal(&lines("write another-disposable.txt"), 80, false).snapshot())
+            .unwrap();
+        assert!(at_boundary.fingerprint != changed.fingerprint);
+    }
+
+    #[test]
+    fn runtime_detector_fingerprints_carry_no_profile_element_across_profile_boundaries() {
+        let catalog = ProfileCatalog::from_definitions(&thresholds(&[
+            ("first", "1.0.0"),
+            ("second", "2.0.0"),
+        ]))
+        .unwrap();
+        let mut rows = vec![
+            "Live footer".to_owned(),
+            "Refused: write outside.txt".to_owned(),
+            "Refusal end".to_owned(),
+        ];
+        rows.extend(lines("write disposable.txt"));
+        let screen = terminal(&rows, 80, false).snapshot();
+        let [first, second] = ["1.4.2", "3.1.4"].map(|run| {
+            Detector::new(&catalog, CodingAgent::Codex, Some(run))
+                .observe(&screen)
+                .unwrap()
+        });
+        for observed in [&first, &second] {
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert!(observed.fingerprint.is_some());
+            assert_eq!(observed.annotations.len(), 1);
+        }
+        assert!(
+            first.fingerprint == second.fingerprint,
+            "the permission request keeps its identity across profile boundaries"
+        );
+        assert!(
+            first.annotations[0].fingerprint == second.annotations[0].fingerprint,
+            "the annotation keeps its identity across profile boundaries"
+        );
+    }
+
+    #[test]
+    fn runtime_detector_raw_evidence_names_the_backend_and_native_version_only() {
+        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
+        let screen = terminal(&lines("write disposable.txt"), 80, false).snapshot();
+        for version in [Some(VERSION), None] {
+            let observed = Detector::new(&catalog, CodingAgent::Codex, version)
+                .observe(&screen)
+                .unwrap();
+            let keys = observed
+                .raw_evidence
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(
+                keys,
+                std::collections::BTreeSet::from([
+                    "backend",
+                    "choices",
+                    "excerpt",
+                    "native_request_id",
+                    "native_version",
+                    "operation",
+                    "operation_rows",
+                    "rule_id",
+                    "screen_seq",
+                    "sensitive",
+                    "truncated",
+                ]),
+                "{version:?}"
+            );
+            assert_eq!(observed.raw_evidence["backend"], "codex");
+            assert_eq!(observed.raw_evidence["native_version"], json!(version));
+        }
     }
 
     #[test]
@@ -2812,7 +3037,6 @@ mod tests {
             .unwrap();
         assert!(matches!(value.kind, ObservationKind::Unknown));
         assert!(matches!(value.match_evidence, MatchEvidence::Absent));
-        assert!(value.profile_version.is_none());
         assert!(value.fingerprint.is_none());
     }
 
@@ -2997,6 +3221,685 @@ mod tests {
                 .observe(&terminal(&rows, 80, false).snapshot())
                 .unwrap();
             assert!(observed.annotations.is_empty());
+        }
+    }
+
+    mod operation_rows {
+        use super::*;
+
+        const MARGIN: &str = "    ";
+
+        /// The synthetic form with a region-scoped operation that captures every row between
+        /// the `Operation:` prefix and the choice rows.
+        fn rowed(margin_rows: Option<&str>, trailer: Option<&str>) -> Value {
+            let mut value = definitions();
+            let rule = &mut value["profiles"][0]["rules"][0];
+            rule["matchers"][0] = json!({
+                "id":"operation","scope":"region",
+                "pattern":"(?m)^Operation: (?P<operation>[^\\n]+(?:\\n[^>\\n][^\\n]*)*)\\n> Allow once$"
+            });
+            let operation = &mut rule["extract"]["operation"];
+            operation["row_margin"] = json!(MARGIN);
+            if let Some(margin_rows) = margin_rows {
+                operation["margin_rows"] = json!(margin_rows);
+            }
+            if let Some(trailer) = trailer {
+                operation["row_trailer"] = json!(trailer);
+            }
+            value
+        }
+
+        fn form(rows: &[&str]) -> ScreenSnapshot {
+            let mut lines = vec!["Synthetic permission request".to_owned()];
+            lines.push(format!("Operation: {}", rows[0]));
+            lines.extend(rows[1..].iter().map(|row| (*row).to_owned()));
+            lines.extend([
+                "> Allow once".to_owned(),
+                "  Deny once".to_owned(),
+                "Request form: synthetic-only".to_owned(),
+                "Selection: ".to_owned(),
+            ]);
+            terminal(&lines, 80, false).snapshot()
+        }
+
+        fn operation(definition: &Value, rows: &[&str]) -> Option<(String, u64)> {
+            let observed = observation(definition, &form(rows));
+            (observed.kind == ObservationKind::Interaction(InteractionClass::PermissionRequest))
+                .then(|| {
+                    (
+                        observed.raw_evidence["operation"]
+                            .as_str()
+                            .unwrap()
+                            .to_owned(),
+                        observed.raw_evidence["operation_rows"].as_u64().unwrap(),
+                    )
+                })
+        }
+
+        #[test]
+        fn continuation_margin_rows_exempt_the_first_row_and_strip_every_later_margin() {
+            let definition = rowed(Some("continuation"), None);
+            assert_eq!(
+                operation(&definition, &["cat /long/path/", "    to/the/file.txt"]),
+                Some(("cat /long/path/\nto/the/file.txt".to_owned(), 2))
+            );
+            assert_eq!(
+                operation(&definition, &["printf one", "    two   ", "    three"]),
+                Some(("printf one\ntwo\nthree".to_owned(), 3))
+            );
+            assert_eq!(
+                operation(&definition, &["write disposable.txt"]),
+                Some(("write disposable.txt".to_owned(), 1))
+            );
+        }
+
+        #[test]
+        fn a_selected_row_without_its_margin_fails_the_match() {
+            let continuation = rowed(Some("continuation"), None);
+            assert_eq!(
+                operation(&continuation, &["cat /long/path/", "  to/the/file.txt"]),
+                None
+            );
+            for all in [rowed(Some("all"), None), rowed(None, None)] {
+                assert_eq!(
+                    operation(&all, &["cat /long/path/", "    to/the/file.txt"]),
+                    None,
+                    "the default margin rows include the first row"
+                );
+            }
+        }
+
+        #[test]
+        fn the_default_margin_rows_keep_the_shipped_all_rows_extraction() {
+            let mut definition = rowed(None, None);
+            definition["profiles"][0]["rules"][0]["matchers"][0]["pattern"] = json!(
+                "(?m)^Operation:(?P<operation> [^\\n]+(?:\\n[^>\\n][^\\n]*)*)\\n> Allow once$"
+            );
+            definition["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] =
+                json!(" ");
+            let explicit = {
+                let mut value = definition.clone();
+                value["profiles"][0]["rules"][0]["extract"]["operation"]["margin_rows"] =
+                    json!("all");
+                value
+            };
+            for value in [&definition, &explicit] {
+                assert_eq!(
+                    operation(value, &["cat /long/path/", " to/the/file.txt"]),
+                    Some(("cat /long/path/\nto/the/file.txt".to_owned(), 2))
+                );
+            }
+        }
+
+        #[test]
+        fn a_trailer_is_removed_with_its_preceding_whitespace_before_the_margin() {
+            let definition = rowed(Some("continuation"), Some("█"));
+            assert_eq!(
+                operation(
+                    &definition,
+                    &["cat /long/path/      █", "    to/the/file.txt     █  "]
+                ),
+                Some(("cat /long/path/\nto/the/file.txt".to_owned(), 2))
+            );
+            assert_eq!(
+                operation(&definition, &["cat /long/path/█", "    to/the/file.txt"]),
+                Some(("cat /long/path/\nto/the/file.txt".to_owned(), 2)),
+                "a row without the trailer keeps its text"
+            );
+            assert_eq!(
+                operation(&definition, &["cat a█b", "    c █ d"]),
+                Some(("cat a█b\nc █ d".to_owned(), 2)),
+                "the trailer is removed only at the row end"
+            );
+        }
+
+        #[test]
+        fn a_trailer_applies_to_a_single_row_operation_without_a_margin() {
+            let mut definition = definitions();
+            definition["profiles"][0]["rules"][0]["extract"]["operation"]["row_trailer"] =
+                json!("█");
+            let observed = observation(
+                &definition,
+                &terminal(&lines("write disposable.txt   █"), 80, false).snapshot(),
+            );
+            assert_permission(&observed);
+            assert_eq!(observed.raw_evidence["operation"], "write disposable.txt");
+            assert_eq!(observed.raw_evidence["operation_rows"], 1);
+        }
+
+        #[test]
+        fn a_blank_margined_row_inside_a_multi_line_command_still_matches() {
+            let mut definition = rowed(None, None);
+            definition["profiles"][0]["rules"][0]["matchers"][0]["pattern"] =
+                json!("(?m)^Operation:(?P<operation> [^\\n]+(?:\\n [^\\n]*)*)\\n> Allow once$");
+            definition["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] =
+                json!(" ");
+            assert_eq!(
+                operation(&definition, &["printf one", " ", " printf two"]),
+                Some(("printf one\n\nprintf two".to_owned(), 3)),
+                "margin removal precedes trimming, so a margin-only row is an empty row"
+            );
+        }
+    }
+
+    mod opencode_layouts {
+        use super::*;
+
+        const VERSION: &str = "2.1.4";
+        const PERMISSION_RULE: &str = "opencode-shell-permission";
+        const REASON_RULE: &str = "opencode-reject-reason";
+        const CHOICES: &str = "   Allow once   Always allow   Reject";
+        const CONTROLS: &str = "⇆ select  enter confirm  esc reject";
+        const PROBE_DIRECTORY: &str = "/tmp/cafleet-194/opencode-narrow-cells-057/";
+
+        enum Layout {
+            Wide,
+            Split,
+            Broken,
+            ControlsOnly,
+            InterposedRow,
+        }
+
+        fn shell_rule() -> Value {
+            let definitions = bundled_definitions();
+            definitions["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|profile| profile["backend"] == "opencode")
+                .expect("bundled OpenCode profile")["rules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|rule| rule["id"] == PERMISSION_RULE)
+                .expect("bundled OpenCode shell permission rule")
+                .clone()
+        }
+
+        fn continuation_margin() -> String {
+            shell_rule()["extract"]["operation"]["row_margin"]
+                .as_str()
+                .expect("the OpenCode operation declares its continuation margin")
+                .to_owned()
+        }
+
+        /// A row of the command box: `text`, then the scrollbar column four cells before the
+        /// right edge, as the 120-column capture shows it.
+        fn boxed(cols: usize, text: &str) -> String {
+            let width = cols - 4;
+            assert!(text.chars().count() < width, "{text:?} fits the box");
+            format!("{text:<width$}█   ")
+        }
+
+        fn form_rows(cols: usize, command: &[&str], layout: Layout) -> Vec<String> {
+            let margin = continuation_margin();
+            let mut rows = vec![
+                "  △ Permission required".to_owned(),
+                String::new(),
+                boxed(cols, "   # Shell command"),
+                boxed(cols, ""),
+                boxed(cols, &format!("  $ {}", command[0])),
+            ];
+            rows.extend(
+                command[1..]
+                    .iter()
+                    .map(|row| boxed(cols, &format!("{margin}{row}"))),
+            );
+            rows.extend([
+                boxed(cols, ""),
+                boxed(cols, ""),
+                String::new(),
+                String::new(),
+            ]);
+            let controls = format!("  {CONTROLS}");
+            match layout {
+                Layout::Wide => {
+                    let padding = cols - CHOICES.chars().count() - CONTROLS.chars().count() - 3;
+                    rows.push(format!("{CHOICES}{}{CONTROLS}   ", " ".repeat(padding)));
+                }
+                Layout::Split => rows.extend([CHOICES.to_owned(), String::new(), controls]),
+                Layout::Broken => rows.extend([
+                    "   Allow once   Always allow".to_owned(),
+                    "   Reject".to_owned(),
+                    controls,
+                ]),
+                Layout::ControlsOnly => rows.extend([String::new(), controls]),
+                Layout::InterposedRow => {
+                    rows.extend([CHOICES.to_owned(), "   Press a key".to_owned(), controls])
+                }
+            }
+            rows
+        }
+
+        fn paint(cols: usize, rows: &[String]) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize {
+                rows: 36,
+                cols: u16::try_from(cols).unwrap(),
+            })
+            .unwrap();
+            state.feed(b"\x1b[2J").unwrap();
+            for (index, row) in rows.iter().enumerate() {
+                if !row.is_empty() {
+                    state
+                        .feed(format!("\x1b[{};1H{row}", index + 11).as_bytes())
+                        .unwrap();
+                }
+            }
+            state.snapshot()
+        }
+
+        fn form(cols: usize, command: &[&str], layout: Layout) -> ScreenSnapshot {
+            paint(cols, &form_rows(cols, command, layout))
+        }
+
+        fn observe(screen: &ScreenSnapshot) -> ScreenObservation {
+            bundled_detector(CodingAgent::Opencode, VERSION)
+                .observe(screen)
+                .unwrap()
+        }
+
+        fn assert_request(observed: &ScreenObservation, operation: &str) {
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert_eq!(observed.rule_id, PERMISSION_RULE);
+            assert_eq!(observed.match_evidence, MatchEvidence::Complete);
+            assert_eq!(observed.raw_evidence["operation"], operation);
+            assert_eq!(
+                observed.raw_evidence["operation_rows"],
+                operation.split('\n').count()
+            );
+            assert_eq!(
+                observed.raw_evidence["choices"],
+                json!(["Allow once", "Reject"])
+            );
+            assert!(observed.fingerprint.is_some());
+        }
+
+        fn assert_no_request(observed: &ScreenObservation, case: &str) {
+            assert_ne!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "{case}"
+            );
+            assert_ne!(observed.rule_id, PERMISSION_RULE, "{case}");
+            assert!(observed.fingerprint.is_none(), "{case}");
+        }
+
+        fn allow_match(screen: &ScreenSnapshot) -> AnswerMatch {
+            let plan = ProfileCatalog::bundled()
+                .unwrap()
+                .answer_plan(
+                    CodingAgent::Opencode,
+                    VERSION,
+                    PERMISSION_RULE,
+                    PermissionDecision::Allow,
+                )
+                .unwrap();
+            bundled_detector(CodingAgent::Opencode, VERSION)
+                .match_answer(screen, &plan)
+                .unwrap()
+                .expect("the form matches the allow plan")
+        }
+
+        fn wrapped() -> [&'static str; 2] {
+            [PROBE_DIRECTORY, "permission-probe allow"]
+        }
+
+        #[test]
+        fn opencode_split_layout_reports_every_displayed_command_row() {
+            let observed = observe(&form(57, &wrapped(), Layout::Split));
+            assert_request(
+                &observed,
+                &format!("{PROBE_DIRECTORY}\npermission-probe allow"),
+            );
+            let single = observe(&form(57, &["/tmp/x/permission-probe allow"], Layout::Split));
+            assert_request(&single, "/tmp/x/permission-probe allow");
+        }
+
+        #[test]
+        fn opencode_wide_layout_keeps_its_single_row_request() {
+            let command = "/tmp/cafleet-194/opencode-cells-001/permission-probe allow";
+            assert_request(&observe(&form(120, &[command], Layout::Wide)), command);
+        }
+
+        /// `rows` with the scrollbar thumb replaced on the given rows, as a command box that
+        /// scrolls shows a shorter thumb than its track.
+        fn clipped(mut rows: Vec<String>, thumb_row: usize, track_rows: &[usize]) -> Vec<String> {
+            rows[thumb_row] = rows[thumb_row].replacen('█', "▀", 1);
+            for &row in track_rows {
+                rows[row] = rows[row].replacen('█', " ", 1);
+            }
+            rows
+        }
+
+        #[test]
+        fn opencode_clipped_commands_yield_no_request_for_either_request_rule() {
+            let split = form_rows(57, &wrapped(), Layout::Split);
+            let compact_command = [
+                "/tmp/cafleet-194/opencode-survey-",
+                "036/permission-probe allow",
+            ];
+            let compact = compact_rows(36, &compact_command, Compact::OwnControls);
+            assert_request(
+                &observe(&paint(57, &split)),
+                &format!("{PROBE_DIRECTORY}\npermission-probe allow"),
+            );
+            assert_compact_request(&observe(&paint(36, &compact)), &compact_command.join("\n"));
+            for (case, cols, rows) in [
+                (
+                    "split, thumb above every command row",
+                    57,
+                    clipped(split.clone(), 2, &[4, 5]),
+                ),
+                (
+                    "split, a later command row off the thumb",
+                    57,
+                    clipped(split.clone(), 5, &[]),
+                ),
+                (
+                    "compact, thumb above every command row",
+                    36,
+                    clipped(compact.clone(), 1, &[2, 3]),
+                ),
+                (
+                    "compact, a later command row off the thumb",
+                    36,
+                    clipped(compact.clone(), 3, &[]),
+                ),
+            ] {
+                assert_no_request(&observe(&paint(cols, &rows)), case);
+            }
+        }
+
+        #[test]
+        fn opencode_forms_outside_the_supported_layouts_yield_no_request() {
+            let mut headless = form_rows(57, &wrapped(), Layout::Split);
+            headless[0] = String::new();
+            let mut stray = form_rows(57, &wrapped(), Layout::Split);
+            stray.insert(6, boxed(57, "stray text"));
+            for (case, screen) in [
+                ("broken layout", form(57, &wrapped(), Layout::Broken)),
+                (
+                    "controls without a choice row",
+                    form(57, &wrapped(), Layout::ControlsOnly),
+                ),
+                (
+                    "a row between the choices and the controls",
+                    form(57, &wrapped(), Layout::InterposedRow),
+                ),
+                (
+                    "a continuation row indented past the margin",
+                    form(
+                        57,
+                        &[PROBE_DIRECTORY, " permission-probe allow"],
+                        Layout::Split,
+                    ),
+                ),
+                (
+                    "a row without the margin before the box end",
+                    paint(57, &stray),
+                ),
+                ("form text outside a live region", paint(57, &headless)),
+            ] {
+                assert_no_request(&observe(&screen), case);
+            }
+        }
+
+        #[test]
+        fn opencode_layouts_differ_in_focus_capture_and_rewraps_differ_in_identity() {
+            let command = format!("{PROBE_DIRECTORY}permission-probe allow");
+            let wide = form(120, &[command.as_str()], Layout::Wide);
+            let split = form(57, &wrapped(), Layout::Split);
+            assert_ne!(
+                allow_match(&wide).focus(),
+                allow_match(&split).focus(),
+                "the focus capture is part of the request identity"
+            );
+            assert!(observe(&wide).fingerprint != observe(&split).fingerprint);
+            let rewrapped = form(
+                57,
+                &[
+                    "/tmp/cafleet-194/opencode-narrow-",
+                    "cells-057/permission-probe allow",
+                ],
+                Layout::Split,
+            );
+            assert!(
+                observe(&split).fingerprint != observe(&rewrapped).fingerprint,
+                "a moved row break is a different request"
+            );
+            assert!(
+                observe(&split).fingerprint
+                    == observe(&form(57, &wrapped(), Layout::Split)).fingerprint,
+                "an unchanged form keeps its identity"
+            );
+            assert!(
+                allow_match(&split).focus()
+                    == allow_match(&form(57, &wrapped(), Layout::Split)).focus()
+            );
+        }
+
+        fn dialog(placeholder: Option<&str>) -> ScreenSnapshot {
+            let mut rows = vec![
+                "  △ Reject permission".to_owned(),
+                String::new(),
+                "  Tell OpenCode what to do differently".to_owned(),
+            ];
+            rows.extend(std::iter::repeat_n(String::new(), 7));
+            if let Some(text) = placeholder {
+                rows.push(format!("  {text}"));
+            }
+            rows.push("  enter confirm  esc cancel".to_owned());
+            paint(57, &rows)
+        }
+
+        #[test]
+        fn opencode_split_reject_dialog_requires_the_empty_placeholder() {
+            let empty = observe(&dialog(Some("Tell OpenCode what to do differently")));
+            assert_eq!(empty.kind, ObservationKind::PermissionContinuation);
+            assert_eq!(empty.rule_id, REASON_RULE);
+            assert_eq!(empty.match_evidence, MatchEvidence::Complete);
+            for (case, screen) in [
+                ("a prompt-only dialog", dialog(None)),
+                (
+                    "a typed reason",
+                    dialog(Some("run it in the sandbox instead")),
+                ),
+                (
+                    "a typed copy of the placeholder with more text",
+                    dialog(Some("Tell OpenCode what to do differently!")),
+                ),
+            ] {
+                let observed = observe(&screen);
+                assert_ne!(
+                    observed.kind,
+                    ObservationKind::PermissionContinuation,
+                    "{case}"
+                );
+                assert_ne!(observed.rule_id, REASON_RULE, "{case}");
+            }
+        }
+
+        const COMPACT_RULE: &str = "opencode-shell-permission-compact";
+        const COMPACT_CHOICES: &str = " Allow once   Always allow   Reject";
+        const COMPACT_CONTROLS: &str = "pgup/pgdn scroll";
+
+        enum Compact {
+            SharedControls,
+            OwnControls,
+            Broken,
+            NoControls,
+        }
+
+        /// A compact command-box row: `text` at column 0 and the scrollbar column at the right
+        /// edge, as the 36-, 52- and 55-column captures show it.
+        fn compact_boxed(cols: usize, text: &str) -> String {
+            let width = cols - 1;
+            assert!(text.chars().count() <= width, "{text:?} fits the box");
+            format!("{text:<width$}█")
+        }
+
+        fn compact_rows(cols: usize, command: &[&str], layout: Compact) -> Vec<String> {
+            let mut rows = vec![
+                "△ Permission required".to_owned(),
+                compact_boxed(cols, "# Shell command"),
+                compact_boxed(cols, &format!("$ {}", command[0])),
+            ];
+            rows.extend(command[1..].iter().map(|row| compact_boxed(cols, row)));
+            rows.extend((0..3).map(|_| compact_boxed(cols, "")));
+            match layout {
+                Compact::SharedControls => {
+                    let padding = cols - COMPACT_CHOICES.chars().count() - COMPACT_CONTROLS.len();
+                    rows.push(format!(
+                        "{COMPACT_CHOICES}{}{COMPACT_CONTROLS}",
+                        " ".repeat(padding)
+                    ));
+                }
+                Compact::OwnControls => {
+                    rows.extend([COMPACT_CHOICES.to_owned(), COMPACT_CONTROLS.to_owned()])
+                }
+                Compact::Broken => rows.extend([
+                    " Allow once   Always allow".to_owned(),
+                    " Reject".to_owned(),
+                    COMPACT_CONTROLS.to_owned(),
+                ]),
+                Compact::NoControls => rows.push(COMPACT_CHOICES.to_owned()),
+            }
+            rows
+        }
+
+        fn compact(cols: usize, command: &[&str], layout: Compact) -> ScreenSnapshot {
+            paint(cols, &compact_rows(cols, command, layout))
+        }
+
+        fn assert_compact_request(observed: &ScreenObservation, operation: &str) {
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert_eq!(observed.rule_id, COMPACT_RULE);
+            assert_eq!(observed.match_evidence, MatchEvidence::Complete);
+            assert_eq!(observed.raw_evidence["operation"], operation);
+            assert_eq!(
+                observed.raw_evidence["operation_rows"],
+                operation.split('\n').count()
+            );
+            assert_eq!(
+                observed.raw_evidence["choices"],
+                json!(["Allow once", "Reject"])
+            );
+            assert!(observed.fingerprint.is_some());
+        }
+
+        #[test]
+        fn opencode_compact_layout_reports_every_displayed_command_row() {
+            for (cols, command, layout) in [
+                (
+                    55,
+                    [
+                        "/tmp/cafleet-194/opencode-survey-055/permission-",
+                        "probe allow",
+                    ],
+                    Compact::SharedControls,
+                ),
+                (
+                    52,
+                    [
+                        "/tmp/cafleet-194/opencode-survey-052/permission-",
+                        "probe allow",
+                    ],
+                    Compact::OwnControls,
+                ),
+                (
+                    36,
+                    [
+                        "/tmp/cafleet-194/opencode-survey-",
+                        "036/permission-probe allow",
+                    ],
+                    Compact::OwnControls,
+                ),
+            ] {
+                assert_compact_request(
+                    &observe(&compact(cols, &command, layout)),
+                    &command.join("\n"),
+                );
+            }
+            assert_compact_request(
+                &observe(&compact(
+                    55,
+                    &["/tmp/x/permission-probe allow"],
+                    Compact::SharedControls,
+                )),
+                "/tmp/x/permission-probe allow",
+            );
+        }
+
+        #[test]
+        fn opencode_compact_forms_outside_the_layout_yield_no_request() {
+            let command = [
+                "/tmp/cafleet-194/opencode-survey-",
+                "036/permission-probe allow",
+            ];
+            let mut stray = compact_rows(36, &command, Compact::OwnControls);
+            stray.insert(5, compact_boxed(36, "stray text"));
+            let mut headless = compact_rows(36, &command, Compact::OwnControls);
+            headless[0] = String::new();
+            let mut margined = compact_rows(36, &command, Compact::OwnControls);
+            margined[0] = "  △ Permission required".to_owned();
+            for (case, screen) in [
+                (
+                    "broken layout",
+                    compact(35, &["/tmp/x/permission-probe allow"], Compact::Broken),
+                ),
+                (
+                    "no control text",
+                    compact(36, &command, Compact::NoControls),
+                ),
+                (
+                    "a continuation row beginning with a space",
+                    compact(
+                        36,
+                        &["/tmp/cafleet-194/opencode-survey-", " 036/permission-probe"],
+                        Compact::OwnControls,
+                    ),
+                ),
+                ("a row after the box end", paint(36, &stray)),
+                ("form text outside a live region", paint(36, &headless)),
+                ("a wide/split heading margin", paint(36, &margined)),
+            ] {
+                assert_no_request(&observe(&screen), case);
+            }
+        }
+
+        #[test]
+        fn opencode_exactly_one_request_rule_matches_each_supported_layout() {
+            for (case, screen, rule) in [
+                (
+                    "wide",
+                    form(120, &["/tmp/x/permission-probe allow"], Layout::Wide),
+                    PERMISSION_RULE,
+                ),
+                (
+                    "split",
+                    form(57, &wrapped(), Layout::Split),
+                    PERMISSION_RULE,
+                ),
+                (
+                    "compact",
+                    compact(
+                        55,
+                        &["/tmp/x/permission-probe allow"],
+                        Compact::SharedControls,
+                    ),
+                    COMPACT_RULE,
+                ),
+            ] {
+                let observed = observe(&screen);
+                assert_eq!(observed.rule_id, rule, "{case}");
+                assert_eq!(observed.match_evidence, MatchEvidence::Complete, "{case}");
+            }
         }
     }
 }
