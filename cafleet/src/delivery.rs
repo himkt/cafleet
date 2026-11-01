@@ -531,6 +531,7 @@ mod tests {
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
     use crate::db::test_support::migrated_conn;
+    use crate::input::PaneLock;
     use crate::receive::AttemptEnd;
     use crate::runtime::runner::{
         ControlIdentity, HealthSnapshot, InputCommandHost, InputControlOperation,

@@ -1114,6 +1114,7 @@ mod tests {
     use super::*;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
+    use crate::broker::runtime::DeliveryMethod;
     use crate::db::test_support::migrated_conn;
     use crate::input::{Deadline, PaneLock};
     use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
