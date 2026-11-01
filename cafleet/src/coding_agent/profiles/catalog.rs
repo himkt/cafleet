@@ -1947,6 +1947,215 @@ mod tests {
     use serde_json::{Value, json};
     use std::time::{Duration, Instant};
 
+    mod bundled_backend_files {
+        use super::super::ProfileCatalog;
+        use super::definitions;
+        use crate::error::CafleetError;
+        use serde_json::{Value, json};
+
+        const SOURCE: &str = "native/codex.json";
+        const PRIMARY: &str = "native-permission-one";
+        const REGRESSION: &str = "native-regression-one";
+        const UNCITED: &str =
+            "invalid native profile: bundled fixture file holds an uncited screen";
+
+        struct NativeFixtureCatalog {
+            definitions: Value,
+            file: Value,
+        }
+
+        fn screen(line: &str) -> Value {
+            let mut lines = vec![""; 24];
+            lines[0] = line;
+            json!({
+                "rows":24,"cols":80,"alternate_screen":true,"screen_seq":0,
+                "cursor_row":23,"cursor_col":0,"lines":lines,"masked_rows":[]
+            })
+        }
+
+        fn screen_digest(screen: &Value) -> String {
+            crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes())
+        }
+
+        impl NativeFixtureCatalog {
+            fn new() -> Self {
+                let primary = screen("permission screen");
+                let regression = screen("regression screen");
+                let mut definitions = definitions();
+                let entry = &mut definitions["fixtures"][0];
+                entry["id"] = json!(PRIMARY);
+                entry["kind"] = json!("native");
+                entry["native_version"] = json!("1.2.3");
+                entry["source_ref"] = json!(SOURCE);
+                entry["sha256"] = json!(screen_digest(&primary));
+                let mut sibling = entry.clone();
+                sibling["id"] = json!(REGRESSION);
+                sibling["sha256"] = json!(screen_digest(&regression));
+                definitions["fixtures"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(sibling);
+                definitions["profiles"][0]["min_version"] = json!("1.2.3");
+                definitions["profiles"][0]["capabilities"]["detection"]["fixture_ids"] =
+                    json!([PRIMARY]);
+
+                let mut screens = serde_json::Map::new();
+                screens.insert(PRIMARY.to_owned(), primary);
+                screens.insert(REGRESSION.to_owned(), regression);
+                Self {
+                    definitions,
+                    file: json!({
+                        "schema_version":1,"backend":"codex","provenance":"native",
+                        "screens":screens
+                    }),
+                }
+            }
+
+            fn load_embedded(
+                &self,
+                embedded: &[(&str, &[u8])],
+            ) -> Result<ProfileCatalog, CafleetError> {
+                ProfileCatalog::from_definitions(&self.definitions).unwrap_or_else(|error| {
+                    panic!("native test declarations are valid: {}", error.message())
+                });
+                ProfileCatalog::from_bundled_definitions(&self.definitions, embedded)
+            }
+
+            fn load(&self) -> Result<ProfileCatalog, CafleetError> {
+                let bytes = serde_json::to_vec(&self.file).unwrap();
+                self.load_embedded(&[(SOURCE, &bytes)])
+            }
+        }
+
+        fn usage_failure(result: Result<ProfileCatalog, CafleetError>) -> String {
+            match result {
+                Err(CafleetError::Usage(message)) => message,
+                Err(error) => panic!("native loader returns a usage error: {}", error.message()),
+                Ok(_) => panic!("native loader rejects the invalid bundled file"),
+            }
+        }
+
+        #[test]
+        fn loads_multiple_screens_including_a_catalogued_regression_without_profile_citations() {
+            let result = NativeFixtureCatalog::new().load();
+            let failure = result.as_ref().err().map(|error| error.message());
+            assert!(
+                result.is_ok(),
+                "valid backend screen map loads: {failure:?}"
+            );
+        }
+
+        #[test]
+        fn a_catalogued_screen_requires_its_key_in_the_backend_file() {
+            let mut fixture = NativeFixtureCatalog::new();
+            fixture.file["screens"]
+                .as_object_mut()
+                .unwrap()
+                .remove(REGRESSION);
+            assert_eq!(
+                usage_failure(fixture.load()),
+                "invalid native profile: bundled fixture screen is missing"
+            );
+        }
+
+        #[test]
+        fn a_referenced_backend_file_rejects_an_uncited_sibling_screen() {
+            let mut fixture = NativeFixtureCatalog::new();
+            fixture.file["screens"]["unlisted-screen"] = screen("uncited screen");
+            assert_eq!(usage_failure(fixture.load()), UNCITED);
+        }
+
+        fn unreferenced_file_failure(extra_first: bool) -> String {
+            let fixture = NativeFixtureCatalog::new();
+            let bytes = serde_json::to_vec(&fixture.file).unwrap();
+            let extra = serde_json::to_vec(&json!({
+                "schema_version":1,"backend":"claude","provenance":"native",
+                "screens":{"unlisted-screen":screen("uncited file screen")}
+            }))
+            .unwrap();
+            let mut embedded = vec![
+                (SOURCE, bytes.as_slice()),
+                ("native/claude.json", extra.as_slice()),
+            ];
+            if extra_first {
+                embedded.reverse();
+            }
+            usage_failure(fixture.load_embedded(&embedded))
+        }
+
+        #[test]
+        fn an_uncited_screen_in_an_unreferenced_file_is_rejected_before_referenced_files() {
+            assert_eq!(unreferenced_file_failure(true), UNCITED);
+        }
+
+        #[test]
+        fn an_uncited_screen_in_an_unreferenced_file_is_rejected_after_referenced_files() {
+            assert_eq!(unreferenced_file_failure(false), UNCITED);
+        }
+
+        #[test]
+        fn file_schema_provenance_and_backend_match_the_catalog() {
+            let causes = [
+                ("schema_version", json!(2)),
+                ("provenance", json!("synthetic")),
+                ("backend", json!("claude")),
+            ]
+            .map(|(field, value)| {
+                let mut fixture = NativeFixtureCatalog::new();
+                fixture.file[field] = value;
+                usage_failure(fixture.load())
+            });
+            assert_eq!(
+                causes,
+                ["invalid native profile: bundled fixture file identity differs from its catalog entry";
+                    3]
+            );
+        }
+
+        #[test]
+        fn a_catalogued_regression_screen_digest_error_names_its_id_and_both_hashes() {
+            let mut fixture = NativeFixtureCatalog::new();
+            let recorded = fixture.definitions["fixtures"][1]["sha256"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            fixture.file["screens"][REGRESSION]["lines"][0] = json!("changed regression");
+            let computed = screen_digest(&fixture.file["screens"][REGRESSION]);
+            assert_ne!(recorded, computed);
+            assert_eq!(
+                usage_failure(fixture.load()),
+                format!(
+                    "invalid native profile: bundled fixture digest mismatch for {REGRESSION}: catalog {recorded}, computed {computed}"
+                )
+            );
+        }
+
+        #[test]
+        fn canonical_screen_digests_accept_compact_and_pretty_backend_files() {
+            let fixture = NativeFixtureCatalog::new();
+            let failures = [
+                serde_json::to_vec(&fixture.file).unwrap(),
+                serde_json::to_vec_pretty(&fixture.file).unwrap(),
+            ]
+            .map(|bytes| {
+                fixture
+                    .load_embedded(&[(SOURCE, &bytes)])
+                    .err()
+                    .map(|error| error.message().into_owned())
+            });
+            assert_eq!(failures, [None, None]);
+        }
+
+        #[test]
+        fn a_catalogued_source_requires_provided_embedded_bytes() {
+            let fixture = NativeFixtureCatalog::new();
+            assert_eq!(
+                usage_failure(fixture.load_embedded(&[])),
+                "invalid native profile: bundled fixture bytes are not embedded"
+            );
+        }
+    }
+
     type ScreenChange = (&'static str, fn(&mut Value));
 
     fn first_masked_or_empty_row(screen: &Value) -> u64 {
