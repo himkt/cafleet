@@ -328,11 +328,11 @@ Delivery results contain `input_id,message_id,delivery,stage`, null interaction/
 
 ### `input show` and `input reconcile`
 
-`cafleet input show INPUT_ID [--json]`; `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]`. Result `input` contains `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,payload_digest_version,uncertain_cause`.
+`cafleet input show INPUT_ID [--json]`; `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]`. Result `input` contains `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,uncertain_cause`.
 
-Kinds: `preview,prompt,exec,permission_response`; states: `ready,in_progress,accepted,uncertain,settled`. Ready certifies zero bytes. Settled dispositions use underscores: `submitted,not_submitted,abandoned_uncertain`; CLI tokens are `submitted`, `not-submitted`, `abandoned-uncertain`. Preview keys are `preview:<run_id>:<message_id>`. Receipts hold digests, never literal payloads; new previews use digest version 2 (method-independent canonical preview and stable input ID), others version 1.
+Kinds: `preview,prompt,exec,permission_response`; states: `ready,in_progress,accepted,uncertain,settled`. Ready certifies zero bytes. Stored dispositions: `submitted,not_submitted,abandoned_uncertain`; CLI: `submitted,not-submitted,abandoned-uncertain`. Preview keys: `preview:<run_id>:<message_id>`. Receipts hold digests, excluding literals. Ordinary-input SHA-256 covers canonical JSON `run_id,kind,message_id,literal`; previews use canonical wrapped lines ending at the resume clause, prompt/exec submitted literals. Stable receipt IDs.
 
-Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. Unrecorded methods stay null with `method_unrecorded` outside ready. Permission responses have null delivery/deferred fields and digest version 1.
+Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. Unrecorded methods stay null with `method_unrecorded` outside ready. Permission responses have null delivery/deferred fields and dedicated validated request/decision/audit metadata digests.
 
 `uncertain_cause` records transition to uncertainty and survives reconciliation; null means never uncertain, pre-V8 input or runner-lost in-progress input.
 
