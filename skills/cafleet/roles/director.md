@@ -292,7 +292,7 @@ The `‹…›` markers are **spawn-skeleton slots**, filled from the consuming 
 | `‹cafleet-load purpose›` + `‹EXTRA SKILL LOADS›` | The cafleet purpose phrase (`for communication with the Director`, or `for the broker primitives and command routing through the Director`), plus any extra startup skills — `cafleet-design-doc` (design-doc family). |
 | `‹CONTEXT LINES›` | The role inputs the consuming workflow's delta table lists, one labeled line each. |
 | `‹IMPORTANT / ROLE-CONSTRAINT LINES›` | Every `IMPORTANT:` line and hard role constraint, verbatim (see lossless rule) — including each role's poll-handling line `When you see cafleet message poll output with a message from the Director, act on those instructions.`, plus each role's coordination constraints. |
-| `‹START CUE›` | The role's closing instruction — e.g. `Start by reading the design document. Then wait for the Director to assign your first step.`; `Read the design document, generate a numbered question list …`; `When complete, send the file path to the Director …`. The start cue follows the frame's ready-signal line and does not restate it. |
+| `‹START CUE›` | The role's closing instruction — e.g. `Start by reading the design document. Then wait for the Director to assign your first step.`; `When complete, send the file path to the Director …`. The start cue follows the frame's ready-signal line and does not restate it. |
 
 **Lossless rule (non-negotiable).** Render every `IMPORTANT:` line, hard role constraint and start cue from the consuming workflow's per-role delta table **verbatim**. The shared frame supplies reader portability, startup ordering and host-prerequisite handling; each workflow's delta table is the authoritative inventory of its roles' hard lines.
 

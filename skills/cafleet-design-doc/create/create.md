@@ -16,7 +16,7 @@ Preserve the user's scope, answers and existing annotations. Assign explicit own
 
 Normalize the argument using the guidelines and resolve the selected folder through BASE before writing. Preserve explicit targets; a newly chosen folder uses the next available seven-digit prefix. Set the document's absolute output path and guard audit writes through BASE.
 
-For an existing document, retain its content and answered questions. Existing user-relay markers enter resume mode. Otherwise resolve whether the user wants quality review or a fresh draft before replacing content. Reuse prior answers and skip already completed clarification.
+For an existing document, retain its content. Existing user-relay markers enter resume mode. Otherwise resolve whether the user wants quality review or a fresh draft before replacing content.
 
 ### Step 1: Register & Spawn Members (Director)
 

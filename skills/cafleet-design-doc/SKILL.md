@@ -2,9 +2,8 @@
 name: cafleet-design-doc
 description: >-
   Use when the user asks to create a design doc, design document, specification,
-  or technical spec (create workflow → Director/Drafter/Reviewer team); to
-  validate, review, or interview an existing design doc through multi-round Q&A
-  (interview workflow); or to implement or execute a design doc (execute workflow
+  or technical spec (create workflow → Director/Drafter/Reviewer team); or to
+  implement or execute a design doc (execute workflow
   → TDD team). Also the standardized format spec — consult the template and
   guidelines when editing a design doc. Always invoke this skill and route into
   the matching workflow, orchestrated as a CAFleet team. Teammates in member teams
@@ -15,7 +14,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUser
 
 # Design Document Skill (CAFleet Edition)
 
-This skill is the umbrella for the full design-document lifecycle: the standardized **format spec** plus three CAFleet-native **orchestration workflows** (create, validate/interview, implement/execute). It is a dispatcher — consult a reference page for the format, or route to the matching workflow body to run a team.
+This skill is the umbrella for the full design-document lifecycle: the standardized **format spec** plus the CAFleet-native **orchestration workflows** linked in Dispatch. It is a dispatcher — consult a reference page for the format, or route to the matching workflow body to run a team.
 
 **Assigned teammates** load this skill through the executing backend's supported loader. Codex/OpenCode use absolute paths for this core, CAFleet core, their own backend section and required role references. Continue the existing assigned workflow; loading this umbrella as a member creates no second team. Main-session user requests follow Dispatch below.
 
@@ -36,7 +35,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 | [reference/guidelines.md](reference/guidelines.md) | you are writing or checking a doc against the standard structure (the template opens the page), or need section guidelines, quality standards, or formatting rules |
 | [reference/coordination.md](reference/coordination.md) | you need the inter-member verb + pointer + `COMMENT(role)` schema |
 
-Each workflow body (create / interview / execute) carries its own Required-reading block for the team it runs — base-dir, supervision, and coordination are gated there, not on this dispatch surface.
+Each workflow body linked in Dispatch carries its own Required-reading block for the team it runs — base-dir, supervision, and coordination are gated there, not on this dispatch surface.
 
 ## Dispatch
 
@@ -47,7 +46,6 @@ For a main-session user request matching a scenario below, invoke this skill and
 | When the user wants to… | Invoke this skill and run |
 |:--|:--|
 | Create a design doc / specification / technical spec | the **create** workflow ([create/create.md](create/create.md)) — Director/Drafter/Reviewer team |
-| Validate / review / interview an existing design doc | the **interview** workflow ([interview/interview.md](interview/interview.md)) — multi-round Q&A |
 | Implement / execute a design doc | the **execute** workflow ([execute/execute.md](execute/execute.md)) — TDD team |
 
 ## Member startup

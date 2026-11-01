@@ -77,7 +77,7 @@
 
 Normalize the design-doc argument to the task folder before invoking the generic [BASE resolver](../../cafleet/reference/base-dir.md#procedure): strip a trailing `/design-doc.md`; for a relative argument, strip a leading `design-docs/` if present and prepend `design-docs/` once. For an absolute argument, only strip the trailing filename and use that absolute folder directly. BASE owns containment and disabled-audit decisions; the invoking workflow owns document discovery and its explicit output target.
 
-Design documents use `design-docs/NNNNNNN-<slug>/design-doc.md` in every repository using CAFleet. The directory may also contain related artifacts, such as `question.md` from interviews. Use a short kebab-case feature description for `<slug>`.
+Design documents use `design-docs/NNNNNNN-<slug>/design-doc.md` in every repository using CAFleet. Use a short kebab-case feature description for `<slug>`.
 
 ### Numbering
 
@@ -85,7 +85,7 @@ Before choosing a new document's folder, inspect the target repository's `design
 
 For fresh creation from a topic or an unnumbered slug such as `my-feature`, choose the next number and use a folder such as `0000001-my-feature`. Resolve that numbered folder through BASE before writing any document or audit artifacts. Recheck availability before creating the folder; if another task has taken the number, select the next available number.
 
-The create, interview, and execute workflows accept an existing directory name such as `0000001-my-feature` or a document path. Preserve existing targets when resuming, interviewing, or executing. Honor an explicit user-supplied output path; numbering supplies the default location when the workflow chooses a new folder.
+The create and execute workflows accept an existing directory name such as `0000001-my-feature` or a document path. Preserve existing targets when resuming or executing. Honor an explicit user-supplied output path; numbering supplies the default location when the workflow chooses a new folder.
 
 ## What "Comprehensive" Means
 
