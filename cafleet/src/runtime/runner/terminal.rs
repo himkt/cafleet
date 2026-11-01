@@ -184,7 +184,7 @@ impl Drop for RawTerminalGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::runtime::runner::terminal::*;
     use crate::runtime::runner::transport::test_support::Observer;
 
     #[test]

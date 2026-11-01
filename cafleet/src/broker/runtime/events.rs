@@ -1,7 +1,9 @@
-use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
-
-use super::*;
+use crate::broker::runtime::*;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use rusqlite::params;
+use serde_json::Value;
+use serde_json::json;
 
 fn map_interaction(row: &rusqlite::Row<'_>) -> rusqlite::Result<InteractionRecord> {
     Ok(InteractionRecord {
@@ -105,7 +107,7 @@ pub(crate) fn get_event(
             map_event,
         )
         .optional()?
-        .ok_or_else(|| CafleetError::Value(format!("Event {event_id} not found")))?;
+        .ok_or_else(|| CafleetError::App(format!("Event {event_id} not found")))?;
     let run = runtime_snapshot(conn, event.run_id)?;
     historical_ownership(conn, &run.run)?;
     let interaction = event
@@ -973,13 +975,17 @@ pub(crate) fn update_interaction_evidence(
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::{Connection, params};
-    use serde_json::{Value, json};
+    use rusqlite::Connection;
+    use rusqlite::params;
+    use serde_json::Value;
+    use serde_json::json;
 
     use crate::broker::members::test_support::register;
+    use crate::broker::runtime as storage;
     use crate::broker::runtime::test_support::*;
-    use crate::broker::runtime::{self as storage, *};
-    use crate::db::test_support::{TableSnapshot, table_snapshot};
+    use crate::broker::runtime::*;
+    use crate::db::test_support::TableSnapshot;
+    use crate::db::test_support::table_snapshot;
 
     const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
     const REFUSAL_INSTRUCTION: &str = "Verify this event. The member's automatic reviewer refused the operation and no native request is waiting. Dispatch evidence comes only from the member's routed request with its exact command, cwd, environment and refusal; this event and screen captures corroborate it. With no routed request, dispatch nothing and ask the member whether the refused operation is still needed when it next reports or goes idle. For a routed request, decide in the Director session's effective auto mode whether to authorize a separate execution through the routed-command path or to refuse; otherwise obtain the user's permission first. Inspect the actual result and the member's continuation afterward.";
@@ -987,8 +993,9 @@ mod tests {
     const MULTI_ROW_SENTENCE: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
 
     mod interaction_refresh {
-        use super::*;
-        use std::time::{Duration, Instant};
+        use crate::broker::runtime::events::tests::*;
+        use std::time::Duration;
+        use std::time::Instant;
 
         struct RefreshFixture {
             fixture: Fixture,
@@ -1450,9 +1457,12 @@ mod tests {
         }
     }
     mod versioned_events {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use rusqlite::hooks::TransactionOperation;
 
-        use super::*;
+        use crate::broker::runtime::events::tests::*;
 
         fn action(fixture: &Fixture, event: &RuntimeEventRecord) -> Value {
             let instruction = match event.payload_json["evidence"]["operation_rows"].as_u64() {
@@ -1980,7 +1990,7 @@ mod tests {
     }
 
     mod automatic_review_events {
-        use super::*;
+        use crate::broker::runtime::events::tests::*;
         use crate::broker::runtime::test_support::automatic_review::*;
 
         #[test]
@@ -2248,7 +2258,11 @@ mod tests {
                 let mut fixture = Fixture::new();
                 let owner = fixture.activate();
                 fixture.reserve(&owner);
-                crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
+                crate::broker::members::test_support::deregister_member(
+                    &mut fixture.conn,
+                    fixture.member,
+                )
+                .unwrap();
                 let recovery = fixture.recoverer();
                 let event = storage::persist_event(
                     &mut fixture.conn,
@@ -2283,10 +2297,7 @@ mod tests {
             (message.from_member_id, message.to_member_id),
             (fixture.member, fixture.director)
         );
-        assert_eq!(
-            message.status,
-            crate::broker::records::MessageStatus::InputRequired
-        );
+        assert_eq!(message.status, crate::broker::MessageStatus::InputRequired);
         assert_eq!(payload, event.payload_json);
         for (key, id) in [
             ("event_id", event.event_id),
@@ -2383,9 +2394,10 @@ mod tests {
             let owner = fixture.activate();
             fixture.reserve(&owner);
             if target == "commit" {
-                use rusqlite::hooks::{
-                    AuthAction, AuthContext, Authorization, TransactionOperation,
-                };
+                use rusqlite::hooks::AuthAction;
+                use rusqlite::hooks::AuthContext;
+                use rusqlite::hooks::Authorization;
+                use rusqlite::hooks::TransactionOperation;
                 fixture
                     .conn
                     .authorizer(Some(|context: AuthContext<'_>| {
@@ -2509,7 +2521,11 @@ mod tests {
             fixture.reserve(&owner);
             match damage {
                 "member" => {
-                    crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
+                    crate::broker::members::test_support::deregister_member(
+                        &mut fixture.conn,
+                        fixture.member,
+                    )
+                    .unwrap();
                 }
                 "director" => {
                     fixture.conn.execute("UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",params![NOW,fixture.director]).unwrap();
@@ -2544,7 +2560,7 @@ mod tests {
                 PersistenceMode::Recovery,
             )
             .unwrap();
-            let output = crate::presentation::runtime_event(
+            let output = crate::output::json::runtime_event(
                 &storage::get_event(&fixture.conn, event.event_id).unwrap(),
             );
             assert_eq!(output["notification_state"], "archived");
@@ -2559,7 +2575,8 @@ mod tests {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
         let first = fixture.open(&owner);
-        crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
+        crate::broker::members::test_support::deregister_member(&mut fixture.conn, fixture.member)
+            .unwrap();
         let recovery = fixture.recoverer();
         let retry = storage::persist_event(
             &mut fixture.conn,
@@ -2789,7 +2806,8 @@ mod tests {
                 [owner.run_id],
             )
             .unwrap();
-        crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
+        crate::broker::members::test_support::deregister_member(&mut fixture.conn, fixture.member)
+            .unwrap();
         let opened = storage::persist_event(
             &mut fixture.conn,
             &owner,
@@ -3059,7 +3077,7 @@ mod tests {
     }
 
     mod input_delivery_result_events {
-        use super::*;
+        use crate::broker::runtime::events::tests::*;
 
         const SUBMITTED: &str = r#"{"status":"submitted","method":"profile","reason":null}"#;
 
@@ -3295,7 +3313,7 @@ mod tests {
                 ),
                 storage::input_delivery_result_cause(3, "submitted", None),
             ] {
-                super::super::validate_delivery_cause(&transition(cause.clone()))
+                crate::broker::runtime::events::validate_delivery_cause(&transition(cause.clone()))
                     .unwrap_or_else(|error| panic!("{cause}: {}", error.message()));
             }
             for forged in [
@@ -3304,7 +3322,10 @@ mod tests {
                 json!({"kind":"input_delivery_result","input_id":3,"stage":"unknown","cause":"write_failed"}),
             ] {
                 assert!(
-                    super::super::validate_delivery_cause(&transition(forged.clone())).is_err(),
+                    crate::broker::runtime::events::validate_delivery_cause(&transition(
+                        forged.clone()
+                    ))
+                    .is_err(),
                     "{forged}"
                 );
             }
@@ -3322,7 +3343,9 @@ mod tests {
                 json!({"kind":"manual_input"})
             );
             assert_eq!(
-                super::super::original(&view).unwrap().cause_json,
+                crate::broker::runtime::events::original(&view)
+                    .unwrap()
+                    .cause_json,
                 Some(
                     json!({"kind":"input_delivery_result","input_id":payload["input_id"],"stage":"unknown","cause":{"kind":"manual_input"}})
                 )

@@ -121,17 +121,20 @@ pub(super) fn reconcile(
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
 
-    use super::super::test_support::*;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
     use crate::db::test_support::TableSnapshot;
     use crate::error::CafleetError;
+    use crate::runtime::runner::recovery::test_support::*;
     use crate::runtime::runner::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     mod history {
-        use super::*;
+        use crate::runtime::runner::recovery::exceptional::tests::*;
         use crate::runtime::runner::recovery::test_support::relationships::retained_history;
         use std::os::unix::fs::MetadataExt;
         use std::path::PathBuf;
@@ -450,7 +453,7 @@ mod tests {
     }
 
     mod missing_paths {
-        use super::*;
+        use crate::runtime::runner::recovery::exceptional::tests::*;
         use crate::runtime::runner::recovery::test_support::missing_paths::*;
         #[test]
         fn runner_recovery_missing_path_machine_termination_commits_one_atomic_database_only_loss()
@@ -564,9 +567,8 @@ mod tests {
         #[test]
         fn runner_recovery_missing_path_uses_current_lifecycle_for_atomic_archived_closure_and_loss()
          {
-            use crate::runtime::runner::recovery::test_support::relationships::{
-                LIFECYCLES, end_lifecycle,
-            };
+            use crate::runtime::runner::recovery::test_support::relationships::LIFECYCLES;
+            use crate::runtime::runner::recovery::test_support::relationships::end_lifecycle;
             for lifecycle in LIFECYCLES {
                 let mut case = Case::new();
                 let opening = persist_opening(&mut case);

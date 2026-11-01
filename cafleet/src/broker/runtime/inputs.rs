@@ -1,7 +1,8 @@
-use rusqlite::{Connection, OptionalExtension, params};
-
-use super::*;
+use crate::broker::runtime::*;
 use crate::time::now_stamp;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use rusqlite::params;
 
 fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
     Ok(InputOperation {
@@ -361,7 +362,7 @@ pub(crate) fn get_input(conn: &Connection, input_id: i64) -> Result<InputOperati
             map_input,
         )
         .optional()?
-        .ok_or_else(|| CafleetError::Value(format!("Input {input_id} not found")))?;
+        .ok_or_else(|| CafleetError::App(format!("Input {input_id} not found")))?;
     validate_input(conn, input)
 }
 
@@ -706,8 +707,9 @@ pub(super) fn require_capacity(conn: &Connection, run_id: i64) -> Result<(), Caf
 #[cfg(test)]
 mod tests {
     use crate::broker::members::test_support::register;
+    use crate::broker::runtime as storage;
     use crate::broker::runtime::test_support::*;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime::*;
 
     #[test]
     fn input_payload_digest_hashes_the_key_sorted_payload() {
@@ -1123,7 +1125,7 @@ mod tests {
     }
 
     mod uncertain_cause {
-        use super::*;
+        use crate::broker::runtime::inputs::tests::*;
 
         fn deferred_attempt(fixture: &mut Fixture, owner: &RunOwner, key: &str) -> InputOperation {
             let input = fixture.input(owner, key, InputKind::Prompt, None);

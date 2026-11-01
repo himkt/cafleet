@@ -4,10 +4,14 @@ use crate::broker::runtime::{
     PersistenceMode, RunRecord, RuntimeEventKind,
 };
 #[cfg(test)]
-use sha2::{Digest, Sha256};
+use sha2::Digest;
+#[cfg(test)]
+use sha2::Sha256;
 use std::collections::VecDeque;
 #[cfg(test)]
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+#[cfg(test)]
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -620,15 +624,14 @@ impl Drop for EventWriter {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
     use crate::broker::runtime::*;
     use crate::runtime::runner::test_support::Fixture;
+    use crate::runtime::runner::writer::*;
     use std::sync::Condvar;
     pub(crate) const VERSION: &str = "0.0.1-synthetic";
     pub(crate) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
-    pub(in crate::runtime::runner) use crate::coding_agent::profiles::catalog::test_support::{
-        synthetic_catalog as catalog, synthetic_definitions as definitions,
-    };
+    pub(in crate::runtime::runner) use crate::coding_agent::profiles::catalog::test_support::synthetic_catalog as catalog;
+    pub(in crate::runtime::runner) use crate::coding_agent::profiles::catalog::test_support::synthetic_definitions as definitions;
     pub(crate) fn configure(fixture: &mut WriterFixture) {
         fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?2",rusqlite::params![VERSION,fixture.fixture.run.run_id]).unwrap();
         fixture.fixture.run =
@@ -964,12 +967,12 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::*;
-    use super::*;
     use crate::broker::runtime::*;
+    use crate::runtime::runner::writer::test_support::*;
+    use crate::runtime::runner::writer::*;
 
     mod refresh {
-        use super::*;
+        use crate::runtime::runner::writer::tests::*;
         fn opening(fixture: &WriterFixture) -> ObservedTransition {
             ObservedTransition {
                 episode_seq: Some(1),
@@ -1176,7 +1179,7 @@ mod tests {
     }
 
     mod worker {
-        use super::*;
+        use crate::runtime::runner::writer::tests::*;
         #[test]
         fn writer_hook_timeout_releases_the_mutex_before_unwinding_through_cleanup() {
             let hooks = Arc::new(Hooks::default());
@@ -1457,7 +1460,7 @@ mod tests {
     }
 
     mod effective_policy {
-        use super::*;
+        use crate::runtime::runner::writer::tests::*;
         fn set_status(fixture: &mut WriterFixture, status: &str) {
             fixture
                 .fixture

@@ -1,10 +1,18 @@
-use crate::broker::records::{
-    CreatedFleet, DeletedFleet, FleetRecord, FleetSummary, MemberActivity, MemberRecord,
-    MessageRecord, Placement, RegisteredMember,
-};
-
-use super::truncate_text;
-use crate::broker::runtime::{DeliveryProjection, DeliveryStatus};
+use crate::broker::CreatedFleet;
+use crate::broker::DeletedFleet;
+use crate::broker::FleetRecord;
+use crate::broker::FleetSummary;
+use crate::broker::MemberActivity;
+use crate::broker::MemberRecord;
+use crate::broker::MessageRecord;
+use crate::broker::Placement;
+use crate::broker::RegisteredMember;
+use crate::broker::runtime::DeliveryProjection;
+use crate::broker::runtime::DeliveryStatus;
+use crate::broker::runtime::InputOperation;
+use crate::broker::runtime::RuntimeEventView;
+use crate::broker::runtime::RuntimeSnapshot;
+use crate::output::truncate_text;
 
 pub(crate) fn format_message(message: &MessageRecord, limit: usize) -> String {
     let header = format!(
@@ -166,7 +174,7 @@ pub(crate) fn format_member_detail(member: &MemberRecord) -> String {
     );
     if let Some(runtime) = &member.runtime {
         text.push('\n');
-        text.push_str(&super::format_runtime_snapshot(runtime));
+        text.push_str(&crate::output::format_runtime_snapshot(runtime));
     }
     text
 }
@@ -238,14 +246,174 @@ pub(crate) fn format_member_list(members: &[MemberActivity]) -> String {
     lines.join("\n")
 }
 
+pub(crate) fn format_runtime_recovery(report: &crate::runtime::runner::RecoveryReport) -> String {
+    let mut text = format!(
+        "Recovery: member={} run={} outcome={} status={} replayed={} inbox={} archived={}",
+        report.member_id,
+        report.run_id,
+        report.outcome.as_str(),
+        report.status.as_str(),
+        report.replayed_count,
+        report.inbox_count,
+        report.archived_count
+    );
+    for diagnostic in &report.cleanup_diagnostics {
+        text.push_str("\nCleanup: ");
+        match diagnostic {
+            serde_json::Value::String(value) => text.push_str(value),
+            value => text.push_str(&value.to_string()),
+        }
+    }
+    text
+}
+
+pub(crate) fn format_runtime_snapshot(snapshot: &RuntimeSnapshot) -> String {
+    let run = &snapshot.run;
+    format!(
+        "Runtime: run={} mode={} status={} coverage={} review={}",
+        run.run_id,
+        run.resolved_mode,
+        run.status.as_str(),
+        run.coverage.as_str(),
+        run.effective_policy_json.as_ref().map_or("-", |record| {
+            record["automatic_review"]
+                .as_str()
+                .expect("validated effective policy review state")
+        })
+    )
+}
+
+pub(crate) fn format_runtime_event(view: &RuntimeEventView) -> String {
+    let event = &view.event;
+    let message = event
+        .message_id
+        .map_or_else(|| "-".into(), |id| id.to_string());
+    let mut text = format!(
+        "Event: {} run={} seq={} kind={} notification={} message={}\n{}",
+        event.event_id,
+        event.run_id,
+        event.event_seq,
+        event.kind.as_str(),
+        event.notification_state.as_str(),
+        message,
+        format_runtime_snapshot(&view.run)
+    );
+    if let Some(interaction) = &view.interaction {
+        text.push_str(&format!(
+            "\nInteraction: {} classification={} closed_at={} close_reason={}",
+            interaction.interaction_id,
+            interaction.classification.as_str(),
+            interaction.closed_at.as_deref().unwrap_or("-"),
+            interaction
+                .close_reason
+                .map_or("-", |reason| reason.as_str())
+        ));
+    }
+    text
+}
+
+pub(crate) fn format_input_operation(input: &InputOperation) -> String {
+    let mut text = format!(
+        "Input: {} run={} kind={} state={} disposition={} message={}",
+        input.input_id,
+        input.run_id,
+        input.kind.as_str(),
+        input.state.as_str(),
+        input
+            .disposition
+            .map_or("-", |disposition| disposition.as_str()),
+        input
+            .message_id
+            .map_or_else(|| "-".into(), |id| id.to_string())
+    );
+    if let Some(response) = &input.permission_response {
+        let metadata = &response.metadata;
+        text.push_str(&format!("\nPermission decision: interaction={} event={} decision={} source={} mode={} director={} epoch={}",
+            metadata.interaction_id,metadata.event_id,metadata.decision.as_str(),metadata.decision_source.as_str(),metadata.director_mode.as_str(),metadata.director_member_id,metadata.expected_owner_epoch));
+    }
+    text
+}
+
+pub(crate) fn format_permission_response_result(
+    row: &crate::runtime::runner::PermissionResponseResult,
+) -> String {
+    let mut text = format!(
+        "Permission response: interaction={} run={} decision={} source={} status={} input={} stage={} output_seq={}",
+        row.interaction_id,
+        row.run_id,
+        row.decision.as_str(),
+        row.decision_source.as_str(),
+        row.submission.status.as_str(),
+        row.submission
+            .input_id
+            .map_or_else(|| "-".into(), |value| value.to_string()),
+        row.submission.stage.as_str(),
+        row.submission
+            .output_seq
+            .map_or_else(|| "-".into(), |value| value.to_string())
+    );
+    if let Some(reason) = &row.submission.reason {
+        text.push_str(&format!("\nReason: {reason}"));
+    }
+    text
+}
+
+pub(crate) fn format_permission_inspection(
+    row: &crate::runtime::runner::PermissionInspection,
+) -> String {
+    let decisions = row
+        .supported_decisions
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let visibility = row.visibility.as_str();
+    let mut text = format!(
+        "Permission: interaction={} event={} member={} run={} epoch={} visibility={} answers={}\nRequest: token={} output_seq={} rule={}",
+        row.interaction_id,
+        row.event_id,
+        row.member_id,
+        row.run_id,
+        row.owner_epoch,
+        visibility,
+        if decisions.is_empty() {
+            "-"
+        } else {
+            &decisions
+        },
+        row.request_token.as_deref().unwrap_or("-"),
+        row.output_seq,
+        row.answer_rule_id.as_deref().unwrap_or("-")
+    );
+    if let Some(reason) = &row.capability_reason {
+        text.push_str(&format!("\nCapability: {reason}"));
+    }
+    if !row.missing_evidence.is_empty() {
+        text.push_str(&format!(
+            "\nMissing evidence: {}",
+            row.missing_evidence
+                .iter()
+                .map(|value| value.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::broker::records::{DeletedMember, MemberKind, MemberStatus, MessageStatus};
+    use crate::broker::DeletedMember;
+    use crate::broker::MemberKind;
+    use crate::broker::MemberStatus;
+    use crate::broker::MessageStatus;
+    use crate::output::text::*;
 
     mod delivery_text {
-        use super::*;
-        use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
+        use crate::broker::runtime::DeliveryMethod;
+        use crate::broker::runtime::DeliveryProjection;
+        use crate::broker::runtime::DeliveryStatus;
+        use crate::output::text::tests::*;
 
         fn projection(
             status: DeliveryStatus,
@@ -353,7 +521,7 @@ mod tests {
         };
         assert_eq!(format_message(&message, 2), "[5 | from:2 | acked]\n界🙂…");
         assert_eq!(
-            crate::presentation::message(&message)["text"],
+            crate::output::json::message(&message)["text"],
             "界🙂a\nnext"
         );
         assert_eq!(format_message(&message, 0), "[5 | from:2 | acked]\n…");
@@ -434,7 +602,7 @@ mod tests {
             "Deleted fleet 4. Deregistered 3 members.\n  member 6: %7 (killed)\n  member 8: (pending — no pane)"
         );
         assert_eq!(
-            crate::presentation::deleted_fleet(&deleted).to_string(),
+            crate::output::json::deleted_fleet(&deleted).to_string(),
             r#"{"fleet_id":4,"deregistered_count":3,"members":[{"member_id":6,"pane_status":"%7 (killed)"},{"member_id":8,"pane_status":"(pending — no pane)"}]}"#
         );
         let empty = DeletedFleet {
@@ -444,6 +612,32 @@ mod tests {
         assert_eq!(
             format_fleet_delete(&empty),
             "Deleted fleet 4. Deregistered 3 members."
+        );
+    }
+    use crate::runtime::runner::input_protocol_test_support::inspection;
+
+    #[test]
+    fn permission_inspection_text_names_the_token_sequence_and_answer_rule() {
+        let token = "a".repeat(64);
+        assert_eq!(
+            crate::output::text::format_permission_inspection(&inspection()),
+            format!(
+                "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=allow,deny\nRequest: token={token} output_seq=5 rule=opencode-shell-allow-enter\nMissing evidence: arguments,cwd"
+            )
+        );
+    }
+
+    #[test]
+    fn permission_inspection_text_marks_an_unsupported_request_with_dashes_and_its_reason() {
+        let mut unsupported = inspection();
+        unsupported.answer_rule_id = None;
+        unsupported.request_token = None;
+        unsupported.supported_decisions = Vec::new();
+        unsupported.capability_reason = Some("native profile unavailable".into());
+        unsupported.missing_evidence = Vec::new();
+        assert_eq!(
+            crate::output::text::format_permission_inspection(&unsupported),
+            "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=-\nRequest: token=- output_seq=5 rule=-\nCapability: native profile unavailable"
         );
     }
 }

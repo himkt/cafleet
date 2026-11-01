@@ -108,7 +108,7 @@ pub(super) fn receive_input_expiration(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
+    use crate::runtime::runner::input_clock::*;
     use std::collections::VecDeque;
 
     pub(crate) struct ScriptClock {
@@ -169,9 +169,10 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::*;
     use crate::runtime::runner::InputExpiration;
-    use std::time::{Duration, Instant};
+    use crate::runtime::runner::input_clock::test_support::*;
+    use std::time::Duration;
+    use std::time::Instant;
 
     const EXPIRATION: u64 = 10_000_000_000;
 

@@ -761,11 +761,13 @@ impl Detector {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
-    use crate::coding_agent::profiles::catalog::test_support::{
-        VERSION, bundled_fixture, simple_definition, synthetic_definitions,
-    };
-    use crate::runtime::runner::{TerminalSize, TerminalState};
+    use crate::coding_agent::profiles::catalog::test_support::VERSION;
+    use crate::coding_agent::profiles::catalog::test_support::bundled_fixture;
+    use crate::coding_agent::profiles::catalog::test_support::simple_definition;
+    use crate::coding_agent::profiles::catalog::test_support::synthetic_definitions;
+    use crate::coding_agent::profiles::detector::*;
+    use crate::runtime::runner::TerminalSize;
+    use crate::runtime::runner::TerminalState;
 
     pub(crate) fn bundled_screen(id: &str) -> String {
         bundled_fixture(id)
@@ -931,14 +933,16 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::*;
-    use super::*;
-    use crate::broker::runtime::{InteractionClass, PermissionDecision};
+    use crate::broker::runtime::InteractionClass;
+    use crate::broker::runtime::PermissionDecision;
     use crate::coding_agent::profiles::catalog::test_support::synthetic_definitions as definitions;
     use crate::coding_agent::profiles::catalog::test_support::*;
+    use crate::coding_agent::profiles::detector::test_support::*;
+    use crate::coding_agent::profiles::detector::*;
     use crate::coding_agent::profiles::*;
     use crate::runtime::runner::*;
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
 
     /// The Claude auto-tip permission form; `padding` written spaces follow the question and
     /// operation rows, as Claude leaves them when it repaints only the changed cells of a row
@@ -2321,7 +2325,7 @@ mod tests {
         assert_no_debug_or_serialize!(AnswerMatch);
     }
     mod focus_resolution {
-        use super::*;
+        use crate::coding_agent::profiles::detector::tests::*;
 
         fn gated_catalog() -> ProfileCatalog {
             ProfileCatalog::from_definitions(&gated_fixture_definition()).unwrap()
@@ -3041,8 +3045,8 @@ mod tests {
     }
 
     mod annotation {
-        use super::*;
         use crate::coding_agent::profiles::catalog::test_support::annotation::*;
+        use crate::coding_agent::profiles::detector::tests::*;
         fn observe_lines(definition: &Value, rows: &[&str]) -> ScreenObservation {
             let rows = rows.iter().map(|row| (*row).to_owned()).collect::<Vec<_>>();
             observation(definition, &terminal(&rows, 80, false).snapshot())
@@ -3225,7 +3229,7 @@ mod tests {
     }
 
     mod operation_rows {
-        use super::*;
+        use crate::coding_agent::profiles::detector::tests::*;
 
         const MARGIN: &str = "    ";
 
@@ -3383,7 +3387,7 @@ mod tests {
     }
 
     mod opencode_layouts {
-        use super::*;
+        use crate::coding_agent::profiles::detector::tests::*;
 
         const VERSION: &str = "2.1.4";
         const PERMISSION_RULE: &str = "opencode-shell-permission";

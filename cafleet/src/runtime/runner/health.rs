@@ -147,13 +147,13 @@ impl ObservationHealth {
 pub(crate) mod test_support {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
-    use std::time::{Duration, Instant};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use super::*;
+    use crate::runtime::runner::health::*;
     use crate::runtime::runner::test_support::Fixture;
     use rusqlite::params;
 
@@ -212,10 +212,11 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use super::test_support::*;
-    use super::*;
+    use crate::runtime::runner::health::test_support::*;
+    use crate::runtime::runner::health::*;
     use crate::runtime::runner::test_support::Fixture;
     use serde_json::json;
 
@@ -232,7 +233,7 @@ mod tests {
     }
 
     mod observation_contract {
-        use super::*;
+        use crate::runtime::runner::health::tests::*;
 
         fn wire(run: &RunRecord) -> serde_json::Value {
             json!({"identity":ControlIdentity::from_run(run),"runner":{"pid":run.runner_pid.unwrap(),"start_identity":run.runner_start_identity.as_ref().unwrap()},"child":{"pid":run.child_pid.unwrap(),"start_identity":run.child_start_identity.as_ref().unwrap()},"output_seq":17,"observation":{"visibility":"unknown","eligibility":{"state":"hold","reason":"unknown"},"pending_count":0,"pending_evidence":false,"gap_count":0,"degraded":false,"diagnostic":null}})
@@ -361,7 +362,7 @@ mod tests {
         use std::os::unix::fs::MetadataExt;
         use std::path::PathBuf;
 
-        use super::*;
+        use crate::runtime::runner::health::tests::*;
 
         const SPOOL_CANARY: &[u8] = b"private-recovery-diagnosis-canary:not-a-complete-valid-frame";
 

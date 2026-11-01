@@ -1027,27 +1027,33 @@ impl ObservationController {
 }
 
 #[cfg(test)]
-pub(crate) use native_capture::*;
+pub(crate) use crate::runtime::runner::observation::native_capture::*;
 
 #[cfg(test)]
 pub(crate) mod native_capture {
-    use super::*;
-    use crate::broker::records::Placement;
-    use crate::broker::runtime::{OwnerKind, RunRecord, RunStatus};
+    use crate::broker::Placement;
+    use crate::broker::runtime::OwnerKind;
+    use crate::broker::runtime::RunRecord;
+    use crate::broker::runtime::RunStatus;
+    use crate::coding_agent::Detector;
+    use crate::coding_agent::ProfileCatalog;
     use crate::coding_agent::ScreenRegion;
-    use crate::coding_agent::{Detector, ProfileCatalog};
-    pub(crate) use exporter::tests::runner_collector_export_child_path;
-    use exporter::{CaptureExporterTask, InertCaptureExportHooks};
-    pub(crate) use exporter::{NativeCaptureExportBoundary, NativeCaptureExportHooks};
-    pub(crate) use files::*;
+    use crate::runtime::runner::observation::native_capture::exporter::CaptureExporterTask;
+    use crate::runtime::runner::observation::native_capture::exporter::InertCaptureExportHooks;
+    pub(crate) use crate::runtime::runner::observation::native_capture::exporter::NativeCaptureExportBoundary;
+    pub(crate) use crate::runtime::runner::observation::native_capture::exporter::NativeCaptureExportHooks;
+    pub(crate) use crate::runtime::runner::observation::native_capture::exporter::tests::runner_collector_export_child_path;
+    pub(crate) use crate::runtime::runner::observation::native_capture::files::*;
+    pub(crate) use crate::runtime::runner::observation::native_capture::verification::native_capture_service_child_path;
+    pub(crate) use crate::runtime::runner::observation::native_capture::verification::run_native_capture_verification_with_export_hooks;
+    pub(crate) use crate::runtime::runner::observation::native_capture::verification::tests::runner_collector_resize_child_path;
+    use crate::runtime::runner::observation::*;
     use regex::Regex;
     use serde_json::json;
-    use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
-    pub(crate) use verification::tests::runner_collector_resize_child_path;
-    pub(crate) use verification::{
-        native_capture_service_child_path, run_native_capture_verification_with_export_hooks,
-    };
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::time::Duration;
+    use std::time::Instant;
 
     #[derive(Clone, Debug, Serialize)]
     pub(crate) struct NativeCaptureLimits {
@@ -1651,7 +1657,7 @@ pub(crate) mod native_capture {
                 state.clock_kind = clock.kind();
             }
             self.source = Some(
-                json!({"database_identity_json":run.database_identity_json,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"runner":{"pid":run.owner_pid,"start_identity":run.owner_start_identity},"child":null,"backend":run.backend,"native_version":run.native_version,"requested_mode":run.requested_mode,"resolved_mode":run.resolved_mode,"mode_source":run.mode_source,"permission_argv":run.permission_argv_json,"executable":native,"cwd":spawn.cwd,"environment_evidence_ref":producer.value["environment_evidence_ref"],"placement":crate::presentation::placement(placement),"producer":producer.value,"clock":{"kind":if clock.kind()==ObservationClockKind::Real{"real"}else{"deterministic"},"monotonic_api":"std::time::Instant","utc_api":"chrono::Utc::now","origin":{"phase":"prepared","observed_at":origin.observed_at}}}),
+                json!({"database_identity_json":run.database_identity_json,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"runner":{"pid":run.owner_pid,"start_identity":run.owner_start_identity},"child":null,"backend":run.backend,"native_version":run.native_version,"requested_mode":run.requested_mode,"resolved_mode":run.resolved_mode,"mode_source":run.mode_source,"permission_argv":run.permission_argv_json,"executable":native,"cwd":spawn.cwd,"environment_evidence_ref":producer.value["environment_evidence_ref"],"placement":crate::output::json::placement(placement),"producer":producer.value,"clock":{"kind":if clock.kind()==ObservationClockKind::Real{"real"}else{"deterministic"},"monotonic_api":"std::time::Instant","utc_api":"chrono::Utc::now","origin":{"phase":"prepared","observed_at":origin.observed_at}}}),
             );
             self.producer_ref = Some(producer.reference.to_string_lossy().into_owned());
             self.origin = Some(origin);
@@ -2154,22 +2160,28 @@ pub(crate) mod native_capture {
     }
 
     pub(crate) mod test_support {
-        use serde_json::{Value, json};
+        use serde_json::Value;
+        use serde_json::json;
 
-        use super::*;
-        use crate::broker::records::Placement;
+        use crate::broker::Placement;
         use crate::broker::runtime as storage;
         use crate::coding_agent::ScreenRegion;
         use crate::digest::sha256_hex;
+        use crate::runtime::runner::observation::native_capture::*;
         use crate::runtime::runner::test_support::*;
         use crate::runtime::system::test_support::TestChild;
         use std::fs::OpenOptions;
         use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        use std::path::{Path, PathBuf};
-        use std::process::{Command, Stdio};
-        use std::sync::atomic::{AtomicU64, Ordering};
-        use std::time::{Duration, Instant};
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::Path;
+        use std::path::PathBuf;
+        use std::process::Command;
+        use std::process::Stdio;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        use std::time::Instant;
 
         /// Publishes `bytes` at `path` atomically: waiters poll these marker
         /// paths from other processes, so the name must never be visible
@@ -2491,12 +2503,14 @@ pub(crate) mod native_capture {
     mod tests {
         use std::result::Result;
 
-        use serde_json::{Value, json};
+        use serde_json::Value;
+        use serde_json::json;
 
-        use super::test_support::*;
-        use super::*;
-        use crate::broker::runtime::{self as storage, *};
+        use crate::broker::runtime as storage;
+        use crate::broker::runtime::*;
         use crate::digest::sha256_hex;
+        use crate::runtime::runner::observation::native_capture::test_support::*;
+        use crate::runtime::runner::observation::native_capture::*;
         use crate::runtime::runner::service::test_support::*;
 
         #[test]
@@ -2523,7 +2537,7 @@ pub(crate) mod native_capture {
         }
 
         mod collection {
-            use super::*;
+            use crate::runtime::runner::observation::native_capture::tests::*;
             use std::time::Duration;
 
             #[test]
@@ -3115,7 +3129,7 @@ pub(crate) mod native_capture {
         }
 
         mod capture_policy {
-            use super::*;
+            use crate::runtime::runner::observation::native_capture::tests::*;
             use std::sync::Mutex;
 
             #[derive(Default)]
@@ -3301,7 +3315,7 @@ pub(crate) mod native_capture {
         }
 
         mod binding {
-            use super::*;
+            use crate::runtime::runner::observation::native_capture::tests::*;
             #[test]
             fn capture_bind_checks_actual_native_digest_before_any_observation() {
                 let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
@@ -3329,8 +3343,8 @@ pub(crate) mod native_capture {
         }
 
         mod recorded_policy {
-            use super::*;
             use crate::coding_agent::ProfileCatalog;
+            use crate::runtime::runner::observation::native_capture::tests::*;
 
             fn select_catalog(fixture: &mut CaptureFixture, bundled: bool) -> ProfileCatalog {
                 if bundled {
@@ -3506,10 +3520,10 @@ pub(crate) mod native_capture {
         }
 
         mod service_capture {
-            use super::*;
-            use crate::runtime::runner::service::test_support::observation_services::{
-                capture, private_write, wait_until,
-            };
+            use crate::runtime::runner::observation::native_capture::tests::*;
+            use crate::runtime::runner::service::test_support::observation_services::capture;
+            use crate::runtime::runner::service::test_support::observation_services::private_write;
+            use crate::runtime::runner::service::test_support::observation_services::wait_until;
             #[test]
             fn service_private_capture_publishes_manifest_last_and_keeps_native_work_running() {
                 let mut fixture = ServiceFixture::configured(false, capture);
@@ -3588,7 +3602,7 @@ pub(crate) mod native_capture {
     }
 
     mod exporter {
-        use super::*;
+        use crate::runtime::runner::observation::native_capture::*;
         use std::thread::JoinHandle;
 
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3824,28 +3838,35 @@ pub(crate) mod native_capture {
         ) -> Result<Option<PublicationPermit<'a>>> {
             let current = control.map_or(until, |control| control.deadline(until));
             hooks.before(boundary, current)?;
-            super::files::operation_permit(control, until)
+            crate::runtime::runner::observation::native_capture::files::operation_permit(
+                control, until,
+            )
         }
 
         pub(super) mod tests {
             use std::fs::File;
-            use std::io::{ErrorKind, Read, Write};
+            use std::io::ErrorKind;
+            use std::io::Read;
+            use std::io::Write;
             use std::path::Path;
             use std::result::Result;
 
-            use serde_json::{Value, json};
+            use serde_json::Value;
+            use serde_json::json;
 
-            use super::*;
-            use crate::broker::runtime::{self as storage, *};
+            use crate::broker::runtime as storage;
+            use crate::broker::runtime::*;
             use crate::digest::sha256_hex;
-            use crate::runtime::runner::service::test_support::observation_services::{
-                capture, private_write,
-            };
+            use crate::runtime::runner::observation::native_capture::exporter::*;
+            use crate::runtime::runner::service::test_support::observation_services::capture;
+            use crate::runtime::runner::service::test_support::observation_services::private_write;
             use crate::runtime::runner::service::test_support::*;
             use crate::runtime::runner::test_support::*;
-            use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+            use std::os::unix::fs::MetadataExt;
+            use std::os::unix::fs::OpenOptionsExt;
             use std::path::PathBuf;
-            use std::sync::{Arc, Mutex};
+            use std::sync::Arc;
+            use std::sync::Mutex;
 
             struct ServiceReturn {
                 at: Instant,
@@ -4601,14 +4622,18 @@ pub(crate) mod native_capture {
     }
 
     mod files {
-        use super::*;
-        use std::fs::{File, OpenOptions};
-        use std::io::{Read, Write};
-        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-        use std::path::{Path, PathBuf};
+        use crate::runtime::runner::observation::native_capture::*;
+        use std::fs::File;
+        use std::fs::OpenOptions;
+        use std::io::Read;
+        use std::io::Write;
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::path::Path;
+        use std::path::PathBuf;
 
         pub(super) fn file_digest(path: &Path) -> Result<String> {
-            crate::digest::sha256_file_hex(path).map_err(io_error)
+            crate::digest::test_support::sha256_file_hex(path).map_err(io_error)
         }
         fn private_directory(path: &Path) -> Result<(u64, u64)> {
             ensure(path.is_absolute(), "private directory must be absolute")?;
@@ -5148,7 +5173,10 @@ pub(crate) mod native_capture {
                     NativeCaptureExportBoundary::Encode,
                     until,
                 )?;
-                super::encode_bounded(result, limits.max_encoded_result_bytes)?
+                crate::runtime::runner::observation::native_capture::encode_bounded(
+                    result,
+                    limits.max_encoded_result_bytes,
+                )?
             };
             let artifact_sha256 = crate::digest::sha256_hex(&encoded);
             let artifact_bytes = encoded.len() as u64;
@@ -5197,12 +5225,15 @@ pub(crate) mod native_capture {
         }
 
         mod tests {
-            use serde_json::{Value, json};
+            use serde_json::Value;
+            use serde_json::json;
 
-            use super::super::test_support::*;
-            use super::*;
-            use std::os::unix::fs::{PermissionsExt, symlink};
-            use std::time::{Duration, Instant};
+            use crate::runtime::runner::observation::native_capture::files::*;
+            use crate::runtime::runner::observation::native_capture::test_support::*;
+            use std::os::unix::fs::PermissionsExt;
+            use std::os::unix::fs::symlink;
+            use std::time::Duration;
+            use std::time::Instant;
             #[test]
             fn capture_arm_validates_schema_identity_duration_and_safe_capture_id() {
                 let fixture = CaptureFixture::new(json!({"mode":"metadata"}));
@@ -5584,7 +5615,7 @@ pub(crate) mod native_capture {
             }
 
             mod duplicate_fields {
-                use super::*;
+                use crate::runtime::runner::observation::native_capture::files::tests::*;
                 fn duplicate_object(
                     object: &serde_json::Map<String, Value>,
                     key: &str,
@@ -5723,18 +5754,23 @@ pub(crate) mod native_capture {
     }
 
     mod verification {
-        use super::*;
         use crate::broker::runtime as storage;
         use crate::coding_agent::CodingAgent;
         use crate::config::Settings;
         use crate::digest::sha256_hex;
-        use crate::multiplexer::{CommandRunner, MultiplexerContext, resolve_multiplexer};
+        use crate::multiplexer::CommandRunner;
+        use crate::multiplexer::MultiplexerContext;
+        use crate::multiplexer::resolve_multiplexer;
+        use crate::runtime::runner::observation::native_capture::*;
         use crate::runtime::system::SystemRunner;
         use rusqlite::Connection;
         use serde_json::Map;
-        use std::collections::{BTreeMap, BTreeSet};
+        use std::collections::BTreeMap;
+        use std::collections::BTreeSet;
         use std::os::unix::fs::MetadataExt;
-        use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+        use std::panic::AssertUnwindSafe;
+        use std::panic::catch_unwind;
+        use std::panic::resume_unwind;
         use std::path::Path;
         use std::rc::Rc;
 
@@ -5769,10 +5805,12 @@ pub(crate) mod native_capture {
                 "verification configuration run/nonce mismatch",
             )?;
             let catalog = ProfileCatalog::bundled()?;
-            let policy: CapturePolicyFile = serde_json::from_slice(&super::files::read_private(
-                &config.capture_policy_path,
-                limits.max_config_bytes,
-            )?)
+            let policy: CapturePolicyFile = serde_json::from_slice(
+                &crate::runtime::runner::observation::native_capture::files::read_private(
+                    &config.capture_policy_path,
+                    limits.max_config_bytes,
+                )?,
+            )
             .map_err(io_error)?;
             ensure(policy.schema_version == 1, "capture policy schema mismatch")?;
             let capture_policy =
@@ -6669,7 +6707,9 @@ pub(crate) mod native_capture {
                     "bounded absolute evidence file required",
                 )?;
                 ensure(
-                    super::files::file_digest(&self.path)? == self.sha256,
+                    crate::runtime::runner::observation::native_capture::files::file_digest(
+                        &self.path,
+                    )? == self.sha256,
                     "driver evidence digest changed",
                 )
             }
@@ -6781,15 +6821,19 @@ pub(crate) mod native_capture {
             exit_code: i32,
         }
         fn driver_read<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
-            let bytes = super::files::read_private(path, 65536)
-                .map_err(|cause| error(format!("{}: {}", path.display(), cause.message())))?;
+            let bytes = crate::runtime::runner::observation::native_capture::files::read_private(
+                path, 65536,
+            )
+            .map_err(|cause| error(format!("{}: {}", path.display(), cause.message())))?;
             serde_json::from_slice(&bytes)
                 .map_err(|cause| error(format!("{}: {cause}", path.display())))
         }
         fn driver_publish(path: &Path, value: &impl Serialize, until: Instant) -> Result<()> {
             let bytes = serde_json::to_vec(value).map_err(io_error)?;
             ensure(bytes.len() <= 65536, "private driver record exceeds bound")?;
-            super::files::publish_private(path, &bytes, until)
+            crate::runtime::runner::observation::native_capture::files::publish_private(
+                path, &bytes, until,
+            )
         }
         fn driver_tmux(case: &DriverCase, parts: &[&str], until: Instant) -> Result<String> {
             let mut argv = vec![
@@ -6917,7 +6961,9 @@ pub(crate) mod native_capture {
                 privacy.schema_version == 1
                     && privacy.case_manifest_sha256 == ownership.case_manifest_sha256
                     && privacy.started_record_sha256
-                        == super::files::file_digest(&case.started_record_path)?
+                        == crate::runtime::runner::observation::native_capture::files::file_digest(
+                            &case.started_record_path,
+                        )?
                     && privacy.rows == approved.size.rows
                     && privacy.cols == approved.size.cols
                     && privacy.capture_policy_sha256 == case.capture_policy.sha256
@@ -6976,7 +7022,9 @@ pub(crate) mod native_capture {
                         .as_i64()
                         .is_some_and(|s| (0..=255).contains(&s))
                     && service["producer_sha256"]
-                        == super::files::file_digest(&case.producer_manifest_path)?
+                        == crate::runtime::runner::observation::native_capture::files::file_digest(
+                            &case.producer_manifest_path,
+                        )?
                     && service["process"]
                         == serde_json::to_value(&launched.started.runner).map_err(io_error)?,
                 "capture service/export did not return a bound actual status",
@@ -6996,7 +7044,7 @@ pub(crate) mod native_capture {
                 "complete capture manifest required",
             )?;
             let artifact = case.output_directory.join(&artifact_name);
-            let bytes = super::files::read_private(
+            let bytes = crate::runtime::runner::observation::native_capture::files::read_private(
                 &artifact,
                 NativeCaptureLimits::default().max_encoded_result_bytes,
             )?;
@@ -7026,7 +7074,7 @@ pub(crate) mod native_capture {
                 "actual complete parser pair required",
             )?;
             Ok(
-                json!({"manifest_path":manifest_path,"manifest_sha256":super::files::file_digest(&manifest_path)?,
+                json!({"manifest_path":manifest_path,"manifest_sha256":crate::runtime::runner::observation::native_capture::files::file_digest(&manifest_path)?,
         "artifact_path":artifact,"artifact_sha256":crate::digest::sha256_hex(&bytes),"service_status":service["status"]}),
             )
         }
@@ -7307,7 +7355,11 @@ pub(crate) mod native_capture {
                     .map_err(io_error)?,
                 "the Claude seed configuration must hold no local settings file",
             )?;
-            let settings = super::files::read_private(&seed.join("settings.json"), 4096)?;
+            let settings =
+                crate::runtime::runner::observation::native_capture::files::read_private(
+                    &seed.join("settings.json"),
+                    4096,
+                )?;
             let theme_only: Value = serde_json::from_slice(&settings).map_err(io_error)?;
             ensure(
                 theme_only
@@ -7315,8 +7367,15 @@ pub(crate) mod native_capture {
                     .is_some_and(|object| object.len() == 1 && object["theme"].is_string()),
                 "the seed settings.json must be exactly a theme-only object",
             )?;
-            let credentials = super::files::read_private(&seed.join(".credentials.json"), 65536)?;
-            let global = super::files::read_private(&seed.join(".claude.json"), 4 * 1024 * 1024)?;
+            let credentials =
+                crate::runtime::runner::observation::native_capture::files::read_private(
+                    &seed.join(".credentials.json"),
+                    65536,
+                )?;
+            let global = crate::runtime::runner::observation::native_capture::files::read_private(
+                &seed.join(".claude.json"),
+                4 * 1024 * 1024,
+            )?;
             let mut global: Value = serde_json::from_slice(&global).map_err(io_error)?;
             let projects = global
                 .as_object_mut()
@@ -7492,7 +7551,7 @@ pub(crate) mod native_capture {
                 Some(marker) => {
                     let marker = case.cwd.join(marker);
                     if marker.try_exists().map_err(io_error)? {
-                        Some(super::files::file_digest(&marker)?)
+                        Some(crate::runtime::runner::observation::native_capture::files::file_digest(&marker)?)
                     } else {
                         None
                     }
@@ -7576,7 +7635,10 @@ pub(crate) mod native_capture {
                 geometry.trim() == approved.tmux_geometry(),
                 "actual native geometry differs",
             )?;
-            let ownership_hash = super::files::file_digest(&case.driver_ownership_path)?;
+            let ownership_hash =
+                crate::runtime::runner::observation::native_capture::files::file_digest(
+                    &case.driver_ownership_path,
+                )?;
             let started = DriverStarted {
                 schema_version: 1,
                 case_manifest_sha256: ownership.case_manifest_sha256.clone(),
@@ -7665,7 +7727,10 @@ pub(crate) mod native_capture {
                 .parent()
                 .ok_or_else(|| error("case parent required"))?
                 .join("case.json");
-            let case_bytes = super::files::read_private(&case_path, 65536)?;
+            let case_bytes =
+                crate::runtime::runner::observation::native_capture::files::read_private(
+                    &case_path, 65536,
+                )?;
             let case: DriverCase = serde_json::from_slice(&case_bytes).map_err(io_error)?;
             let approved = ApprovedCase::select(&case)?;
             ensure(
@@ -7942,7 +8007,7 @@ pub(crate) mod native_capture {
                             driver_read(&case.config_path.with_extension("service-outcome.json"))?;
                         ensure(
                             service["config_sha256"]
-                                == super::files::file_digest(&case.config_path)?
+                                == crate::runtime::runner::observation::native_capture::files::file_digest(&case.config_path)?
                                 && service["run_id"] == launched.run.run_id
                                 && service["launch_nonce"] == launched.run.launch_nonce,
                             "service outcome binding differs",
@@ -7987,7 +8052,7 @@ pub(crate) mod native_capture {
                     let runner_absent = launched.started.runner.matches().map(|exists| !exists);
                     let native_absent = launched.started.child.matches().map(|exists| !exists);
                     let summary = json!({"schema_version":1,"case_manifest_sha256":ownership.case_manifest_sha256,"work_error":work_error,
-                "driver_ownership_sha256":super::files::file_digest(&case.driver_ownership_path)?,
+                "driver_ownership_sha256":crate::runtime::runner::observation::native_capture::files::file_digest(&case.driver_ownership_path)?,
                 "shutdown":shutdown.as_ref().ok(),"shutdown_error":shutdown.as_ref().err().map(|e|e.message().into_owned()),
                 "observation":observed.as_ref().ok(),"observation_error":observed.as_ref().err().map(|e|e.message().into_owned()),
                 "pane_capture":pane_capture.as_ref().ok(),"pane_capture_error":pane_capture.as_ref().err().map(|e|e.message().into_owned()),
@@ -8060,7 +8125,7 @@ pub(crate) mod native_capture {
 
             use serde_json::Value;
 
-            use super::*;
+            use crate::runtime::runner::observation::native_capture::verification::*;
             use crate::runtime::runner::service::test_support::*;
             #[test]
             fn capture_ignored_entry_requires_explicit_configuration_before_launching() {
@@ -8076,7 +8141,7 @@ pub(crate) mod native_capture {
                     std::process::Command::new(std::env::current_exe().unwrap())
                         .args([
                             "--exact",
-                            super::native_capture_service_child_path(),
+                            crate::runtime::runner::observation::native_capture::verification::native_capture_service_child_path(),
                             "--ignored",
                             "--test-threads=1",
                         ])
@@ -8104,9 +8169,10 @@ pub(crate) mod native_capture {
                     "{combined}"
                 );
             }
-            use crate::runtime::runner::service::test_support::observation_services::{
-                capture, health, private_write, wait_until,
-            };
+            use crate::runtime::runner::service::test_support::observation_services::capture;
+            use crate::runtime::runner::service::test_support::observation_services::health;
+            use crate::runtime::runner::service::test_support::observation_services::private_write;
+            use crate::runtime::runner::service::test_support::observation_services::wait_until;
             #[test]
             fn runner_collector_common_service_arms_on_actual_resize_and_preserves_trigger_geometry_and_sequence()
              {
@@ -8157,7 +8223,8 @@ pub(crate) mod native_capture {
             use crate::config::Settings;
             use std::os::unix::fs::OpenOptionsExt;
             use std::path::Path;
-            use std::sync::atomic::{AtomicBool, Ordering};
+            use std::sync::atomic::AtomicBool;
+            use std::sync::atomic::Ordering;
 
             struct ResizeArm {
                 receiver: Arc<Mutex<NativeCaptureReceiver>>,
@@ -8231,7 +8298,7 @@ pub(crate) mod native_capture {
                         while !stopped.load(Ordering::Acquire) && Instant::now() < until {
                             if let Some(lease) = receiver.lock().unwrap().try_take()? {
                                 let pair = serde_json::to_vec(lease.result()).map_err(io_error)?;
-                                super::super::files::publish_private(&result_path, &pair, until)?;
+                                crate::runtime::runner::observation::native_capture::files::publish_private(&result_path, &pair, until)?;
                                 return Ok(());
                             }
                             std::thread::sleep(Duration::from_millis(2));
@@ -8304,7 +8371,7 @@ pub(crate) mod native_capture {
             };
             let bytes = serde_json::to_vec(&value).unwrap();
             assert!(bytes.len() <= 16 * 1024);
-            super::files::publish_private(
+            crate::runtime::runner::observation::native_capture::files::publish_private(
                 &path.with_extension("service-outcome.json"),
                 &bytes,
                 Instant::now() + Duration::from_secs(10),
@@ -8358,17 +8425,18 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use std::io::Write;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     use crate::broker::runtime as storage;
     use crate::runtime::runner::service::test_support::*;
 
     mod observation_contract {
-        use super::super::test_support::synthetic;
-        use super::*;
-        use crate::runtime::runner::service::test_support::observation_services::{
-            count, health, wait_until,
-        };
+        use crate::runtime::runner::observation::test_support::synthetic;
+        use crate::runtime::runner::observation::tests::*;
+        use crate::runtime::runner::service::test_support::observation_services::count;
+        use crate::runtime::runner::service::test_support::observation_services::health;
+        use crate::runtime::runner::service::test_support::observation_services::wait_until;
         #[test]
         fn service_quiet_timer_persists_one_opening_without_changing_output_sequence() {
             let mut fixture = ServiceFixture::configured(false, synthetic);
@@ -8484,11 +8552,11 @@ mod tests {
     }
 
     mod injected_failures {
-        use super::*;
+        use crate::runtime::runner::observation::tests::*;
         use crate::runtime::runner::service::test_support::injected_failures::*;
-        use crate::runtime::runner::service::test_support::observation_services::{
-            count, health, wait_until,
-        };
+        use crate::runtime::runner::service::test_support::observation_services::count;
+        use crate::runtime::runner::service::test_support::observation_services::health;
+        use crate::runtime::runner::service::test_support::observation_services::wait_until;
         #[test]
         fn runner_resize_detector_failure_keeps_actual_resized_service_and_native_child() {
             let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
@@ -8553,8 +8621,8 @@ mod tests {
         }
     }
     mod observer_initialization {
-        use super::super::*;
         use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
+        use crate::runtime::runner::observation::*;
         use crate::runtime::runner::test_support::Fixture;
         use std::sync::Arc;
 
@@ -8612,16 +8680,17 @@ mod tests {
     }
 
     mod inspection_tests {
-        use super::super::*;
+        use crate::runtime::runner::observation::*;
         use crate::runtime::runner::test_support::Fixture;
 
         #[test]
         fn permission_inspection_request_generation_exhaustion_invalidates_without_wrap() {
-            use crate::coding_agent::profiles::catalog::test_support::{
-                inspection_fixture_definition, inspection_fixture_form,
-            };
+            use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
+            use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_form;
             use crate::runtime::system::test_support::TestChild;
-            use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+            use std::panic::AssertUnwindSafe;
+            use std::panic::catch_unwind;
+            use std::panic::resume_unwind;
             use std::sync::Arc;
 
             let until = Instant::now() + Duration::from_secs(5);
@@ -8805,9 +8874,8 @@ mod tests {
             command: [&str; 2],
             trailer_col: usize,
         ) -> Vec<u8> {
-            use crate::coding_agent::profiles::detector::test_support::{
-                bundled_screen, native_fixture_bytes,
-            };
+            use crate::coding_agent::profiles::detector::test_support::bundled_screen;
+            use crate::coding_agent::profiles::detector::test_support::native_fixture_bytes;
             let mut screen: serde_json::Value = serde_json::from_str(&bundled_screen(id)).unwrap();
             let cols = usize::try_from(screen["cols"].as_u64().unwrap()).unwrap();
             for (offset, text) in command.iter().enumerate() {
@@ -8828,7 +8896,9 @@ mod tests {
         #[test]
         fn opencode_resize_across_w_split_starts_a_new_generation_and_a_rewrap_a_new_episode() {
             use crate::runtime::system::test_support::TestChild;
-            use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+            use std::panic::AssertUnwindSafe;
+            use std::panic::catch_unwind;
+            use std::panic::resume_unwind;
             use std::sync::Arc;
 
             let until = Instant::now() + Duration::from_secs(5);
@@ -8969,15 +9039,18 @@ mod tests {
         }
     }
     mod controller_tests {
-        use super::super::*;
-        use crate::broker::runtime::{self as storage, *};
+        use crate::broker::runtime as storage;
+        use crate::broker::runtime::*;
         use crate::coding_agent::ProfileCatalog;
+        use crate::runtime::runner::observation::*;
         use crate::runtime::runner::writer::test_support::*;
         use crate::runtime::system::test_support::TestChild;
         use std::os::unix::process::ExitStatusExt;
         use std::sync::Arc;
-        use std::sync::atomic::{AtomicU64, Ordering};
-        use std::time::{Duration, Instant};
+        use std::sync::atomic::AtomicU64;
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        use std::time::Instant;
 
         /// A controller started for a running `/bin/cat` native child on a 24×80 terminal.
         fn started_controller(
@@ -8999,7 +9072,7 @@ mod tests {
         }
 
         mod bounded_updates {
-            use super::*;
+            use crate::runtime::runner::observation::tests::controller_tests::*;
 
             fn draft(fixture: &WriterFixture, kind: RuntimeEventKind) -> TransitionDraft {
                 TransitionDraft {
@@ -9091,10 +9164,10 @@ mod tests {
         }
 
         mod failure_handling {
-            use super::*;
+            use crate::runtime::runner::observation::tests::controller_tests::*;
 
             mod observation_failures {
-                use super::*;
+                use crate::runtime::runner::observation::tests::controller_tests::failure_handling::*;
                 use std::sync::atomic::AtomicBool;
 
                 struct Fault {

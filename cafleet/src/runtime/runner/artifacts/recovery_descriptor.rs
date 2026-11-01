@@ -159,7 +159,8 @@ mod tests {
     use crate::runtime::runner::recovery::test_support::descriptor::*;
     use crate::runtime::runner::recovery::test_support::*;
     use crate::runtime::runner::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
     #[test]
     fn runner_recovery_historical_descriptor_pin_remove_uses_the_supplied_connection_budget() {
         for takeovers in [1, 2] {

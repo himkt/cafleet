@@ -734,8 +734,8 @@ impl EventSequencePool {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
     use crate::coding_agent::ScreenObservation;
+    use crate::runtime::runner::episodes::*;
     use serde_json::json;
     pub(crate) const NOW: &str = "2026-10-26T15:35:00.000000+00:00";
     pub(crate) fn tracker() -> EpisodeTracker {
@@ -861,16 +861,16 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::*;
-    use super::*;
     use crate::coding_agent::CodingAgent;
     use crate::coding_agent::profiles::catalog::test_support::synthetic_definitions as definitions;
     use crate::coding_agent::profiles::catalog::test_support::*;
     use crate::coding_agent::profiles::detector::test_support::*;
     use crate::coding_agent::profiles::*;
+    use crate::runtime::runner::episodes::test_support::*;
+    use crate::runtime::runner::episodes::*;
     use serde_json::json;
     mod continuation_episodes {
-        use super::*;
+        use crate::runtime::runner::episodes::tests::*;
 
         fn gated(bytes: &[u8], sequence: u64) -> ScreenObservation {
             let catalog = ProfileCatalog::from_definitions(&gated_fixture_definition()).unwrap();

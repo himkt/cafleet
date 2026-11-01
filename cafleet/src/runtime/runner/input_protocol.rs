@@ -1,16 +1,26 @@
-use super::*;
-use crate::runtime::runner::codec::{
-    decode_legacy_control_body, frame_control_body, validate_version,
-};
+use crate::broker::runtime::DecisionSource;
+use crate::broker::runtime::DeliveryProjection;
+use crate::broker::runtime::DeliveryStatus;
+use crate::broker::runtime::DirectorMode;
+use crate::broker::runtime::InputDisposition;
+use crate::broker::runtime::InputKind;
+use crate::broker::runtime::InputState;
+use crate::broker::runtime::InteractionClass;
+use crate::broker::runtime::PermissionDecision;
+use crate::runtime::runner::codec::decode_legacy_control_body;
+use crate::runtime::runner::codec::frame_control_body;
+use crate::runtime::runner::codec::validate_version;
+use crate::runtime::runner::*;
 use serde::Deserializer;
-use serde::de::{DeserializeOwned, IgnoredAny, MapAccess, SeqAccess, Visitor};
-use serde_json::{Map, Number, json};
+use serde::de::DeserializeOwned;
+use serde::de::IgnoredAny;
+use serde::de::MapAccess;
+use serde::de::SeqAccess;
+use serde::de::Visitor;
+use serde_json::Map;
+use serde_json::Number;
+use serde_json::json;
 use std::fmt;
-
-use crate::broker::runtime::{
-    DecisionSource, DeliveryProjection, DeliveryStatus, DirectorMode, InputDisposition, InputKind,
-    InputState, InteractionClass, PermissionDecision,
-};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -469,7 +479,7 @@ fn decode_request_value(value: &Value) -> Result<InputControlRequest> {
             };
             validate_operation_key(&input.operation_key)?;
             ensure(
-                crate::input::valid_input(&input.literal),
+                crate::pane_lock::valid_input(&input.literal),
                 "valid single-line input literal required",
             )?;
             let valid_kind = match (kind, input.input_kind, input.message_id) {
@@ -926,11 +936,11 @@ fn encode_result(reply: &InputControlReply) -> Value {
             json!({"kind":"submission","submission":submission})
         }
         InputControlReply::Inspection(inspection) => {
-            let public = crate::presentation::permission_inspection(inspection);
+            let public = crate::output::json::permission_inspection(inspection);
             json!({"kind":"inspection","request":public.get("request").expect("inspection projection contains its request")})
         }
         InputControlReply::PermissionResponse(response) => {
-            let public = crate::presentation::permission_response_result(response);
+            let public = crate::output::json::permission_response_result(response);
             json!({"kind":"permission_response","response":public.get("response").expect("response projection contains its response")})
         }
         InputControlReply::Receipt(receipt) => json!({"kind":"receipt","receipt":match receipt {
@@ -958,7 +968,7 @@ pub(in crate::runtime::runner) fn encode_input_reply(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
+    use crate::runtime::runner::input_protocol::*;
     use serde_json::json;
 
     /// A tested, visible permission inspection with every identity field set.
@@ -978,9 +988,10 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::runtime::runner::input_protocol::*;
     use crate::runtime::runner::test_support::Fixture;
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
 
     struct Case {
         fixture: Fixture,
@@ -2086,7 +2097,7 @@ mod tests {
     }
 
     mod identity {
-        use super::*;
+        use crate::runtime::runner::input_protocol::tests::*;
 
         const PAYLOAD_CANARY: &str = "WIRE_R1_PRIVATE_LITERAL_CANARY";
         const IDENTITY_CANARY: &str = "WIRE_R1_PRIVATE_IDENTITY_CANARY";

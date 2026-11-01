@@ -636,18 +636,28 @@ pub(crate) fn settle_any_input_in_transaction(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::sync::{Arc, Barrier};
-    use std::time::{Duration, Instant};
+    use std::sync::Arc;
+    use std::sync::Barrier;
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
-    use rusqlite::{Connection, params};
-    use serde_json::{Value, json};
-    use sha2::{Digest, Sha256};
+    use rusqlite::Connection;
+    use rusqlite::hooks::AuthAction;
+    use rusqlite::hooks::AuthContext;
+    use rusqlite::hooks::Authorization;
+    use rusqlite::hooks::TransactionOperation;
+    use rusqlite::params;
+    use serde_json::Value;
+    use serde_json::json;
+    use sha2::Digest;
+    use sha2::Sha256;
 
     use crate::broker::members::test_support::register;
+    use crate::broker::runtime as storage;
     use crate::broker::runtime::test_support::*;
-    use crate::broker::runtime::{self as storage, *};
-    use crate::coding_agent::{AnswerCapability, CodingAgent};
+    use crate::broker::runtime::*;
+    use crate::coding_agent::AnswerCapability;
+    use crate::coding_agent::CodingAgent;
 
     fn state(conn: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
         let mut snapshot = durable_state(conn);
@@ -1304,8 +1314,11 @@ mod tests {
                     fixture.owner.database_identity_json["instance_id"] = json!("0".repeat(32))
                 }
                 "member" => {
-                    crate::broker::deregister_member(&mut fixture.base.conn, fixture.base.member)
-                        .unwrap();
+                    crate::broker::members::test_support::deregister_member(
+                        &mut fixture.base.conn,
+                        fixture.base.member,
+                    )
+                    .unwrap();
                 }
                 "director" => {
                     fixture.base.conn.execute("UPDATE members SET status='deregistered',deregistered_at=?1 WHERE member_id=?2",params![NOW,fixture.base.director]).unwrap();
@@ -1532,7 +1545,11 @@ mod tests {
         let mut fixture = ResponseFixture::new();
         let receipt = fixture.reserve();
         fixture.base.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",params![NOW,fixture.request.metadata.interaction_id]).unwrap();
-        crate::broker::deregister_member(&mut fixture.base.conn, fixture.base.member).unwrap();
+        crate::broker::members::test_support::deregister_member(
+            &mut fixture.base.conn,
+            fixture.base.member,
+        )
+        .unwrap();
         fixture
             .base
             .conn

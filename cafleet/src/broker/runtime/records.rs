@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
+use crate::broker::stored_enum;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
-
-use crate::broker::records::stored_enum;
 
 stored_enum!(RunStatus, "member_runs.status", {
     Starting => "starting", Prepared => "prepared", Running => "running",

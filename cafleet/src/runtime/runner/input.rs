@@ -1,29 +1,62 @@
-#[cfg(test)]
-use super::InputDrain;
-use super::{
-    ControlIdentity, DrainedInput, InputControlOperation, InputControlReply, InputControlRequest,
-    InputEligibility, ObservationController, ObservedContinuation, ObservedRequest,
-    ProgrammaticWrite, PtyIo, SubmissionResult, SubmissionStatus, Visibility,
-    validate_operation_key,
-};
-use super::{
-    InputFailure, ProcessIdentity, Result, RunLock, SubmissionStage, Transport, check_deadline,
-    ensure, error, stable_run_identity, with_database_deadline,
-};
-use super::{
-    MissingEvidence, PermissionInspectInput, PermissionInspection, PermissionResponseResult,
-};
-use crate::broker::records::{MemberKind, Placement};
-use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
-use crate::coding_agent::{AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, StageGate};
-use crate::coding_agent::{ComposerOperation, coding_agent};
+use crate::broker::MemberKind;
+use crate::broker::Placement;
+use crate::broker::runtime as storage;
+use crate::broker::runtime::OwnerKind;
+use crate::broker::runtime::RunRecord;
+use crate::broker::runtime::RunStatus;
+use crate::coding_agent::AnswerMatch;
+use crate::coding_agent::AnswerPlan;
+use crate::coding_agent::AnswerStage;
+use crate::coding_agent::ComposerOperation;
+use crate::coding_agent::ProfileCatalog;
+use crate::coding_agent::StageGate;
+use crate::coding_agent::coding_agent;
+use crate::db::bounded_by_inherited;
+use crate::db::with_database_budget;
 use crate::error::CafleetError;
-use crate::input::{Deadline, PaneLock, bounded_by_inherited, with_database_budget};
-use rusqlite::{Connection, TransactionBehavior};
+use crate::pane_lock::PaneLock;
+use crate::runtime::runner::ControlIdentity;
+use crate::runtime::runner::DrainedInput;
+use crate::runtime::runner::InputControlOperation;
+use crate::runtime::runner::InputControlReply;
+use crate::runtime::runner::InputControlRequest;
+use crate::runtime::runner::InputEligibility;
+use crate::runtime::runner::InputFailure;
+use crate::runtime::runner::MissingEvidence;
+use crate::runtime::runner::ObservationController;
+use crate::runtime::runner::ObservedContinuation;
+use crate::runtime::runner::ObservedRequest;
+use crate::runtime::runner::PermissionInspectInput;
+use crate::runtime::runner::PermissionInspection;
+use crate::runtime::runner::PermissionResponseResult;
+use crate::runtime::runner::ProcessIdentity;
+use crate::runtime::runner::ProgrammaticWrite;
+use crate::runtime::runner::PtyIo;
+use crate::runtime::runner::Result;
+use crate::runtime::runner::RunLock;
+use crate::runtime::runner::SubmissionResult;
+use crate::runtime::runner::SubmissionStage;
+use crate::runtime::runner::SubmissionStatus;
+use crate::runtime::runner::Transport;
+use crate::runtime::runner::Visibility;
+use crate::runtime::runner::check_deadline;
+use crate::runtime::runner::ensure;
+use crate::runtime::runner::error;
+use crate::runtime::runner::stable_run_identity;
+use crate::runtime::runner::validate_operation_key;
+use crate::runtime::runner::with_database_deadline;
+use crate::time::Deadline;
+use rusqlite::Connection;
+use rusqlite::TransactionBehavior;
 use std::collections::BTreeMap;
-use std::io::{self, ErrorKind};
+use std::io;
+use std::io::ErrorKind;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
+
+#[cfg(test)]
+use crate::runtime::runner::InputDrain;
 
 pub(crate) trait RequestTokenSource: Send {
     fn fill(&mut self, bytes: &mut [u8; 32]) -> Result<()>;
@@ -304,7 +337,7 @@ enum OrdinaryBlocker {
 }
 
 fn ordinary_blocker(status: &super::ObservationStatus) -> Option<OrdinaryBlocker> {
-    use super::GateReason;
+    use crate::runtime::runner::GateReason;
     if matches!(
         status.visibility,
         Visibility::Visible | Visibility::Obscured
@@ -1599,7 +1632,8 @@ impl InputCoordinator {
         action: &super::ReceiptAction,
         deadline: Instant,
     ) -> Result<InputControlReply> {
-        use super::{ReceiptAction, ReceiptReply};
+        use crate::runtime::runner::ReceiptAction;
+        use crate::runtime::runner::ReceiptReply;
         if let ReceiptAction::Retire { input_id } = action {
             return self.retire_received(conn, run, *input_id, deadline);
         }
@@ -1899,7 +1933,7 @@ impl InputCoordinator {
             }
             validate_operation_key(&input.operation_key)?;
             ensure(
-                crate::input::valid_input(&input.literal),
+                crate::pane_lock::valid_input(&input.literal),
                 "composer submission requires one nonempty line without control characters",
             )?;
             if input.input_kind == storage::InputKind::Preview {
@@ -2342,7 +2376,7 @@ impl InputCoordinator {
         let target = match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
             if let Some(message_id) = message_id {
                 let message = crate::broker::get_message(conn, message_id)?;
-                if message.status != crate::broker::records::MessageStatus::InputRequired {
+                if message.status != crate::broker::MessageStatus::InputRequired {
                     return Ok(Some("message_consumed"));
                 }
             }
@@ -3759,17 +3793,21 @@ fn with_diagnostic(cause: CafleetError, diagnostic: &CafleetError) -> CafleetErr
 #[cfg(test)]
 mod tests {
     mod manual_progress {
-        use super::super::*;
-        use super::ordinary_prompt::support::RunnerFixture;
         use crate::broker::runtime as storage;
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::RunnerFixture;
+        use crate::runtime::runner::input::*;
         use crate::runtime::runner::*;
         use std::collections::VecDeque;
-        use std::io::{self, ErrorKind};
-        use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+        use std::io;
+        use std::io::ErrorKind;
+        use std::panic::AssertUnwindSafe;
+        use std::panic::catch_unwind;
+        use std::panic::resume_unwind;
         use std::sync::Arc;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
 
         #[derive(Default)]
         struct Human {
@@ -3851,7 +3889,7 @@ mod tests {
                     self.lock.clone(),
                     InputServices {
                         catalog: ProfileCatalog::bundled().unwrap(),
-                        token_source: Box::new(super::ordinary_prompt::support::PanicTokens(
+                        token_source: Box::new(crate::runtime::runner::input::tests::ordinary_prompt::support::PanicTokens(
                             "manual progress",
                         )),
                         hooks: Arc::new(InertInputHooks),
@@ -4067,19 +4105,22 @@ mod tests {
     }
 
     pub(in crate::runtime::runner::input) mod ordinary_prompt {
-        use super::super::*;
         use crate::broker::runtime as storage;
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
+        use crate::runtime::runner::input::*;
         use crate::runtime::runner::test_support::Fixture;
         use crate::runtime::runner::*;
         use std::collections::VecDeque;
         use std::io;
-        use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+        use std::panic::AssertUnwindSafe;
+        use std::panic::catch_unwind;
+        use std::panic::resume_unwind;
         use std::sync::Arc;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
 
-        use support::*;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::*;
 
         fn submitted(reply: InputControlReply) -> SubmissionResult {
             match reply {
@@ -4274,7 +4315,7 @@ mod tests {
         }
 
         mod guards {
-            use super::*;
+            use crate::runtime::runner::input::tests::ordinary_prompt::*;
 
             fn rejected(result: Result<ProgrammaticWrite>) {
                 assert!(
@@ -4419,8 +4460,8 @@ mod tests {
         }
 
         mod preview_exec {
-            use super::*;
             use crate::coding_agent::CodingAgent;
+            use crate::runtime::runner::input::tests::ordinary_prompt::*;
 
             fn request(
                 host: &Host,
@@ -4606,8 +4647,8 @@ mod tests {
         }
 
         mod staged_delivery {
-            use super::*;
             use crate::coding_agent::CodingAgent;
+            use crate::runtime::runner::input::tests::ordinary_prompt::*;
 
             pub(super) const SETTLE: Duration = Duration::from_millis(500);
             const ESCAPE: &[u8] = b"\x1b";
@@ -4759,7 +4800,7 @@ mod tests {
                     encoded(),
                     HostProfile::metadata(),
                     |host| {
-                        super::super::permission_inspection_contracts::stable_form(host);
+                        crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form(host);
                         let reply = submitted(
                             host.handle(prompt_request(host, "prompt:blocked"))
                                 .unwrap()
@@ -4829,7 +4870,7 @@ mod tests {
                             host,
                             prompt_request(host, "prompt:interaction-race"),
                         );
-                        super::super::permission_inspection_contracts::form(
+                        crate::runtime::runner::input::tests::permission_inspection_contracts::form(
                             host,
                             "write raced.txt",
                             "synthetic-only",
@@ -4859,7 +4900,7 @@ mod tests {
                             std::thread::sleep(Duration::from_millis(1));
                         }
                         assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
-                        super::super::permission_inspection_contracts::form(
+                        crate::runtime::runner::input::tests::permission_inspection_contracts::form(
                             host,
                             "write raced.txt",
                             "synthetic-only",
@@ -4868,7 +4909,7 @@ mod tests {
                         assert_eq!(reply.status, SubmissionStatus::Uncertain);
                         assert_eq!(reply.stage, SubmissionStage::Partial);
                         host.show(SCREEN.to_vec());
-                        super::composer_busy::hold_turns(host);
+                        crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                         assert_eq!(
                             host.pty.stage_bytes(),
                             vec![LITERAL.as_bytes().to_vec()],
@@ -4878,7 +4919,7 @@ mod tests {
                 );
             }
 
-            fn placement(host: &Host) -> crate::broker::records::Placement {
+            fn placement(host: &Host) -> crate::broker::Placement {
                 crate::broker::get_member(
                     &host.fixture.conn,
                     host.fixture.run.member_id,
@@ -4898,7 +4939,7 @@ mod tests {
                     let placement = placement(host);
                     until_literal_written(host, prompt_request(host, "prompt:locked"));
                     assert!(
-                        crate::input::PaneLock::try_acquire(&url, &placement)
+                        crate::pane_lock::PaneLock::try_acquire(&url, &placement)
                             .unwrap()
                             .is_none(),
                         "the runner retains the pane lock between its stages"
@@ -4906,7 +4947,7 @@ mod tests {
                     let reply = finish_after_interruption(host);
                     assert_eq!(reply.status, SubmissionStatus::Accepted);
                     assert!(
-                        crate::input::PaneLock::acquire_released(&url, &placement)
+                        crate::pane_lock::PaneLock::acquire_released(&url, &placement)
                             .unwrap()
                             .is_some(),
                         "the runner releases the pane lock after the submit stage"
@@ -4919,7 +4960,7 @@ mod tests {
                 with_host(|host| {
                     let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
                     let placement = placement(host);
-                    let held = crate::input::PaneLock::try_acquire(&url, &placement)
+                    let held = crate::pane_lock::PaneLock::try_acquire(&url, &placement)
                         .unwrap()
                         .expect("the pane lock is free before submission");
                     assert!(
@@ -4942,7 +4983,7 @@ mod tests {
             }
 
             mod uncertain_cause {
-                use super::*;
+                use crate::runtime::runner::input::tests::ordinary_prompt::staged_delivery::*;
 
                 const FOCUS_REPLY: &[u8] = b"\x1b[I";
                 const CURSOR_REPORT: &[u8] = b"\x1b[24;80R";
@@ -5148,7 +5189,7 @@ mod tests {
                 fn staged_open_interaction_during_the_settle_records_interaction_open() {
                     with_interaction_host(|host| {
                         until_literal_written(host, prompt_request(host, "prompt:open"));
-                        super::super::super::permission_inspection_contracts::stable_form(host);
+                        crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form(host);
                         let reply = submitted(
                             host.advance()
                                 .expect("the settle check stops the remaining stages"),
@@ -5187,7 +5228,7 @@ mod tests {
                     with_interaction_host(|host| {
                         until_literal_written(host, prompt_request(host, "prompt:armed-open"));
                         until_armed(host);
-                        super::super::super::permission_inspection_contracts::stable_form(host);
+                        crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form(host);
                         let reply = submitted(
                             host.advance()
                                 .expect("the armed stage stops on the interaction"),
@@ -5217,13 +5258,17 @@ mod tests {
         }
 
         mod deferred_queue {
-            use super::staged_delivery::permission_catalog;
-            use super::*;
-            use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
-            use crate::input::PaneLock;
+            use crate::broker::runtime::DeliveryMethod;
+            use crate::broker::runtime::DeliveryProjection;
+            use crate::broker::runtime::DeliveryStatus;
+            use crate::pane_lock::PaneLock;
+            use crate::runtime::runner::input::tests::ordinary_prompt::staged_delivery::permission_catalog;
+            use crate::runtime::runner::input::tests::ordinary_prompt::*;
 
             pub(super) fn form(host: &mut Host) {
-                super::super::permission_inspection_contracts::stable_form(host);
+                crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form(
+                    host,
+                );
             }
 
             pub(super) fn close(host: &mut Host) {
@@ -5474,7 +5519,7 @@ mod tests {
                 });
             }
 
-            fn placement(host: &Host) -> crate::broker::records::Placement {
+            fn placement(host: &Host) -> crate::broker::Placement {
                 crate::broker::get_member(
                     &host.fixture.conn,
                     host.fixture.run.member_id,
@@ -5660,7 +5705,7 @@ mod tests {
                     turns_until(host, |host| {
                         row(host, first).state == storage::InputState::Uncertain
                     });
-                    super::composer_busy::hold_turns(host);
+                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(
                         host.pty.offers,
                         vec![LITERAL.as_bytes().to_vec(), b"h".to_vec()],
@@ -5772,7 +5817,7 @@ mod tests {
                             host.pty.failure = Some(io::ErrorKind::BrokenPipe);
                         } else {
                             std::thread::sleep(
-                                super::staged_delivery::SETTLE + Duration::from_millis(100),
+                                crate::runtime::runner::input::tests::ordinary_prompt::staged_delivery::SETTLE + Duration::from_millis(100),
                             );
                             host.human.bytes.extend(b"h");
                         }
@@ -5803,7 +5848,7 @@ mod tests {
                         }
                         host.pty.failure = None;
                         turns_until(host, |host| result_events(host, first) > 0);
-                        super::composer_busy::hold_turns(host);
+                        crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                         assert_eq!(result_events(host, first), 1, "{case}");
                         let recorded = row(host, first)
                             .uncertain_cause
@@ -5867,7 +5912,7 @@ mod tests {
                         preview_request(host, &message, &canonical),
                         "earlier_input",
                     );
-                    super::composer_busy::hold_turns(host);
+                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(
                         host.pty.offers.len(),
                         offers,
@@ -5886,7 +5931,8 @@ mod tests {
 
             #[test]
             fn accepted_preview_stamp_failure_is_retried_and_published_once_without_retyping() {
-                use std::sync::{Arc, Mutex};
+                use std::sync::Arc;
+                use std::sync::Mutex;
                 with_permission_host(Duration::from_secs(60), |host| {
                     let message = crate::broker::send_message(
                         &mut host.fixture.conn,
@@ -5968,7 +6014,7 @@ mod tests {
                         released,
                         "storage was busy for the accepted preview's stamp"
                     );
-                    super::composer_busy::hold_turns(host);
+                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(result_events(host, id), 1, "the result is published once");
                     assert_eq!(row(host, id).state, storage::InputState::Settled);
                     assert_eq!(
@@ -6002,7 +6048,7 @@ mod tests {
                     host.coordinator.pending.as_mut().unwrap().deadline =
                         Instant::now() - Duration::from_millis(1);
                     form(host);
-                    super::composer_busy::hold_turns(host);
+                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     let requeued = row(host, id);
                     assert_eq!(
                         requeued.state,
@@ -6054,7 +6100,7 @@ mod tests {
                     };
                     assert_eq!(reply.status, SubmissionStatus::Uncertain);
                     let offers = host.pty.offers.len();
-                    super::composer_busy::hold_turns(host);
+                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(
                         host.pty.offers.len(),
                         offers,
@@ -6214,7 +6260,7 @@ mod tests {
                     assert_eq!(input.delivery_reason.as_deref(), Some("target_changed"));
                     assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
                     turns_until(host, |host| result_events(host, id) > 0);
-                    super::composer_busy::hold_turns(host);
+                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(result_events(host, id), 1, "the result is published once");
                 });
             }
@@ -6388,9 +6434,11 @@ mod tests {
         }
 
         mod method_rendering {
-            use super::deferred_queue::{queued, row, turns_until};
-            use super::*;
             use crate::broker::runtime::DeliveryMethod;
+            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::queued;
+            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::row;
+            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::turns_until;
+            use crate::runtime::runner::input::tests::ordinary_prompt::*;
 
             const UNCLASSIFIED: &[u8] = b"\x1b[2J\x1b[1;1Hworking on something";
 
@@ -6403,7 +6451,7 @@ mod tests {
 
             const DISMISSAL: &str = "[cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.";
 
-            fn message(host: &mut Host, body: &str) -> crate::broker::records::MessageRecord {
+            fn message(host: &mut Host, body: &str) -> crate::broker::MessageRecord {
                 crate::broker::send_message(
                     &mut host.fixture.conn,
                     host.fixture.run.director_member_id,
@@ -6531,9 +6579,11 @@ mod tests {
         }
 
         mod composer_busy {
-            use super::deferred_queue::{queued, row, turns_until};
-            use super::*;
             use crate::broker::runtime::DeliveryMethod;
+            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::queued;
+            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::row;
+            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::turns_until;
+            use crate::runtime::runner::input::tests::ordinary_prompt::*;
 
             const DRAFT: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic draft\r\nDraft end";
 
@@ -6647,8 +6697,8 @@ mod tests {
                 type Case = (fn() -> ProfileCatalog, fn(&mut Host), &'static str);
                 let cases: [Case; 2] = [
                     (
-                        super::staged_delivery::permission_catalog,
-                        super::deferred_queue::form,
+                        crate::runtime::runner::input::tests::ordinary_prompt::staged_delivery::permission_catalog,
+                        crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::form,
                         "interaction_open",
                     ),
                     (
@@ -6755,7 +6805,9 @@ mod tests {
                     HostProfile::metadata(),
                     Instant::now() + Duration::from_secs(60),
                     |host| {
-                        super::deferred_queue::form(host);
+                        crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::form(
+                            host,
+                        );
                         let request = host.request("prompt:busy-after-start");
                         let id = queued(host, request, "interaction_open");
                         let behind =
@@ -6814,7 +6866,9 @@ mod tests {
                     HostProfile::metadata(),
                     Instant::now() + Duration::from_secs(60),
                     |host| {
-                        super::deferred_queue::form(host);
+                        crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::form(
+                            host,
+                        );
                         let request = host.request("prompt:interaction-then-busy");
                         let id = queued(host, request, "interaction_open");
                         let long_queued = crate::time::format_utc(
@@ -6961,11 +7015,17 @@ mod tests {
         }
 
         mod sql {
-            use super::*;
-            use crate::input::{Deadline, with_database_budget};
+            use crate::db::with_database_budget;
+            use crate::runtime::runner::input::tests::ordinary_prompt::*;
+            use crate::time::Deadline;
             use rusqlite::Connection;
-            use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
-            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+            use rusqlite::hooks::AuthAction;
+            use rusqlite::hooks::AuthContext;
+            use rusqlite::hooks::Authorization;
+            use rusqlite::hooks::TransactionOperation;
+            use std::sync::atomic::AtomicBool;
+            use std::sync::atomic::AtomicUsize;
+            use std::sync::atomic::Ordering;
 
             struct SqlObservation {
                 begins: AtomicUsize,
@@ -7248,9 +7308,10 @@ mod tests {
         }
 
         pub(in crate::runtime::runner::input) mod support {
-            use super::*;
+            use crate::runtime::runner::input::tests::ordinary_prompt::*;
             use crate::runtime::system::test_support::TestChild;
-            use std::process::{Command, Stdio};
+            use std::process::Command;
+            use std::process::Stdio;
             use std::sync::Mutex;
 
             pub(super) const LITERAL: &str = "ordinary fixture λ";
@@ -7314,14 +7375,14 @@ mod tests {
             }
 
             pub(in crate::runtime::runner::input) fn canonical_preview(
-                message: &crate::broker::records::MessageRecord,
+                message: &crate::broker::MessageRecord,
             ) -> String {
                 crate::delivery::canonical_preview_line(message)
             }
 
             pub(in crate::runtime::runner::input) fn preview_request(
                 host: &Host,
-                message: &crate::broker::records::MessageRecord,
+                message: &crate::broker::MessageRecord,
                 literal: &str,
             ) -> InputControlRequest {
                 let key = format!("preview:{}:{}", host.fixture.run.run_id, message.message_id);
@@ -8071,20 +8132,25 @@ mod tests {
         }
     }
     mod permission_inspection_contracts {
-        use super::super::*;
-        use super::ordinary_prompt::support::{
-            Host, HostProfile, catalog_definition, with_profile_host,
-        };
-        use crate::broker::runtime::{Coverage, InteractionClass, PermissionDecision};
-        use crate::coding_agent::profiles::catalog::test_support::{
-            inspection_fixture_definition, inspection_fixture_form,
-        };
+        use crate::broker::runtime::Coverage;
+        use crate::broker::runtime::InteractionClass;
+        use crate::broker::runtime::PermissionDecision;
+        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
+        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_form;
         pub(super) use crate::coding_agent::profiles::detector::test_support::native_fixture_bytes;
-        use crate::runtime::runner::{
-            MissingEvidence, PermissionInspectInput, PermissionInspection, RuntimePaths,
-        };
+        use crate::runtime::runner::MissingEvidence;
+        use crate::runtime::runner::PermissionInspectInput;
+        use crate::runtime::runner::PermissionInspection;
+        use crate::runtime::runner::RuntimePaths;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::Host;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::HostProfile;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::catalog_definition;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::with_profile_host;
+        use crate::runtime::runner::input::*;
         use rusqlite::OptionalExtension;
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
         use std::time::Duration;
 
         struct Tokens {
@@ -8700,8 +8766,10 @@ mod tests {
 
         #[test]
         fn permission_inspection_missing_facts_use_validated_post_policy_evidence_only() {
-            use crate::coding_agent::{CodingAgent, Detector};
-            use crate::runtime::runner::{TerminalSize, TerminalState};
+            use crate::coding_agent::CodingAgent;
+            use crate::coding_agent::Detector;
+            use crate::runtime::runner::TerminalSize;
+            use crate::runtime::runner::TerminalState;
             let catalog =
                 ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
@@ -8769,21 +8837,36 @@ mod tests {
         }
     }
     mod permission_response_contracts {
-        use super::super::*;
-        use super::ordinary_prompt::support::{Host, Pty};
-        use super::permission_inspection_contracts::{
-            counts, detail_rewrite, form, inspect, inspect_request, native_fixture_bytes,
-            request as inspection_target, settled_ids, stable_detailed_form, stable_form,
-            with_claude_host, with_claude_inspection, with_definition, with_inspection,
-            with_redacted_inspection,
-        };
-        use crate::broker::runtime::{DecisionSource, DirectorMode, PermissionDecision};
+        use crate::broker::runtime::DecisionSource;
+        use crate::broker::runtime::DirectorMode;
+        use crate::broker::runtime::PermissionDecision;
         use crate::coding_agent::CodingAgent;
         use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
-        use crate::runtime::runner::{
-            ByteInput, PermissionInspection, PermissionRespondInput, PermissionResponseResult,
-            ReceiptAction, ReceiptReply, TerminalSize,
-        };
+        use crate::runtime::runner::ByteInput;
+        use crate::runtime::runner::PermissionInspection;
+        use crate::runtime::runner::PermissionRespondInput;
+        use crate::runtime::runner::PermissionResponseResult;
+        use crate::runtime::runner::ReceiptAction;
+        use crate::runtime::runner::ReceiptReply;
+        use crate::runtime::runner::TerminalSize;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::Host;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::Pty;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::counts;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::detail_rewrite;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::form;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::inspect;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::inspect_request;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::native_fixture_bytes;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::request as inspection_target;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::settled_ids;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::stable_detailed_form;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_claude_host;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_claude_inspection;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_definition;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_inspection;
+        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_redacted_inspection;
+        use crate::runtime::runner::input::*;
         use std::sync::atomic::Ordering;
         use std::time::Duration;
 
@@ -9213,7 +9296,8 @@ mod tests {
         #[test]
         fn a_preview_during_the_claude_read_outside_dialog_queues_with_zero_bytes_and_drains_once_on_the_idle_composer()
          {
-            use super::ordinary_prompt::support::{canonical_preview, preview_request};
+            use crate::runtime::runner::input::tests::ordinary_prompt::support::canonical_preview;
+            use crate::runtime::runner::input::tests::ordinary_prompt::support::preview_request;
             const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
             let idle = || {
                 native_fixture_bytes(
@@ -10627,7 +10711,7 @@ mod tests {
                     InputServices {
                         catalog: ProfileCatalog::from_definitions(&inspection_fixture_definition())
                             .unwrap(),
-                        token_source: Box::new(super::ordinary_prompt::support::PanicTokens(
+                        token_source: Box::new(crate::runtime::runner::input::tests::ordinary_prompt::support::PanicTokens(
                             "receipt-only proof",
                         )),
                         hooks: h.hooks.clone(),
@@ -11240,12 +11324,13 @@ mod tests {
         }
 
         mod gated {
-            use super::super::permission_inspection_contracts::with_opencode_inspection;
-            use super::*;
-            use crate::coding_agent::profiles::catalog::test_support::{
-                gated_fixture_definition, gated_fixture_form, gated_reason_dialog,
-            };
-            use std::sync::atomic::{AtomicUsize, Ordering};
+            use crate::coding_agent::profiles::catalog::test_support::gated_fixture_definition;
+            use crate::coding_agent::profiles::catalog::test_support::gated_fixture_form;
+            use crate::coding_agent::profiles::catalog::test_support::gated_reason_dialog;
+            use crate::runtime::runner::input::tests::permission_inspection_contracts::with_opencode_inspection;
+            use crate::runtime::runner::input::tests::permission_response_contracts::*;
+            use std::sync::atomic::AtomicUsize;
+            use std::sync::atomic::Ordering;
 
             const IDLE_COMPOSER: &[u8] = b"\x1b[0m\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
             const OPERATION: &str = "PRIVATE_GATED_OPERATION";
@@ -11892,11 +11977,17 @@ mod tests {
         }
     }
     mod retirement_contracts {
-        use super::super::*;
-        use super::ordinary_prompt::support::{Host, with_host, with_host_until};
-        use crate::runtime::runner::{ReceiptAction, ReceiptReply};
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use crate::runtime::runner::ReceiptAction;
+        use crate::runtime::runner::ReceiptReply;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::Host;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::with_host;
+        use crate::runtime::runner::input::tests::ordinary_prompt::support::with_host_until;
+        use crate::runtime::runner::input::*;
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
         use std::time::Duration;
 
         /// Fills the receipt cache with `count` completed entries modelled on the real retained
@@ -11940,7 +12031,8 @@ mod tests {
 
         fn complete(h: &mut Host, key: &str) -> i64 {
             let request = h.request(key);
-            let accepted = super::ordinary_prompt::support::settle(h, request);
+            let accepted =
+                crate::runtime::runner::input::tests::ordinary_prompt::support::settle(h, request);
             assert_eq!(accepted.status, SubmissionStatus::Accepted);
             assert_eq!(accepted.stage, SubmissionStage::Submitted);
             assert!(h.coordinator.pending.is_none());
@@ -12353,13 +12445,18 @@ mod tests {
                     "retirement preview",
                 )
                 .unwrap();
-                let canonical = super::ordinary_prompt::support::canonical_preview(&message);
+                let canonical = crate::runtime::runner::input::tests::ordinary_prompt::support::canonical_preview(&message);
                 let mut program = canonical.as_bytes().to_vec();
                 program.push(b'~');
                 h.pty.expect_program(program.clone());
                 let request =
-                    super::ordinary_prompt::support::preview_request(h, &message, &canonical);
-                let accepted = super::ordinary_prompt::support::settle(h, request);
+                    crate::runtime::runner::input::tests::ordinary_prompt::support::preview_request(
+                        h, &message, &canonical,
+                    );
+                let accepted =
+                    crate::runtime::runner::input::tests::ordinary_prompt::support::settle(
+                        h, request,
+                    );
                 assert!(matches!(accepted.status, SubmissionStatus::Accepted));
                 let id = accepted.input_id.expect("durable Preview ID");
                 let before = cached(h, id);

@@ -1,5 +1,6 @@
-use crate::broker::records::*;
-use serde_json::{Value, json};
+use crate::broker::*;
+use serde_json::Value;
+use serde_json::json;
 
 pub(crate) fn member_press(value: &crate::runtime::KeyAcknowledgment) -> Value {
     json!({"member_id":value.member_id,"pane_id":value.pane_id,"keys":value.keys,"status":"acknowledged"})
@@ -122,7 +123,7 @@ pub(crate) fn member_exec(
         "input_id":input_id,"delivery":delivery.to_json()})
 }
 
-pub(crate) fn member_capture(capture: &crate::capture::MemberCapture) -> Value {
+pub(crate) fn member_capture(capture: &crate::cli::MemberCapture) -> Value {
     let snapshot = &capture.snapshot;
     json!({"member_id":capture.member_id,"pane_id":capture.pane_id,"lines":capture.lines,
         "content":snapshot.content,"captured_at":snapshot.captured_at,"content_sha256":snapshot.content_sha256})
@@ -186,7 +187,8 @@ mod tests {
     use serde_json::json;
 
     use crate::broker::runtime::RunStatus;
-    use crate::runtime::runner::{RecoveryOutcome, RecoveryReport};
+    use crate::runtime::runner::RecoveryOutcome;
+    use crate::runtime::runner::RecoveryReport;
     #[test]
     fn runner_recovery_presentation_pins_ordered_json_outcomes_and_exact_cleanup_text() {
         for (outcome, wire, status) in [
@@ -221,7 +223,7 @@ mod tests {
                 status,
                 cleanup_diagnostics: diagnostics.clone(),
             };
-            let value = crate::presentation::runtime_recovery(&report);
+            let value = crate::output::json::runtime_recovery(&report);
             assert_eq!(
                 value
                     .as_object()
@@ -256,10 +258,13 @@ mod tests {
     }
 
     mod delivery_outcomes {
-        use crate::broker::records::MessageRecord;
+        use crate::broker::MessageRecord;
+        use crate::broker::runtime::DeliveryMethod;
+        use crate::broker::runtime::DeliveryProjection;
+        use crate::broker::runtime::DeliveryStatus;
         use crate::broker::runtime::test_support::assert_key_order;
-        use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
-        use serde_json::{Value, json};
+        use serde_json::Value;
+        use serde_json::json;
 
         fn projection(
             status: DeliveryStatus,
@@ -326,7 +331,7 @@ mod tests {
         fn send_outcome_appends_input_id_and_ordered_delivery_after_its_existing_keys() {
             let message = MessageRecord::fixture(9, 2, 3, "hello");
             for (sent, input_id, delivery, expected) in cases() {
-                let output = crate::presentation::send_outcome(&message, sent, input_id, &delivery);
+                let output = crate::output::json::send_outcome(&message, sent, input_id, &delivery);
                 assert_key_order(
                     &output,
                     &["message", "notification_sent", "input_id", "delivery"],
@@ -335,7 +340,7 @@ mod tests {
                 assert_eq!(output["notification_sent"], sent);
                 assert_eq!(output["input_id"], json!(input_id));
                 assert_eq!(output["delivery"], expected);
-                assert_eq!(output["message"], crate::presentation::message(&message));
+                assert_eq!(output["message"], crate::output::json::message(&message));
             }
         }
 
@@ -343,7 +348,7 @@ mod tests {
         fn prompt_and_exec_outcomes_append_delivery_and_dispatch_only_on_submission() {
             for (_, input_id, delivery, expected) in cases().into_iter().take(4) {
                 let prompt =
-                    crate::presentation::member_prompt(7, "%2", "do it", input_id, &delivery);
+                    crate::output::json::member_prompt(7, "%2", "do it", input_id, &delivery);
                 assert_key_order(
                     &prompt,
                     &["member_id", "pane_id", "text", "input_id", "delivery"],
@@ -352,7 +357,7 @@ mod tests {
                     prompt,
                     json!({"member_id":7,"pane_id":"%2","text":"do it","input_id":input_id,"delivery":expected})
                 );
-                let exec = crate::presentation::member_exec(
+                let exec = crate::output::json::member_exec(
                     7, "%2", "codex", "ls -l", input_id, &delivery,
                 );
                 assert_key_order(
@@ -378,9 +383,10 @@ mod tests {
     }
 
     mod runtime {
-        use super::*;
+        use crate::broker::runtime as storage;
         use crate::broker::runtime::test_support::*;
-        use crate::broker::runtime::{self as storage, *};
+        use crate::broker::runtime::*;
+        use crate::output::json::tests::*;
         use rusqlite::params;
         use serde_json::Value;
 
@@ -388,7 +394,7 @@ mod tests {
         fn runtime_permission_presentation_flattens_the_audit_in_shipping_order() {
             let mut fixture = ResponseFixture::new();
             let receipt = fixture.reserve();
-            let output = crate::presentation::input_operation(&receipt.input);
+            let output = crate::output::json::input_operation(&receipt.input);
             assert_key_order(
                 &output["input"],
                 &[
@@ -475,7 +481,7 @@ mod tests {
             let member = crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
                 .unwrap()
                 .unwrap();
-            let output = crate::presentation::member(&member);
+            let output = crate::output::json::member(&member);
             assert_key_order(
                 &output,
                 &[
@@ -531,7 +537,7 @@ mod tests {
                     .unwrap()
                     .unwrap();
             assert_eq!(
-                crate::presentation::member(&director).get("runtime"),
+                crate::output::json::member(&director).get("runtime"),
                 Some(&Value::Null)
             );
             let text = crate::output::format_member_detail(&member);
@@ -578,7 +584,7 @@ mod tests {
             let member = crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
                 .unwrap()
                 .unwrap();
-            let runtime = &crate::presentation::member(&member)["runtime"];
+            let runtime = &crate::output::json::member(&member)["runtime"];
             assert_eq!(runtime["coverage"], "tested");
             assert_key_order(runtime, &RUNTIME_KEYS);
             let line = format!(
@@ -591,7 +597,7 @@ mod tests {
             );
             let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
             assert_key_order(
-                &crate::presentation::runtime_event(&view)["run"],
+                &crate::output::json::runtime_event(&view)["run"],
                 &RUNTIME_KEYS,
             );
             assert_eq!(
@@ -624,7 +630,7 @@ mod tests {
                     crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
                         .unwrap()
                         .unwrap();
-                let runtime = &crate::presentation::member(&member)["runtime"];
+                let runtime = &crate::output::json::member(&member)["runtime"];
                 assert_eq!(
                     runtime.as_object().unwrap().keys().next_back().unwrap(),
                     "effective_policy"
@@ -639,7 +645,7 @@ mod tests {
                     format!("{} worker active\n{line}", fixture.member)
                 );
                 let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
-                let shown = crate::presentation::runtime_event(&view);
+                let shown = crate::output::json::runtime_event(&view);
                 assert_eq!(shown["run"]["effective_policy"], record);
                 assert_eq!(
                     shown["run"]
@@ -670,7 +676,7 @@ mod tests {
             let owner = fixture.activate();
             let event = fixture.open(&owner);
             let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
-            let output = crate::presentation::runtime_event(&view);
+            let output = crate::output::json::runtime_event(&view);
             assert_key_order(
                 &output,
                 &[
@@ -708,7 +714,7 @@ mod tests {
                 )
             );
             let input = fixture.input(&owner, "exec:lost-output", InputKind::Exec, None);
-            let output = crate::presentation::input_operation(&input);
+            let output = crate::output::json::input_operation(&input);
             assert_key_order(
                 &output["input"],
                 &[
@@ -810,7 +816,7 @@ mod tests {
                     .unwrap_or_else(|error| panic!("{assignment}: {error}"));
                 let stored = storage::get_input(&fixture.conn, input.input_id)
                     .unwrap_or_else(|error| panic!("{assignment}: {}", error.message()));
-                let output = &crate::presentation::input_operation(&stored)["input"];
+                let output = &crate::output::json::input_operation(&stored)["input"];
                 assert_eq!(output["delivery"], delivery, "{assignment}");
                 assert_key_order(&output["delivery"], &["status", "method", "reason"]);
                 assert_eq!(output["deferred_at"].is_null(), !deferred, "{assignment}");
@@ -844,7 +850,7 @@ mod tests {
                 UncertainCause::ManualInput,
             )
             .unwrap();
-            let output = crate::presentation::input_operation(&caused);
+            let output = crate::output::json::input_operation(&caused);
             assert_eq!(output["input"]["uncertain_cause"], "manual_input");
             assert_eq!(
                 crate::output::format_input_operation(&caused),
@@ -863,13 +869,13 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                crate::presentation::input_operation(&settled)["input"]["uncertain_cause"],
+                crate::output::json::input_operation(&settled)["input"]["uncertain_cause"],
                 "manual_input",
                 "reconciliation keeps the recorded cause"
             );
             let plain = fixture.input(&owner, "prompt:plain", InputKind::Prompt, None);
             assert_eq!(
-                crate::presentation::input_operation(&plain)["input"]["uncertain_cause"],
+                crate::output::json::input_operation(&plain)["input"]["uncertain_cause"],
                 Value::Null
             );
         }
@@ -877,7 +883,7 @@ mod tests {
         #[test]
         fn permission_inspection_request_orders_its_identity_and_capability_keys() {
             let inspection = crate::runtime::runner::input_protocol_test_support::inspection();
-            let output = crate::presentation::permission_inspection(&inspection);
+            let output = crate::output::json::permission_inspection(&inspection);
             assert_key_order(&output, &["request"]);
             let request = &output["request"];
             assert_key_order(
@@ -914,11 +920,14 @@ mod tests {
     }
 
     mod runner_registry {
-        use crate::broker::runtime::{self as storage, RunStatus};
-        use crate::runtime::runner::health::test_support::{SilentServer, activate};
+        use crate::broker::runtime as storage;
+        use crate::broker::runtime::RunStatus;
+        use crate::runtime::runner::health::test_support::SilentServer;
+        use crate::runtime::runner::health::test_support::activate;
         use crate::runtime::runner::test_support::Fixture;
         use rusqlite::Connection;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
 
         fn counts(conn: &Connection) -> (i64, i64, i64) {
             let scalar = |table| {
@@ -956,7 +965,7 @@ mod tests {
             .unwrap();
             assert!(start.elapsed() < Duration::from_millis(750));
             assert_eq!(
-                crate::presentation::member(&member)["runtime"]["last_health_at"],
+                crate::output::json::member(&member)["runtime"]["last_health_at"],
                 "2000-01-01T00:00:00Z"
             );
             assert_eq!(counts(&fixture.conn), before);

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 #[cfg(test)]
-pub(super) use replies::REPLY_PREFIX_BOUND;
+pub(super) use crate::runtime::runner::transport::replies::REPLY_PREFIX_BOUND;
 use replies::{Classified, ReplyClassifier};
 
 mod drain;
@@ -492,8 +492,8 @@ pub(crate) mod test_support {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use super::*;
     use crate::error::CafleetError;
+    use crate::runtime::runner::transport::*;
     #[derive(Default)]
     pub(crate) struct Observer {
         pub(crate) screens: Vec<(u64, String)>,
@@ -523,13 +523,14 @@ pub(crate) mod test_support {
 mod tests {
     use std::cell::RefCell;
     use std::collections::VecDeque;
-    use std::io::{self, ErrorKind};
+    use std::io;
+    use std::io::ErrorKind;
     use std::rc::Rc;
 
-    use super::replies::REPLY_PREFIX_BOUND;
-    use super::test_support::*;
-    use super::*;
     use crate::error::CafleetError;
+    use crate::runtime::runner::transport::replies::REPLY_PREFIX_BOUND;
+    use crate::runtime::runner::transport::test_support::*;
+    use crate::runtime::runner::transport::*;
 
     struct Bytes {
         chunks: VecDeque<Vec<u8>>,

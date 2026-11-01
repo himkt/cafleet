@@ -1,7 +1,10 @@
+use crate::multiplexer::BackendCore;
+use crate::multiplexer::CommandRunner;
+use crate::multiplexer::MultiplexerContext;
+use crate::multiplexer::MultiplexerError;
+use crate::multiplexer::PLACEMENT_MISMATCH;
 use std::collections::HashMap;
 use std::rc::Rc;
-
-use super::{BackendCore, CommandRunner, MultiplexerContext, MultiplexerError, PLACEMENT_MISMATCH};
 
 const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
 
@@ -33,7 +36,7 @@ impl TmuxMultiplexer {
         }
     }
 
-    pub(crate) fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+    pub(crate) fn bounded(&self, deadline: crate::time::Deadline) -> Self {
         Self {
             core: self.core.bounded(deadline),
         }
@@ -77,12 +80,12 @@ impl TmuxMultiplexer {
 
     pub(crate) fn validate_key_target(
         &self,
-        placement: &crate::broker::records::Placement,
-        deadline: crate::input::Deadline,
+        placement: &crate::broker::Placement,
+        deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
-        super::check_deadline(deadline)?;
+        crate::multiplexer::check_deadline(deadline)?;
         self.ensure_available()?;
-        super::check_deadline(deadline)?;
+        crate::multiplexer::check_deadline(deadline)?;
         let (_, current) =
             self.caller_context(|argv| self.core.press_run(argv, deadline, false))?;
         if !current.is_some_and(|context| {
@@ -125,8 +128,8 @@ impl TmuxMultiplexer {
     pub(crate) fn send_keys(
         &self,
         pane_id: &str,
-        keys: &super::PressKeys,
-        deadline: crate::input::Deadline,
+        keys: &crate::multiplexer::PressKeys,
+        deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
         let mut argv = tmux_argv(&["tmux", "send-keys", "-t", pane_id]);
         argv.extend(keys.tmux_arguments());
@@ -166,13 +169,13 @@ impl TmuxMultiplexer {
         let pane_id = self
             .core
             .run(&args, None)
-            .map_err(|error| error.with_pane_cleanup(super::PaneCleanup::Unknown))?
+            .map_err(|error| error.with_pane_cleanup(crate::multiplexer::PaneCleanup::Unknown))?
             .trim()
             .to_string();
         if pane_id.is_empty() {
             return Err(
                 MultiplexerError::new("tmux split-window returned an empty pane ID")
-                    .with_pane_cleanup(super::PaneCleanup::Unknown),
+                    .with_pane_cleanup(crate::multiplexer::PaneCleanup::Unknown),
             );
         }
         let _ = self.core.run(
@@ -189,14 +192,14 @@ impl TmuxMultiplexer {
     }
 
     /// Capture the last `lines` drawn lines of the pane buffer via the shared
-    /// capture windowing ([`super::capture_window`]).
+    /// capture windowing ([`crate::multiplexer::capture_window`]).
     pub(crate) fn capture_pane(
         &self,
         target_pane_id: &str,
         lines: i64,
     ) -> Result<String, MultiplexerError> {
-        super::check_capture_lines(lines)?;
-        let fetch_depth = lines + super::CAPTURE_OVER_FETCH_LINES;
+        crate::multiplexer::check_capture_lines(lines)?;
+        let fetch_depth = lines + crate::multiplexer::CAPTURE_OVER_FETCH_LINES;
         let raw = self.core.run(
             &tmux_argv(&[
                 "tmux",
@@ -210,7 +213,7 @@ impl TmuxMultiplexer {
             ]),
             None,
         )?;
-        Ok(super::capture_window(&raw, lines))
+        Ok(crate::multiplexer::capture_window(&raw, lines))
     }
 
     pub(crate) fn kill_pane(
@@ -228,9 +231,13 @@ impl TmuxMultiplexer {
 
 #[cfg(test)]
 mod tests {
-
-    use crate::multiplexer::test_support::{FakeRunner, argv, env, run_event};
-    use crate::multiplexer::{MultiplexerContext, RunError, TmuxMultiplexer};
+    use crate::multiplexer::MultiplexerContext;
+    use crate::multiplexer::RunError;
+    use crate::multiplexer::TmuxMultiplexer;
+    use crate::multiplexer::test_support::FakeRunner;
+    use crate::multiplexer::test_support::argv;
+    use crate::multiplexer::test_support::env;
+    use crate::multiplexer::test_support::run_event;
 
     fn tmux_env() -> std::collections::HashMap<String, String> {
         env(&[

@@ -1,9 +1,15 @@
-use super::*;
-use crate::broker::records::{MemberStatus, Placement};
-use crate::broker::runtime::{self as storage, *};
+use crate::broker::MemberStatus;
+use crate::broker::Placement;
+use crate::broker::runtime as storage;
+use crate::broker::runtime::*;
 use crate::config::Settings;
-use crate::input::{PaneLock, bounded_by_inherited};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use crate::db::bounded_by_inherited;
+use crate::pane_lock::PaneLock;
+use crate::runtime::runner::*;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use rusqlite::TransactionBehavior;
+use rusqlite::params;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -367,10 +373,10 @@ pub(crate) fn reconcile_input_with_host(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::super::*;
-    use crate::broker::records::Placement;
+    use crate::broker::Placement;
     use crate::broker::runtime::*;
-    use crate::input::Deadline;
+    use crate::runtime::runner::*;
+    use crate::time::Deadline;
     use std::time::Instant;
 
     pub(crate) enum Termination {
@@ -511,17 +517,21 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::super::*;
-    use super::test_support::*;
-    use crate::broker::records::Placement;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::Placement;
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
     use crate::config::Settings;
-    use crate::input::{Deadline, PaneLock, with_database_budget};
+    use crate::db::with_database_budget;
+    use crate::pane_lock::PaneLock;
+    use crate::runtime::runner::input_recovery::test_support::*;
     use crate::runtime::runner::test_support::Fixture;
+    use crate::runtime::runner::*;
+    use crate::time::Deadline;
     use rusqlite::Connection;
     use serde_json::json;
     use std::os::unix::fs::MetadataExt;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     struct ReceiptCase {
         fixture: Fixture,
@@ -607,7 +617,7 @@ mod tests {
             held: Option<&PaneLock>,
             host: &mut TypedHost,
         ) -> std::result::Result<InputOperation, InputFailure> {
-            super::reconcile_input_with_host(
+            crate::runtime::runner::input_recovery::reconcile_input_with_host(
                 &mut self.fixture.conn,
                 &self.settings,
                 &self.input,
@@ -681,7 +691,8 @@ mod tests {
 
     #[test]
     fn exclusive_permission_ready_proof_and_claim_release_share_the_owner_transaction() {
-        use crate::runtime::runner::input_client::test_support::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::Case;
+        use crate::runtime::runner::input_client::test_support::Retained;
 
         let mut case = Case::new(Retained::InProgress);
         storage::record_input_state(
@@ -744,7 +755,7 @@ mod tests {
             }
             Ok(())
         }));
-        let failed = super::reconcile_input_with_host(
+        let failed = crate::runtime::runner::input_recovery::reconcile_input_with_host(
             &mut case.fixture.conn,
             &case.settings,
             &original.input,
@@ -790,7 +801,7 @@ mod tests {
         assert_eq!(spool(), original_spool);
         assert_lock_released(&case.fixture.conn, &run);
         let mut retry = TypedHost::new(until);
-        let settled = super::reconcile_input_with_host(
+        let settled = crate::runtime::runner::input_recovery::reconcile_input_with_host(
             &mut case.fixture.conn,
             &case.settings,
             &original.input,
@@ -834,9 +845,11 @@ mod tests {
 
     #[test]
     fn exclusive_permission_receipt_pins_original_audit_and_creation_after_snapshot() {
-        use crate::runtime::runner::input_client::test_support::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::Case;
+        use crate::runtime::runner::input_client::test_support::Retained;
         use std::sync::Arc;
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
 
         for changed in ["decided_at", "created_at"] {
             let mut case = Case::new(Retained::Uncertain);
@@ -872,7 +885,7 @@ mod tests {
                 }
                 Ok(())
             }));
-            let result = super::reconcile_input_with_host(
+            let result = crate::runtime::runner::input_recovery::reconcile_input_with_host(
                 &mut case.fixture.conn,
                 &case.settings,
                 &original.input,
@@ -1005,7 +1018,7 @@ mod tests {
                 .unwrap();
             } else {
                 assert!(
-                    crate::broker::deregister_member(
+                    crate::broker::members::test_support::deregister_member(
                         &mut case.fixture.conn,
                         case.fixture.run.member_id
                     )
@@ -1057,7 +1070,7 @@ mod tests {
         for (placement, guard) in [(Some(&case.placement), None), (None, Some(&held))] {
             let mut host = TypedHost::new(Instant::now() + Duration::from_secs(1));
             assert!(
-                super::reconcile_input_with_host(
+                crate::runtime::runner::input_recovery::reconcile_input_with_host(
                     &mut case.fixture.conn,
                     &case.settings,
                     &case.input,
@@ -1238,9 +1251,15 @@ mod tests {
 
     #[test]
     fn exclusive_receipt_revalidates_original_input_placement_and_budget_after_real_sql_entry() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::{Arc, Mutex, mpsc};
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use rusqlite::hooks::TransactionOperation;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+        use std::sync::mpsc;
 
         for change in ["digest", "state", "placement", "appearance", "deadline"] {
             let mut case = ReceiptCase::new();
@@ -1255,7 +1274,7 @@ mod tests {
                 [case.fixture.run.member_id], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, Option<String>>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, String>(5)?)),
             ).unwrap();
             let held = if change == "appearance" {
-                crate::broker::deregister_member(
+                crate::broker::members::test_support::deregister_member(
                     &mut case.fixture.conn,
                     case.fixture.run.member_id,
                 )
@@ -1363,18 +1382,20 @@ mod tests {
                 });
                 let result =
                     with_database_budget(&mut case.fixture.conn, Deadline::until(cap), |conn| {
-                        Ok(super::reconcile_input_with_host(
-                            conn,
-                            &case.settings,
-                            &case.input,
-                            &case.fixture.run,
-                            held.as_ref().map(|_| &case.placement),
-                            held.as_ref(),
-                            InputDisposition::Submitted,
-                            "fixture:fixed-after-wait",
-                            cap + Duration::from_secs(1),
-                            &mut host,
-                        ))
+                        Ok(
+                            crate::runtime::runner::input_recovery::reconcile_input_with_host(
+                                conn,
+                                &case.settings,
+                                &case.input,
+                                &case.fixture.run,
+                                held.as_ref().map(|_| &case.placement),
+                                held.as_ref(),
+                                InputDisposition::Submitted,
+                                "fixture:fixed-after-wait",
+                                cap + Duration::from_secs(1),
+                                &mut host,
+                            ),
+                        )
                     });
                 let joined = writer.join();
                 (result, joined)

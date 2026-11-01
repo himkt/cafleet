@@ -428,18 +428,25 @@ impl<S: OutboxIo> Outbox<S> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::broker::runtime::*;
-    use crate::runtime::runner::writer::test_support::{
-        WriterFixture, deadline, frame, independent_frames, transition,
-    };
-    use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
+    use crate::runtime::runner::outbox::*;
+    use crate::runtime::runner::writer::test_support::WriterFixture;
+    use crate::runtime::runner::writer::test_support::deadline;
+    use crate::runtime::runner::writer::test_support::frame;
+    use crate::runtime::runner::writer::test_support::independent_frames;
+    use crate::runtime::runner::writer::test_support::transition;
+    use std::io;
+    use std::io::Cursor;
+    use std::io::Read;
+    use std::io::Seek;
+    use std::io::SeekFrom;
+    use std::io::Write;
     use std::sync::Mutex;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
     mod supplied_connection_compaction {
-        use super::*;
+        use crate::runtime::runner::outbox::tests::*;
 
         fn ordinary_connection_work(conn: &rusqlite::Connection, timeout: i64) {
             assert_eq!(
@@ -615,7 +622,7 @@ mod tests {
     }
 
     mod terminal_tail {
-        use super::*;
+        use crate::runtime::runner::outbox::tests::*;
 
         fn terminal_spool(committed: bool) -> (WriterFixture, FaultIo, Vec<u8>) {
             let mut fixture = WriterFixture::new();
@@ -877,10 +884,11 @@ mod tests {
     }
 
     mod effective_policy_frames {
-        use super::*;
-        use crate::runtime::runner::writer::test_support::{
-            frame_bodies, observation, outbox_frame, unavailable,
-        };
+        use crate::runtime::runner::outbox::tests::*;
+        use crate::runtime::runner::writer::test_support::frame_bodies;
+        use crate::runtime::runner::writer::test_support::observation;
+        use crate::runtime::runner::writer::test_support::outbox_frame;
+        use crate::runtime::runner::writer::test_support::unavailable;
 
         fn framed(body: &Value) -> Vec<u8> {
             outbox_frame(&serde_json::to_vec(body).unwrap())

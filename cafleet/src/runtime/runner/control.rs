@@ -1,14 +1,20 @@
-use super::codec::{AdmittedControlFrame, decode_legacy_control_body};
-use super::input_protocol::{decode_input_reply, encode_input_request};
-use super::*;
-
-use crate::broker::records::Placement;
-use crate::broker::runtime::{self as storage, RunRecord};
-use crate::multiplexer::{AnyMultiplexer, MultiplexerContext};
+use crate::broker::Placement;
+use crate::broker::runtime as storage;
+use crate::broker::runtime::RunRecord;
+use crate::multiplexer::AnyMultiplexer;
+use crate::multiplexer::MultiplexerContext;
+use crate::runtime::runner::codec::AdmittedControlFrame;
+use crate::runtime::runner::codec::decode_legacy_control_body;
+use crate::runtime::runner::input_protocol::decode_input_reply;
+use crate::runtime::runner::input_protocol::encode_input_request;
+use crate::runtime::runner::*;
 use serde_json::json;
-use std::io::{ErrorKind, Read, Write};
+use std::io::ErrorKind;
+use std::io::Read;
+use std::io::Write;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Instant;
@@ -35,7 +41,12 @@ impl ControlClient {
     }
 
     fn connect_in_phase(path: &Path, deadline: Instant, phase: EndpointPhase) -> Result<Self> {
-        use nix::sys::socket::{AddressFamily, SockFlag, SockType, UnixAddr, connect, socket};
+        use nix::sys::socket::AddressFamily;
+        use nix::sys::socket::SockFlag;
+        use nix::sys::socket::SockType;
+        use nix::sys::socket::UnixAddr;
+        use nix::sys::socket::connect;
+        use nix::sys::socket::socket;
         loop {
             check_deadline(Instant::now(), deadline)?;
             let meta = match std::fs::symlink_metadata(path) {
@@ -204,7 +215,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
         deadline: Instant,
     ) -> Result<String> {
         self.mux
-            .bounded(crate::input::Deadline::until(deadline))
+            .bounded(crate::time::Deadline::until(deadline))
             .split_window(self.context, environment, argv)
             .map_err(|cause| error(format!("runner pane spawn failed: {cause}")))
     }
@@ -267,7 +278,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
     }
     fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<()> {
         self.mux
-            .bounded(crate::input::Deadline::until(deadline))
+            .bounded(crate::time::Deadline::until(deadline))
             .kill_pane(pane, true)
             .map_err(|cause| error(format!("runner pane cleanup failed: {cause}")))
     }
@@ -291,31 +302,42 @@ pub(crate) fn request_shutdown(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::runtime::runner::control::*;
     use std::time::Duration;
 
     mod launch_readiness_tests {
         use std::io::ErrorKind;
         use std::os::fd::AsRawFd;
-        use std::os::unix::fs::{FileTypeExt, PermissionsExt, symlink};
-        use std::os::unix::net::{UnixListener, UnixStream};
+        use std::os::unix::fs::FileTypeExt;
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::symlink;
+        use std::os::unix::net::UnixListener;
+        use std::os::unix::net::UnixStream;
         use std::path::Path;
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::time::{Duration, Instant};
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        use std::time::Instant;
 
-        use nix::sys::socket::{
-            AddressFamily, Backlog, SockFlag, SockType, UnixAddr, bind, listen, socket,
-        };
+        use nix::sys::socket::AddressFamily;
+        use nix::sys::socket::Backlog;
+        use nix::sys::socket::SockFlag;
+        use nix::sys::socket::SockType;
+        use nix::sys::socket::UnixAddr;
+        use nix::sys::socket::bind;
+        use nix::sys::socket::listen;
+        use nix::sys::socket::socket;
         use serde_json::Value;
 
-        use super::*;
         use crate::error::CafleetError;
-        use crate::multiplexer::{
-            AnyMultiplexer, MultiplexerContext, TmuxMultiplexer, test_support,
-        };
-        use crate::runtime::runner::test_support::{
-            Fixture, read_fixture_bytes, write_fixture_bytes,
-        };
+        use crate::multiplexer::AnyMultiplexer;
+        use crate::multiplexer::MultiplexerContext;
+        use crate::multiplexer::TmuxMultiplexer;
+        use crate::multiplexer::test_support;
+        use crate::runtime::runner::control::tests::*;
+        use crate::runtime::runner::test_support::Fixture;
+        use crate::runtime::runner::test_support::read_fixture_bytes;
+        use crate::runtime::runner::test_support::write_fixture_bytes;
 
         struct Endpoint {
             fixture: Fixture,
@@ -688,21 +710,22 @@ mod tests {
         }
     }
     mod input_client_tests {
-        use super::*;
         use crate::broker::runtime::InputKind;
-        use crate::runtime::runner::input_protocol::{
-            InputControlOperation, InputControlReply, InputControlRequest, SubmissionStage,
-            SubmissionStatus, SubmitInput,
-        };
+        use crate::runtime::runner::control::tests::*;
+        use crate::runtime::runner::input_protocol::InputControlOperation;
+        use crate::runtime::runner::input_protocol::InputControlReply;
+        use crate::runtime::runner::input_protocol::InputControlRequest;
+        use crate::runtime::runner::input_protocol::SubmissionStage;
+        use crate::runtime::runner::input_protocol::SubmissionStatus;
+        use crate::runtime::runner::input_protocol::SubmitInput;
         use crate::runtime::runner::test_support::Fixture;
         use serde_json::json;
         use std::net::Shutdown;
         use std::os::unix::fs::PermissionsExt;
         use std::os::unix::net::UnixListener;
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
 
         type PeerResult<T> = std::result::Result<T, String>;
         use crate::runtime::runner::codec::test_support::independent_frame as frame;

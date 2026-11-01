@@ -1,11 +1,18 @@
-use rusqlite::{Connection, OptionalExtension, params};
-
-use super::members::{NewPlacement, insert_member_row, insert_placement_row};
-use super::records::{
-    CreatedFleet, FleetRecord, FleetSummary, MemberKind, MemberRecord, MemberStatus, Placement,
-};
+use crate::broker::CreatedFleet;
+use crate::broker::FleetRecord;
+use crate::broker::FleetSummary;
+use crate::broker::MemberKind;
+use crate::broker::MemberRecord;
+use crate::broker::MemberStatus;
+use crate::broker::Placement;
+use crate::broker::members::NewPlacement;
+use crate::broker::members::insert_member_row;
+use crate::broker::members::insert_placement_row;
 use crate::error::CafleetError;
 use crate::time::now_stamp;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use rusqlite::params;
 
 const DIRECTOR_NAME: &str = "Director";
 const DIRECTOR_DESCRIPTION: &str = "Root Director for this fleet";
@@ -162,25 +169,70 @@ pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<usiz
     Ok(deregistered_count)
 }
 
+pub(crate) fn member_run_ids(conn: &Connection) -> Result<Vec<i64>, CafleetError> {
+    let mut statement = conn.prepare("SELECT run_id FROM member_runs ORDER BY run_id")?;
+    let runs = statement
+        .query_map([], |row| row.get::<_, i64>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(runs)
+}
+
+pub(crate) fn recorded_asset_install(
+    conn: &Connection,
+    coding_agent: &str,
+    path: &str,
+) -> rusqlite::Result<Option<(String, String)>> {
+    conn.query_row(
+        "SELECT cafleet_version, installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
+        params![coding_agent, path],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    ).optional()
+}
+
+pub(crate) fn record_asset_install(
+    conn: &mut Connection,
+    coding_agent: &str,
+    path: &str,
+    cafleet_version: &str,
+) -> Result<(), CafleetError> {
+    let now = now_stamp();
+    conn.execute(
+        "INSERT INTO asset_installs (coding_agent, path, cafleet_version, installed_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(coding_agent, path) DO UPDATE SET
+             cafleet_version=excluded.cafleet_version, installed_at=excluded.installed_at",
+        params![coding_agent, path, cafleet_version, now],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use rusqlite::Connection;
 
     pub(crate) fn create_fleet_fixture(conn: &mut Connection, name: &str) -> (i64, i64) {
-        let fleet =
-            super::create_fleet(conn, Some(name), "main", "@1", "%0", "claude", "tmux").unwrap();
+        let fleet = crate::broker::fleets::create_fleet(
+            conn,
+            Some(name),
+            "main",
+            "@1",
+            "%0",
+            "claude",
+            "tmux",
+        )
+        .unwrap();
         (fleet.fleet_id, fleet.director.member_id)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::create_fleet_fixture;
-    use super::*;
     use crate::broker;
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::fleets::*;
     use crate::broker::members::test_support::register;
+    use crate::cli::guarded_delete_fleet;
     use crate::db::test_support::migrated_conn;
-    use crate::deletion::test_support::guarded_delete_fleet;
 
     fn row_count(conn: &Connection, table: &str) -> i64 {
         conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
@@ -247,7 +299,7 @@ mod tests {
             [first, third, second]
         );
         assert_eq!(rows[0].member_count, 2);
-        broker::deregister_member(&mut conn, worker).unwrap();
+        crate::broker::members::test_support::deregister_member(&mut conn, worker).unwrap();
         assert_eq!(list_fleets(&conn).unwrap()[0].member_count, 1);
         guarded_delete_fleet(&mut conn, second).unwrap();
         assert_eq!(list_fleets(&conn).unwrap().len(), 2);
@@ -319,5 +371,39 @@ mod tests {
             );
             assert!(guarded_delete_fleet(&mut conn, 999).is_err());
         }
+    }
+
+    #[test]
+    fn install_record_upsert_changes_only_the_selected_agent_and_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = crate::db::test_support::migrated_conn(&dir);
+        for (agent, path) in [("codex", "/a"), ("codex", "/b"), ("claude", "/a")] {
+            record_asset_install(&mut conn, agent, path, "old").unwrap();
+        }
+        conn.execute("UPDATE asset_installs SET installed_at='old-time'", [])
+            .unwrap();
+        record_asset_install(&mut conn, "codex", "/a", "new").unwrap();
+        let rows = conn.prepare("SELECT coding_agent, path, cafleet_version, installed_at FROM asset_installs ORDER BY coding_agent, path")
+            .unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)))
+            .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[0],
+            (
+                "claude".into(),
+                "/a".into(),
+                "old".into(),
+                "old-time".into()
+            )
+        );
+        assert_eq!(
+            (&rows[1].0, &rows[1].1, &rows[1].2),
+            (&"codex".into(), &"/a".into(), &"new".into())
+        );
+        assert!(crate::time::parse_lenient(&rows[1].3).is_ok());
+        assert_eq!(
+            rows[2],
+            ("codex".into(), "/b".into(), "old".into(), "old-time".into())
+        );
     }
 }

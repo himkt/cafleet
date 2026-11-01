@@ -267,22 +267,25 @@ fn perform(
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
-    use serde_json::{Value, json};
-    use sha2::{Digest, Sha256};
+    use serde_json::Value;
+    use serde_json::json;
+    use sha2::Digest;
+    use sha2::Sha256;
     use std::io::Write;
 
-    use super::super::test_support::*;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
     use crate::error::CafleetError;
+    use crate::runtime::runner::recovery::test_support::*;
     use crate::runtime::runner::*;
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     mod history {
-        use super::*;
-        use crate::runtime::runner::recovery::test_support::relationships::{
-            LIFECYCLES, end_lifecycle,
-        };
+        use crate::runtime::runner::recovery::replay::tests::*;
+        use crate::runtime::runner::recovery::test_support::relationships::LIFECYCLES;
+        use crate::runtime::runner::recovery::test_support::relationships::end_lifecycle;
 
         #[test]
         fn runner_recovery_archives_each_original_and_synthesized_event_by_current_lifecycle() {
@@ -350,7 +353,8 @@ mod tests {
 
         #[test]
         fn runner_recovery_preserves_latest_evidence_receipts_response_audits_and_episode_claims() {
-            use crate::coding_agent::{AnswerCapability, CodingAgent};
+            use crate::coding_agent::AnswerCapability;
+            use crate::coding_agent::CodingAgent;
             let mut case = Case::new();
             case.fixture
         .conn
@@ -479,7 +483,7 @@ mod tests {
     }
 
     mod replay {
-        use super::*;
+        use crate::runtime::runner::recovery::replay::tests::*;
 
         fn unavailable(run: &RunRecord, sequence: i64) -> ObservedTransition {
             ObservedTransition {
@@ -972,8 +976,8 @@ mod tests {
     }
 
     mod terminal_tail {
-        use super::*;
-        use crate::input::PaneLock;
+        use crate::pane_lock::PaneLock;
+        use crate::runtime::runner::recovery::replay::tests::*;
 
         fn terminal_case(status: RunStatus) -> Case {
             let mut case = Case::new();
@@ -1105,13 +1109,12 @@ mod tests {
     }
 
     mod descriptor {
-        use super::*;
+        use crate::runtime::runner::recovery::replay::tests::*;
         use crate::runtime::runner::recovery::test_support::descriptor::*;
         use std::os::unix::fs::PermissionsExt;
-        use std::sync::{
-            Mutex,
-            atomic::{AtomicBool, Ordering},
-        };
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
         #[test]
         fn runner_recovery_verified_creator_recovery_removes_its_private_descriptor() {
             let mut case = described_creator();
@@ -1421,7 +1424,7 @@ mod tests {
     }
 
     mod descriptor_cleanup {
-        use super::*;
+        use crate::runtime::runner::recovery::replay::tests::*;
         use crate::runtime::runner::recovery::test_support::descriptor::*;
         #[test]
         fn runner_recovery_coordinator_propagates_actual_unlink_failure_and_retries_historical_epoch()
@@ -1500,7 +1503,7 @@ mod tests {
     }
 
     mod relationships {
-        use super::*;
+        use crate::runtime::runner::recovery::replay::tests::*;
         use crate::runtime::runner::recovery::test_support::relationships::*;
         #[test]
         fn runner_recovery_finalization_after_replay_refuses_actual_member_fleet_change_atomically()
@@ -1567,7 +1570,7 @@ mod tests {
     }
 
     mod delivery_results {
-        use super::*;
+        use crate::runtime::runner::recovery::replay::tests::*;
 
         fn uncertain_deferred(case: &Case, key: &str, cause: Option<&str>) -> i64 {
             case.fixture

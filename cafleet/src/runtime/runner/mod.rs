@@ -1,10 +1,10 @@
 mod input_protocol;
 #[cfg(test)]
-pub(crate) use input_protocol::test_support as input_protocol_test_support;
+pub(crate) use crate::runtime::runner::input_protocol::test_support as input_protocol_test_support;
 pub(crate) use input_protocol::*;
 mod input_client;
 #[cfg(test)]
-pub(crate) use input_client::test_support as input_client_test_support;
+pub(crate) use crate::runtime::runner::input_client::test_support as input_client_test_support;
 pub(crate) use input_client::*;
 mod input_clock;
 mod input_recovery;
@@ -36,6 +36,10 @@ mod terminal;
 mod transport;
 mod writer;
 
+#[cfg(test)]
+pub(crate) use crate::runtime::runner::service::RunnerDependencies;
+#[cfg(test)]
+pub(crate) use crate::runtime::runner::service::run_service;
 pub(crate) use artifacts::*;
 pub(crate) use codec::*;
 pub(crate) use control::{NativeLaunchHost, request_shutdown};
@@ -43,8 +47,6 @@ pub(crate) use creation::*;
 pub(crate) use health::*;
 pub(crate) use lifecycle::*;
 pub(crate) use process::*;
-#[cfg(test)]
-pub(crate) use service::{RunnerDependencies, run_service};
 pub(crate) use service::{run, terminal_size};
 pub(crate) use terminal::*;
 pub(crate) use transport::*;
@@ -142,16 +144,17 @@ impl SpawnSpec {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    pub(crate) use super::artifacts::test_support::short_tempdir;
+    pub(crate) use crate::runtime::runner::artifacts::test_support::short_tempdir;
     use rusqlite::Connection;
     use serde_json::json;
     use tempfile::TempDir;
 
-    use super::*;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::placement;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
     use crate::db::test_support::migrated_conn;
+    use crate::runtime::runner::*;
     pub(crate) fn read_fixture_bytes(
         stream: &mut std::os::unix::net::UnixStream,
         mut bytes: &mut [u8],
@@ -225,7 +228,7 @@ pub(crate) mod test_support {
             let (fleet, director) = create_fleet_fixture(&mut conn, "runner-contract");
             let mut placement = placement(Some("%2"));
             placement.coding_agent = "codex".into();
-            let member = crate::broker::register_member(
+            let member = crate::broker::members::test_support::register_member(
                 &mut conn,
                 fleet,
                 "worker",

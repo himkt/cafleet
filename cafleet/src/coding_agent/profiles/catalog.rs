@@ -1428,7 +1428,7 @@ impl ProfileCatalog {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
+    use crate::coding_agent::profiles::catalog::*;
     use serde_json::json;
 
     pub(crate) struct BundledBoundary {
@@ -1842,7 +1842,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod annotation {
-        use super::*;
+        use crate::coding_agent::profiles::catalog::test_support::*;
         pub(crate) const REFUSAL: &str = "synthetic-auto-refusal";
         pub(crate) const UNAVAILABLE: &str = "synthetic-auto-unavailable";
         pub(crate) const AVAILABLE: &str = "synthetic-auto-indicator";
@@ -1905,26 +1905,30 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::synthetic_definitions as definitions;
-    use super::test_support::*;
-    use crate::broker::runtime::{
-        Coverage, InteractionClass, InteractionCloseReason, RuntimeEventKind,
-        evidence::EvidencePolicy,
-    };
+    use crate::broker::runtime::Coverage;
+    use crate::broker::runtime::InteractionClass;
+    use crate::broker::runtime::InteractionCloseReason;
+    use crate::broker::runtime::RuntimeEventKind;
+    use crate::broker::runtime::evidence::EvidencePolicy;
+    use crate::coding_agent::profiles::catalog::test_support::synthetic_definitions as definitions;
+    use crate::coding_agent::profiles::catalog::test_support::*;
     use crate::coding_agent::profiles::composer::test_support::*;
     use crate::coding_agent::profiles::detector::test_support::*;
     use crate::coding_agent::profiles::*;
     use crate::runtime::runner::episodes::test_support::*;
     use crate::runtime::runner::*;
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
     use std::collections::BTreeSet;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     mod bundled_backend_files {
-        use super::super::ProfileCatalog;
-        use super::definitions;
+        use crate::coding_agent::profiles::catalog::ProfileCatalog;
+        use crate::coding_agent::profiles::catalog::tests::definitions;
         use crate::error::CafleetError;
-        use serde_json::{Value, json};
+        use serde_json::Value;
+        use serde_json::json;
 
         const SOURCE: &str = "native/codex.json";
         const PRIMARY: &str = "native-permission-one";
@@ -2971,7 +2975,7 @@ mod tests {
         assert_no_debug_or_serialize!(SemanticFingerprint);
     }
     mod gated_catalog {
-        use super::*;
+        use crate::coding_agent::profiles::catalog::tests::*;
 
         const STAGES: &str = "/profiles/0/capabilities/answers/1/stages";
         const ALLOW_STAGES: &str = "/profiles/0/capabilities/answers/0/stages";
@@ -3360,7 +3364,7 @@ mod tests {
     }
 
     mod composer_submission {
-        use super::*;
+        use crate::coding_agent::profiles::catalog::tests::*;
         #[test]
         fn composer_submit_byte_limits_are_inclusive_before_plan_construction() {
             for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
@@ -3630,7 +3634,7 @@ mod tests {
         }
     }
     mod bundled_claude {
-        use super::*;
+        use crate::coding_agent::profiles::catalog::tests::*;
         use std::collections::BTreeSet;
 
         const CLAUDE_VERSION: &str = "2.1.302";
@@ -3783,8 +3787,8 @@ mod tests {
     }
 
     mod bundled_claude_auto {
-        use super::*;
         use crate::broker::runtime::AutomaticReview;
+        use crate::coding_agent::profiles::catalog::tests::*;
         use std::collections::BTreeSet;
 
         const CLAUDE_VERSION: &str = "2.1.302";
@@ -4184,7 +4188,7 @@ mod tests {
                 .iter()
                 .filter(|entry| entry["backend"] == "claude")
                 .map(|entry| entry["id"].as_str().unwrap().to_owned())
-                .filter(|id| !super::bundled_claude::PREDECESSOR_FIXTURES.contains(&id.as_str()))
+                .filter(|id| !crate::coding_agent::profiles::catalog::tests::bundled_claude::PREDECESSOR_FIXTURES.contains(&id.as_str()))
                 .filter(|id| !submission_fixture_ids(CodingAgent::Claude).contains(id))
                 .collect::<BTreeSet<_>>();
             assert_eq!(ids, automatic, "every automatic-mode fixture is classified");
@@ -5091,8 +5095,8 @@ mod tests {
     }
 
     mod bundled_codex_auto {
-        use super::*;
         use crate::broker::runtime::AutomaticReview;
+        use crate::coding_agent::profiles::catalog::tests::*;
         use std::collections::BTreeSet;
 
         const CODEX_VERSION: &str = "0.163.0";
@@ -5340,7 +5344,7 @@ mod tests {
                 .iter()
                 .filter(|entry| entry["backend"] == "codex")
                 .map(|entry| entry["id"].as_str().unwrap().to_owned())
-                .filter(|id| !super::bundled_codex::PREDECESSOR_FIXTURES.contains(&id.as_str()))
+                .filter(|id| !crate::coding_agent::profiles::catalog::tests::bundled_codex::PREDECESSOR_FIXTURES.contains(&id.as_str()))
                 .filter(|id| !submission_fixture_ids(CodingAgent::Codex).contains(id))
                 .collect::<BTreeSet<_>>();
             assert_eq!(
@@ -5378,7 +5382,9 @@ mod tests {
                     assert_eq!(block.raw_evidence["observed_mode"], mode, "{id}");
                 }
             }
-            for id in super::bundled_codex::PREDECESSOR_FIXTURES {
+            for id in
+                crate::coding_agent::profiles::catalog::tests::bundled_codex::PREDECESSOR_FIXTURES
+            {
                 let screen = replay_native_fixture(
                     std::str::from_utf8(&bytes(id)).unwrap(),
                     |_| {},
@@ -5505,7 +5511,7 @@ mod tests {
     }
 
     mod bundled_codex {
-        use super::*;
+        use crate::coding_agent::profiles::catalog::tests::*;
 
         const PERMISSION_FIXTURE: &str = "codex-0.163.0-on-request-permission-1";
         const ALLOW_FIXTURE: &str = "codex-0.163.0-allow-pre-stage-1";
@@ -5552,7 +5558,7 @@ mod tests {
     }
 
     mod bundled_backends {
-        use super::*;
+        use crate::coding_agent::profiles::catalog::tests::*;
 
         struct BundledProfile {
             backend: CodingAgent,
@@ -5851,7 +5857,7 @@ mod tests {
     }
 
     mod bundled_opencode {
-        use super::*;
+        use crate::coding_agent::profiles::catalog::tests::*;
         use std::collections::BTreeSet;
 
         const OPENCODE_VERSION: &str = "2.1.4";
@@ -7075,8 +7081,8 @@ mod tests {
     }
 
     mod annotation {
-        use super::*;
         use crate::coding_agent::profiles::catalog::test_support::annotation::*;
+        use crate::coding_agent::profiles::catalog::tests::*;
         fn rejected(label: &str, change: impl FnOnce(&mut Value)) {
             assert!(ProfileCatalog::from_definitions(&annotated()).is_ok());
             let mut value = annotated();
@@ -7266,7 +7272,7 @@ mod tests {
         }
     }
     mod profile_thresholds {
-        use super::*;
+        use crate::coding_agent::profiles::catalog::tests::*;
         use crate::coding_agent::profiles::detector::test_support::bundled_observe;
 
         fn catalog(profiles: &[(&str, &str)]) -> ProfileCatalog {

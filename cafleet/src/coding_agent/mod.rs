@@ -1,27 +1,36 @@
+pub(crate) use crate::coding_agent::native_version::NativeVersion;
+pub(crate) use crate::coding_agent::native_version::native_launch_identity;
+pub(crate) use crate::coding_agent::policy::LaunchPolicySelection;
+pub(crate) use crate::coding_agent::profiles::AnnotationBlock;
+pub(crate) use crate::coding_agent::profiles::AnnotationFingerprint;
+pub(crate) use crate::coding_agent::profiles::AnswerCapability;
+pub(crate) use crate::coding_agent::profiles::AnswerMatch;
+pub(crate) use crate::coding_agent::profiles::AnswerPlan;
+pub(crate) use crate::coding_agent::profiles::AnswerStage;
+pub(crate) use crate::coding_agent::profiles::ComposerOperation;
+pub(crate) use crate::coding_agent::profiles::Detector;
+pub(crate) use crate::coding_agent::profiles::MatchEvidence;
+pub(crate) use crate::coding_agent::profiles::ObservationKind;
+pub(crate) use crate::coding_agent::profiles::ProfileCatalog;
+pub(crate) use crate::coding_agent::profiles::ScreenObservation;
+pub(crate) use crate::coding_agent::profiles::SemanticFingerprint;
+pub(crate) use crate::coding_agent::profiles::StageGate;
+use crate::config::EnvLookup;
+use crate::error::CafleetError;
+use clap::ValueEnum;
+use std::path::Path;
+use std::path::PathBuf;
+
 mod native_version;
 #[cfg(test)]
-pub(crate) use native_version::version_token;
-pub(crate) use native_version::{NativeVersion, native_launch_identity};
+pub(crate) use crate::coding_agent::native_version::version_token;
+
 mod policy;
-pub(crate) use policy::LaunchPolicySelection;
+
 pub(crate) mod profiles;
-pub(crate) use profiles::ComposerOperation;
+
 #[cfg(test)]
-pub(crate) use profiles::ScreenRegion;
-pub(crate) use profiles::{
-    AnnotationBlock, AnnotationFingerprint, Detector, MatchEvidence, ObservationKind,
-    ScreenObservation, SemanticFingerprint,
-};
-pub(crate) use profiles::{AnswerCapability, ProfileCatalog};
-pub(crate) use profiles::{AnswerMatch, AnswerPlan};
-pub(crate) use profiles::{AnswerStage, StageGate};
-
-use std::path::{Path, PathBuf};
-
-use clap::ValueEnum;
-
-use crate::config_dir::{self, EnvLookup};
-use crate::error::CafleetError;
+pub(crate) use crate::coding_agent::profiles::ScreenRegion;
 
 pub(crate) trait SpawnProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf>;
@@ -66,9 +75,9 @@ impl CodingAgent {
         let default = match self {
             Self::Claude => home.join(".claude"),
             Self::Codex => home.join(".codex"),
-            Self::Opencode => config_dir::opencode_skills_base(home),
+            Self::Opencode => crate::config::opencode_skills_base(home),
         };
-        config_dir::resolve(self.config_variable(), env, default)
+        crate::config::resolve(self.config_variable(), env, default)
     }
 
     pub(crate) fn spawn_environment(
@@ -78,7 +87,7 @@ impl CodingAgent {
     ) -> Result<Vec<(String, String)>, CafleetError> {
         let mut environment = vec![("CAFLEET_DATABASE_URL".to_owned(), database_url.to_owned())];
         if let Some(value) = env(self.config_variable()) {
-            config_dir::require_absolute(self.config_variable(), &value)?;
+            crate::config::require_absolute(self.config_variable(), &value)?;
             environment.push((self.config_variable().to_owned(), value));
         }
         Ok(environment)
@@ -175,7 +184,7 @@ pub(crate) fn coding_agent(name: &str) -> Option<CodingAgent> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::coding_agent::*;
 
     struct Probe {
         agent: CodingAgent,
@@ -637,14 +646,15 @@ mod tests {
         let home = home();
         assert_eq!(
             CodingAgent::Opencode.config_dir(&|_| None, &home).unwrap(),
-            config_dir::opencode_skills_base(&home)
+            crate::config::opencode_skills_base(&home)
         );
     }
 
     #[test]
     fn native_launch_probes_and_launches_the_same_resolved_executable() {
         use std::os::unix::fs::PermissionsExt;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
         let dir = tempfile::tempdir().unwrap();
         let executable = dir.path().join("versions/2.1.302/claude");
         std::fs::create_dir_all(executable.parent().unwrap()).unwrap();

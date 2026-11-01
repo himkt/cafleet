@@ -217,7 +217,7 @@ impl CodingAgent {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::coding_agent::policy::*;
     fn version(backend: CodingAgent) -> Option<&'static str> {
         versions(backend)[0]
     }

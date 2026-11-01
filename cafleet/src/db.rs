@@ -1,6 +1,9 @@
-use rusqlite::{Connection, OptionalExtension};
-
 use crate::error::CafleetError;
+use crate::time::Deadline;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use std::time::Duration;
+use std::time::Instant;
 
 mod embedded {
     refinery::embed_migrations!("migrations");
@@ -241,9 +244,342 @@ pub(crate) fn schema_matches_version(
     Ok(matches)
 }
 
+#[derive(Debug)]
+pub(crate) enum SchemaState {
+    Missing,
+    Incompatible { path: String },
+    Behind { recorded: u32, head: u32 },
+    Head { version: u32 },
+    Ahead { recorded: u32, head: u32 },
+    Unreachable { cause: CafleetError },
+}
+
+impl SchemaState {
+    pub(crate) fn require_current(&self) -> Result<(), CafleetError> {
+        match self {
+            SchemaState::Head { .. } => Ok(()),
+            SchemaState::Behind { recorded, head } => Err(CafleetError::App(format!(
+                "database schema is outdated (schema {recorded}, head {head}); run 'cafleet setup'"
+            ))),
+            SchemaState::Ahead { recorded, head } => Err(CafleetError::App(format!(
+                "database schema {recorded} is newer than this cafleet (head {head}); upgrade cafleet"
+            ))),
+            SchemaState::Incompatible { path } => Err(crate::db::incompatible_format(path)),
+            SchemaState::Missing => Err(CafleetError::App(
+                "no cafleet database; run 'cafleet setup'".into(),
+            )),
+            SchemaState::Unreachable { cause } => Err(cause.clone()),
+        }
+    }
+}
+
+fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
+    let ledger_exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='refinery_schema_history')",
+        [], |row| row.get(0),
+    )?;
+    if !ledger_exists {
+        return Ok(None);
+    }
+    conn.query_row(
+        "SELECT MAX(version) FROM refinery_schema_history",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(crate::error::CafleetError::from)
+}
+
+pub(crate) fn incompatible_format(path: &str) -> CafleetError {
+    CafleetError::App(format!(
+        "database format is incompatible at '{path}'; choose an empty database path and run 'cafleet setup'."
+    ))
+}
+
+pub(crate) fn classify_schema(conn: &Connection, head: u32) -> SchemaState {
+    let incompatible = || SchemaState::Incompatible {
+        path: conn.path().unwrap_or(":memory:").to_owned(),
+    };
+    let inspect = || -> Result<SchemaState, CafleetError> {
+        let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+        let populated: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
+            [], |row| row.get(0)
+        )?;
+        if identity == 0 && !populated {
+            return Ok(SchemaState::Missing);
+        }
+        if identity != crate::db::APPLICATION_ID {
+            return Ok(incompatible());
+        }
+        let Some(recorded) = recorded_version(conn)? else {
+            return Ok(incompatible());
+        };
+        if !crate::db::schema_matches_version(conn, recorded)? {
+            return Ok(incompatible());
+        }
+        if recorded > head {
+            return Ok(SchemaState::Ahead { recorded, head });
+        }
+        Ok(if recorded < head {
+            SchemaState::Behind { recorded, head }
+        } else {
+            SchemaState::Head { version: recorded }
+        })
+    };
+    match inspect() {
+        Ok(state) => state,
+        Err(cause) => SchemaState::Unreachable { cause },
+    }
+}
+
+pub(crate) fn classify_selected_schema(
+    conn: &Connection,
+    head: u32,
+    database_url: &str,
+) -> SchemaState {
+    match classify_schema(conn, head) {
+        SchemaState::Incompatible { .. } => match crate::db::database_path(database_url) {
+            Ok(path) => SchemaState::Incompatible { path: path.into() },
+            Err(cause) => SchemaState::Unreachable { cause },
+        },
+        state => state,
+    }
+}
+
+struct DatabaseWait {
+    deadline: Deadline,
+    completion: bool,
+}
+
+#[derive(Default)]
+struct DatabaseWaits {
+    identity: Option<usize>,
+    frames: Vec<DatabaseWait>,
+}
+
+impl DatabaseWaits {
+    /// The tightest deadline from the innermost completion scope inward, so mandatory finalization
+    /// after an irreversible effect is not bounded by an enclosing, already expired budget.
+    fn innermost_deadline(&self) -> Option<Deadline> {
+        let start = self
+            .frames
+            .iter()
+            .rposition(|frame| frame.completion)
+            .unwrap_or(0);
+        self.frames[start..]
+            .iter()
+            .map(|frame| frame.deadline)
+            .min_by_key(|deadline| deadline.instant())
+    }
+}
+
+thread_local! {
+    static DATABASE_WAITS: std::cell::RefCell<DatabaseWaits> = const {
+        std::cell::RefCell::new(DatabaseWaits { identity: None, frames: Vec::new() })
+    };
+}
+
+pub(crate) fn inherited_deadline() -> Option<Deadline> {
+    DATABASE_WAITS.with(|waits| waits.borrow().innermost_deadline())
+}
+
+fn inherited_database_deadline(conn: &Connection) -> Option<Deadline> {
+    DATABASE_WAITS.with(|waits| {
+        let waits = waits.borrow();
+        if waits.frames.is_empty() {
+            assert!(
+                waits.identity.is_none(),
+                "an empty database scope has no owner"
+            );
+            return None;
+        }
+        assert_eq!(
+            waits.identity,
+            Some(std::ptr::from_ref(conn).addr()),
+            "inherited database scopes use the same connection"
+        );
+        waits.innermost_deadline()
+    })
+}
+
+pub(crate) fn bounded_by_inherited(conn: &Connection, until: Instant) -> Instant {
+    inherited_database_deadline(conn).map_or(until, |inherited| until.min(inherited.instant()))
+}
+
+fn remaining_database_wait() -> Option<Duration> {
+    DATABASE_WAITS.with(|waits| {
+        let waits = waits.borrow();
+        assert!(
+            waits.identity.is_some() && !waits.frames.is_empty(),
+            "a busy handler has an owning connection scope"
+        );
+        let start = waits
+            .frames
+            .iter()
+            .rposition(|wait| wait.completion)
+            .unwrap_or(0);
+        waits.frames[start..]
+            .iter()
+            .try_fold(Duration::MAX, |remaining, wait| {
+                wait.deadline.remaining().map(|left| remaining.min(left))
+            })
+            .ok()
+    })
+}
+
+fn wait_for_database_deadline(_: i32) -> bool {
+    let Some(remaining) = remaining_database_wait() else {
+        return false;
+    };
+    std::thread::sleep(remaining.min(Duration::from_millis(10)));
+    remaining_database_wait().is_some()
+}
+
+struct DatabaseBudget<'a> {
+    conn: &'a mut Connection,
+    identity: usize,
+    previous_timeout: Duration,
+    active: bool,
+}
+
+impl<'a> DatabaseBudget<'a> {
+    fn new(
+        conn: &'a mut Connection,
+        deadline: Deadline,
+        completion: bool,
+    ) -> Result<Self, CafleetError> {
+        let identity = std::ptr::from_ref(conn).addr();
+        DATABASE_WAITS.with(|waits| {
+            if let Some(owner) = waits.borrow().identity {
+                assert_eq!(
+                    owner, identity,
+                    "nested database scopes use the same connection"
+                );
+            }
+        });
+        let previous: u32 = conn.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+        conn.busy_handler(Some(wait_for_database_deadline))?;
+        DATABASE_WAITS.with(|waits| {
+            let mut waits = waits.borrow_mut();
+            waits.identity = Some(identity);
+            waits.frames.push(DatabaseWait {
+                deadline,
+                completion,
+            })
+        });
+        Ok(Self {
+            conn,
+            identity,
+            previous_timeout: Duration::from_millis(u64::from(previous)),
+            active: true,
+        })
+    }
+
+    fn restore(&mut self) -> Result<(), CafleetError> {
+        if !self.active {
+            return Ok(());
+        }
+        let nested = DATABASE_WAITS.with(|waits| {
+            let waits = waits.borrow();
+            assert_eq!(waits.identity, Some(self.identity));
+            assert!(
+                !waits.frames.is_empty(),
+                "an active database budget is registered"
+            );
+            waits.frames.len() > 1
+        });
+        let restored = if nested {
+            self.conn
+                .busy_handler(Some(wait_for_database_deadline))
+                .map_err(crate::error::CafleetError::from)
+        } else {
+            self.conn
+                .busy_timeout(self.previous_timeout)
+                .map_err(crate::error::CafleetError::from)
+        };
+        DATABASE_WAITS.with(|waits| {
+            let mut waits = waits.borrow_mut();
+            waits
+                .frames
+                .pop()
+                .expect("the active database scope is registered");
+            if waits.frames.is_empty() {
+                waits.identity = None;
+            }
+        });
+        self.active = false;
+        restored
+    }
+}
+
+impl Drop for DatabaseBudget<'_> {
+    fn drop(&mut self) {
+        self.restore()
+            .expect("an open borrowed connection accepts busy-handler restoration");
+    }
+}
+
+pub(crate) fn with_database_budget<T>(
+    conn: &mut Connection,
+    deadline: Deadline,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    deadline.remaining()?;
+    scoped_database_budget(conn, deadline, false, operation)
+}
+
+pub(crate) fn finalize_deletion<T>(
+    conn: &mut Connection,
+    deadline: Deadline,
+    has_run: bool,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    if has_run {
+        with_database_budget(conn, deadline, operation)
+    } else {
+        complete_database_budget(conn, deadline, operation)
+    }
+}
+
+// Pane side effects are irreversible; mandatory storage finalization gets a
+// bounded grace period independent of the input deadline.
+pub(crate) fn complete_database_budget<T>(
+    conn: &mut Connection,
+    deadline: Deadline,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    scoped_database_budget(conn, completion_deadline(deadline), true, operation)
+}
+
+fn completion_deadline(deadline: Deadline) -> Deadline {
+    Deadline::until(
+        deadline
+            .instant()
+            .max(Instant::now() + Duration::from_secs(1)),
+    )
+}
+
+fn scoped_database_budget<T>(
+    conn: &mut Connection,
+    deadline: Deadline,
+    completion: bool,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    let mut budget = DatabaseBudget::new(conn, deadline, completion)?;
+    let result = operation(budget.conn);
+    let restored = budget.restore().map_err(|error| {
+        CafleetError::App(format!(
+            "restoring database wait failed: {}",
+            error.message()
+        ))
+    });
+    CafleetError::merge_cleanup(result, restored)
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
+    use std::path::PathBuf;
 
     use rusqlite::Connection;
     use rusqlite::types::Value;
@@ -251,13 +587,13 @@ pub(crate) mod test_support {
 
     pub(crate) fn migrated_conn(dir: &TempDir) -> Connection {
         let url = format!("sqlite:///{}", dir.path().join("broker.db").display());
-        let mut conn = super::connect(&url).unwrap();
-        super::migrate_to_head(&mut conn).unwrap();
+        let mut conn = crate::db::connect(&url).unwrap();
+        crate::db::migrate_to_head(&mut conn).unwrap();
         conn
     }
 
     pub(crate) fn migrate_to_version(conn: &mut Connection, version: u32) {
-        super::embedded::migrations::runner()
+        crate::db::embedded::migrations::runner()
             .set_grouped(true)
             .set_target(refinery::Target::Version(i32::try_from(version).unwrap()))
             .run(conn)
@@ -313,11 +649,14 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{migrate_to_version, table_rows as rows};
-    use super::*;
+    use crate::db::test_support::migrate_to_version;
+    use crate::db::test_support::table_rows as rows;
+    use crate::db::*;
 
     mod existing_file_opener {
-        use super::{Connection, connect, connect_read_only};
+        use crate::db::tests::Connection;
+        use crate::db::tests::connect;
+        use crate::db::tests::connect_read_only;
 
         fn file_with_probe() -> (tempfile::TempDir, String) {
             let dir = tempfile::tempdir().unwrap();
@@ -351,7 +690,7 @@ mod tests {
                 let path = dir.path().join(format!("missing-{read_only}.db"));
                 let url = format!("sqlite:///{}", path.display());
                 assert!(!path.exists());
-                let opened = super::super::open_existing(&url, read_only).unwrap();
+                let opened = crate::db::open_existing(&url, read_only).unwrap();
                 assert!(opened.is_none(), "an absent file has no connection");
                 assert!(!path.exists(), "opening an absent file preserves absence");
             }
@@ -360,7 +699,7 @@ mod tests {
         #[test]
         fn an_existing_writable_connection_keeps_pragmas_and_persists_writes() {
             let (_dir, url) = file_with_probe();
-            let conn = super::super::open_existing(&url, false)
+            let conn = crate::db::open_existing(&url, false)
                 .unwrap()
                 .expect("the existing file has a connection");
             assert_connection_pragmas(&conn);
@@ -378,7 +717,7 @@ mod tests {
         #[test]
         fn an_existing_read_only_connection_keeps_pragmas_and_refuses_writes() {
             let (_dir, url) = file_with_probe();
-            let conn = super::super::open_existing(&url, true)
+            let conn = crate::db::open_existing(&url, true)
                 .unwrap()
                 .expect("the existing file has a connection");
             assert_connection_pragmas(&conn);
@@ -400,7 +739,7 @@ mod tests {
     }
 
     fn require_current(conn: &Connection) -> Result<(), CafleetError> {
-        crate::diagnosis::classify_schema(conn, head_version()).require_current()
+        crate::db::classify_schema(conn, head_version()).require_current()
     }
 
     fn at_version(version: u32) -> Connection {
@@ -562,9 +901,9 @@ mod tests {
         }
         let before = std::fs::read(&path).unwrap();
         let conn = connect_read_only(&url).unwrap();
-        let state = crate::diagnosis::classify_selected_schema(&conn, head_version(), &url);
+        let state = crate::db::classify_selected_schema(&conn, head_version(), &url);
         assert!(
-            matches!(&state, crate::diagnosis::SchemaState::Incompatible { path: shown } if shown == path.to_str().unwrap()),
+            matches!(&state, crate::db::SchemaState::Incompatible { path: shown } if shown == path.to_str().unwrap()),
             "{state:?}"
         );
         assert_eq!(
@@ -666,8 +1005,8 @@ mod tests {
         conn.execute("UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [head_version() + 1]).unwrap();
         assert!(schema_matches_version(&conn, head_version() + 1).unwrap());
         assert!(matches!(
-            crate::diagnosis::classify_schema(&conn, head_version()),
-            crate::diagnosis::SchemaState::Ahead { .. }
+            crate::db::classify_schema(&conn, head_version()),
+            crate::db::SchemaState::Ahead { .. }
         ));
         conn.execute_batch("ALTER TABLE refinery_schema_history RENAME COLUMN checksum TO wrong")
             .unwrap();
@@ -742,13 +1081,14 @@ mod tests {
         assert!(chain.iter().all(|(_, name)| !name.is_empty()));
     }
     mod runtime_tests {
-        use rusqlite::{Connection, params};
+        use rusqlite::Connection;
+        use rusqlite::params;
         use serde_json::json;
         use tempfile::TempDir;
 
-        use super::test_support::migrated_conn;
         use crate::broker::fleets::test_support::create_fleet_fixture;
         use crate::broker::members::test_support::register;
+        use crate::db::tests::test_support::migrated_conn;
 
         const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
 
@@ -850,9 +1190,12 @@ mod tests {
             assert_eq!(original.len(), 32);
             assert!(original.bytes().all(|byte| byte.is_ascii_hexdigit()));
             assert_ne!(original, identity(&second.conn));
-            super::migrate_to_head(&mut first.conn).unwrap();
+            crate::db::tests::migrate_to_head(&mut first.conn).unwrap();
             let url = format!("sqlite:///{}", first.conn.path().unwrap());
-            assert_eq!(identity(&super::connect(&url).unwrap()), original);
+            assert_eq!(
+                identity(&crate::db::tests::connect(&url).unwrap()),
+                original
+            );
             assert_eq!(count(&first.conn, "runtime_database_identity"), 1);
             assert!(
             first
@@ -925,7 +1268,11 @@ mod tests {
                     .execute_batch(&format!("DROP TABLE {table}"))
                     .unwrap();
                 assert!(
-                    !super::schema_matches_version(&fixture.conn, super::head_version()).unwrap(),
+                    !crate::db::tests::schema_matches_version(
+                        &fixture.conn,
+                        crate::db::tests::head_version()
+                    )
+                    .unwrap(),
                     "{table}"
                 );
             }
@@ -1230,6 +1577,259 @@ mod tests {
                     .is_err()
             );
             assert_eq!(count(&fixture.conn, "member_runs"), 1);
+        }
+    }
+
+    #[test]
+    fn classification_preserves_missing_behind_ahead_identity_and_sql_causes() {
+        let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
+        let head = crate::db::head_version();
+        assert!(matches!(classify_schema(&conn, head), SchemaState::Missing));
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        assert!(
+            matches!(classify_schema(&conn, head), SchemaState::Head { version } if version == head)
+        );
+        conn.execute_batch("ALTER TABLE messages ADD COLUMN future_value TEXT")
+            .unwrap();
+        conn.execute("UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [head + 1]).unwrap();
+        assert!(matches!(
+            classify_schema(&conn, head),
+            SchemaState::Ahead { .. }
+        ));
+        conn.execute_batch("PRAGMA application_id=1").unwrap();
+        assert!(matches!(
+            classify_schema(&conn, head),
+            SchemaState::Incompatible { .. }
+        ));
+        conn.pragma_update(None, "application_id", crate::db::APPLICATION_ID)
+            .unwrap();
+        conn.execute_batch(
+            "ALTER TABLE refinery_schema_history RENAME COLUMN version TO missing_version",
+        )
+        .unwrap();
+        assert!(matches!(
+            classify_schema(&conn, head),
+            SchemaState::Unreachable { .. }
+        ));
+    }
+    mod database_scope_tests {
+        use crate::db::*;
+
+        #[test]
+        fn expired_completion_commits_uncontended_work() {
+            let mut conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch("CREATE TABLE probe(value INTEGER);")
+                .unwrap();
+            let expired = Deadline::until(Instant::now() - Duration::from_millis(1));
+            assert!(with_database_budget(&mut conn, expired, |_| Ok(())).is_err());
+            complete_database_budget(&mut conn, expired, |conn| {
+                conn.execute_batch("BEGIN IMMEDIATE; INSERT INTO probe VALUES(42); COMMIT;")
+                    .map_err(crate::error::CafleetError::from)
+            })
+            .unwrap();
+            assert_eq!(
+                conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                42
+            );
+        }
+
+        #[test]
+        fn completion_waits_for_a_reader_to_release_commit_after_input_expiry() {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("reader.db");
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(1)")
+                .unwrap();
+            let reader = Connection::open(&path).unwrap();
+            reader.execute_batch("BEGIN; SELECT * FROM probe").unwrap();
+            let (release, released) = std::sync::mpsc::channel();
+            let thread = std::thread::spawn(move || {
+                released.recv().unwrap();
+                std::thread::sleep(Duration::from_millis(100));
+                reader.execute_batch("COMMIT").unwrap();
+            });
+            let deadline = Deadline::until(Instant::now() + Duration::from_millis(20));
+            with_database_budget(&mut conn, deadline, |conn| {
+                std::thread::sleep(Duration::from_millis(30));
+                complete_database_budget(conn, deadline, |conn| {
+                    let tx =
+                        conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                    tx.execute("UPDATE probe SET value=42", [])?;
+                    release.send(()).unwrap();
+                    tx.commit().map_err(crate::error::CafleetError::from)
+                })?;
+                assert!(with_database_budget(conn, deadline, |_| Ok(())).is_err());
+                Ok(())
+            })
+            .unwrap();
+            thread.join().unwrap();
+            assert_eq!(
+                conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                42
+            );
+        }
+
+        #[test]
+        fn expired_completion_reports_contention_after_bounded_grace() {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("completion.db");
+            let writer = Connection::open(&path).unwrap();
+            writer
+                .execute_batch("CREATE TABLE probe(value INTEGER); BEGIN IMMEDIATE;")
+                .unwrap();
+            let mut conn = Connection::open(&path).unwrap();
+            let started = Instant::now();
+            let expired = Deadline::until(started - Duration::from_millis(1));
+            let error = complete_database_budget(&mut conn, expired, |conn| {
+                conn.execute("INSERT INTO probe VALUES(42)", [])
+                    .map_err(crate::error::CafleetError::from)
+            })
+            .unwrap_err();
+            assert!(error.message().contains("database is locked"));
+            assert!(started.elapsed() >= Duration::from_millis(900));
+            assert!(started.elapsed() < Duration::from_secs(2));
+        }
+
+        fn assert_timeout(conn: &Connection, expected: u32) {
+            assert_eq!(
+                conn.query_row("PRAGMA busy_timeout", [], |row| row.get::<_, u32>(0))
+                    .unwrap(),
+                expected
+            );
+        }
+
+        #[test]
+        fn scope_exit_restores_timeouts_and_allows_sequential_connections_and_threads() {
+            let mut first = Connection::open_in_memory().unwrap();
+            let mut second = Connection::open_in_memory().unwrap();
+            for conn in [&mut first, &mut second] {
+                conn.busy_timeout(Duration::from_millis(137)).unwrap();
+                with_database_budget(conn, Deadline::new(), |_| Ok(())).unwrap();
+                assert_timeout(conn, 137);
+                assert!(
+                    with_database_budget(conn, Deadline::new(), |_| Err::<(), _>(
+                        CafleetError::App("expected".into())
+                    ))
+                    .is_err()
+                );
+                assert_timeout(conn, 137);
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = with_database_budget(
+                        conn,
+                        Deadline::new(),
+                        |_| -> Result<(), CafleetError> { panic!("scope unwind") },
+                    );
+                }));
+                assert!(panic.is_err());
+                assert_timeout(conn, 137);
+            }
+            with_database_budget(&mut first, Deadline::new(), |_| {
+                std::thread::spawn(|| {
+                    let mut conn = Connection::open_in_memory().unwrap();
+                    with_database_budget(&mut conn, Deadline::new(), |_| Ok(())).unwrap();
+                })
+                .join()
+                .unwrap();
+                Ok(())
+            })
+            .unwrap();
+        }
+
+        #[test]
+        fn cross_connection_nesting_fails_before_changing_the_inner_timeout() {
+            let mut outer = Connection::open_in_memory().unwrap();
+            let mut inner = Connection::open_in_memory().unwrap();
+            inner.busy_timeout(Duration::from_millis(137)).unwrap();
+            with_database_budget(&mut outer, Deadline::new(), |_| {
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    with_database_budget(&mut inner, Deadline::new(), |_| Ok(()))
+                }));
+                assert!(panic.is_err());
+                assert_timeout(&inner, 137);
+                Ok(())
+            })
+            .unwrap();
+        }
+
+        #[test]
+        fn nested_exit_restores_the_earliest_outer_deadline_on_every_exit() {
+            for exit in 0..3 {
+                let dir = tempfile::tempdir().unwrap();
+                let path = dir.path().join("nested.db");
+                let writer = Connection::open(&path).unwrap();
+                writer.execute_batch("CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(42); BEGIN EXCLUSIVE").unwrap();
+                let mut conn = Connection::open(&path).unwrap();
+                conn.busy_timeout(Duration::from_millis(137)).unwrap();
+                let started = Instant::now();
+                let outer = Deadline::until(started + Duration::from_millis(160));
+                let error = with_database_budget(&mut conn, outer, |conn| {
+                    match exit {
+                        0 => with_database_budget(conn, Deadline::new(), |_| Ok(())).unwrap(),
+                        1 => assert!(
+                            with_database_budget(conn, Deadline::new(), |_| Err::<(), _>(
+                                CafleetError::App("expected".into())
+                            ))
+                            .is_err()
+                        ),
+                        2 => assert!(
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                let _ = with_database_budget(
+                                    conn,
+                                    Deadline::new(),
+                                    |_| -> Result<(), CafleetError> { panic!("nested unwind") },
+                                );
+                            }))
+                            .is_err()
+                        ),
+                        _ => unreachable!(),
+                    }
+                    with_database_budget(conn, Deadline::new(), |conn| {
+                        conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
+                            .map_err(crate::error::CafleetError::from)
+                    })
+                })
+                .unwrap_err();
+                assert!(matches!(error, CafleetError::DatabaseBusy(_)));
+                assert!(started.elapsed() >= Duration::from_millis(140));
+                assert!(started.elapsed() < Duration::from_millis(700));
+                assert_timeout(&conn, 137);
+            }
+        }
+
+        #[test]
+        fn consecutive_sql_waits_share_one_absolute_deadline() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("aggregate.db");
+            let writer = Connection::open(&path).unwrap();
+            writer
+            .execute_batch(
+                "CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(42); BEGIN EXCLUSIVE",
+            )
+            .unwrap();
+            let release = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(80));
+                writer.execute_batch("ROLLBACK").unwrap();
+            });
+            let mut conn = Connection::open(&path).unwrap();
+            let started = Instant::now();
+            let deadline = Deadline::until(started + Duration::from_millis(200));
+            let error = with_database_budget(&mut conn, deadline, |conn| {
+                assert_eq!(
+                    conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))?,
+                    42
+                );
+                release.join().unwrap();
+                let writer = Connection::open(&path).unwrap();
+                writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+                conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
+                    .map_err(crate::error::CafleetError::from)
+            })
+            .unwrap_err();
+            assert!(matches!(error, CafleetError::DatabaseBusy(_)));
+            assert!(started.elapsed() >= Duration::from_millis(180));
+            assert!(started.elapsed() < Duration::from_millis(700));
         }
     }
 }

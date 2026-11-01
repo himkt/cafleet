@@ -668,10 +668,10 @@ impl Drop for PtySession {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::runtime::runner::process::*;
     #[cfg(all(test, target_os = "macos"))]
     mod setuid_member_tests {
-        use super::*;
+        use crate::runtime::runner::process::tests::*;
         use std::os::unix::fs::MetadataExt;
 
         const SETUID_HELPER: &str = "/usr/bin/su";
@@ -748,9 +748,10 @@ mod tests {
     mod mechanisms_tests {
         use std::fs::File;
         use std::io::ErrorKind;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
 
-        use super::*;
+        use crate::runtime::runner::process::tests::*;
         use crate::runtime::runner::test_support::Fixture;
 
         struct OwnedPty {
@@ -1049,7 +1050,7 @@ mod tests {
         }
     }
     mod ownership_refresh_tests {
-        use super::*;
+        use crate::runtime::runner::process::tests::*;
         use std::collections::VecDeque;
 
         const GROUP: i32 = 41001;
@@ -1384,7 +1385,7 @@ mod tests {
 
         #[cfg(target_os = "linux")]
         mod reaped_stat {
-            use super::*;
+            use crate::runtime::runner::process::tests::ownership_refresh_tests::*;
 
             fn reaped_stat_read() -> io::Error {
                 let mut child = std::process::Command::new("true").spawn().unwrap();

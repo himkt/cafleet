@@ -235,16 +235,23 @@ impl Transport {
 
 #[cfg(test)]
 mod tests {
-    use super::super::replies::REPLY_PREFIX_BOUND;
-    use super::*;
     use crate::broker::runtime as storage;
     use crate::coding_agent::ProfileCatalog;
-    use crate::runtime::runner::writer::test_support::{
-        Clock, Hooks, Release, WriterFixture, start, transition,
-    };
-    use std::cell::{Cell, RefCell};
-    use std::io::{self, ErrorKind};
-    use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+    use crate::runtime::runner::transport::drain::*;
+    use crate::runtime::runner::transport::replies::REPLY_PREFIX_BOUND;
+    use crate::runtime::runner::writer::test_support::Clock;
+    use crate::runtime::runner::writer::test_support::Hooks;
+    use crate::runtime::runner::writer::test_support::Release;
+    use crate::runtime::runner::writer::test_support::WriterFixture;
+    use crate::runtime::runner::writer::test_support::start;
+    use crate::runtime::runner::writer::test_support::transition;
+    use std::cell::Cell;
+    use std::cell::RefCell;
+    use std::io;
+    use std::io::ErrorKind;
+    use std::panic::AssertUnwindSafe;
+    use std::panic::catch_unwind;
+    use std::panic::resume_unwind;
     use std::rc::Rc;
     use std::time::Duration;
 

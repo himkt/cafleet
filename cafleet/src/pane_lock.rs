@@ -1,57 +1,19 @@
-use std::fs::{File, OpenOptions, TryLockError};
+use crate::broker::MemberRecord;
+use crate::broker::Placement;
+use crate::config::Settings;
+use crate::db::with_database_budget;
+use crate::error::CafleetError;
+use crate::time::Deadline;
+use rusqlite::Connection;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::fs::TryLockError;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
-
-use rusqlite::Connection;
-
-use crate::broker::records::{MemberRecord, Placement};
-use crate::config::Settings;
-use crate::error::CafleetError;
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Deadline(Instant);
+use std::time::Duration;
 
 pub(crate) fn valid_input(text: &str) -> bool {
     !text.trim().is_empty() && !text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
-}
-
-impl Deadline {
-    pub(crate) fn instant(self) -> Instant {
-        self.0
-    }
-    pub(crate) fn inherited_or_new() -> Self {
-        DATABASE_WAITS
-            .with(|waits| waits.borrow().innermost_deadline())
-            .unwrap_or_else(Deadline::new)
-    }
-    pub(crate) fn new() -> Self {
-        Self::until(Instant::now() + Duration::from_secs(5))
-    }
-
-    pub(crate) fn until(instant: Instant) -> Self {
-        Self(instant)
-    }
-
-    pub(crate) fn remaining(self) -> Result<Duration, CafleetError> {
-        self.remaining_at(Instant::now())
-    }
-
-    pub(crate) fn remaining_at(self, now: Instant) -> Result<Duration, CafleetError> {
-        self.0
-            .checked_duration_since(now)
-            .filter(|left| !left.is_zero())
-            .ok_or(CafleetError::DeadlineExceeded)
-    }
-
-    /// The deadline `reserve` earlier; already expired when less than `reserve` remains.
-    pub(crate) fn reserving(self, reserve: Duration) -> Self {
-        Self(
-            self.0
-                .checked_sub(reserve)
-                .expect("a monotonic deadline lies far past the clock origin"),
-        )
-    }
 }
 
 pub(crate) fn member_pane_input_error(member_id: i64) -> impl FnOnce(CafleetError) -> CafleetError {
@@ -63,235 +25,10 @@ pub(crate) fn member_pane_input_error(member_id: i64) -> impl FnOnce(CafleetErro
     }
 }
 
-struct DatabaseWait {
-    deadline: Deadline,
-    completion: bool,
-}
-
-#[derive(Default)]
-struct DatabaseWaits {
-    identity: Option<usize>,
-    frames: Vec<DatabaseWait>,
-}
-
-impl DatabaseWaits {
-    /// The tightest deadline from the innermost completion scope inward, so mandatory finalization
-    /// after an irreversible effect is not bounded by an enclosing, already expired budget.
-    fn innermost_deadline(&self) -> Option<Deadline> {
-        let start = self
-            .frames
-            .iter()
-            .rposition(|frame| frame.completion)
-            .unwrap_or(0);
-        self.frames[start..]
-            .iter()
-            .map(|frame| frame.deadline)
-            .min_by_key(|deadline| deadline.0)
-    }
-}
-
-thread_local! {
-    static DATABASE_WAITS: std::cell::RefCell<DatabaseWaits> = const {
-        std::cell::RefCell::new(DatabaseWaits { identity: None, frames: Vec::new() })
-    };
-}
-
-fn inherited_database_deadline(conn: &Connection) -> Option<Deadline> {
-    DATABASE_WAITS.with(|waits| {
-        let waits = waits.borrow();
-        if waits.frames.is_empty() {
-            assert!(
-                waits.identity.is_none(),
-                "an empty database scope has no owner"
-            );
-            return None;
-        }
-        assert_eq!(
-            waits.identity,
-            Some(std::ptr::from_ref(conn).addr()),
-            "inherited database scopes use the same connection"
-        );
-        waits.innermost_deadline()
-    })
-}
-
-pub(crate) fn bounded_by_inherited(conn: &Connection, until: Instant) -> Instant {
-    inherited_database_deadline(conn).map_or(until, |inherited| until.min(inherited.instant()))
-}
-
-fn remaining_database_wait() -> Option<Duration> {
-    DATABASE_WAITS.with(|waits| {
-        let waits = waits.borrow();
-        assert!(
-            waits.identity.is_some() && !waits.frames.is_empty(),
-            "a busy handler has an owning connection scope"
-        );
-        let start = waits
-            .frames
-            .iter()
-            .rposition(|wait| wait.completion)
-            .unwrap_or(0);
-        waits.frames[start..]
-            .iter()
-            .try_fold(Duration::MAX, |remaining, wait| {
-                wait.deadline.remaining().map(|left| remaining.min(left))
-            })
-            .ok()
-    })
-}
-
-fn wait_for_database_deadline(_: i32) -> bool {
-    let Some(remaining) = remaining_database_wait() else {
-        return false;
-    };
-    std::thread::sleep(remaining.min(Duration::from_millis(10)));
-    remaining_database_wait().is_some()
-}
-
-struct DatabaseBudget<'a> {
-    conn: &'a mut Connection,
-    identity: usize,
-    previous_timeout: Duration,
-    active: bool,
-}
-
-impl<'a> DatabaseBudget<'a> {
-    fn new(
-        conn: &'a mut Connection,
-        deadline: Deadline,
-        completion: bool,
-    ) -> Result<Self, CafleetError> {
-        let identity = std::ptr::from_ref(conn).addr();
-        DATABASE_WAITS.with(|waits| {
-            if let Some(owner) = waits.borrow().identity {
-                assert_eq!(
-                    owner, identity,
-                    "nested database scopes use the same connection"
-                );
-            }
-        });
-        let previous: u32 = conn.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
-        conn.busy_handler(Some(wait_for_database_deadline))?;
-        DATABASE_WAITS.with(|waits| {
-            let mut waits = waits.borrow_mut();
-            waits.identity = Some(identity);
-            waits.frames.push(DatabaseWait {
-                deadline,
-                completion,
-            })
-        });
-        Ok(Self {
-            conn,
-            identity,
-            previous_timeout: Duration::from_millis(u64::from(previous)),
-            active: true,
-        })
-    }
-
-    fn restore(&mut self) -> Result<(), CafleetError> {
-        if !self.active {
-            return Ok(());
-        }
-        let nested = DATABASE_WAITS.with(|waits| {
-            let waits = waits.borrow();
-            assert_eq!(waits.identity, Some(self.identity));
-            assert!(
-                !waits.frames.is_empty(),
-                "an active database budget is registered"
-            );
-            waits.frames.len() > 1
-        });
-        let restored = if nested {
-            self.conn
-                .busy_handler(Some(wait_for_database_deadline))
-                .map_err(crate::error::CafleetError::from)
-        } else {
-            self.conn
-                .busy_timeout(self.previous_timeout)
-                .map_err(crate::error::CafleetError::from)
-        };
-        DATABASE_WAITS.with(|waits| {
-            let mut waits = waits.borrow_mut();
-            waits
-                .frames
-                .pop()
-                .expect("the active database scope is registered");
-            if waits.frames.is_empty() {
-                waits.identity = None;
-            }
-        });
-        self.active = false;
-        restored
-    }
-}
-
-impl Drop for DatabaseBudget<'_> {
-    fn drop(&mut self) {
-        self.restore()
-            .expect("an open borrowed connection accepts busy-handler restoration");
-    }
-}
-
-pub(crate) fn with_database_budget<T>(
-    conn: &mut Connection,
-    deadline: Deadline,
-    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
-) -> Result<T, CafleetError> {
-    deadline.remaining()?;
-    scoped_database_budget(conn, deadline, false, operation)
-}
-
-pub(crate) fn finalize_deletion<T>(
-    conn: &mut Connection,
-    deadline: Deadline,
-    has_run: bool,
-    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
-) -> Result<T, CafleetError> {
-    if has_run {
-        with_database_budget(conn, deadline, operation)
-    } else {
-        complete_database_budget(conn, deadline, operation)
-    }
-}
-
-// Pane side effects are irreversible; mandatory storage finalization gets a
-// bounded grace period independent of the input deadline.
-pub(crate) fn complete_database_budget<T>(
-    conn: &mut Connection,
-    deadline: Deadline,
-    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
-) -> Result<T, CafleetError> {
-    scoped_database_budget(conn, completion_deadline(deadline), true, operation)
-}
-
-fn completion_deadline(deadline: Deadline) -> Deadline {
-    Deadline::until(deadline.0.max(Instant::now() + Duration::from_secs(1)))
-}
-
-fn scoped_database_budget<T>(
-    conn: &mut Connection,
-    deadline: Deadline,
-    completion: bool,
-    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
-) -> Result<T, CafleetError> {
-    let mut budget = DatabaseBudget::new(conn, deadline, completion)?;
-    let result = operation(budget.conn);
-    let restored = budget.restore().map_err(|error| {
-        CafleetError::App(format!(
-            "restoring database wait failed: {}",
-            error.message()
-        ))
-    });
-    CafleetError::merge_cleanup(result, restored)
-}
-
 pub(crate) struct PaneLock {
     file: File,
     path: PathBuf,
 }
-
-#[cfg(test)]
-pub(crate) const RELEASED_LOCK_GRACE: Duration = Duration::from_secs(2);
 
 pub(crate) fn lock_path(
     database_url: &str,
@@ -425,10 +162,13 @@ impl PaneLock {
             std::thread::sleep(left.min(Duration::from_millis(50)));
         }
     }
+}
 
+#[cfg(test)]
+impl PaneLock {
+    pub(crate) const RELEASED_LOCK_GRACE: Duration = Duration::from_secs(2);
     /// Acquire a lock the caller has just seen released. A child forked by a concurrent
     /// test shares the released descriptor's flock until its exec closes it, so retry briefly.
-    #[cfg(test)]
     pub(crate) fn acquire_released(
         database_url: &str,
         placement: &Placement,
@@ -436,7 +176,7 @@ impl PaneLock {
         Self::acquire_within(
             database_url,
             placement,
-            Deadline::until(Instant::now() + RELEASED_LOCK_GRACE),
+            Deadline::until(std::time::Instant::now() + Self::RELEASED_LOCK_GRACE),
         )
     }
 }
@@ -461,7 +201,7 @@ impl LockedMember {
 pub(crate) struct LockedDeletion<S, T> {
     pub(crate) snapshot: S,
     pub(crate) value: T,
-    _span: crate::signals::DeferTermination,
+    _span: crate::time::DeferTermination,
     guards: Vec<PaneLock>,
 }
 
@@ -535,7 +275,7 @@ pub(crate) fn lock_deletion<S, T>(
             };
             guards.push(guard);
         }
-        let span = crate::signals::DeferTermination::begin()?;
+        let span = crate::time::DeferTermination::begin()?;
         let value = with_database_budget(conn, deadline, |conn| {
             revalidate(conn, &mut snapshot, &guards)
         })?;
@@ -594,10 +334,10 @@ pub(crate) mod test_support {
 
     use rusqlite::Connection;
 
-    use super::*;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
     use crate::db::test_support::migrated_conn;
+    use crate::pane_lock::*;
 
     pub(super) const TEST_WORK_RESERVE: Duration = Duration::from_millis(3500);
 
@@ -656,8 +396,9 @@ mod tests {
     use crate::runtime::runner::test_support::*;
 
     mod pane_guard {
-        use super::*;
-        use crate::input::{PaneLock, pane_lock_for};
+        use crate::pane_lock::PaneLock;
+        use crate::pane_lock::pane_lock_for;
+        use crate::pane_lock::tests::*;
         #[test]
         fn runner_recovery_pane_guard_validates_the_actual_database_placement_and_named_inode() {
             use std::os::unix::fs::PermissionsExt;
@@ -698,7 +439,8 @@ mod tests {
             crate::db::migrate_to_head(&mut sibling).unwrap();
             let sibling_url = format!("sqlite:///{}", sibling_path.display());
             assert!(held.validate_binding(&sibling_url, &placement).is_err());
-            let path = crate::input::lock_path(&configuration.database_url, &placement).unwrap();
+            let path =
+                crate::pane_lock::lock_path(&configuration.database_url, &placement).unwrap();
             let original = path.with_extension("retained");
             std::fs::rename(&path, &original).unwrap();
             std::fs::write(&path, b"replacement lock identity").unwrap();
@@ -744,243 +486,11 @@ mod tests {
             assert!(pane_lock_for(&[], &database_url, &placement).is_err());
         }
     }
-    mod database_scope_tests {
-        use super::super::*;
 
-        #[test]
-        fn expired_completion_commits_uncontended_work() {
-            let mut conn = Connection::open_in_memory().unwrap();
-            conn.execute_batch("CREATE TABLE probe(value INTEGER);")
-                .unwrap();
-            let expired = Deadline::until(Instant::now() - Duration::from_millis(1));
-            assert!(with_database_budget(&mut conn, expired, |_| Ok(())).is_err());
-            complete_database_budget(&mut conn, expired, |conn| {
-                conn.execute_batch("BEGIN IMMEDIATE; INSERT INTO probe VALUES(42); COMMIT;")
-                    .map_err(crate::error::CafleetError::from)
-            })
-            .unwrap();
-            assert_eq!(
-                conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
-                    .unwrap(),
-                42
-            );
-        }
-
-        #[test]
-        fn completion_waits_for_a_reader_to_release_commit_after_input_expiry() {
-            let directory = tempfile::tempdir().unwrap();
-            let path = directory.path().join("reader.db");
-            let mut conn = Connection::open(&path).unwrap();
-            conn.execute_batch("CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(1)")
-                .unwrap();
-            let reader = Connection::open(&path).unwrap();
-            reader.execute_batch("BEGIN; SELECT * FROM probe").unwrap();
-            let (release, released) = std::sync::mpsc::channel();
-            let thread = std::thread::spawn(move || {
-                released.recv().unwrap();
-                std::thread::sleep(Duration::from_millis(100));
-                reader.execute_batch("COMMIT").unwrap();
-            });
-            let deadline = Deadline::until(Instant::now() + Duration::from_millis(20));
-            with_database_budget(&mut conn, deadline, |conn| {
-                std::thread::sleep(Duration::from_millis(30));
-                complete_database_budget(conn, deadline, |conn| {
-                    let tx =
-                        conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-                    tx.execute("UPDATE probe SET value=42", [])?;
-                    release.send(()).unwrap();
-                    tx.commit().map_err(crate::error::CafleetError::from)
-                })?;
-                assert!(with_database_budget(conn, deadline, |_| Ok(())).is_err());
-                Ok(())
-            })
-            .unwrap();
-            thread.join().unwrap();
-            assert_eq!(
-                conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
-                    .unwrap(),
-                42
-            );
-        }
-
-        #[test]
-        fn expired_completion_reports_contention_after_bounded_grace() {
-            let directory = tempfile::tempdir().unwrap();
-            let path = directory.path().join("completion.db");
-            let writer = Connection::open(&path).unwrap();
-            writer
-                .execute_batch("CREATE TABLE probe(value INTEGER); BEGIN IMMEDIATE;")
-                .unwrap();
-            let mut conn = Connection::open(&path).unwrap();
-            let started = Instant::now();
-            let expired = Deadline::until(started - Duration::from_millis(1));
-            let error = complete_database_budget(&mut conn, expired, |conn| {
-                conn.execute("INSERT INTO probe VALUES(42)", [])
-                    .map_err(crate::error::CafleetError::from)
-            })
-            .unwrap_err();
-            assert!(error.message().contains("database is locked"));
-            assert!(started.elapsed() >= Duration::from_millis(900));
-            assert!(started.elapsed() < Duration::from_secs(2));
-        }
-
-        fn assert_timeout(conn: &Connection, expected: u32) {
-            assert_eq!(
-                conn.query_row("PRAGMA busy_timeout", [], |row| row.get::<_, u32>(0))
-                    .unwrap(),
-                expected
-            );
-        }
-
-        #[test]
-        fn scope_exit_restores_timeouts_and_allows_sequential_connections_and_threads() {
-            let mut first = Connection::open_in_memory().unwrap();
-            let mut second = Connection::open_in_memory().unwrap();
-            for conn in [&mut first, &mut second] {
-                conn.busy_timeout(Duration::from_millis(137)).unwrap();
-                with_database_budget(conn, Deadline::new(), |_| Ok(())).unwrap();
-                assert_timeout(conn, 137);
-                assert!(
-                    with_database_budget(conn, Deadline::new(), |_| Err::<(), _>(
-                        CafleetError::App("expected".into())
-                    ))
-                    .is_err()
-                );
-                assert_timeout(conn, 137);
-                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _ = with_database_budget(
-                        conn,
-                        Deadline::new(),
-                        |_| -> Result<(), CafleetError> { panic!("scope unwind") },
-                    );
-                }));
-                assert!(panic.is_err());
-                assert_timeout(conn, 137);
-            }
-            with_database_budget(&mut first, Deadline::new(), |_| {
-                std::thread::spawn(|| {
-                    let mut conn = Connection::open_in_memory().unwrap();
-                    with_database_budget(&mut conn, Deadline::new(), |_| Ok(())).unwrap();
-                })
-                .join()
-                .unwrap();
-                Ok(())
-            })
-            .unwrap();
-        }
-
-        #[test]
-        fn cross_connection_nesting_fails_before_changing_the_inner_timeout() {
-            let mut outer = Connection::open_in_memory().unwrap();
-            let mut inner = Connection::open_in_memory().unwrap();
-            inner.busy_timeout(Duration::from_millis(137)).unwrap();
-            with_database_budget(&mut outer, Deadline::new(), |_| {
-                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    with_database_budget(&mut inner, Deadline::new(), |_| Ok(()))
-                }));
-                assert!(panic.is_err());
-                assert_timeout(&inner, 137);
-                Ok(())
-            })
-            .unwrap();
-        }
-
-        #[test]
-        fn nested_exit_restores_the_earliest_outer_deadline_on_every_exit() {
-            for exit in 0..3 {
-                let dir = tempfile::tempdir().unwrap();
-                let path = dir.path().join("nested.db");
-                let writer = Connection::open(&path).unwrap();
-                writer.execute_batch("CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(42); BEGIN EXCLUSIVE").unwrap();
-                let mut conn = Connection::open(&path).unwrap();
-                conn.busy_timeout(Duration::from_millis(137)).unwrap();
-                let started = Instant::now();
-                let outer = Deadline::until(started + Duration::from_millis(160));
-                let error = with_database_budget(&mut conn, outer, |conn| {
-                    match exit {
-                        0 => with_database_budget(conn, Deadline::new(), |_| Ok(())).unwrap(),
-                        1 => assert!(
-                            with_database_budget(conn, Deadline::new(), |_| Err::<(), _>(
-                                CafleetError::App("expected".into())
-                            ))
-                            .is_err()
-                        ),
-                        2 => assert!(
-                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                let _ = with_database_budget(
-                                    conn,
-                                    Deadline::new(),
-                                    |_| -> Result<(), CafleetError> { panic!("nested unwind") },
-                                );
-                            }))
-                            .is_err()
-                        ),
-                        _ => unreachable!(),
-                    }
-                    with_database_budget(conn, Deadline::new(), |conn| {
-                        conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
-                            .map_err(crate::error::CafleetError::from)
-                    })
-                })
-                .unwrap_err();
-                assert!(matches!(error, CafleetError::DatabaseBusy(_)));
-                assert!(started.elapsed() >= Duration::from_millis(140));
-                assert!(started.elapsed() < Duration::from_millis(700));
-                assert_timeout(&conn, 137);
-            }
-        }
-
-        #[test]
-        fn consecutive_sql_waits_share_one_absolute_deadline() {
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("aggregate.db");
-            let writer = Connection::open(&path).unwrap();
-            writer
-            .execute_batch(
-                "CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(42); BEGIN EXCLUSIVE",
-            )
-            .unwrap();
-            let release = std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(80));
-                writer.execute_batch("ROLLBACK").unwrap();
-            });
-            let mut conn = Connection::open(&path).unwrap();
-            let started = Instant::now();
-            let deadline = Deadline::until(started + Duration::from_millis(200));
-            let error = with_database_budget(&mut conn, deadline, |conn| {
-                assert_eq!(
-                    conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))?,
-                    42
-                );
-                release.join().unwrap();
-                let writer = Connection::open(&path).unwrap();
-                writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
-                conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
-                    .map_err(crate::error::CafleetError::from)
-            })
-            .unwrap_err();
-            assert!(matches!(error, CafleetError::DatabaseBusy(_)));
-            assert!(started.elapsed() >= Duration::from_millis(180));
-            assert!(started.elapsed() < Duration::from_millis(700));
-        }
-    }
     mod pane_lock_wait_tests {
-        use super::super::test_support::{LockFixture, TEST_WORK_RESERVE};
-        use super::super::*;
-
-        #[test]
-        fn reserving_moves_the_deadline_earlier_by_the_reserve() {
-            let deadline = Deadline::until(Instant::now() + Duration::from_secs(5));
-            let left = deadline.reserving(TEST_WORK_RESERVE).remaining().unwrap();
-            assert!(left <= Duration::from_millis(1500), "{left:?}");
-            assert!(left > Duration::from_millis(1400), "{left:?}");
-        }
-
-        #[test]
-        fn reserving_more_than_remains_is_already_expired() {
-            let deadline = Deadline::until(Instant::now() + Duration::from_secs(3));
-            assert!(deadline.reserving(TEST_WORK_RESERVE).remaining().is_err());
-        }
+        use crate::pane_lock::test_support::LockFixture;
+        use crate::pane_lock::*;
+        use std::time::Instant;
 
         #[test]
         fn an_uncontended_lock_is_acquired_at_once() {
@@ -1048,7 +558,9 @@ mod tests {
 
         #[test]
         fn physical_lock_identity_uses_canonical_database_backend_session_and_pane() {
-            use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+            use std::os::unix::fs::MetadataExt;
+            use std::os::unix::fs::PermissionsExt;
+            use std::os::unix::fs::symlink;
             let fixture = LockFixture::new();
             let url = &fixture.settings.database_url;
             let placement = fixture.placement();

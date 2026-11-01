@@ -372,10 +372,12 @@ pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
 
+    use crate::broker::runtime as storage;
     use crate::broker::runtime::test_support::*;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime::*;
 
     #[test]
     fn metadata_removes_all_screen_fields_and_hashes_only_post_policy_evidence() {
@@ -418,7 +420,8 @@ mod tests {
     }
 
     fn independent_evidence_digest(value: &Value) -> String {
-        use sha2::{Digest, Sha256};
+        use sha2::Digest;
+        use sha2::Sha256;
         fn sorted(value: &Value) -> Value {
             match value {
                 Value::Object(object) => {

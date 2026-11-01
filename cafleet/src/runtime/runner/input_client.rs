@@ -1,9 +1,14 @@
-use super::*;
-use crate::broker::records::Placement;
-use crate::broker::runtime::{self as storage, *};
+use crate::broker::Placement;
+use crate::broker::runtime as storage;
+use crate::broker::runtime::*;
 use crate::config::Settings;
-use crate::input::{Deadline, PaneLock, bounded_by_inherited, with_database_budget};
-use rusqlite::{Connection, OptionalExtension};
+use crate::db::bounded_by_inherited;
+use crate::db::with_database_budget;
+use crate::pane_lock::PaneLock;
+use crate::runtime::runner::*;
+use crate::time::Deadline;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
 use std::time::Instant;
 
 pub(crate) struct PreparedSubmission<'a> {
@@ -170,7 +175,7 @@ fn submission_context(run_id: i64, request: &SubmitInput) -> InputContext {
 fn validate_submission_request(run_id: i64, request: &SubmitInput) -> Result<()> {
     validate_operation_key(&request.operation_key)?;
     usage(
-        run_id > 0 && crate::input::valid_input(&request.literal),
+        run_id > 0 && crate::pane_lock::valid_input(&request.literal),
         "ordinary submission requires a positive run and one nonblank line without control characters",
     )?;
     match request.input_kind {
@@ -371,7 +376,7 @@ pub(crate) fn validate_submission_target(
     let member = crate::broker::get_member(conn, expected.member_id, expected.fleet_id)?
         .ok_or_else(|| error("input member is absent"))?;
     ensure(
-        member.kind == crate::broker::records::MemberKind::Member
+        member.kind == crate::broker::MemberKind::Member
             && member.placement.as_ref() == Some(placement),
         "submission member placement changed",
     )?;
@@ -578,7 +583,7 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
             validate_submission_target(conn, settings, expected_run, expected_placement)
         };
         if runner_owned {
-            crate::input::complete_database_budget(conn, deadline, validate)?;
+            crate::db::complete_database_budget(conn, deadline, validate)?;
         } else {
             with_database_budget(conn, deadline, validate)?;
         }
@@ -1352,13 +1357,15 @@ fn inspect_permission_with_host(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
     use crate::config::Settings;
     use crate::runtime::runner::test_support::Fixture;
     use crate::runtime::runner::*;
     use serde_json::json;
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     pub(crate) const NOW: &str = "2026-10-26T22:00:00.000000+00:00";
 
@@ -1378,7 +1385,7 @@ pub(crate) mod test_support {
         pub(crate) request: NewPermissionResponse,
         pub(crate) input_id: i64,
         pub(crate) settings: Settings,
-        pub(crate) placement: crate::broker::records::Placement,
+        pub(crate) placement: crate::broker::Placement,
         pub(crate) _artifacts: RunArtifacts,
         pub(crate) _lock: Arc<RunLock>,
     }
@@ -1598,12 +1605,13 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::runtime::runner::input_client::*;
     use crate::runtime::runner::service::test_support::ServiceFixture;
-    use crate::runtime::runner::service::test_support::input_service::{
-        input_service_barrier, input_service_composer, input_service_records,
-        wait_input_service_record, with_input_service,
-    };
+    use crate::runtime::runner::service::test_support::input_service::input_service_barrier;
+    use crate::runtime::runner::service::test_support::input_service::input_service_composer;
+    use crate::runtime::runner::service::test_support::input_service::input_service_records;
+    use crate::runtime::runner::service::test_support::input_service::wait_input_service_record;
+    use crate::runtime::runner::service::test_support::input_service::with_input_service;
     use crate::runtime::runner::test_support::Fixture;
     use std::io::Write;
     use std::net::Shutdown;
@@ -2045,10 +2053,15 @@ mod tests {
 
     #[test]
     fn permission_response_history_honors_expired_inherited_budget_before_sql_or_live_calls() {
-        use crate::runtime::runner::input_client::test_support::{Case, Retained};
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::{Arc, Mutex};
+        use crate::runtime::runner::input_client::test_support::Case;
+        use crate::runtime::runner::input_client::test_support::Retained;
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
 
         let mut case = Case::new(Retained::Accepted);
         let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
@@ -2692,7 +2705,8 @@ mod tests {
 
     #[test]
     fn permission_receipt_live_failure_preserves_original_error_without_exclusive_effects() {
-        use crate::runtime::runner::input_client::test_support::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::Case;
+        use crate::runtime::runner::input_client::test_support::Retained;
         use crate::runtime::runner::input_recovery::test_support::TypedHost;
 
         let mut case = Case::new(Retained::Accepted);
@@ -2759,7 +2773,8 @@ mod tests {
 
     #[test]
     fn exclusive_permission_receipt_client_preserves_uncertain_claim_and_continuous_guard() {
-        use crate::runtime::runner::input_client::test_support::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::Case;
+        use crate::runtime::runner::input_client::test_support::Retained;
         use crate::runtime::runner::input_recovery::test_support::TypedHost;
 
         for absent in [false, true] {
@@ -2779,8 +2794,11 @@ mod tests {
                     .unwrap();
             if absent {
                 assert!(
-                    crate::broker::deregister_member(&mut case.fixture.conn, run.member_id)
-                        .unwrap()
+                    crate::broker::members::test_support::deregister_member(
+                        &mut case.fixture.conn,
+                        run.member_id
+                    )
+                    .unwrap()
                 );
             }
             let before = health_records(&case.fixture.conn);
@@ -2963,7 +2981,8 @@ mod tests {
 
     #[test]
     fn exclusive_receipt_client_keeps_one_guard_original_row_and_error_across_live_fallback() {
-        use crate::runtime::runner::input_recovery::test_support::{Termination, TypedHost};
+        use crate::runtime::runner::input_recovery::test_support::Termination;
+        use crate::runtime::runner::input_recovery::test_support::TypedHost;
 
         for mode in [
             "eligible",
@@ -2990,8 +3009,11 @@ mod tests {
             let absent = mode == "absent_placement";
             if absent {
                 assert!(
-                    crate::broker::deregister_member(&mut fixture.conn, fixture.run.member_id)
-                        .unwrap()
+                    crate::broker::members::test_support::deregister_member(
+                        &mut fixture.conn,
+                        fixture.run.member_id
+                    )
+                    .unwrap()
                 );
             }
             let original = fixture.run.clone();
@@ -3257,7 +3279,9 @@ mod tests {
             );
             let health = match self.health_reply.take() {
                 Some(health) => health,
-                None => super::super::probe_health(run, deadline).map_err(host_failure)?,
+                None => {
+                    crate::runtime::runner::probe_health(run, deadline).map_err(host_failure)?
+                }
             };
             if let Some(callback) = &mut self.after_health {
                 callback();
@@ -3306,7 +3330,8 @@ mod tests {
             }
             self.requests.push(
                 serde_json::from_slice(
-                    &super::super::input_protocol::encode_input_request(request).unwrap()[4..],
+                    &crate::runtime::runner::input_protocol::encode_input_request(request).unwrap()
+                        [4..],
                 )
                 .unwrap(),
             );
@@ -3351,16 +3376,18 @@ mod tests {
             }
             let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)
                 .map_err(host_failure)?;
-            let mut client =
-                super::super::control::ControlClient::connect(&paths.control_socket, deadline)
-                    .map_err(host_failure)?;
+            let mut client = crate::runtime::runner::control::ControlClient::connect(
+                &paths.control_socket,
+                deadline,
+            )
+            .map_err(host_failure)?;
             if matches!(self.reply, ReplyMode::Disconnected) {
                 client
                     .stream
                     .shutdown(Shutdown::Read)
                     .map_err(io_error)
                     .map_err(host_failure)?;
-                let bytes = super::super::input_protocol::encode_input_request(request)
+                let bytes = crate::runtime::runner::input_protocol::encode_input_request(request)
                     .map_err(host_failure)?;
                 let mut offset = 0;
                 while offset < bytes.len() {
@@ -3374,7 +3401,8 @@ mod tests {
                                 std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
                             ) =>
                         {
-                            super::super::control::pause(deadline).map_err(host_failure)?;
+                            crate::runtime::runner::control::pause(deadline)
+                                .map_err(host_failure)?;
                         }
                         Err(cause) => return Err(host_failure(io_error(cause))),
                     }
@@ -3395,7 +3423,7 @@ mod tests {
                     if retained.is_some_and(|input| input.state == InputState::Accepted) {
                         break;
                     }
-                    super::super::control::pause(deadline).map_err(host_failure)?;
+                    crate::runtime::runner::control::pause(deadline).map_err(host_failure)?;
                 }
                 drop(client);
                 return Err(host_failure(CafleetError::App(
@@ -3470,8 +3498,11 @@ mod tests {
 
     #[test]
     fn live_receipt_settled_history_is_immutable_before_live_calls_and_the_original_sql_deadline() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::{Arc, Mutex};
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::Mutex;
 
         let mut case = History::new(InputState::Settled, Some(InputDisposition::Submitted));
         case.fixture.conn.execute("UPDATE members SET status='deregistered',deregistered_at='2026-10-27T17:26:00Z' WHERE member_id=?1", [case.fixture.run.member_id]).unwrap();
@@ -3601,7 +3632,8 @@ mod tests {
         }
         case.assert_unchanged(changes);
 
-        use crate::runtime::runner::input_client::test_support::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::Case;
+        use crate::runtime::runner::input_client::test_support::Retained;
         let mut permission = Case::new(Retained::Submitted);
         let audit = storage::get_permission_response(&permission.fixture.conn, permission.input_id)
             .unwrap();
@@ -3639,8 +3671,11 @@ mod tests {
 
     #[test]
     fn live_receipt_client_binds_query_and_commit_ack_before_one_real_retirement() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::{Arc, Mutex};
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::Mutex;
 
         with_input_service(|fixture, outer| {
             let (settings, run, placement, request, original) =
@@ -4062,8 +4097,11 @@ mod tests {
 
     #[test]
     fn external_input_borrowed_history_keeps_the_prepared_deadline_before_first_sql() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::{Arc, Mutex};
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::Mutex;
 
         let mut case = History::new(InputState::Accepted, None);
         let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
@@ -4076,7 +4114,7 @@ mod tests {
         let control = PreparedSubmission::new(
             &case.request,
             control_deadline,
-            &mut super::super::RealInputDeadlineClock,
+            &mut crate::runtime::runner::RealInputDeadlineClock,
         )
         .unwrap();
         let result = submit_wrapped_input_under_pane_lock_with_host(
@@ -4097,7 +4135,7 @@ mod tests {
         let expired_attempt = PreparedSubmission::new(
             &case.request,
             original,
-            &mut super::super::RealInputDeadlineClock,
+            &mut crate::runtime::runner::RealInputDeadlineClock,
         )
         .unwrap();
         std::thread::sleep(
@@ -4144,7 +4182,7 @@ mod tests {
         let active_attempt = PreparedSubmission::new(
             &case.request,
             original_active,
-            &mut super::super::RealInputDeadlineClock,
+            &mut crate::runtime::runner::RealInputDeadlineClock,
         )
         .unwrap();
         let inherited = Deadline::until(Instant::now() + Duration::from_secs(2));
@@ -4207,11 +4245,12 @@ mod tests {
 
     #[test]
     fn external_input_discovery_rejects_payload_association_and_database_conflicts() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        };
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
         let mut case = History::new(InputState::Accepted, None);
         let changes = case.fixture.conn.total_changes();
         let identity = case.identity();
@@ -4318,9 +4357,12 @@ mod tests {
             let (settings, run, placement) = service_target(fixture);
             let request = ordinary(&run, "borrowed");
             let until = outer.min(Instant::now() + Duration::from_secs(10));
-            let attempt =
-                PreparedSubmission::new(&request, until, &mut super::super::RealInputDeadlineClock)
-                    .unwrap();
+            let attempt = PreparedSubmission::new(
+                &request,
+                until,
+                &mut crate::runtime::runner::RealInputDeadlineClock,
+            )
+            .unwrap();
             let expiration = attempt.expiration.monotonic_ns();
             let held = PaneLock::try_acquire(&settings.database_url, &placement)
                 .unwrap()
@@ -4463,9 +4505,12 @@ mod tests {
             let (settings, run, placement) = service_target(fixture);
             let request = ordinary(&run, "lock-taken-after-reply");
             let until = outer.min(Instant::now() + Duration::from_secs(4));
-            let attempt =
-                PreparedSubmission::new(&request, until, &mut super::super::RealInputDeadlineClock)
-                    .unwrap();
+            let attempt = PreparedSubmission::new(
+                &request,
+                until,
+                &mut crate::runtime::runner::RealInputDeadlineClock,
+            )
+            .unwrap();
             let held = PaneLock::try_acquire(&settings.database_url, &placement)
                 .unwrap()
                 .unwrap();
@@ -4502,9 +4547,12 @@ mod tests {
             let request = ordinary(&run, "identity");
             let until = outer.min(Instant::now() + Duration::from_secs(2));
             let deadline = Deadline::until(until);
-            let attempt =
-                PreparedSubmission::new(&request, until, &mut super::super::RealInputDeadlineClock)
-                    .unwrap();
+            let attempt = PreparedSubmission::new(
+                &request,
+                until,
+                &mut crate::runtime::runner::RealInputDeadlineClock,
+            )
+            .unwrap();
             let held = PaneLock::try_acquire(&settings.database_url, &placement)
                 .unwrap()
                 .unwrap();
@@ -4571,11 +4619,12 @@ mod tests {
 
     #[test]
     fn external_input_typed_success_requires_the_actual_supplied_connection_receipt() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
 
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
@@ -4879,7 +4928,7 @@ mod tests {
     }
 
     mod prepared_submission {
-        use super::*;
+        use crate::runtime::runner::input_client::tests::*;
         use crate::runtime::runner::input_clock::test_support::*;
 
         fn request() -> SubmitInput {
@@ -4929,20 +4978,25 @@ mod tests {
     }
 
     mod permission_history {
-        use super::super::test_support::*;
         use crate::broker::fleets::test_support::create_fleet_fixture;
         use crate::broker::members::test_support::placement;
-        use crate::broker::runtime::{self as storage, *};
+        use crate::broker::runtime as storage;
+        use crate::broker::runtime::*;
         use crate::config::Settings;
-        use crate::db::test_support::{TableSnapshot, table_snapshot};
+        use crate::db::test_support::TableSnapshot;
+        use crate::db::test_support::table_snapshot;
+        use crate::db::with_database_budget;
         use crate::error::CafleetError;
-        use crate::input::{Deadline, PaneLock, with_database_budget};
+        use crate::pane_lock::PaneLock;
+        use crate::runtime::runner::input_client::test_support::*;
         use crate::runtime::runner::test_support::Fixture;
         use crate::runtime::runner::*;
+        use crate::time::Deadline;
         use rusqlite::Connection;
         use serde_json::json;
         use std::sync::Arc;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
         struct Snapshot {
             tables: Vec<TableSnapshot>,
             changes: u64,
@@ -4968,8 +5022,9 @@ mod tests {
         }
 
         mod inspect_errors {
-            use super::*;
-            use crate::runtime::runner::{PermissionInspectInput, inspect_permission};
+            use crate::runtime::runner::PermissionInspectInput;
+            use crate::runtime::runner::input_client::tests::permission_history::*;
+            use crate::runtime::runner::inspect_permission;
 
             fn opened(case: &Case) -> (i64, i64) {
                 case.fixture
@@ -5115,12 +5170,16 @@ mod tests {
         }
 
         mod entry {
-            use super::*;
-            use crate::runtime::runner::{
-                InputCommandHost, InputControlReply, InputControlRequest, InputFailure,
-                PermissionRespondInput, PermissionResponseResult, SubmissionStage,
-                SubmissionStatus, respond_permission_with_host,
-            };
+            use crate::runtime::runner::InputCommandHost;
+            use crate::runtime::runner::InputControlReply;
+            use crate::runtime::runner::InputControlRequest;
+            use crate::runtime::runner::InputFailure;
+            use crate::runtime::runner::PermissionRespondInput;
+            use crate::runtime::runner::PermissionResponseResult;
+            use crate::runtime::runner::SubmissionStage;
+            use crate::runtime::runner::SubmissionStatus;
+            use crate::runtime::runner::input_client::tests::permission_history::*;
+            use crate::runtime::runner::respond_permission_with_host;
 
             #[derive(Default)]
             struct NoLive {
@@ -5145,7 +5204,7 @@ mod tests {
                     &mut self,
                     _: &Settings,
                     run: &RunRecord,
-                    _: &crate::broker::records::Placement,
+                    _: &crate::broker::Placement,
                     _: Deadline,
                 ) -> std::result::Result<Option<PaneLock>, InputFailure> {
                     Err(self.failure("lock", run))
@@ -5629,7 +5688,7 @@ mod tests {
                 for changed in ["member", "director", "fleet"] {
                     let mut case = Case::new(Retained::Accepted);
                     if changed == "fleet" {
-                        let alternate = crate::broker::register_member(
+                        let alternate = crate::broker::members::test_support::register_member(
                             &mut case.fixture.conn,
                             case.fixture.run.fleet_id,
                             "alternative",
@@ -5797,10 +5856,11 @@ mod tests {
             }
 
             mod claim_and_association_history {
-                use super::*;
-                use rusqlite::hooks::{
-                    AuthAction, AuthContext, Authorization, TransactionOperation,
-                };
+                use crate::runtime::runner::input_client::tests::permission_history::entry::*;
+                use rusqlite::hooks::AuthAction;
+                use rusqlite::hooks::AuthContext;
+                use rusqlite::hooks::Authorization;
+                use rusqlite::hooks::TransactionOperation;
                 use std::sync::Mutex;
 
                 #[test]
@@ -5843,7 +5903,7 @@ mod tests {
                     conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
                     let mut placement = placement(Some("%3"));
                     placement.coding_agent = "codex".into();
-                    let member = crate::broker::register_member(
+                    let member = crate::broker::members::test_support::register_member(
                         &mut conn,
                         case.fixture.run.fleet_id,
                         "related-history-worker",
@@ -6126,7 +6186,7 @@ mod tests {
             }
 
             mod staged {
-                use super::*;
+                use crate::runtime::runner::input_client::tests::permission_history::entry::*;
 
                 fn response_context(
                     case: &Case,
@@ -6237,9 +6297,10 @@ mod tests {
     }
 
     mod uncertain_reason {
-        use super::*;
         use crate::broker::runtime::test_support::Fixture as StorageFixture;
-        use crate::runtime::runner::input_client::test_support::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::Case;
+        use crate::runtime::runner::input_client::test_support::Retained;
+        use crate::runtime::runner::input_client::tests::*;
 
         const MESSAGES: [&str; 4] = ["identity", "contradiction", "missing", "unmatched"];
 

@@ -1,30 +1,39 @@
-use super::codec::AdmittedControlFrame;
-use super::input::{InertInputHooks, InputCoordinator, InputServices, RequestTokenSource};
-use super::input_clock::{RealInputDeadlineClock, receive_input_expiration};
-use super::input_protocol::{ServiceControlRequest, decode_service_request, encode_input_reply};
-use super::transport::TransportProgress;
-use super::writer::EventWriter;
-use super::*;
-
-use crate::broker::{
-    self,
-    runtime::{self as storage, *},
-};
+use crate::broker;
+use crate::broker::runtime as storage;
+use crate::broker::runtime::*;
 use crate::config::Settings;
+use crate::runtime::runner::codec::AdmittedControlFrame;
+use crate::runtime::runner::input::InertInputHooks;
+use crate::runtime::runner::input::InputCoordinator;
+use crate::runtime::runner::input::InputServices;
+use crate::runtime::runner::input::RequestTokenSource;
+use crate::runtime::runner::input_clock::RealInputDeadlineClock;
+use crate::runtime::runner::input_clock::receive_input_expiration;
+use crate::runtime::runner::input_protocol::ServiceControlRequest;
+use crate::runtime::runner::input_protocol::decode_service_request;
+use crate::runtime::runner::input_protocol::encode_input_reply;
+use crate::runtime::runner::transport::TransportProgress;
+use crate::runtime::runner::writer::EventWriter;
+use crate::runtime::runner::*;
 use filedescriptor::FileDescriptor;
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
+use rusqlite::params;
 use serde_json::json;
 use std::collections::VecDeque;
-use std::io::{ErrorKind, Read, Write};
+use std::io::ErrorKind;
+use std::io::Read;
+use std::io::Write;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
 
 pub(crate) fn terminal_size(terminal: &impl std::os::fd::AsFd) -> Result<TerminalSize> {
     let size = rustix::termios::tcgetwinsize(terminal).map_err(io_error)?;
@@ -408,6 +417,7 @@ impl LiveShutdown<'_> {
         }
         Err(CafleetError::DeadlineExceeded)
     }
+
     fn send_exit(&mut self) -> Result<()> {
         if let Some(exit) = self.pty.try_wait()? {
             self.controller.child_exited(
@@ -437,8 +447,10 @@ impl ShutdownHost for LiveShutdown<'_> {
         #[cfg(test)]
         self.transport
             .set_observation_phase(ObservationPhase::ShutdownDrain);
+
         #[cfg(test)]
         self.await_native_exit_before_parsing(deadline)?;
+
         while Instant::now() < deadline {
             let mut tick = |transport: &mut Transport| {
                 transport.tick(
@@ -555,6 +567,7 @@ pub(crate) struct RunnerDependencies {
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
     #[cfg(test)]
     pub(crate) capture: Option<NativeCapturePort>,
+
     #[cfg(test)]
     pub(crate) observation_hooks: Option<Arc<dyn ObservationHooks>>,
 }
@@ -568,6 +581,7 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
             writer_hooks: Arc::new(InertWriterHooks),
             #[cfg(test)]
             capture: None,
+
             #[cfg(test)]
             observation_hooks: None,
         },
@@ -580,13 +594,10 @@ pub(crate) fn run_service(
 ) -> Result<i32> {
     #[cfg(test)]
     let mut services = services;
+
     let mut conn = crate::db::connect(&settings.database_url)?;
-    crate::diagnosis::classify_selected_schema(
-        &conn,
-        crate::db::head_version(),
-        &settings.database_url,
-    )
-    .require_current()?;
+    crate::db::classify_selected_schema(&conn, crate::db::head_version(), &settings.database_url)
+        .require_current()?;
     let descriptor = load_descriptor(&conn, descriptor_path)?;
     let original = storage::get_run(&conn, descriptor.run_id)?;
     let creator = ProcessIdentity {
@@ -677,6 +688,7 @@ pub(crate) fn run_service(
         controller.set_observation_hooks(hooks.clone())?;
         transport.set_observation_hooks(hooks)?;
     }
+
     let mut writer = EventWriter::start_with_hooks(
         settings.database_url.clone(),
         run.clone(),
@@ -916,6 +928,7 @@ pub(crate) fn run_service(
                                         }
                                         None => None,
                                     };
+
                                     let child = native.pty.spawn(&descriptor.spawn)?;
                                     with_database_deadline(
                                         &mut conn,
@@ -938,6 +951,7 @@ pub(crate) fn run_service(
                                         port.finalize_source(&run, &placement, &child)?;
                                         native.controller.attach_capture(port)?;
                                     }
+
                                     native.controller.started(
                                         &run,
                                         &native.transport.snapshot(),
@@ -1338,19 +1352,29 @@ fn tick_sleep(
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::fs::File;
-    use std::io::{ErrorKind, Read, Write};
+    use std::io::ErrorKind;
+    use std::io::Read;
+    use std::io::Write;
     use std::os::unix::net::UnixStream;
     use std::path::Path;
-    use std::process::{Command, ExitStatus, Stdio};
+    use std::process::Command;
+    use std::process::ExitStatus;
+    use std::process::Stdio;
     use std::result::Result;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use nix::sys::signal::{Signal, kill};
-    use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+    use nix::sys::signal::Signal;
+    use nix::sys::signal::kill;
+    use nix::sys::wait::WaitPidFlag;
+    use nix::sys::wait::WaitStatus;
+    use nix::sys::wait::waitpid;
     use nix::unistd::Pid;
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
 
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
     use crate::config::Settings;
     use crate::digest::sha256_hex;
     use crate::runtime::runner::test_support::*;
@@ -1594,7 +1618,7 @@ pub(crate) mod test_support {
                 } else if capture {
                     native_capture_service_child_path()
                 } else {
-                    super::tests::control_service::service_child_path()
+                    crate::runtime::runner::service::tests::control_service::service_child_path()
                 },
                 "--nocapture",
                 "--test-threads=1",
@@ -1945,9 +1969,11 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod input_service {
-        use super::observation_services::private_write;
-        use super::*;
-        use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+        use crate::runtime::runner::service::test_support::observation_services::private_write;
+        use crate::runtime::runner::service::test_support::*;
+        use std::panic::AssertUnwindSafe;
+        use std::panic::catch_unwind;
+        use std::panic::resume_unwind;
         pub(crate) fn native(path: &Path) {
             install_panic_record(path.parent().unwrap(), "native");
             native::run(path);
@@ -1962,7 +1988,8 @@ pub(crate) mod test_support {
         pub(crate) const PANIC_DIRECTORY: &str = "service-input-panics";
 
         pub(crate) fn install_panic_record(directory: &Path, role: &'static str) {
-            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            use std::os::unix::fs::OpenOptionsExt;
+            use std::os::unix::fs::PermissionsExt;
 
             assert!(matches!(role, "native" | "runner"));
             let directory = directory.join(PANIC_DIRECTORY);
@@ -2371,9 +2398,14 @@ pub(crate) mod test_support {
         }
 
         pub(crate) mod native {
-            use super::*;
-            use nix::fcntl::{FcntlArg, OFlag, fcntl};
-            use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
+            use crate::runtime::runner::service::test_support::input_service::*;
+            use nix::fcntl::FcntlArg;
+            use nix::fcntl::OFlag;
+            use nix::fcntl::fcntl;
+            use nix::sys::termios::LocalFlags;
+            use nix::sys::termios::SetArg;
+            use nix::sys::termios::tcgetattr;
+            use nix::sys::termios::tcsetattr;
             use std::fs::OpenOptions;
             use std::os::unix::fs::OpenOptionsExt;
 
@@ -2497,11 +2529,12 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod observation_services {
-        use super::*;
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
         use crate::runtime::runner::observation::test_support::synthetic;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        use crate::runtime::runner::service::test_support::*;
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::PermissionsExt;
         use std::sync::Arc;
 
         pub(crate) struct Clock;
@@ -2567,10 +2600,11 @@ pub(crate) mod test_support {
                     directory: config.parent().unwrap().to_path_buf(),
                 }),
                 capture: None,
-                observation_hooks: super::injected_failures::hooks(
-                    &value,
-                    config.parent().unwrap(),
-                )?,
+                observation_hooks:
+                    crate::runtime::runner::service::test_support::injected_failures::hooks(
+                        &value,
+                        config.parent().unwrap(),
+                    )?,
             };
             run_service(settings, descriptor, services)
         }
@@ -2677,11 +2711,15 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod injected_failures {
-        use super::observation_services::{count, health, private_write, wait_until};
-        use super::*;
         use crate::error::CafleetError;
         use crate::runtime::runner::observation::test_support::synthetic;
-        use std::sync::{Arc, OnceLock};
+        use crate::runtime::runner::service::test_support::observation_services::count;
+        use crate::runtime::runner::service::test_support::observation_services::health;
+        use crate::runtime::runner::service::test_support::observation_services::private_write;
+        use crate::runtime::runner::service::test_support::observation_services::wait_until;
+        use crate::runtime::runner::service::test_support::*;
+        use std::sync::Arc;
+        use std::sync::OnceLock;
 
         pub(crate) const CANARY: &str = "private-observation-fault-canary";
 
@@ -2935,29 +2973,36 @@ pub(crate) mod test_support {
 mod tests {
     use std::io::Write;
     use std::net::Shutdown;
-    use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+    use std::panic::AssertUnwindSafe;
+    use std::panic::catch_unwind;
+    use std::panic::resume_unwind;
     use std::path::Path;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
 
-    use super::test_support::*;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
     use crate::config::Settings;
+    use crate::runtime::runner::service::test_support::*;
     use crate::runtime::runner::*;
 
     pub(super) mod control_service {
-        use super::*;
+        use crate::runtime::runner::service::tests::*;
         pub(crate) fn service_child_path() -> &'static str {
             test_path!(service_child)
         }
 
         #[test]
         fn service_child() {
-            if let Some(config) =
-                std::env::var_os(super::super::test_support::input_service::NATIVE_ENV)
-            {
-                super::super::test_support::input_service::native(Path::new(&config));
+            if let Some(config) = std::env::var_os(
+                crate::runtime::runner::service::test_support::input_service::NATIVE_ENV,
+            ) {
+                crate::runtime::runner::service::test_support::input_service::native(Path::new(
+                    &config,
+                ));
                 std::process::exit(0);
             }
             let Some(descriptor) = std::env::var_os(DESCRIPTOR_ENV) else {
@@ -2966,7 +3011,7 @@ mod tests {
             if let Some(configured) = std::env::var_os(SERVICES_ENV) {
                 let directory = Path::new(&configured).parent().unwrap();
                 if directory.join("service-input-native.json").exists() {
-                    super::super::test_support::input_service::install_panic_record(
+                    crate::runtime::runner::service::test_support::input_service::install_panic_record(
                         directory, "runner",
                     );
                 }
@@ -3142,8 +3187,8 @@ mod tests {
     }
 
     mod input_service {
-        use super::super::test_support::input_service::*;
-        use super::*;
+        use crate::runtime::runner::service::test_support::input_service::*;
+        use crate::runtime::runner::service::tests::*;
         #[test]
         fn service_input_socket_submission_persists_typed_outcome_and_matching_key_never_replays() {
             with_input_service(|fixture, until| {
@@ -3625,7 +3670,7 @@ mod tests {
             with_detecting_input_service_exiting(143, |fixture, until| {
                 let id = queue_behind_the_form(fixture, until);
                 let outcome =
-                    super::super::test_support::injected_failures::shutdown_reply(fixture);
+                    crate::runtime::runner::service::test_support::injected_failures::shutdown_reply(fixture);
                 assert_eq!(
                     outcome.cleanup_state,
                     CleanupState::Complete,
@@ -3643,11 +3688,12 @@ mod tests {
     }
 
     mod observation_contract {
-        use super::super::test_support::observation_services::{
-            count, health, private_write, wait_until,
-        };
-        use super::*;
         use crate::runtime::runner::observation::test_support::synthetic;
+        use crate::runtime::runner::service::test_support::observation_services::count;
+        use crate::runtime::runner::service::test_support::observation_services::health;
+        use crate::runtime::runner::service::test_support::observation_services::private_write;
+        use crate::runtime::runner::service::test_support::observation_services::wait_until;
+        use crate::runtime::runner::service::tests::*;
         #[test]
         fn service_sqlite_and_writer_failures_keep_health_manual_display_and_resize_live() {
             for boundary in ["fail-sync", "block-persist"] {
@@ -3787,10 +3833,10 @@ mod tests {
     }
 
     mod injected_failures {
-        use super::super::test_support::injected_failures::*;
-        use super::super::test_support::observation_services::count;
-        use super::*;
         use crate::runtime::runner::observation::test_support::synthetic;
+        use crate::runtime::runner::service::test_support::injected_failures::*;
+        use crate::runtime::runner::service::test_support::observation_services::count;
+        use crate::runtime::runner::service::tests::*;
         #[test]
         fn runner_failure_with_a_live_native_child_persists_degraded_before_owned_cleanup_confirms_exit()
          {
@@ -4020,7 +4066,7 @@ mod tests {
         }
     }
     mod pacing_tests {
-        use super::super::*;
+        use crate::runtime::runner::service::*;
         use crate::runtime::runner::transport::TransportProgress;
 
         fn progress(human_bytes: usize, forwarded_bytes: usize) -> TransportProgress {
@@ -4074,10 +4120,10 @@ mod tests {
         }
     }
     mod input_admission_tests {
-        use super::super::*;
         use crate::runtime::runner::InputClockSample;
         use crate::runtime::runner::codec::AdmittedControlFrame;
         use crate::runtime::runner::input_clock::receive_input_expiration;
+        use crate::runtime::runner::service::*;
         use std::net::Shutdown;
 
         use crate::runtime::runner::codec::test_support::independent_frame as frame;

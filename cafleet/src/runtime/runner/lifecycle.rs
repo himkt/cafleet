@@ -1,8 +1,10 @@
-use super::*;
 use crate::broker::runtime::CleanupState;
-use crate::input::{Deadline, with_database_budget};
+use crate::db::with_database_budget;
+use crate::runtime::runner::*;
+use crate::time::Deadline;
 use rusqlite::Connection;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum ChildExit {
@@ -327,13 +329,16 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{FAST_SUM, SLOW_SUM, sum};
-    use super::*;
     use crate::error::CafleetError;
+    use crate::runtime::runner::lifecycle::test_support::FAST_SUM;
+    use crate::runtime::runner::lifecycle::test_support::SLOW_SUM;
+    use crate::runtime::runner::lifecycle::test_support::sum;
+    use crate::runtime::runner::lifecycle::*;
     use crate::runtime::runner::test_support::Fixture;
     use std::collections::BTreeSet;
     use std::result::Result;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     #[test]
     fn runner_recovery_clock_clips_each_original_boundary_and_never_renews_time() {

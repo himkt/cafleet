@@ -443,10 +443,15 @@ pub(crate) fn read_stdin() -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::io;
-    use std::ops::{Deref, DerefMut};
+    use std::ops::Deref;
+    use std::ops::DerefMut;
     use std::path::Path;
-    use std::process::{Child, Command, ExitStatus, Stdio};
-    use std::time::{Duration, Instant};
+    use std::process::Child;
+    use std::process::Command;
+    use std::process::ExitStatus;
+    use std::process::Stdio;
+    use std::time::Duration;
+    use std::time::Instant;
 
     use crate::runtime::runner::ProcessIdentity;
 
@@ -526,11 +531,13 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::runtime::system::*;
     use nix::errno::Errno;
-    use nix::sys::wait::{WaitPidFlag, waitpid};
+    use nix::sys::wait::WaitPidFlag;
+    use nix::sys::wait::waitpid;
     use nix::unistd::Pid;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::Mutex;
+    use std::sync::MutexGuard;
     use tempfile::TempDir;
 
     // Concurrent process launches can exhaust a one-second deadline before sh starts.
@@ -830,7 +837,7 @@ mod tests {
     }
 
     mod test_child {
-        use super::super::test_support::TestChild;
+        use crate::runtime::system::test_support::TestChild;
         #[test]
         fn owned_child_guard_cleans_up_when_identity_setup_unwinds() {
             let mut identity = None;

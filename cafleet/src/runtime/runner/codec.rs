@@ -127,7 +127,7 @@ impl ControlDecoder {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
+    use crate::runtime::runner::codec::*;
 
     /// A `u32` big-endian length prefix followed by `body`, built without the production framer.
     pub(crate) fn independent_frame(body: &[u8]) -> Vec<u8> {
@@ -147,11 +147,13 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{feed_values, independent_frame as frame};
-    use super::*;
+    use crate::runtime::runner::codec::test_support::feed_values;
+    use crate::runtime::runner::codec::test_support::independent_frame as frame;
+    use crate::runtime::runner::codec::*;
     mod input_frames_tests {
-        use super::*;
-        use std::time::{Duration, Instant};
+        use crate::runtime::runner::codec::tests::*;
+        use std::time::Duration;
+        use std::time::Instant;
 
         fn later(origin: Instant, millis: u64) -> Instant {
             origin.checked_add(Duration::from_millis(millis)).unwrap()
@@ -320,15 +322,17 @@ mod tests {
         }
     }
     mod control_codec_tests {
-        use super::*;
         use crate::broker::runtime as storage;
-        use crate::runtime::runner::test_support::{
-            Fixture, read_fixture_bytes, write_fixture_bytes,
-        };
-        use serde_json::{Value, json};
+        use crate::runtime::runner::codec::tests::*;
+        use crate::runtime::runner::test_support::Fixture;
+        use crate::runtime::runner::test_support::read_fixture_bytes;
+        use crate::runtime::runner::test_support::write_fixture_bytes;
+        use serde_json::Value;
+        use serde_json::json;
         use std::os::unix::fs::PermissionsExt;
         use std::os::unix::net::UnixListener;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
 
         #[test]
         fn runner_review_codec_encoding_pins_big_endian_length_and_required_version() {

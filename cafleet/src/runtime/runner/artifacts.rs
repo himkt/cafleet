@@ -431,7 +431,7 @@ impl RunLock {
     /// The run-lock counterpart of [`crate::input::PaneLock::acquire_released`].
     #[cfg(test)]
     pub(crate) fn acquire_released(conn: &Connection, owner: &RunOwner) -> Result<Option<Self>> {
-        let until = Instant::now() + crate::input::RELEASED_LOCK_GRACE;
+        let until = Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE;
         loop {
             if let Some(lock) = Self::acquire(conn, owner)? {
                 return Ok(Some(lock));
@@ -509,9 +509,11 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::symlink;
 
-    use super::*;
+    use crate::runtime::runner::artifacts::*;
     use crate::runtime::runner::test_support::Fixture;
     use rusqlite::params;
 
@@ -931,8 +933,9 @@ mod tests {
     }
 
     mod lock_transfer {
-        use super::*;
-        use crate::broker::runtime::{Reachability, RunStatus};
+        use crate::broker::runtime::Reachability;
+        use crate::broker::runtime::RunStatus;
+        use crate::runtime::runner::artifacts::tests::*;
 
         #[test]
         fn runner_recovery_lock_transfer_commits_fresh_epochs_and_preserves_first_origin_status() {

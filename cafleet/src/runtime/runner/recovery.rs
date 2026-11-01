@@ -1,12 +1,16 @@
-use super::*;
-use crate::broker::records::Placement;
-use crate::broker::runtime::{self as storage, *};
+use crate::broker::Placement;
+use crate::broker::runtime as storage;
+use crate::broker::runtime::*;
 use crate::config::Settings;
-use crate::input::PaneLock;
-use rusqlite::{Connection, OptionalExtension, params};
+use crate::pane_lock::PaneLock;
+use crate::runtime::runner::*;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use rusqlite::params;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 mod exceptional;
 mod replay;
@@ -242,6 +246,7 @@ pub(crate) fn recover_member_with_host(
 ) -> Result<RecoveryReport> {
     recover(conn, settings, member_id, attestation, deadline, None, host).map(|value| value.report)
 }
+
 struct BorrowedPane<'a> {
     run: &'a RunRecord,
     placement: &'a Placement,
@@ -520,9 +525,10 @@ pub(crate) mod test_support {
     use rusqlite::Connection;
     use serde_json::json;
 
+    use crate::broker::Placement;
     use crate::broker::fleets::test_support::create_fleet_fixture;
-    use crate::broker::records::Placement;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
     use crate::config::Settings;
     use crate::db::test_support::TableSnapshot;
     use crate::error::CafleetError;
@@ -531,7 +537,8 @@ pub(crate) mod test_support {
     use serde_json::Value;
     use std::io::Write;
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
     pub(crate) type TestResult<T> = std::result::Result<T, CafleetError>;
     pub(crate) const NOW: &str = "2026-10-26T20:00:00.000000+00:00";
 
@@ -675,7 +682,7 @@ pub(crate) mod test_support {
         pub(crate) fn recover_held(
             &mut self,
             expected: &RunRecord,
-            held: &crate::input::PaneLock,
+            held: &crate::pane_lock::PaneLock,
             host: &mut Host,
         ) -> TestResult<RecoveryCompletion> {
             recover_member_with_held_pane_lock(
@@ -1049,7 +1056,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod missing_paths {
-        use super::*;
+        use crate::runtime::runner::recovery::test_support::*;
         pub(crate) fn persist_opening(case: &mut Case) -> RuntimeEventRecord {
             let transition = opening(&case.fixture.run, 1, 1);
             storage::persist_event(
@@ -1112,8 +1119,9 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod descriptor {
-        use super::*;
-        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        use crate::runtime::runner::recovery::test_support::*;
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::fs::OpenOptionsExt;
         use std::path::Path;
 
         pub(crate) const PRIVATE_VALUE: &str = "descriptor-private-fixture-canary";
@@ -1179,7 +1187,7 @@ pub(crate) mod test_support {
         /// test shares that flock until its exec closes it, which recovery reads as a live owner,
         /// so retry that side-effect-free outcome briefly.
         pub(crate) fn recover_released(case: &mut Case) -> TestResult<RecoveryReport> {
-            let until = Instant::now() + crate::input::RELEASED_LOCK_GRACE;
+            let until = Instant::now() + crate::pane_lock::PaneLock::RELEASED_LOCK_GRACE;
             loop {
                 let result = case.recover(&mut new_host());
                 let contended = matches!(
@@ -1212,7 +1220,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod relationships {
-        use super::*;
+        use crate::runtime::runner::recovery::test_support::*;
         use std::sync::Mutex;
 
         #[derive(Clone, Copy, Debug)]
@@ -1285,7 +1293,7 @@ pub(crate) mod test_support {
                     create_fleet_fixture(&mut case.fixture.conn, "other-relationship-fleet").0
                 }
                 Relationship::FleetDirector => {
-                    crate::broker::register_member(
+                    crate::broker::members::test_support::register_member(
                         &mut case.fixture.conn,
                         case.fixture.run.fleet_id,
                         "alternate-director",
@@ -1461,7 +1469,7 @@ pub(crate) mod test_support {
         pub(crate) fn end_lifecycle(case: &mut Case, lifecycle: Lifecycle) {
             if matches!(lifecycle, Lifecycle::MemberInactive) {
                 assert!(
-                    crate::broker::deregister_member(
+                    crate::broker::members::test_support::deregister_member(
                         &mut case.fixture.conn,
                         case.fixture.run.member_id
                     )
@@ -1557,26 +1565,32 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
     use std::io::Write;
 
-    use super::test_support::*;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
     use crate::config::Settings;
     use crate::db::test_support::TableSnapshot;
     use crate::digest::sha256_hex;
     use crate::error::CafleetError;
+    use crate::runtime::runner::recovery::test_support::*;
     use crate::runtime::runner::*;
     use crate::runtime::system::test_support::TestChild;
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     mod crash {
-        use super::*;
+        use crate::runtime::runner::recovery::tests::*;
         use std::os::unix::fs::OpenOptionsExt;
-        use std::path::{Path, PathBuf};
-        use std::process::{Command, Stdio};
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::path::Path;
+        use std::path::PathBuf;
+        use std::process::Command;
+        use std::process::Stdio;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
 
         fn write_json(path: &Path, value: &Value) {
             let temporary = path.with_extension("provisional");
@@ -2242,14 +2256,14 @@ mod tests {
                 };
             write_json(
                 &result,
-                &json!({"report":crate::presentation::runtime_recovery(&report),"spool_state":spool_state}),
+                &json!({"report":crate::output::json::runtime_recovery(&report),"spool_state":spool_state}),
             );
         }
     }
 
     mod identity {
-        use super::*;
-        use crate::input::PaneLock;
+        use crate::pane_lock::PaneLock;
+        use crate::runtime::runner::recovery::tests::*;
 
         #[test]
         fn runner_recovery_matching_held_original_lock_defers_without_mutating_rows_or_spool() {
@@ -2592,8 +2606,8 @@ mod tests {
     }
 
     mod clock {
-        use super::*;
-        use crate::input::PaneLock;
+        use crate::pane_lock::PaneLock;
+        use crate::runtime::runner::recovery::tests::*;
 
         fn clock_case(borrowed: bool, cap: Duration, delay: Duration) {
             let mut case = Case::new();
@@ -2669,10 +2683,15 @@ mod tests {
     }
 
     mod completion {
-        use super::*;
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::{Mutex, mpsc};
+        use crate::runtime::runner::recovery::tests::*;
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use rusqlite::hooks::TransactionOperation;
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+        use std::sync::mpsc;
 
         type CompletedSnapshot = Arc<Mutex<Option<Vec<TableSnapshot>>>>;
 
@@ -2894,8 +2913,8 @@ mod tests {
     }
 
     mod missing_paths {
-        use super::super::test_support::missing_paths::*;
-        use super::*;
+        use crate::runtime::runner::recovery::test_support::missing_paths::*;
+        use crate::runtime::runner::recovery::tests::*;
         #[test]
         fn runner_recovery_missing_path_unknown_identity_preserves_open_episode_and_requires_operator()
          {
@@ -3034,7 +3053,7 @@ mod tests {
     }
 
     mod relationships {
-        use super::super::test_support::relationships::*;
+        use crate::runtime::runner::recovery::test_support::relationships::*;
         #[test]
         fn runner_recovery_ordinary_takeover_refuses_actual_member_fleet_change_atomically() {
             refusal(Stage::OrdinaryTakeover, Relationship::MemberFleet);
@@ -3054,7 +3073,7 @@ mod tests {
     }
 
     mod deferred_inputs {
-        use super::*;
+        use crate::runtime::runner::recovery::tests::*;
 
         fn insert(case: &Case, key: &str, state: &str, deferred: bool) -> i64 {
             case.fixture

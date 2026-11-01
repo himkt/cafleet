@@ -1,5 +1,5 @@
-use super::CodingAgent;
-use super::catalog::ProfileCatalog;
+use crate::coding_agent::profiles::CodingAgent;
+use crate::coding_agent::profiles::catalog::ProfileCatalog;
 use crate::error::CafleetError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +70,7 @@ impl ComposerPlan {
             .and_then(|size| size.checked_add(self.submit.len()))
             .filter(|size| *size <= 65536)
             .ok_or_else(|| {
-                CafleetError::Value("native composer payload exceeds 65536 bytes".into())
+                CafleetError::App("native composer payload exceeds 65536 bytes".into())
             })?;
         let mut bytes = Vec::with_capacity(size);
         bytes.extend_from_slice(&self.prefix);
@@ -113,12 +113,13 @@ impl ProfileCatalog {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
     use crate::broker::runtime::Coverage;
-    use crate::coding_agent::profiles::catalog::test_support::{
-        FIXTURE, VERSION, simple_definition,
-    };
-    use serde_json::{Value, json};
+    use crate::coding_agent::profiles::catalog::test_support::FIXTURE;
+    use crate::coding_agent::profiles::catalog::test_support::VERSION;
+    use crate::coding_agent::profiles::catalog::test_support::simple_definition;
+    use crate::coding_agent::profiles::composer::*;
+    use serde_json::Value;
+    use serde_json::json;
     pub(crate) const EMPTY: &str = "synthetic-composer_empty";
     pub(crate) const DRAFT: &str = "synthetic-composer_draft";
     pub(crate) const PROMPT_FIXTURE: &str = "synthetic-prompt-plan";
@@ -216,11 +217,12 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::*;
-    use super::*;
-    use crate::broker::runtime::{Coverage, PermissionDecision};
+    use crate::broker::runtime::Coverage;
+    use crate::broker::runtime::PermissionDecision;
     use crate::coding_agent::profiles::catalog::test_support::synthetic_definitions as definitions;
     use crate::coding_agent::profiles::catalog::test_support::*;
+    use crate::coding_agent::profiles::composer::test_support::*;
+    use crate::coding_agent::profiles::composer::*;
     use serde_json::json;
 
     #[test]

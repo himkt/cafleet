@@ -1,14 +1,16 @@
-use rusqlite::{Connection, OptionalExtension, params};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-use std::time::Instant;
-
-use super::records::{MemberStatus, MessageRecord};
+use crate::broker::MemberStatus;
+use crate::broker::MessageRecord;
+use crate::db::with_database_budget;
 use crate::error::CafleetError;
-use crate::input::{Deadline, with_database_budget};
+use crate::time::Deadline;
 use crate::time::now_stamp;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use rusqlite::params;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 pub(crate) const MESSAGE_COLUMNS: &str =
     "message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text";
@@ -46,12 +48,12 @@ pub(crate) fn get_message(
     message_id: i64,
 ) -> Result<MessageRecord, CafleetError> {
     message_row(conn, message_id)?
-        .ok_or_else(|| CafleetError::Value(format!("Message {message_id} not found")))
+        .ok_or_else(|| CafleetError::App(format!("Message {message_id} not found")))
 }
 
 fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetError> {
-    super::members::active_member_fleet(conn, from_member_id)?.ok_or_else(|| {
-        CafleetError::Value(format!(
+    crate::broker::members::active_member_fleet(conn, from_member_id)?.ok_or_else(|| {
+        CafleetError::App(format!(
             "Sender member not found or not active: {from_member_id}"
         ))
     })
@@ -76,16 +78,16 @@ pub(crate) fn insert_message_validated(
     text: &str,
 ) -> Result<MessageRecord, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
-    super::fleets::require_live_fleet(conn, fleet_id)?;
+    crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
     let Some((recipient_fleet, MemberStatus::Active)) =
-        super::members::member_fleet_status(conn, to_member_id)?
+        crate::broker::members::member_fleet_status(conn, to_member_id)?
     else {
-        return Err(CafleetError::Value(format!(
+        return Err(CafleetError::App(format!(
             "Destination member not found: {to_member_id}"
         )));
     };
     if recipient_fleet != fleet_id {
-        return Err(CafleetError::Value(format!(
+        return Err(CafleetError::App(format!(
             "members {from_member_id} and {to_member_id} are not in the same fleet."
         )));
     }
@@ -126,8 +128,8 @@ pub(crate) fn poll_messages(
     conn: &Connection,
     member_id: i64,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
-    if super::members::active_member_fleet(conn, member_id)?.is_none() {
-        return Err(CafleetError::Value(format!("Member {member_id} not found")));
+    if crate::broker::members::active_member_fleet(conn, member_id)?.is_none() {
+        return Err(CafleetError::App(format!("Member {member_id} not found")));
     }
     let mut stmt = conn.prepare(&format!(
         "SELECT {MESSAGE_COLUMNS} FROM messages \
@@ -198,13 +200,16 @@ fn listen_snapshot_with_clock(
         let cleanup = conn
             .progress_handler(0, None::<fn() -> bool>)
             .map_err(crate::error::CafleetError::from);
-        match (result, cleanup) {
-            (Ok(snapshot), Ok(())) => Ok(snapshot),
-            (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
-            (Err(error), Err(cleanup)) => Err(error.with_cleanup(format!(
-                "removing listener progress handler failed: {cleanup}"
-            ))),
-        }
+        let cleanup = cleanup.map_err(|cleanup| {
+            if result.is_err() {
+                CafleetError::App(format!(
+                    "removing listener progress handler failed: {cleanup}"
+                ))
+            } else {
+                cleanup
+            }
+        });
+        CafleetError::merge_cleanup(result, cleanup)
     })
 }
 
@@ -231,12 +236,15 @@ fn read_listen_snapshot(
     };
     match result {
         Ok(snapshot) => Ok(snapshot),
-        Err(error) => match tx.rollback().map_err(crate::error::CafleetError::from) {
-            Ok(()) => Err(error),
-            Err(cleanup) => {
-                Err(error.with_cleanup(format!("rolling back listener snapshot failed: {cleanup}")))
-            }
-        },
+        Err(error) => {
+            let cleanup = tx
+                .rollback()
+                .map_err(crate::error::CafleetError::from)
+                .map_err(|cleanup| {
+                    CafleetError::App(format!("rolling back listener snapshot failed: {cleanup}"))
+                });
+            CafleetError::merge_cleanup(Err(error), cleanup)
+        }
     }
 }
 
@@ -248,7 +256,7 @@ fn select_listen_snapshot(
     now: &impl Fn() -> Instant,
 ) -> Result<InboxSnapshot, CafleetError> {
     deadline.remaining_at(now())?;
-    let subject = super::members::member_fleet_status(conn, member_id)?;
+    let subject = crate::broker::members::member_fleet_status(conn, member_id)?;
     let Some((fleet_id, status)) = subject else {
         return Err(if expected_fleet.is_some() {
             CafleetError::InvalidStoredValue {
@@ -256,19 +264,15 @@ fn select_listen_snapshot(
                 value: member_id.to_string(),
             }
         } else {
-            CafleetError::Value(format!("Member {member_id} not found"))
+            CafleetError::App(format!("Member {member_id} not found"))
         });
     };
-    if expected_fleet.is_some_and(|expected| expected != fleet_id) {
-        return Err(CafleetError::App(format!(
-            "Member {member_id} changed fleets during listen"
-        )));
-    }
+    crate::broker::members::require_pinned_fleet(member_id, fleet_id, expected_fleet, "listen")?;
     if expected_fleet.is_none() && status != MemberStatus::Active {
-        return Err(CafleetError::Value(format!("Member {member_id} not found")));
+        return Err(CafleetError::App(format!("Member {member_id} not found")));
     }
     deadline.remaining_at(now())?;
-    let fleet = super::fleets::get_fleet(conn, fleet_id)?.ok_or_else(|| {
+    let fleet = crate::broker::fleets::get_fleet(conn, fleet_id)?.ok_or_else(|| {
         CafleetError::InvalidStoredValue {
             field: "fleets.fleet_id".into(),
             value: fleet_id.to_string(),
@@ -289,13 +293,13 @@ fn select_listen_snapshot(
         }
     }
     deadline.remaining_at(now())?;
-    let live = super::fleets::require_live_fleet(conn, fleet_id)?;
+    let live = crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
     let root = live
         .director_member_id
         .expect("a live fleet has its root Director");
     for id in [member_id, root] {
         deadline.remaining_at(now())?;
-        super::members::get_member(conn, id, fleet_id)?.ok_or_else(|| {
+        crate::broker::members::get_member(conn, id, fleet_id)?.ok_or_else(|| {
             CafleetError::InvalidStoredValue {
                 field: "members.member_id".into(),
                 value: id.to_string(),
@@ -341,14 +345,35 @@ pub(crate) fn ack_message(
         return Ok(message);
     }
     let Some(message) = message_row(conn, message_id)? else {
-        return Err(CafleetError::Value(format!(
-            "Message {message_id} not found"
-        )));
+        return Err(CafleetError::App(format!("Message {message_id} not found")));
     };
-    Err(CafleetError::Value(format!(
+    Err(CafleetError::App(format!(
         "Cannot ACK message in state {}",
         message.status.as_str()
     )))
+}
+
+pub(crate) fn pending_previews(
+    conn: &Connection,
+    fleet_id: i64,
+    subject_id: i64,
+) -> Result<Vec<(i64, i64)>, CafleetError> {
+    let mut statement = conn.prepare(&format!(
+        "SELECT m.member_id, g.message_id FROM members m
+         JOIN fleets f ON f.fleet_id=m.fleet_id
+         JOIN member_placements p ON p.member_id=m.member_id AND p.mux_pane_id IS NOT NULL
+         JOIN messages g ON g.to_member_id=m.member_id
+         WHERE m.fleet_id=?1 AND m.status='active' AND m.member_id!=?2
+         AND m.member_id!=f.director_member_id AND {}
+         ORDER BY m.member_id, g.created_at, g.message_id",
+        crate::broker::messaging::PENDING_PREVIEW,
+    ))?;
+    statement
+        .query_map(params![fleet_id, subject_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(crate::error::CafleetError::from)
 }
 
 #[cfg(test)]
@@ -376,19 +401,25 @@ pub(crate) mod test_support {
         .unwrap();
         let fleet = created.fleet_id;
         let director = created.director.member_id;
-        let worker = broker::register_member(&mut conn, fleet, "worker", "listener sender", None)
-            .unwrap()
-            .member_id;
+        let worker = crate::broker::members::test_support::register_member(
+            &mut conn,
+            fleet,
+            "worker",
+            "listener sender",
+            None,
+        )
+        .unwrap()
+        .member_id;
         (dir, conn, fleet, director, worker)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::broker;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
+    use crate::broker::messaging::*;
     use crate::db::test_support::migrated_conn;
     use tempfile::TempDir;
 
@@ -406,10 +437,7 @@ mod tests {
             (first.from_member_id, first.to_member_id),
             (director, worker)
         );
-        assert_eq!(
-            first.status,
-            super::super::records::MessageStatus::InputRequired
-        );
+        assert_eq!(first.status, crate::broker::MessageStatus::InputRequired);
         assert_eq!(first.created_at, first.status_timestamp);
         assert_eq!(get_message(&conn, first.message_id).unwrap(), first);
         assert_eq!(
@@ -418,7 +446,7 @@ mod tests {
         );
         assert_eq!(notified_at(&conn, first.message_id), None);
         let ack = ack_message(&mut conn, first.message_id).unwrap();
-        assert_eq!(ack.status, super::super::records::MessageStatus::Completed);
+        assert_eq!(ack.status, crate::broker::MessageStatus::Completed);
         assert!(ack.status_timestamp >= first.status_timestamp);
         assert_eq!(ack.text, text);
         assert!(ack_message(&mut conn, first.message_id).is_err());
@@ -458,7 +486,7 @@ mod tests {
                 Err(CafleetError::App(_))
             ));
         }
-        broker::deregister_member(&mut conn, worker).unwrap();
+        crate::broker::members::test_support::deregister_member(&mut conn, worker).unwrap();
         assert!(send_message(&mut conn, director, worker, "inactive recipient").is_err());
         assert!(send_message(&mut conn, worker, director, "inactive sender").is_err());
         conn.execute(
@@ -506,11 +534,12 @@ mod tests {
 
     #[test]
     fn an_ack_that_loses_the_pending_transition_reports_completed() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
 
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
@@ -647,7 +676,7 @@ mod tests {
             .is_none()
         );
         assert_eq!(
-            broker::panes::pending_previews(&conn, fleet, director).unwrap(),
+            crate::broker::messaging::pending_previews(&conn, fleet, director).unwrap(),
             vec![(worker, previous.message_id), (worker, next.message_id)]
         );
     }
@@ -684,8 +713,8 @@ mod tests {
     }
 
     mod listen_snapshot {
-        use super::super::test_support::broker_fixture;
-        use super::*;
+        use crate::broker::messaging::test_support::broker_fixture;
+        use crate::broker::messaging::tests::*;
         use std::cell::Cell;
         use std::time::Duration;
 
@@ -878,8 +907,12 @@ mod tests {
 
         #[test]
         fn a_failed_snapshot_commit_preserves_rollback_failure_and_removes_the_progress_handler() {
-            use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
-            use std::sync::{Arc, Mutex};
+            use rusqlite::hooks::AuthAction;
+            use rusqlite::hooks::AuthContext;
+            use rusqlite::hooks::Authorization;
+            use rusqlite::hooks::TransactionOperation;
+            use std::sync::Arc;
+            use std::sync::Mutex;
 
             let (_dir, mut conn, fleet, director, _) = broker_fixture();
             let attempts = Arc::new(Mutex::new(Vec::new()));
@@ -935,7 +968,9 @@ mod tests {
 
         #[test]
         fn an_unrelated_sqlite_interrupt_preserves_its_cause_before_the_deadline() {
-            use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+            use rusqlite::hooks::AuthAction;
+            use rusqlite::hooks::AuthContext;
+            use rusqlite::hooks::Authorization;
             let (_dir, mut conn, fleet, director, worker) = broker_fixture();
             broker::send_message(
                 &mut conn,
@@ -984,5 +1019,74 @@ mod tests {
                 .unwrap();
             assert_handler_cleared(&conn);
         }
+    }
+
+    #[test]
+    fn preview_rotation_selects_only_concrete_ordinary_placements() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "rotation");
+        let pending = register(&mut conn, fleet, "pending", None);
+        let placed = register(&mut conn, fleet, "placed", Some("%2"));
+        broker::send_message(&mut conn, director, pending, "wait for placement").unwrap();
+        let message = broker::send_message(&mut conn, director, placed, "deliver now").unwrap();
+        assert_eq!(
+            pending_previews(&conn, fleet, director).unwrap(),
+            vec![(placed, message.message_id)]
+        );
+    }
+
+    #[test]
+    fn an_ordinary_subject_retries_ordinary_members_and_preserves_the_directors_inbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "director");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let observer = register(&mut conn, fleet, "observer", Some("%3"));
+        let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
+        let assignment = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
+        assert_eq!(
+            pending_previews(&conn, fleet, observer).unwrap(),
+            vec![(worker, assignment.message_id)]
+        );
+        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
+    }
+
+    #[test]
+    fn the_subjects_own_previews_are_not_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "subject");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        broker::send_message(&mut conn, worker, director, "reply").unwrap();
+        let to_worker = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
+        assert_eq!(
+            pending_previews(&conn, fleet, director).unwrap(),
+            vec![(worker, to_worker.message_id)]
+        );
+        assert!(pending_previews(&conn, fleet, worker).unwrap().is_empty());
+    }
+
+    #[test]
+    fn retry_eligibility_follows_the_fleets_director_back_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, former_director) = create_fleet_fixture(&mut conn, "new-root");
+        let observer = register(&mut conn, fleet, "observer", Some("%2"));
+        let director = register(&mut conn, fleet, "new-director", Some("%3"));
+        conn.execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            rusqlite::params![director, fleet],
+        )
+        .unwrap();
+        let ordinary =
+            broker::send_message(&mut conn, director, former_director, "ordinary assignment")
+                .unwrap();
+        let reply = broker::send_message(&mut conn, observer, director, "root reply").unwrap();
+        assert_eq!(
+            pending_previews(&conn, fleet, observer).unwrap(),
+            vec![(former_director, ordinary.message_id)]
+        );
+        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }
 }

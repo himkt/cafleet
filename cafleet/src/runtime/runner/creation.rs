@@ -1,8 +1,12 @@
-use super::*;
-use crate::broker::records::{Placement, RegisteredMember};
-use crate::broker::runtime::{self as storage, *};
-use crate::broker::{self, NewPlacement};
-use rusqlite::{Connection, params};
+use crate::broker;
+use crate::broker::NewPlacement;
+use crate::broker::Placement;
+use crate::broker::RegisteredMember;
+use crate::broker::runtime as storage;
+use crate::broker::runtime::*;
+use crate::runtime::runner::*;
+use rusqlite::Connection;
+use rusqlite::params;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -440,20 +444,23 @@ mod tests {
     use rusqlite::Connection;
     use serde_json::json;
 
-    use super::*;
+    use crate::broker::MemberStatus;
+    use crate::broker::Placement;
     use crate::broker::members::test_support::placement;
-    use crate::broker::records::{MemberStatus, Placement};
     use crate::broker::runtime as storage;
     use crate::error::CafleetError;
+    use crate::runtime::runner::creation::*;
     use crate::runtime::runner::test_support::*;
-    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use rusqlite::hooks::AuthAction;
+    use rusqlite::hooks::AuthContext;
+    use rusqlite::hooks::Authorization;
     use rusqlite::params;
     use std::path::PathBuf;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-    use std::time::{Duration, Instant};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+    use std::time::Instant;
 
     #[derive(Clone, Copy)]
     enum PublicationFailure {
@@ -1355,7 +1362,7 @@ mod tests {
             &member,
             &settings,
             |conn, pending| {
-                let assignment = crate::spawn_prompt::substitute_spawn_placeholders(
+                let assignment = crate::cli::substitute_spawn_placeholders(
                     template,
                     pending.run.fleet_id,
                     pending.member.member_id,

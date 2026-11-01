@@ -1,6 +1,52 @@
-pub(crate) use events::{
-    original as original_transition, validate_transition as validate_observed_transition,
-};
+use crate::broker::MemberStatus;
+pub(crate) use crate::broker::runtime::effective_policy::persist_transition_with_effective_policy;
+pub(crate) use crate::broker::runtime::effective_policy::record_effective_policy;
+pub(crate) use crate::broker::runtime::events::get_event;
+pub(crate) use crate::broker::runtime::events::input_delivery_result_cause;
+pub(crate) use crate::broker::runtime::events::latest_event_seq;
+pub(crate) use crate::broker::runtime::events::original as original_transition;
+pub(crate) use crate::broker::runtime::events::persist_transition;
+pub(crate) use crate::broker::runtime::events::persist_transition_in_transaction;
+pub(crate) use crate::broker::runtime::events::update_interaction_evidence;
+pub(crate) use crate::broker::runtime::events::validate_transition as validate_observed_transition;
+pub(crate) use crate::broker::runtime::inputs::InputReservation;
+pub(crate) use crate::broker::runtime::inputs::NewReservation;
+pub(crate) use crate::broker::runtime::inputs::UNRESOLVED_INPUT;
+pub(crate) use crate::broker::runtime::inputs::begin_deferred_attempt;
+pub(crate) use crate::broker::runtime::inputs::find_input;
+pub(crate) use crate::broker::runtime::inputs::get_input;
+pub(crate) use crate::broker::runtime::inputs::has_unresolved_ordinary_attempt;
+pub(crate) use crate::broker::runtime::inputs::input_payload_digest;
+pub(crate) use crate::broker::runtime::inputs::record_input_state;
+pub(crate) use crate::broker::runtime::inputs::record_input_uncertain;
+pub(crate) use crate::broker::runtime::inputs::requeue_zero_byte_immediate;
+pub(crate) use crate::broker::runtime::inputs::reserve_input_with_provenance;
+pub(crate) use crate::broker::runtime::inputs::settle_lost_deferred;
+pub(crate) use crate::broker::runtime::inputs::settle_lost_deferred_in_transaction;
+pub(crate) use crate::broker::runtime::inputs::settle_preview;
+pub(crate) use crate::broker::runtime::inputs::settle_zero_byte_deferred;
+pub(crate) use crate::broker::runtime::inputs::unpublished_delivery_results;
+pub(crate) use crate::broker::runtime::permissions::ZeroByteRetirement;
+pub(crate) use crate::broker::runtime::permissions::get_permission_response;
+pub(crate) use crate::broker::runtime::permissions::lookup_permission_response;
+pub(crate) use crate::broker::runtime::permissions::permission_response_digest;
+pub(crate) use crate::broker::runtime::permissions::rearm_permission_response;
+pub(crate) use crate::broker::runtime::permissions::reserve_permission_response;
+pub(crate) use crate::broker::runtime::permissions::settle_any_input_in_transaction;
+pub(crate) use crate::broker::runtime::records::*;
+use crate::db::with_database_budget;
+use crate::error::CafleetError;
+use crate::time::Deadline;
+use crate::time::now_stamp;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use rusqlite::TransactionBehavior;
+use rusqlite::params;
+use serde_json::Value;
+use serde_json::json;
+use std::ops::RangeInclusive;
+use std::os::unix::fs::MetadataExt;
+
 mod effective_policy;
 mod events;
 pub(crate) mod evidence;
@@ -9,47 +55,18 @@ mod permissions;
 mod records;
 
 #[cfg(test)]
-pub(crate) use effective_policy::persist_event_with_effective_policy;
-pub(crate) use effective_policy::{
-    persist_transition_with_effective_policy, record_effective_policy,
-};
-#[cfg(test)]
-pub(crate) use events::persist_event;
-pub(crate) use events::persist_transition_in_transaction;
-pub(crate) use events::{
-    get_event, input_delivery_result_cause, latest_event_seq, persist_transition,
-    update_interaction_evidence,
-};
-pub(crate) use inputs::{
-    InputReservation, NewReservation, UNRESOLVED_INPUT, begin_deferred_attempt,
-    has_unresolved_ordinary_attempt, input_payload_digest, requeue_zero_byte_immediate,
-    reserve_input_with_provenance, settle_lost_deferred, settle_lost_deferred_in_transaction,
-    settle_zero_byte_deferred, unpublished_delivery_results,
-};
-pub(crate) use inputs::{
-    find_input, get_input, record_input_state, record_input_uncertain, settle_preview,
-};
-#[cfg(test)]
-pub(crate) use inputs::{reserve_input, settle_input};
-#[cfg(test)]
-pub(crate) use permissions::release_permission_claim;
-pub(crate) use permissions::{
-    ZeroByteRetirement, get_permission_response, lookup_permission_response,
-    permission_response_digest, reserve_permission_response,
-};
-pub(crate) use permissions::{rearm_permission_response, settle_any_input_in_transaction};
-pub(crate) use records::*;
+pub(crate) use crate::broker::runtime::effective_policy::persist_event_with_effective_policy;
 
-use std::ops::RangeInclusive;
-use std::os::unix::fs::MetadataExt;
+#[cfg(test)]
+pub(crate) use crate::broker::runtime::events::persist_event;
 
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde_json::{Value, json};
+#[cfg(test)]
+pub(crate) use crate::broker::runtime::inputs::reserve_input;
+#[cfg(test)]
+pub(crate) use crate::broker::runtime::inputs::settle_input;
 
-use super::records::MemberStatus;
-use crate::error::CafleetError;
-use crate::input::{Deadline, with_database_budget};
-use crate::time::now_stamp;
+#[cfg(test)]
+pub(crate) use crate::broker::runtime::permissions::release_permission_claim;
 
 pub(super) fn invalid(field: &str, description: impl Into<String>) -> CafleetError {
     CafleetError::InvalidStoredValue {
@@ -186,7 +203,7 @@ pub(crate) fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, Cafle
             map_run,
         )
         .optional()?
-        .ok_or_else(|| CafleetError::Value(format!("Run {run_id} not found")))?;
+        .ok_or_else(|| CafleetError::App(format!("Run {run_id} not found")))?;
     nonblank(
         &run.owner_start_identity,
         "member_runs.owner_start_identity",
@@ -442,13 +459,16 @@ pub(crate) mod test_support {
     use std::ops::RangeInclusive;
 
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
     use tempfile::TempDir;
 
-    use super::{self as storage, *};
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
-    use crate::db::test_support::{migrated_conn, table_rows};
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::*;
+    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::table_rows;
     use crate::output::format_json;
 
     pub(crate) const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
@@ -678,8 +698,10 @@ pub(crate) mod test_support {
         }
     }
 
-    use crate::coding_agent::{AnswerCapability, CodingAgent};
-    use std::time::{Duration, Instant};
+    use crate::coding_agent::AnswerCapability;
+    use crate::coding_agent::CodingAgent;
+    use std::time::Duration;
+    use std::time::Instant;
 
     pub(crate) struct ResponseFixture {
         pub(crate) base: Fixture,
@@ -808,7 +830,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) mod automatic_review {
-        use super::*;
+        use crate::broker::runtime::test_support::*;
         pub(crate) fn annotation_raw(rule: &str, operation: Option<&str>) -> Value {
             json!({
                 "backend":"codex","native_version":"0.163.0",
@@ -937,10 +959,11 @@ mod tests {
     use rusqlite::params;
     use serde_json::json;
 
-    use super::test_support::*;
-    use super::{self as storage, *};
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
+    use crate::broker::runtime as storage;
+    use crate::broker::runtime::test_support::*;
+    use crate::broker::runtime::*;
 
     #[test]
     fn new_run_records_launch_intent_and_unreached_phases_without_inventing_policy() {

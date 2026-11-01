@@ -155,7 +155,7 @@ pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::coding_agent::native_version::*;
 
     #[test]
     fn version_token_records_the_documented_first_lines_without_a_leading_v() {
@@ -229,7 +229,7 @@ mod tests {
     }
 
     mod native_version_probe {
-        use super::*;
+        use crate::coding_agent::native_version::tests::*;
         use std::os::unix::fs::PermissionsExt;
         use std::path::PathBuf;
 
@@ -311,9 +311,9 @@ mod tests {
             );
         }
 
-        use crate::coding_agent::profiles::catalog::test_support::{
-            BUNDLED_BOUNDARIES, inspection_fixture_definition, thresholds,
-        };
+        use crate::coding_agent::profiles::catalog::test_support::BUNDLED_BOUNDARIES;
+        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
+        use crate::coding_agent::profiles::catalog::test_support::thresholds;
 
         fn launched(
             backend: CodingAgent,

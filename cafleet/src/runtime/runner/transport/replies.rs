@@ -242,8 +242,9 @@ impl ReplyClassifier {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::time::{Duration, Instant};
+    use crate::runtime::runner::transport::replies::*;
+    use std::time::Duration;
+    use std::time::Instant;
 
     fn classifier() -> ReplyClassifier {
         ReplyClassifier::default()
@@ -278,7 +279,7 @@ mod tests {
     }
 
     mod allowlist {
-        use super::*;
+        use crate::runtime::runner::transport::replies::tests::*;
 
         #[test]
         fn reply_classifier_cursor_position_reports_are_replies() {
@@ -392,7 +393,7 @@ mod tests {
     }
 
     mod arity {
-        use super::*;
+        use crate::runtime::runner::transport::replies::tests::*;
 
         #[test]
         fn reply_classifier_window_report_with_four_parameters_is_manual() {
@@ -455,7 +456,7 @@ mod tests {
     }
 
     mod manual {
-        use super::*;
+        use crate::runtime::runner::transport::replies::tests::*;
 
         #[test]
         fn reply_classifier_text_and_c0_controls_are_manual_immediately() {
@@ -613,7 +614,7 @@ mod tests {
     }
 
     mod invalid_continuation {
-        use super::*;
+        use crate::runtime::runner::transport::replies::tests::*;
 
         #[test]
         fn reply_classifier_escape_inside_csi_restarts_a_reply() {
@@ -690,7 +691,7 @@ mod tests {
     }
 
     mod pending {
-        use super::*;
+        use crate::runtime::runner::transport::replies::tests::*;
 
         const SPLIT_REPLIES: [&[u8]; 7] = [
             b"\x1b[I",
