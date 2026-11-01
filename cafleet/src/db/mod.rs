@@ -295,6 +295,89 @@ mod tests {
     use super::test_support::{migrate_to_version, table_rows as rows};
     use super::*;
 
+    mod existing_file_opener {
+        use super::{Connection, connect, connect_read_only};
+
+        fn file_with_probe() -> (tempfile::TempDir, String) {
+            let dir = tempfile::tempdir().unwrap();
+            let url = format!("sqlite:///{}", dir.path().join("existing.db").display());
+            let conn = connect(&url).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE probe(value INTEGER NOT NULL); INSERT INTO probe VALUES(7);",
+            )
+            .unwrap();
+            drop(conn);
+            (dir, url)
+        }
+
+        fn assert_connection_pragmas(conn: &Connection) {
+            assert_eq!(
+                conn.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                conn.query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                5000
+            );
+        }
+
+        #[test]
+        fn absent_files_return_none_and_remain_absent_in_both_modes() {
+            let dir = tempfile::tempdir().unwrap();
+            for read_only in [false, true] {
+                let path = dir.path().join(format!("missing-{read_only}.db"));
+                let url = format!("sqlite:///{}", path.display());
+                assert!(!path.exists());
+                let opened = super::super::open_existing(&url, read_only).unwrap();
+                assert!(opened.is_none(), "an absent file has no connection");
+                assert!(!path.exists(), "opening an absent file preserves absence");
+            }
+        }
+
+        #[test]
+        fn an_existing_writable_connection_keeps_pragmas_and_persists_writes() {
+            let (_dir, url) = file_with_probe();
+            let conn = super::super::open_existing(&url, false)
+                .unwrap()
+                .expect("the existing file has a connection");
+            assert_connection_pragmas(&conn);
+            assert_eq!(conn.execute("UPDATE probe SET value=11", []).unwrap(), 1);
+            drop(conn);
+            let reopened = connect_read_only(&url).unwrap();
+            assert_eq!(
+                reopened
+                    .query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                11
+            );
+        }
+
+        #[test]
+        fn an_existing_read_only_connection_keeps_pragmas_and_refuses_writes() {
+            let (_dir, url) = file_with_probe();
+            let conn = super::super::open_existing(&url, true)
+                .unwrap()
+                .expect("the existing file has a connection");
+            assert_connection_pragmas(&conn);
+            let failure = conn.execute("UPDATE probe SET value=11", []).unwrap_err();
+            assert!(
+                matches!(
+                    &failure,
+                    rusqlite::Error::SqliteFailure(code, _)
+                        if code.code == rusqlite::ErrorCode::ReadOnly
+                ),
+                "a valid write is refused as read-only: {failure:?}"
+            );
+            assert_eq!(
+                conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                7
+            );
+        }
+    }
+
     fn require_current(conn: &Connection) -> Result<(), CafleetError> {
         crate::diagnosis::classify_schema(conn, head_version()).require_current()
     }
