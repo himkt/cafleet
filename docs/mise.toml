@@ -1,0 +1,11 @@
+[tasks.dev]
+run = "pnpm dev"
+description = "Serve the documentation site locally"
+
+[tasks.install]
+run = "pnpm install --frozen-lockfile"
+description = "Install the documentation site dependencies"
+
+[tasks.build]
+run = "pnpm build"
+description = "Build the documentation site and check its links"

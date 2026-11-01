@@ -1,6 +1,6 @@
 # Contributing
 
-Develop changes through reviewed designs and the bundled CAFleet workflows. Run repository tasks from the root through mise tasks. [SPEC.md](https://github.com/himkt/cafleet/blob/main/SPEC.md) is the specification for the CLI, runtime and storage contracts.
+Develop changes through reviewed designs and the bundled CAFleet workflows. Run repository tasks through their full mise monorepo paths. [SPEC.md](https://github.com/himkt/cafleet/blob/main/SPEC.md) is the specification for the CLI, runtime and storage contracts.
 
 ## Project structure
 
@@ -24,25 +24,25 @@ Every Rust test is a unit test in a `#[cfg(test)] mod tests` block of the implem
 git clone https://github.com/himkt/cafleet.git
 ```
 
-Enter the checkout, then run repository-root tasks:
+Enter the checkout, then install the CLI through its package task:
 
 ```bash
-mise cafleet-install
+mise //cafleet:install
 ```
 
 ```bash
 cafleet setup
 ```
 
-Use `mise tasks` and the root `mise.toml` as the task registry. Run Rust validation with `mise cafleet-test` and `mise cafleet-lint`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use the new implementation.
+Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools and selects package task files through `monorepo.config_roots`; each package's `mise.toml` owns its tasks and working directory. Run Rust validation with `mise //cafleet:test` and `mise //cafleet:lint`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use the new implementation.
 
 ### Installing the skills from your checkout
 
-Setup installs assets embedded at binary build time. Contributors can install working-tree skills with `mise skill-install`; run it after setup when you want those local files. Preserve an active executing team's installed assets until its workflow finishes.
+Setup installs assets embedded at binary build time. Contributors can install working-tree skills with `mise //:skill-install`; run it after setup when you want those local files. Preserve an active executing team's installed assets until its workflow finishes.
 
 ## Building docs locally
 
-The documentation site retains its Node/pnpm toolchain and lockfile. Run `mise docs-install`, then `mise docs-build`; the build checks links. Use the root task registry for preview and other available documentation operations. Update dependencies through the manifest and regenerate its pnpm lockfile deliberately.
+The documentation site retains its Node/pnpm toolchain and lockfile. Run `mise //docs:install`, then `mise //docs:build`; the build checks links. Use `mise tasks --all` for preview and other available documentation operations. Update dependencies through the manifest and regenerate its pnpm lockfile deliberately.
 
 ## Contributing changes
 

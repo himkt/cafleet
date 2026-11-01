@@ -89,10 +89,10 @@ Use [Member permission events](concepts/members.md#consume-a-runtime-event) to v
 
 ### Run a command for a member
 
-A member can ask `Need to run: mise cafleet-test. My harness denied it.` Authorize and dispatch the exact command:
+A member can ask `Need to run: mise //cafleet:test. My harness denied it.` Authorize and dispatch the exact command:
 
 ```bash
-cafleet member exec 3 "mise cafleet-test"
+cafleet member exec 3 "mise //cafleet:test"
 ```
 
 The CLI returns submission metadata. Inspect the native command and result:

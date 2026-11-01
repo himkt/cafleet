@@ -1,0 +1,23 @@
+[tasks.test]
+run = "cargo test --bin cafleet"
+description = "Run inline unit tests (positional args forward to the cargo test harness)"
+
+[tasks.lint]
+run = ["cargo clippy --all-targets -- -D warnings", "cargo fmt --check"]
+description = "Run clippy (deny warnings) and the rustfmt check"
+
+[tasks.format]
+run = "cargo fmt"
+description = "Format the Rust sources with rustfmt"
+
+[tasks.typecheck]
+run = "cargo check"
+description = "Type-check the package without producing a binary"
+
+[tasks.install]
+run = "cargo install --path ."
+description = "Install the cafleet CLI from the working tree (re-run after source edits to refresh the installed binary)"
+
+[tasks.build]
+run = "cargo build --release"
+description = "Build the release binary into cafleet/target/release/cafleet"

@@ -12,7 +12,7 @@ CAFleet multiplexes coding-agent sessions and coordinates them through durable p
 
 ## Commands
 
-Use repository-root mise tasks. See `.claude/rules/commands.md` and the task registry for available operations.
+Use full mise monorepo task paths and discover available operations with `mise tasks --all`. The root `mise.toml` selects package task files through `monorepo.config_roots`; see `.claude/rules/commands.md` for invocation conventions.
 
 ## Tests
 

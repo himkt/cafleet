@@ -27,4 +27,4 @@ jobs:
             cafleet/target
           key: ${{ runner.os }}-cargo-${{ matrix.task }}-${{ hashFiles('cafleet/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-${{ matrix.task }}-
-      - run: mise cafleet-${{ matrix.task }}
+      - run: mise //cafleet:${{ matrix.task }}

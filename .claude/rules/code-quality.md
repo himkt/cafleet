@@ -28,7 +28,7 @@ Only add comments where the logic is genuinely non-obvious. Do NOT add:
 
 ## Test placement
 
-Every Rust test is an in-file unit test. It lives in one `#[cfg(test)] mod tests` block at the end of the implementation file whose behavior it exercises, and `mise cafleet-test` runs it.
+Every Rust test is an in-file unit test. It lives in one `#[cfg(test)] mod tests` block at the end of the implementation file whose behavior it exercises, and `mise //cafleet:test` runs it.
 
 - Place each test in the file that defines the entry point it asserts on. When a test drives several files, the file that owns the asserted behavior owns the test. Group related tests in nested modules inside `mod tests`.
 - Put a helper shared by tests in several files into the implementation file that owns the type it builds, as `#[cfg(test)] pub(crate) mod test_support`. A test-only constructor or method on a production type is a `#[cfg(test)] impl` block beside that type. A helper used only by one file's tests stays inside that file's `mod tests`. Crate-wide test macros are defined at the top of `main.rs`, before the first `mod` declaration. Reuse an existing helper or production function (clocks, digests, frame codecs, fixtures) before writing another.
