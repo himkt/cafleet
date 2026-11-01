@@ -290,23 +290,21 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "branches");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        for (from, to, notification_sent, expected) in [
+        for (from, to, expected) in [
             (
                 director,
                 director,
-                false,
                 projection(DeliveryStatus::NotApplicable, None, Some("self_send")),
             ),
             (
                 worker,
                 director,
-                false,
                 projection(DeliveryStatus::NotApplicable, None, Some("director_stdout")),
             ),
         ] {
             let message = broker::send_message(&mut conn, from, to, "branch").unwrap();
             assert_eq!(
-                send_delivery(&conn, &message, notification_sent, None).unwrap(),
+                send_delivery(&conn, &message, None).unwrap(),
                 (None, expected),
                 "{from} -> {to}"
             );
@@ -424,7 +422,7 @@ mod tests {
         let own =
             broker::send_message(&mut fixture.conn, run.member_id, run.member_id, "self").unwrap();
         assert_eq!(
-            send_delivery(&fixture.conn, &own, false, None).unwrap(),
+            send_delivery(&fixture.conn, &own, None).unwrap(),
             (
                 None,
                 projection(DeliveryStatus::NotApplicable, None, Some("self_send"))
@@ -453,7 +451,7 @@ mod tests {
             .unwrap();
         let receipt = fixture.conn.last_insert_rowid();
         assert_eq!(
-            send_delivery(&fixture.conn, &message, false, None).unwrap(),
+            send_delivery(&fixture.conn, &message, None).unwrap(),
             (
                 Some(receipt),
                 projection(DeliveryStatus::Queued, None, Some("interaction_open"))
@@ -469,7 +467,7 @@ mod tests {
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let message = broker::send_message(&mut conn, director, worker, "committed").unwrap();
         assert!(broker::deregister_member(&mut conn, worker).unwrap());
-        let (input_id, delivery) = send_delivery(&conn, &message, false, None)
+        let (input_id, delivery) = send_delivery(&conn, &message, None)
             .expect("a committed send reports its record after the recipient is gone");
         assert_eq!(input_id, None);
         assert_eq!(

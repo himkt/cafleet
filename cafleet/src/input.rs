@@ -613,7 +613,9 @@ pub(crate) mod test_support {
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
     use crate::db::test_support::migrated_conn;
-    use crate::multiplexer::INPUT_RESERVATION;
+
+    pub(super) const TEST_WORK_RESERVE: Duration = Duration::from_millis(3500);
+
     pub(crate) struct LockFixture {
         pub(crate) _dir: tempfile::TempDir,
         pub(crate) conn: Connection,
@@ -657,7 +659,7 @@ pub(crate) mod test_support {
         }
 
         pub(crate) fn writer_deadline() -> Deadline {
-            Deadline::new().reserving(INPUT_RESERVATION)
+            Deadline::new().reserving(TEST_WORK_RESERVE)
         }
     }
 }
@@ -978,14 +980,13 @@ mod tests {
         }
     }
     mod pane_lock_wait_tests {
-        use super::super::test_support::LockFixture;
+        use super::super::test_support::{LockFixture, TEST_WORK_RESERVE};
         use super::super::*;
-        use crate::multiplexer::INPUT_RESERVATION;
 
         #[test]
         fn reserving_moves_the_deadline_earlier_by_the_reserve() {
             let deadline = Deadline::until(Instant::now() + Duration::from_secs(5));
-            let left = deadline.reserving(INPUT_RESERVATION).remaining().unwrap();
+            let left = deadline.reserving(TEST_WORK_RESERVE).remaining().unwrap();
             assert!(left <= Duration::from_millis(1500), "{left:?}");
             assert!(left > Duration::from_millis(1400), "{left:?}");
         }
@@ -993,7 +994,7 @@ mod tests {
         #[test]
         fn reserving_more_than_remains_is_already_expired() {
             let deadline = Deadline::until(Instant::now() + Duration::from_secs(3));
-            assert!(deadline.reserving(INPUT_RESERVATION).remaining().is_err());
+            assert!(deadline.reserving(TEST_WORK_RESERVE).remaining().is_err());
         }
 
         #[test]
