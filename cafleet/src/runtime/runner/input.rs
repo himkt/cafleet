@@ -4130,6 +4130,146 @@ mod tests {
         }
 
         #[test]
+        fn checkpoint_hook_error_precedes_expiry_and_blocks_before_write() {
+            use std::sync::Mutex;
+
+            #[derive(Clone, Copy)]
+            struct ObservedCheckpoint {
+                input_id: i64,
+                stage: SubmissionStage,
+                written_bytes: u64,
+                output_seq: u64,
+                deadline: Instant,
+            }
+
+            struct ExpiringReservedHooks {
+                fail: bool,
+                observed: Mutex<Option<ObservedCheckpoint>>,
+            }
+
+            impl InputHooks for ExpiringReservedHooks {
+                fn checkpoint(
+                    &self,
+                    boundary: InputBoundary,
+                    state: &InputCheckpoint,
+                    deadline: Instant,
+                ) -> std::result::Result<(), CafleetError> {
+                    assert!(matches!(boundary, InputBoundary::Reserved));
+                    assert!(Instant::now() < deadline);
+                    {
+                        let mut observed = self.observed.lock().unwrap();
+                        assert!(observed.is_none(), "one actual reservation checkpoint");
+                        *observed = Some(ObservedCheckpoint {
+                            input_id: state.input_id,
+                            stage: state.stage,
+                            written_bytes: state.written_bytes,
+                            output_seq: state.output_seq,
+                            deadline,
+                        });
+                    }
+                    std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+                    assert!(Instant::now() >= deadline);
+                    if self.fail {
+                        Err(CafleetError::App(
+                            "fixture checkpoint failed after expiry".into(),
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+
+            for fail in [true, false] {
+                with_host(|h| {
+                    let key = "prompt:checkpoint-error-expiry";
+                    let cache_count = h.coordinator.operations.len();
+                    assert!(h.handle(h.request(key)).unwrap().is_none());
+                    let pending = h.pending_snapshot();
+                    let hooks = Arc::new(ExpiringReservedHooks {
+                        fail,
+                        observed: Mutex::new(None),
+                    });
+                    h.coordinator.services.hooks = hooks.clone();
+                    let deadline = Instant::now() + Duration::from_secs(1);
+                    assert!(deadline < h.until);
+                    let failure = (0..8)
+                        .find_map(|_| {
+                            h.drain();
+                            match h.coordinator.advance(
+                                &mut h.fixture.conn,
+                                &h.fixture.run,
+                                &mut h.transport,
+                                &mut h.pty,
+                                &h.controller,
+                                deadline,
+                            ) {
+                                Err(failure) => Some(failure),
+                                Ok(None) => None,
+                                Ok(Some(_)) => panic!("the hook blocks before a reply"),
+                            }
+                        })
+                        .expect("the real reservation reaches the configured checkpoint");
+                    let ObservedCheckpoint {
+                        input_id: id,
+                        stage,
+                        written_bytes: written,
+                        output_seq,
+                        deadline: actual_deadline,
+                    } = hooks
+                        .observed
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .copied()
+                        .expect("the hook received the actual reserved input");
+                    assert_eq!(actual_deadline, deadline);
+                    assert!(Instant::now() >= deadline);
+                    if fail {
+                        assert!(
+                            matches!(&failure.source, CafleetError::App(cause) if cause == "fixture checkpoint failed after expiry")
+                        );
+                    } else {
+                        assert!(matches!(&failure.source, CafleetError::DeadlineExceeded));
+                    }
+                    assert_eq!(failure.run_id, Some(h.fixture.run.run_id));
+                    assert_eq!(failure.input_id, Some(id));
+                    assert_eq!(failure.operation_key.as_deref(), Some(key));
+                    assert_eq!(stage, SubmissionStage::ZeroBytes);
+                    assert_eq!(written, 0);
+                    let retained = h.coordinator.retained_checkpoint(id).unwrap();
+                    assert_eq!(
+                        (
+                            retained.input_id,
+                            retained.stage,
+                            retained.written_bytes,
+                            retained.output_seq,
+                        ),
+                        (id, stage, written, output_seq)
+                    );
+                    let blocked = h.pending_snapshot();
+                    assert_eq!(
+                        (&blocked.0, &blocked.1, &blocked.2, blocked.3),
+                        (&pending.0, &pending.1, &pending.2, pending.3)
+                    );
+                    assert!(matches!(blocked.4, InputPhase::Blocked));
+                    assert_eq!(blocked.5, Some(id));
+                    assert_eq!(h.coordinator.operations.len(), cache_count + 1);
+                    let durable = storage::get_input(&h.fixture.conn, id).unwrap();
+                    assert_eq!(durable.state, storage::InputState::InProgress);
+                    let changes = h.fixture.conn.total_changes();
+                    assert!(h.try_advance().unwrap().is_none());
+                    assert!(h.pending_snapshot() == blocked);
+                    assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), durable);
+                    assert_eq!(h.fixture.conn.total_changes(), changes);
+                    assert!(h.pty.offers.is_empty());
+                    assert!(h.pty.stages.is_empty());
+                    assert!(h.pty.program.is_empty());
+                    assert!(h.pty.manual.is_empty());
+                });
+            }
+        }
+
+        #[test]
         fn prompt_reservation_and_each_hook_require_a_fresh_drain_before_one_real_write() {
             with_host(|h| {
                 let id = h.arm("prompt:fixture-complete");
@@ -12156,6 +12296,66 @@ mod tests {
             assert!(
                 matches!(reply, InputControlReply::Receipt(ReceiptReply::Retired { input_id }) if input_id == expected)
             );
+        }
+
+        #[test]
+        fn live_receipt_query_rejects_changed_creation_stamp_before_effects() {
+            with_host(|h| {
+                let key = "prompt:receipt-cache-created-at";
+                let id = h.arm(key);
+                let cache = cached(h, id);
+                let pending = h.pending_snapshot();
+                let mut durable = storage::get_input(&h.fixture.conn, id).unwrap();
+                assert_ne!(durable.created_at, "2000-01-02T03:04:05.000000+00:00");
+                durable.created_at = "2000-01-02T03:04:05.000000+00:00".into();
+                assert_eq!(
+                    h.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_input_operations SET created_at=?1 WHERE input_id=?2",
+                            rusqlite::params![durable.created_at, id],
+                        )
+                        .unwrap(),
+                    1
+                );
+                assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), durable);
+                let changes = h.fixture.conn.total_changes();
+                let hooks = h.hooks.points.lock().unwrap().len();
+                let failure = match h.receipt(ReceiptAction::Query {
+                    operation_key: key.into(),
+                }) {
+                    Err(failure) => failure,
+                    Ok(_) => panic!("the receipt cache binds the original creation stamp"),
+                };
+                let CafleetError::WithDiagnostics { cause, diagnostics } = &failure.source else {
+                    panic!("the selected receipt identity remains diagnostic context: {failure:?}");
+                };
+                assert!(
+                    matches!(cause.as_ref(), CafleetError::App(message) if message == "receipt cache identity changed")
+                );
+                assert_eq!(diagnostics.len(), 1);
+                assert_eq!(
+                    diagnostics[0],
+                    format!(
+                        "run_id={} input_id={} operation_key={}",
+                        h.fixture.run.run_id,
+                        id,
+                        serde_json::to_string(key).unwrap()
+                    )
+                );
+                assert_eq!(failure.run_id, Some(h.fixture.run.run_id));
+                assert_eq!(failure.input_id, None);
+                assert_eq!(failure.operation_key.as_deref(), Some(key));
+                assert!(h.pending_snapshot() == pending);
+                assert_eq!(cached(h, id), cache);
+                assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), durable);
+                assert_eq!(h.fixture.conn.total_changes(), changes);
+                assert_eq!(h.hooks.points.lock().unwrap().len(), hooks);
+                assert!(h.pty.offers.is_empty());
+                assert!(h.pty.stages.is_empty());
+                assert!(h.pty.program.is_empty());
+                assert!(h.pty.manual.is_empty());
+            });
         }
 
         #[test]
