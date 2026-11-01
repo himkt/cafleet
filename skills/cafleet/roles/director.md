@@ -276,7 +276,7 @@ Caps and fail-closed cases: the initial member plus at most two replacements per
 
 ## Member Delete
 
-For a wrapped run, coordinate identity-pinned runner shutdown and bounded event recovery before pane/registry cleanup, retaining unconfirmed descendants and recoverable artifacts. For a concrete placement, acquire its shared pane-input lock and revalidate the placement before killing the pane and deregistering the member; preserve the backend’s layout cleanup. Retry lock contention every 50 milliseconds against one operation-wide five-second monotonic deadline. On expiry, exit 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leave the pane/registry unchanged. A pending or placementless unwrapped member follows plain registry deregistration without a pane lock or multiplexer operation; an already-gone concrete pane retains its documented tolerated teardown.
+For a recorded run, coordinate identity-pinned runner shutdown and bounded event recovery before pane/registry cleanup, retaining unconfirmed descendants and recoverable artifacts. Run-less teardown skips runner shutdown and closes the recorded pane before deregistration. For a concrete placement, acquire its shared pane-input lock and revalidate the placement before killing the pane and deregistering the member; preserve the backend’s layout cleanup. Retry lock contention every 50 milliseconds against one operation-wide five-second monotonic deadline. On expiry, exit 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leave the pane/registry unchanged. A pending or placementless member deregisters without pane I/O; an already-gone concrete pane retains its documented tolerated teardown.
 
 ```bash
 cafleet member delete <member-id>
@@ -317,7 +317,7 @@ Ask the user through {decision_surface} under the [User Delegation Protocol](#us
 | [member prompt](#member-prompt) | Submit explicitly authorized composer input or post-command continuation |
 | [member press](#member-press) | Request explicitly authorized ordered manual keys |
 
-Every writer shares the bounded pane-input lock. Wrapped prompt/exec input validates the pinned runner and durable receipt. The runner submits by its measured profile plan without Escape into a verified empty composer. It queues the input while a candidate/open interaction is detected, or while a planned composer is not verified empty, until that clears or fallback after 3 minutes. Without a plan it uses Escape-first delivery fallback, and it reports the method. Explicitly unwrapped prompt/exec input retains Escape-first multiplexer submission. Manual `member press` requests only its explicit keys through the outer pane, including wrapped members, with no implicit Escape or Enter. Its success establishes backend acknowledgment, while actual native effects and continuation require separate observation.
+All writers share the bounded pane-input lock. Prompt/exec requires the pinned runner and durable receipt; [wrapped delivery methods](../reference/cli.md#wrapped-delivery-methods) owns profile submission, zero-byte queueing and fallback. [Member Press](#member-press) owns manual keys, their authorization and outcome evidence.
 
 Read the request, record the outstanding action in host-owned state, authorize its exact command, then dispatch and ACK consumption:
 
@@ -329,9 +329,9 @@ cafleet member exec <member-id> "<command>"
 cafleet message ack <message-id>
 ```
 
-After placement revalidation, the CLI routes wrapped input to the healthy runner, which submits through its native-exec plan or delivery fallback, or queues it behind a detected interaction; an explicitly unwrapped member receives the legacy Escape lead under the pane lock. It types `! ` plus the actual command once. It returns submission or queue metadata with its delivery status and method; a queued command runs only after the interaction closes, and its result arrives as an `input_delivery_result` event. The host owns environment, permissions, execution and visible output.
+After placement revalidation, the runner submits literal `! ` plus the actual command through profile/fallback or queues it. Inspect returned delivery metadata; deferred completion arrives as `input_delivery_result`. The host owns environment, permissions, execution and output.
 
-Escape-first input, from an explicitly unwrapped member's dispatch or a wrapped member's delivery fallback, cancels an open tool approval or question the runner did not detect. Capture the member's pane before `member exec` or `member prompt`; when the capture shows an open prompt, resolve it through the user relay first, or reach the member with `message send`, whose Escape-led preview carries the dismissal clause.
+Delivery fallback can dismiss an open tool approval or question the runner did not detect. Capture the member's pane before `member exec` or `member prompt`; when the capture shows an open prompt, resolve it through the user relay first, or reach the member with `message send`, whose Escape-led preview carries the dismissal clause.
 
 Inspect the result and terminal state:
 
@@ -345,17 +345,17 @@ After completion evidence, continue a member that has not resumed:
 cafleet member prompt <member-id> "Use the native command output and continue your assignment."
 ```
 
-An uncertain dispatch requires capture/inspection and durable receipt reconciliation before a newly authorized action. Preserve known input IDs and use the [runtime procedure](#runtime-events). The first writing call can partially type; a failure after Enter can mean the command ran. Preserve the pane and evidence instead of automatically resubmitting.
+Retain input IDs and pane/native evidence. A first write can partially type; failure after Enter can mean execution began. Before another authorized attempt, inspect captures and durable receipts under [Runtime events](#runtime-events).
 
-Refuse with a plain broker reply explaining why, then ACK. Relay a new user decision through the executing backend's decision surface. Track an authorized command/result/continuation in host-owned state while it remains outstanding, and check it on every [wake](#director-wake). Native shell probes establish visibility; [backend notes](../reference/coding-agents.md) state the permission evidence limits.
+Refuse by broker reply, then ACK. Route new user decisions through {decision_surface}. Track outstanding commands/results/continuations and inspect them on every [wake](#director-wake). Native visibility supplies no extra authorization; [backend notes](../reference/coding-agents.md) owns evidence limits.
 
 ### Member Exec
 
-Authorize the required one-line command and call `cafleet member exec <member-id> COMMAND` or `--file PATH`. The CLI submits visible native shell input, or the runner queues it behind a detected interaction, and returns dispatch metadata with its delivery status and method. Inspect `member capture` for output and completion. After completion evidence, send an explicit continuation prompt if the host has not resumed the member. On failed/uncertain dispatch, inspect before authorizing a retry. Follow [routing](#director-side-dispatch).
+Authorize `cafleet member exec <member-id> COMMAND` or `--file PATH` and follow [Director-side dispatch](#director-side-dispatch) for result inspection, uncertainty and continuation.
 
 ### Member Prompt
 
-Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Wrapped input reaches a verified empty composer through the profile plan without Escape. The runner queues it with zero bytes while a native interaction is detected, or while a planned composer is not verified empty, and delivers it when that clears or by fallback after 3 minutes. Without a plan it uses Escape-first delivery fallback. Explicitly unwrapped input retains Escape-first behavior, and both paths reject the Director’s own pane. Success means submission or queue acceptance only; its `delivery` reports which. Before prompting an explicitly unwrapped member, run the open-prompt check in [Director-side dispatch](#director-side-dispatch).
+Use `cafleet member prompt <member-id> TEXT` for authorized composer input under [delivery arbitration](../reference/cli.md#wrapped-delivery-methods). It rejects the Director's pane; `delivery` reports submission/queue acceptance. Follow [dispatch checks](#director-side-dispatch).
 
 ### Member Press
 
@@ -401,15 +401,11 @@ The event is an alert, not a one-to-one count of refusals: a repeated refusal of
 
 ### Reconcile generated input
 
-Wrapped preview, prompt and native-exec input uses the pinned runner, which selects the delivery method under the [wrapped delivery rules](../reference/cli.md#wrapped-delivery-methods).
+Preview/prompt/native-exec uses the pinned runner under [delivery rules](../reference/cli.md#wrapped-delivery-methods).
 
-Fallback can interrupt the member's work, mix with a draft, or dismiss a native prompt the runner did not detect; its previews carry the Escape-dismissal clause. Native exec uses its own plan, prefixed `! `. Explicitly unwrapped members receive Escape-first input.
+Permission responses require the selected profile's independently tested answer plan and never use fallback. The runner validates the visible request/token and input/output, then atomically reserves audit/episode-claim/receipt before answer keys. Human input (terminal replies excluded) or request/ownership/visibility change invalidates the token. CLI decisions are semantic, separate from arbitrary keys.
 
-Permission response is a separate input kind with an independently tested answer profile from the run's selected profile, and it never uses delivery fallback. The runner validates the current visible permission request and random token, resolves available manual input/output and atomically reserves its audit/episode claim/receipt before sending native answer keys. Human input (terminal replies excluded) or a request/ownership/visibility change invalidates the token. The permission-response CLI accepts semantic decisions rather than arbitrary keys.
-
-Preserve known `input_id` from stdout, queue results or uncertainty errors and inspect `cafleet input show INPUT_ID --json`; a queued request keeps its input ID across later method changes, so a client timeout after queue acceptance needs inspection rather than a new operation key. For an uncertain input, its recorded `uncertain_cause` (for example `manual_input`, `short_write` or `write_failed`) is attribution evidence: read it, together with the pane and native output, before choosing a reconciliation disposition; a null cause means the runner recorded none. Durable operation keys and episode claims prevent a possibly submitted answer from being repeated through another invocation/key. Only the Director records an evidence-based `input reconcile` disposition after synchronizing with the live writer or establishing exclusive recovery. Settlement sends zero bytes; a claim is released only with synchronized zero-byte/no-writer proof, independently of its disposition label. Unreachable-owner reconciliation retains the original pane/run locks and positive termination evidence while preserving lifecycle history under the [receipt ownership contract](../reference/cli.md#input-show-and-input-reconcile); missing proof keeps uncertainty.
-
-A returned member-tool denial arrives as a [routed request](member.md#reconsider-then-route); a screen event supplements that route. A separately authorized native command is a new action rather than proof that the pending request was answered.
+Retain every known `input_id` from stdout, queue results or uncertainty errors and inspect `cafleet input show INPUT_ID --json`. Queued input keeps its ID across method changes; after a client timeout, inspect it instead of choosing another operation key. Read recorded `uncertain_cause` (`manual_input`, `short_write`, `write_failed`, or null when none was recorded) with pane/native evidence before reconciliation. Durable keys and episode claims prevent repeating possibly submitted answers. Only the Director records evidence-based `input reconcile` after synchronizing with the live writer or establishing exclusive recovery. Settlement sends zero bytes; claim release requires synchronized zero-byte/no-writer proof independently of disposition. Unreachable-owner reconciliation retains original pane/run locks, positive termination evidence and lifecycle history under the [receipt ownership contract](../reference/cli.md#input-show-and-input-reconcile); missing proof preserves uncertainty.
 
 ## Supervision
 

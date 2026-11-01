@@ -82,7 +82,7 @@ cafleet message send --from-member-id <my-member-id> --to-member-id <target-memb
 
 Supply one positional body or `--file PATH`; use file input for long/multiline text. Previews truncate by `CAFLEET_MAX_TEXT_LEN`; `--json` returns complete payloads.
 
-Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a `message show ID --json` pointer; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/queue/fallback behavior, and explicitly unwrapped previews retain their legacy Escape path and dismissal clause. The root Director uses native reception or manual broker reads without automatic pane input, and its sends report `notification_sent: false` without a pane diagnostic or multiplexer requirement.
+Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a `message show ID --json` pointer; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/queue/fallback behavior. The root Director uses native reception or manual broker reads without automatic pane input, and its sends report `notification_sent: false` without a pane diagnostic or multiplexer requirement.
 
 Retain the committed message ID and successful record across a held preview or post-commit delivery error. Send each body once; a later send retries pending ordinary-member notifications. Recipients record deferred actions and ACK consumption. Fan out with one send per recipient and report failed recipients explicitly. [Send outcomes](reference/cli.md#message-send) owns exact diagnostics.
 

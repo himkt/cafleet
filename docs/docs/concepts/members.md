@@ -10,7 +10,7 @@ Members confirm readiness, then poll their inbox. The Director can assign a memb
 
 ## Assignment and receiving
 
-Messages are point-to-point. Send individually to every selected recipient. Runner-managed members receive previews through their runner: profile delivery into a verified empty composer; a queue while a native interaction is open or a composer with a measured plan holds a draft or a state the runner cannot classify, delivered when that clears or by fallback after 3 minutes; and Escape-first delivery fallback when no plan exists ([delivery methods](#deliver-generated-input)). Explicitly unwrapped members receive Escape-first previews. The root Director receives replies through its native inbox tools; [run a fleet](../mixed-backend-team.md#manual-lifecycle) explains reception and consumption.
+Messages are point-to-point. Send individually to every selected recipient. Runner-managed members receive previews through their runner: profile delivery into a verified empty composer; a queue while a native interaction is open or a composer with a measured plan holds a draft or a state the runner cannot classify, delivered when that clears or by fallback after 3 minutes; and Escape-first delivery fallback when no plan exists ([delivery methods](#deliver-generated-input)). The root Director receives replies through its native inbox tools; [run a fleet](../mixed-backend-team.md#manual-lifecycle) explains reception and consumption.
 
 ## Command routing
 
@@ -79,6 +79,6 @@ Delivery fallback can interrupt work, mix text with a draft, or dismiss a native
 
 ### Inspect and recover
 
-`member show` reads recorded runtime state without a socket probe. `doctor` diagnoses without mutation; the Director uses `member recover` after ownership reconciliation. Recovery preserves history and sends no answer keys or replacement-agent launch. Members with `runtime: null` retain their unwrapped transport.
+`member show` reads recorded runtime state without a socket probe. `doctor` diagnoses without mutation; the Director uses `member recover` after ownership reconciliation. Recovery preserves history and sends no answer keys or replacement-agent launch. Only the root Director has `runtime: null`.
 
 The [member runtime contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#69-member-pty-runtime) defines identity fencing, bounded shutdown, evidence privacy and acceptance. Each claimed detector, composer and answer capability requires its declared fixtures and native evidence captured within its profile's version interval.

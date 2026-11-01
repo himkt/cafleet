@@ -23,7 +23,7 @@ A Director arms native reception before relying on replies and retains one recei
 | Broker | Typed fleet/member/message/asset records and synchronous transactions |
 | Output | Ordered wire presenters, truncation and capture formatting |
 | Multiplexer | Discovery, pane creation/capture/input/kill and layout compensation |
-| Pane input | Stable OS locks, runner-state gating and durable receipt settlement; explicitly unwrapped input retains Escape-first literal submission |
+| Pane input | Stable OS locks, runner-state gating and durable receipt settlement |
 | Member runtime | Owned PTY transport, typed observations, durable event/inbox transactions and identity-pinned recovery |
 | Notification / receiving | Ordinary-member draining delivery, caller-owned finite retries and read-only persistent inbox streams |
 | Coding-agent backends | Registry, availability, model/effort validation and spawn argv |
@@ -359,7 +359,7 @@ List non-deleted fleets by descending creation timestamp/fleet ID. Rows retain t
 `cafleet fleet delete FLEET_ID [--json]` ends every active ordinary member that owns a concrete pane, then deregisters the fleet. It retains messages and is idempotent; an unknown ID fails with `fleet 'X' not found.`, exit 1. One operation-wide five-second deadline bounds the whole command.
 
 1. **Lock.** Lock every active concrete placement in sorted key order and revalidate the placement set, retrying contention every 50 milliseconds and restarting on a set change. Contention until the deadline leaves every pane and registry row unchanged and exits 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.`
-2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure: runner shutdown and recovery for a wrapped member, pane close, that member's deregistration, then optional layout restoration. A member without a runtime has its pane closed as well. The root Director's pane stays open.
+2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure: runner shutdown and recovery for a wrapped member, pane close, that member's deregistration, then optional layout restoration. A run-less ordinary row skips runner shutdown, closes its recorded pane under the held deletion lock and deregisters without requiring a runtime. The root Director's pane stays open.
 3. **Deregister the fleet.** One transaction stamps deletion, deregisters the remaining active members (the root Director and members with a pending or absent placement) and removes their placements.
 
 The first member that cannot be ended stops the command, and the fleet is not deleted. Members ended before it stay deregistered with closed panes; the failing member and every later member keep their registry rows and panes, so `member list` still shows them. The command exits 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is the member deletion cause and `IDS` is a comma-separated id list or `none`. A placement-set change after cleanup began exits 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` Rerunning `fleet delete` resumes with the members that remain.
@@ -479,15 +479,13 @@ message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; the next send to
 
 | Failure | `CAUSE` |
 |---|---|
+| Recipient ordinary member has no recorded run | `member MEMBER_ID has no recorded run` |
 | The pane input lock stays busy through the lock wait (§6.5 Pane input lock) | `pane input remained busy` |
-| Lock acquisition error | `pane input: <lock error>` |
-| Multiplexer resolution or availability error | The multiplexer error text |
-| Budget cannot cover literal input, settle and Enter before the first line | `insufficient pane input budget for literal input, settle and Enter` |
-| Transport error before or during typing | The transport error text |
+| Runner lock, transport or submission failure | The runner error text with known run/input context |
 | Database busy or deadline exceeded during the under-lock snapshot or notification stamp | The storage error text; names the current candidate, or the candidate from placement revalidation when selection has not completed |
 | `message wait` attempt fails with database busy or deadline exceeded before selecting a candidate | The storage error text; names the selected rotation entry |
 
-A lock wait that ends after another sender delivered every pending message reports nothing. Other failures, including corrupt, incompatible or unreadable storage and a termination-span start failure, retain their causes after the persisted prefix. Storage failure before commit exits 1 with its cause. Consume an existing committed ID once; notification failure supplies no reason to create another delivery.
+Other failures, including corrupt, incompatible or unreadable storage and a termination-span start failure, retain their causes after the persisted prefix. A recipient ordinary member without a run leaves the committed message pending and uses `method: null` in the failed-attempt `delivery` projection. Stderr prints `Message NEW_ID was persisted. message NEW_ID was not notified to member MEMBER_ID: member MEMBER_ID has no recorded run; the next send to member MEMBER_ID or the next message wait retries it.`; the normal successful stdout record and exit 0 remain. Storage failure before commit exits 1 with its cause. Consume an existing committed ID once; notification failure supplies no reason to create another delivery.
 
 ##### `message poll`
 
@@ -501,7 +499,7 @@ Timeout is an integer in `1..=1800`, default `300`. Validate an active subject a
 
 Between inbox checks, retry pending deliveries for at most one ordinary member per interval with an in-memory round-robin cursor. Select concrete ordinary-member placements in the fleet, excluding its root Director, the wait's own subject, self-notifications, ACKed and already-notified rows. Each attempt drains that member's pending messages under the delivery procedure (§6.5 Push notifications) without consulting pane state. One invocation attempts each pending message at most once; a failed message is retried by a later send or wait invocation, while later messages for the same member remain eligible. Recheck the inbox before starting another attempt. Shared input locks and under-lock revalidation keep multiple waiters safe.
 
-Start each receive check or notification attempt before the monotonic receive deadline. An attempt already in flight retains its original five-second budget for the lock wait, revalidation, Escape, typing, settle and Enter. A busy pane lock makes the attempt wait up to 1.5 seconds; a lock still busy then records the not-notified diagnostic (§6.3 Delivery outcome) in `notification_errors`. Cap subprocess/database busy waits to its remaining budget and start input only with time reserved for settle and Enter. Mandatory database finalization uses the later of the original deadline and one second after finalization begins, keeping pane transport within its original budget. A receive returns by its deadline plus at most one six-second in-flight attempt/finalization allowance. A snapshot blocked until receive expiry returns `timeout` with retained notification diagnostics; earlier transient contention can retry before expiry. Corruption and other fatal storage errors retain their causes.
+Start each receive check or notification attempt before the monotonic receive deadline. An attempt already in flight retains its original five-second budget for runtime locking, revalidation, submission and receipt settlement. A lock still busy at that attempt's bound records the not-notified diagnostic (§6.3 Delivery outcome) in `notification_errors`. Cap subprocess/database waits and staged input to the remaining original budget. Mandatory database finalization uses the later of the original deadline and one second after finalization begins, keeping pane transport within its original budget. A receive returns by its deadline plus at most one six-second in-flight attempt/finalization allowance. A snapshot blocked until receive expiry returns `timeout` with retained notification diagnostics; earlier transient contention can retry before expiry. Corruption and other fatal storage errors retain their causes.
 
 The ordered JSON result is:
 
@@ -678,7 +676,7 @@ runtime presentation contract (§6.3 Runtime presentation).
 
 ##### `member delete`
 
-For wrapped members, request owned runner shutdown under the recorded identity before pane/registry cleanup, retaining explicit unconfirmed-child diagnostics and recoverable runtime records. Attempt remaining event replay before deregistration only within the remaining operation deadline. Lock the concrete placement before kill/deregistration. A member without a concrete pane needs no lock. Retry contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
+For a member with a recorded run, request owned runner shutdown under that identity before pane/registry cleanup, retaining explicit unconfirmed-child diagnostics and recoverable runtime records. A run-less ordinary row skips runner shutdown, closes its recorded pane under the deletion lock and deregisters; teardown does not require a runtime. Attempt remaining event replay before deregistration only within the remaining operation deadline. Lock the concrete placement before kill/deregistration. A member without a concrete pane needs no lock. Retry contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
 
 Revalidate pending or absent placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, mandatory registry finalization uses the later of the original deadline and one second after finalization begins, allowing short reader/writer contention to clear; actual database failures report that the pane was closed and preserve the database cause. Optional layout work follows mandatory finalization within the original deadline. A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
 
@@ -690,7 +688,7 @@ any active registry entry — placed or placementless (root Director included).
 Registry read — no multiplexer requirement. Text is the compact one-line row;
 the detailed view — including `kind` (`director` / `member`, §5.4 Member kind discriminator) and the
 placement sub-dict and appended runtime summary — is the `--json` payload (see
-§6.3 Runtime presentation). A wrapped result appends the runtime text line; an unwrapped result retains its existing row.
+§6.3 Runtime presentation). An ordinary member's result appends the runtime text line; the root Director retains its registry row.
 
 
 ##### `member list`
@@ -713,11 +711,11 @@ Per-member detail such as `description` and `registered_at` lives on
 
 `cafleet member prompt MEMBER_ID TEXT [--json]` validates a nonblank line without CR/LF or C0/DEL controls, otherwise exits 2 with `text must be one non-empty line without control characters.`
 
-A root Director target exits 1 with `cannot prompt the Director's own pane` before any pane I/O, because Escape would interrupt the Director's own running turn. For a wrapped member, validate activity/placement and submit the request to its runner, which owns the pane input lock for the actual stages (§6.5 Pane input lock) and selects profile delivery, delivery fallback or queueing under the delivery arbitration contract (§6.9 Delivery method and interaction priority). Explicitly unwrapped members acquire the shared input lock within its bounded wait, revalidate activity/placement and receive Escape, settle, literal text, settle and Enter; that Escape-first path can interrupt work or dismiss a prompt. Exit 0 means submission or queue acceptance only, with ordered `{member_id, pane_id, text, input_id, delivery}`; unwrapped input has a null ID and method `unwrapped`.
+A root Director target exits 1 with `cannot prompt the Director's own pane` before pane I/O. An ordinary member without a recorded run exits 1 with `Error: member <ID> has no recorded run` before pane I/O. Validate activity/placement and submit to the member's runner, which owns the pane input lock for actual stages (§6.5 Pane input lock) and selects profile delivery, delivery fallback or queueing (§6.9 Delivery method and interaction priority). Exit 0 means submission or queue acceptance only, with ordered `{member_id, pane_id, text, input_id, delivery}`.
 
 A submitted prompt prints `Sent prompt TEXT_REPR to member NAME (PANE).`; a queued prompt prints `Queued prompt for member ID (PANE).` Both add the delivery and input lines (§6.3 Runtime presentation).
 
-A lock still busy when the wait ends uses `member ID's pane input remained busy; prompt was not dispatched.` Pre-write error, including an Escape failure or a held runner reply: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
+Pre-write error, including a held runner reply: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
 
 ##### `member exec`
 
@@ -725,7 +723,7 @@ A lock still busy when the wait ends uses `member ID's pane input remained busy;
 
 Require a nonblank line without CR/LF, NUL or other C0/DEL controls, including tabs. Invalid input exits 2 before pane I/O with `command must be one non-empty line without control characters.` A multiline task supplies a one-line explicit script invocation.
 
-Resolve an active ordinary member and concrete placement and reject the root Director. Wrapped input goes to the runner, which owns the pane input lock for the actual stages (§6.5 Pane input lock) and submits literal `! ` plus the command through the native-exec submission plan, delivery fallback or its queue (§6.9 Delivery method and interaction priority). Explicitly unwrapped input locks within its bounded wait, reloads and retains Escape, settle, literal native shell input, settle and Enter. The backend owns working directory, environment, permissions, output and exit rendering.
+Resolve an active ordinary member and concrete placement and reject the root Director. An ordinary member without a recorded run exits 1 with `Error: member <ID> has no recorded run` before pane I/O. Input goes to the runner, which owns the pane input lock for actual stages (§6.5 Pane input lock) and submits literal `! ` plus the command through its native-exec plan, delivery fallback or queue (§6.9 Delivery method and interaction priority). The backend owns working directory, environment, permissions, output and exit rendering.
 
 Successful exit 0 establishes complete submission/dispatch or queue acceptance only. Ordered JSON is:
 
@@ -739,8 +737,7 @@ Successful exit 0 establishes complete submission/dispatch or queue acceptance o
 |---|---|
 | Root Director | `cannot exec in the Director's own pane` |
 | Pending placement | `member ID has no pane yet (pending placement) — nothing to exec.` |
-| Input lock still busy when the wait ends | `member ID's pane input remained busy; native command was not dispatched.` |
-| Escape or transport failure before typing | `native command was not dispatched to member ID: CAUSE` |
+| Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
 | Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
 
 The first text-writing call can partially type even if it fails. Failure after Enter may mean execution began. Inspect native pane output before any newly authorized retry. A wrapped operation durably records its operation key, payload digest and submission state; the receipt contains no command text. The result describes dispatch, independently of native execution. The Director authorizes native input under its host rules; visibility establishes no second member-tool permission check.
@@ -812,7 +809,7 @@ capture prints content without adding a newline.
 
 #### Runtime presentation
 
-Member create preserves ordered `member_id,name,registered_at,placement` and appends `runtime`; member show preserves ordered `member_id,name,description,status,registered_at,kind,placement` and appends `runtime`. An explicitly unwrapped member has `runtime: null`. The runtime object has ordered keys `run_id,resolved_mode,status,reachability,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity,effective_policy`, preserving stored nullability. `effective_policy` is the stored effective policy record (§6.9 Effective policy record) or null. `unresolved_input_ids` lists the run's inputs in `in_progress`, `accepted` or `uncertain`, plus `ready` inputs carrying deferred metadata, in input-ID order; an accepted input needs no reconciliation and stays listed until a settlement records its disposition, a deferred ready input stays listed while the runner owns it in its queue, and `in_progress` and `uncertain` inputs need Director reconciliation. These are registry reads and make no live-health claim.
+Member create preserves ordered `member_id,name,registered_at,placement` and appends `runtime`; member show preserves ordered `member_id,name,description,status,registered_at,kind,placement` and appends `runtime`. Every ordinary member has a recorded run; `runtime: null` is valid only for the root Director. The runtime object has ordered keys `run_id,resolved_mode,status,reachability,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity,effective_policy`, preserving stored nullability. `effective_policy` is the stored effective policy record (§6.9 Effective policy record) or null. `unresolved_input_ids` lists the run's inputs in `in_progress`, `accepted` or `uncertain`, plus `ready` inputs carrying deferred metadata, in input-ID order; an accepted input needs no reconciliation and stays listed until a settlement records its disposition, a deferred ready input stays listed while the runner owns it in its queue, and `in_progress` and `uncertain` inputs need Director reconciliation. These are registry reads and make no live-health claim.
 
 Wrapped create/show preserves its existing text row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE review=STATE`, where `STATE` is the effective policy's `automatic_review` value, `-` when absent. `event show` uses the same runtime object and line. Prompt/exec/send JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The existing submitted-success lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable` or `idle_timeout`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy` or `earlier_input` and states that the runner will retry. A queued result also points to `cafleet input show INPUT_ID --json` for the eventual result. An uncertain error retains its existing exit category, names the receipt's recorded `uncertain_cause` and the selected method, as in `exec delivery to member 110 is uncertain: manual_input (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
 
@@ -952,6 +949,7 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | `member capture` / `member prompt` / `member exec` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&gt;.</code> | 1 | — |
 | `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` | 1 | — |
 | `member prompt` / `exec` / `capture` | A target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` | 1 | — |
+| `member prompt` / `member exec` | Ordinary member without a recorded run | `Error: member <ID> has no recorded run` | 1 | Before pane I/O |
 | `message send` / `member create` | Neither the positional body nor `--file`, or both | The parser's native argument-group error | 2 | — |
 | `message send` / `member create` | Positional body empty or whitespace-only | `Error: text may not be empty.` | 2 | — |
 | `message send` / `member create` | `--file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --file <path>: file is empty.` | 1 | — |
@@ -1015,7 +1013,7 @@ Text bodies use `CAFLEET_MAX_TEXT_LEN` codepoints plus `…`; JSON preserves the
 
 #### Pane preview forms
 
-The wrapped and explicitly unwrapped pane preview lines, their body folding, inline limit and long-body `message show` pointer are specified in §6.5 Multiplexer *Push notifications*.
+Pane preview lines, their body folding, inline limit and long-body `message show` pointer are specified in §6.5 Multiplexer *Push notifications*.
 
 #### Runtime observation messages
 
@@ -1056,7 +1054,6 @@ CAFleet hosts coding-agent sessions in tmux or herdr panes. Pane IDs are opaque 
 | Access | CLI subprocess | CLI subprocess |
 | Spawn working directory | Splitting pane inheritance | Explicit `--cwd` |
 | Capture for `member capture` | `capture-pane -p -e` | `pane read --format ansi` |
-| Unwrapped input | Optional Escape lead, literal text, settle, Enter | Optional Escape lead, literal text, settle, Enter |
 | Wrapped input | Pinned PTY runner control socket | Pinned PTY runner control socket |
 | Delete layout | Native auto-fit | Best-effort rebalance scoped to the closed pane’s tab |
 
@@ -1180,7 +1177,7 @@ retains its successful close and deregistration result.
 
 #### Pane input lock
 
-Every operation that writes pane input uses one process-shared OS file lock. Acquire the guard before placement revalidation. For wrapped prompt/exec/preview submissions the runner owns the lock: wrapped clients validate and submit without holding it while awaiting the runner, and the runner acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement and retains it across an active staged write through durable receipt/stamp settlement (§6.9 Runner-owned deferred delivery). A merely queued request holds no lock. Explicitly unwrapped submissions hold it through the Escape lead, literal text, settle, Enter and the notification stamp of the last drained message. Explicit key requests hold it through their outer-pane dispatch and bounded cleanup. Close the non-cloned owned handle on every path.
+Every operation that writes pane input uses one process-shared OS file lock. Acquire the guard before placement revalidation. For wrapped prompt/exec/preview submissions the runner owns the lock: wrapped clients validate and submit without holding it while awaiting the runner, and the runner acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement and retains it across an active staged write through durable receipt/stamp settlement (§6.9 Runner-owned deferred delivery). A merely queued request holds no lock. Explicit key requests hold it through their outer-pane dispatch and bounded cleanup. Close the non-cloned owned handle on every path.
 
 | Property | Contract |
 |---|---|
@@ -1189,18 +1186,16 @@ Every operation that writes pane input uses one process-shared OS file lock. Acq
 | File | `<key>.lock`, read/write create without truncation, owner-only creation permissions |
 | Acquisition | Exclusive nonblocking OS file lock, retried every 50 milliseconds while another writer holds it; preserve unexpected errors with path/member context |
 | Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane |
-| Contention | Unwrapped prompt/exec/preview submission reserves 3.5 seconds, leaving at most 1.5 seconds to wait. The runner retries a busy lock every 100 milliseconds within its five-second attempt deadline. Explicit keys use their dispatch reservation (§6.5 Explicit key dispatch); a lock still busy at its wait bound fails that writer |
+| Contention | The runner retries a busy lock every 100 milliseconds within its five-second attempt deadline. Explicit keys use their dispatch reservation (§6.5 Explicit key dispatch); a lock still busy at its wait bound fails that writer |
 
-The unwrapped 3.5-second input reservation covers a 0.5-second revalidation margin, the 0.5-second Escape settle, a 0.5-second minimum literal budget, the one-second submit settle and one second for Enter. A writer that acquires the lock within its wait therefore still submits; a lock released just before the wait ends still leads to a successful submission. No database statement runs while a writer waits for the lock.
+No database statement runs while a writer waits for the lock.
 
 | Writer | Lock still busy when the wait ends |
 |---|---|
 | `message send` / `message wait` delivery | `message MESSAGE_ID was not notified to member MEMBER_ID: pane input remained busy; the next send to member MEMBER_ID or the next message wait retries it.` |
-| `member prompt` | Exit 1: `member ID's pane input remained busy; prompt was not dispatched.` |
-| `member exec` | Exit 1: `member ID's pane input remained busy; native command was not dispatched.` |
+| `member prompt` | Exit 1 with the runner input failure and recorded runtime context (§6.3 Runtime presentation) |
+| `member exec` | Exit 1 with the runner input failure and recorded runtime context (§6.3 Runtime presentation) |
 | `member press` | Exit 1 with the primary and zero-dispatch diagnostics (§6.3 `member press`) |
-
-When a delivery's lock wait ends, one short read selects the oldest pending message this invocation has not attempted for the recipient. When none remains, the attempt reports nothing. Otherwise the lock-busy diagnostic names that message.
 
 Duplicate placements for one pane share the same lock key. Process exit releases ownership. Read-only capture needs no input lock.
 
@@ -1215,7 +1210,7 @@ Interrupting a host turn can also end the turn's in-flight shell tool, including
 | Command | Span |
 |---|---|
 | `message send`, each `message wait` attempt | From lock acquisition through the last `notified_at` stamp |
-| `member prompt`, `member exec` | Unwrapped: from lock acquisition through Enter; wrapped: from the runner request through its reply |
+| `member prompt`, `member exec` | From the runner request through its reply |
 | `member press` | Begin before acquiring the lock; retain it through the writing process and bounded cleanup, releasing the lock before restoring signals |
 | `member create` | From the pane spawn through the registry commit or its compensation |
 | `member delete`, `fleet delete` | From lock acquisition through deregistration and layout cleanup |
@@ -1263,36 +1258,15 @@ Both writing adapters acknowledge only successful process completion with empty/
 
 #### Prompt dispatch
 
-The sequences below specify the explicitly unwrapped multiplexer path. Runner-managed members use a pinned, healthy control socket and their runner's owned child PTY under the runtime input contract (§6.9 Input arbitration and the original native answer). The runner submits through the selected profile's measured plan without Escape into a verified empty composer. It queues ordinary input with zero bytes while a detected interaction is a candidate or open, or while a composer with an executable plan is not verified empty; the latter falls back with `idle_timeout` after 3 minutes. Without an executable plan it uses Escape-first delivery fallback (§6.9 Delivery method and interaction priority). Uncertain reachability preserves manual terminal use while holding generated input.
+Every ordinary member uses a pinned, healthy control socket and its runner's owned child PTY (§6.9 Input arbitration and the original native answer). The runner submits through the selected profile's measured plan without Escape into a verified empty composer. It queues ordinary input with zero bytes while a detected interaction is a candidate or open, or while a composer with an executable plan is not verified empty; the latter falls back with `idle_timeout` after 3 minutes. Without an executable plan it uses Escape-first delivery fallback (§6.9 Delivery method and interaction priority). Uncertain reachability preserves manual terminal use while holding generated input.
 
-Validate a nonblank literal line without CR/LF or C0/DEL control characters before starting any process. No input path captures the pane or consults its state. Every submission selects a lead:
-
-| Lead | Input sequence | Used by |
-|---|---|---|
-| Escape | Escape, 0.5-second settle, literal line, settle, Enter | `member prompt`, `member exec` and the first notification of a drain |
-| Direct | Literal line, settle, Enter | Each further notification drained in the same lock hold |
-
-Escape is meant to interrupt a working turn or close an open prompt so the line reaches the composer. A further drained line uses the direct lead because a second Escape would interrupt the turn the first delivered line just started; the host queues or appends it.
-
-| Input | tmux argv | herdr argv |
-|---|---|---|
-| Escape | `tmux send-keys -t PANE Escape` | `herdr pane send-keys PANE escape` |
-| Literal | `tmux send-keys -t PANE -l -- TEXT` | `herdr pane send-text PANE TEXT` |
-| Enter | `tmux send-keys -t PANE Enter` | `herdr pane send-keys PANE enter` |
-
-Native shell input starts with `! ` followed by the validated actual command. Composer controls begin the submitted input. Tmux uses the `--` option terminator before its literal payload to preserve leading hyphens. Herdr receives the complete payload as one TEXT argument immediately after the pane ID.
+Validate a nonblank literal line without CR/LF or C0/DEL controls before starting any process. No input path captures the pane or consults its state. Native shell input starts with `! ` followed by the actual validated command; composer controls begin the submitted input.
 
 Opencode `mini` receives pushed notifications and direct prompts as submitted user turns. Native `! ` input executes a shell command. Poll returns the full persisted message, and ACK consumes its ID.
 
-Deletion and prompt/exec operations start their five-second budgets after the invocation's schema-version guard. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
+Deletion and prompt/exec operations start their five-second budgets after the invocation's schema-version guard. Resolve native command bodies before starting their input budget. Runner-owned staged writes use the original attempt deadline (§6.9 Runner-owned deferred delivery).
 
-1. Reserve the one-second settle delay and one second for Enter, plus the 0.5-second Escape settle for the Escape lead. When no time remains beyond the reservation, fail with `insufficient pane input budget for literal input, settle and Enter` and start no input.
-2. For the Escape lead, send Escape bounded by one second or the unreserved time, whichever is shorter, then wait the Escape settle. Any Escape failure (launch, missing pane, nonzero exit or timeout) reports no dispatch, because no text was typed.
-3. Recompute the literal budget as the remaining time minus the settle delay and Enter. When Escape consumed the slack, fail with the same insufficient-budget error and type no text. Otherwise type the literal line within that budget, wait the settle delay and submit Enter.
-
-A confirmed launch failure or recognized missing pane reports no dispatch. A started text write with an ambiguous result, or any failure after successful literal input, is uncertain. A failure after Enter can mean the command ran. Inspect the pane before authorizing any retry.
-
-The lock excludes CAFleet writers; the user's keyboard and host UI can change at any time. Successful dispatch establishes complete submission only.
+A started write with an ambiguous result retains uncertainty; failure after submission can mean the command ran. Inspect native output and durable receipts before any newly authorized retry. The lock excludes CAFleet writers while the user's keyboard and host UI remain independent; successful dispatch establishes submission only.
 
 #### Push notifications
 
@@ -1304,29 +1278,29 @@ The canonical wrapped preview, which profile delivery submits unchanged, is this
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.
 ```
 
-Wrapped delivery fallback (§6.9 Delivery method and interaction priority) and explicitly unwrapped previews use the full line:
+Delivery fallback (§6.9 Delivery method and interaction priority) uses the full line:
 
 ```text
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
 ```
 
-Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.`, where N counts stored text. This limit is independent of `CAFLEET_MAX_TEXT_LEN`. Every profile-delivered line ends with the resume clause; every fallback or unwrapped line, whose submission leads with Escape, carries both clauses. The runner renders the wrapped form from the selected delivery method before its first byte (§6.9 Delivery reporting).
+Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.`, where N counts stored text. This limit is independent of `CAFLEET_MAX_TEXT_LEN`. Every profile-delivered line ends with the resume clause; every fallback line, whose submission leads with Escape, carries both clauses. The runner renders the form from the selected delivery method before its first byte (§6.9 Delivery reporting).
 
-One synchronous drain owns the shared pane lock and five-second attempt budget. Commit short read snapshots before socket or multiplexer I/O.
+One synchronous drain uses a five-second attempt budget and the runtime pane-lock protocol. Commit short read snapshots before socket I/O.
 
-1. Read recipient/message eligibility, excluding the root Director before preview selection or pane locking. An inactive/ineligible recipient, fleet mismatch or no pending row ends the attempt; pending placement holds it.
-2. For wrapped delivery, query durable key `preview:<run_id>:<message_id>` before live input eligibility. Conflicting reuse fails; in-progress or uncertain holds for inspection, a queued ready receipt returns its queued result, and a settled key returns its existing disposition without replay. An accepted receipt permits settlement without typing. Capture one expiration from the original deadline for every path that will submit, queue, settle or retire, including retained accepted/submitted history.
-3. For unwrapped delivery, acquire the pane input lock, then revalidate activity, member kind, fleet, concrete placement, message status and notification stamp. Wrapped delivery performs the same revalidation without the lock, and the runner acquires and revalidates it for the actual stages. Changed placement holds delivery.
-4. Resolve the recorded transport. A wrapped new input attempt requires a fresh pinned identity/epoch and socket health; retained accepted history proceeds to settlement. An unwrapped placement resolves the multiplexer and checks availability.
-5. Select the oldest unattempted pending message by `(created_at,message_id)` and revalidate the recipient/placement. Each invocation attempts a selected message at most once. Query the wrapped receipt for each later candidate before current input eligibility; unwrapped delivery retains the same owned lock.
-6. A wrapped new attempt sends the canonical base preview to the runner, which reserves the receipt, then submits it immediately, queues it with zero bytes or holds it (§6.9 Delivery method and interaction priority). An immediate submission commits its durable in-progress row and selected method before child bytes, then records accepted or uncertain submission. Reuse the captured expiration for submission and any later retirement.
-7. Settle wrapped accepted delivery in one transaction that stamps `notified_at` or verifies ACK and marks the receipt settled/submitted. The serialized service verifies that same durable settled/submitted receipt and excludes every active pending writer before removing an unleased cache entry with no available attempt permit. Retirement uses the remaining original expiration and sends zero native bytes. Failure after possible input preserves the actual receipt state and notification stamp for reconciliation.
-8. For unwrapped delivery, reserve the lead/settle/Enter time plus the minimum literal budget before input. Use Escape for the first line and direct input for later drained lines, then stamp `notified_at` after full submission; an intervening ACK counts as notified.
-9. Continue at step 5 while the budget and input state permit. Each new wrapped attempt is evaluated afresh by the runner; a request queued behind an earlier queued input receives the same queued result.
+1. Read recipient/message eligibility, excluding the root Director before preview selection or pane locking. An inactive/ineligible recipient, fleet mismatch or no pending row ends the attempt. An ordinary recipient without a recorded run fails this attempt with `member MEMBER_ID has no recorded run`; pending placement holds a recipient with a run.
+2. Query durable key `preview:<run_id>:<message_id>` before live input eligibility. Conflicting reuse fails; in-progress or uncertain holds for inspection, a queued ready receipt returns its queued result, and a settled key returns its existing disposition without replay. An accepted receipt permits settlement without typing. Capture one expiration from the original deadline for every path that will submit, queue, settle or retire, including retained accepted/submitted history.
+3. Revalidate activity, member kind, fleet, concrete placement, message status and notification stamp before runner submission; the runtime input protocol acquires and revalidates the shared pane lock for actual stages. Changed placement holds delivery.
+4. A new input attempt requires a fresh pinned run identity/epoch and socket health; retained accepted history proceeds to settlement.
+5. Select the oldest unattempted pending message by `(created_at,message_id)` and revalidate the recipient/placement. Each invocation attempts it at most once; query its durable receipt before current input eligibility.
+6. A new attempt sends the canonical base preview to the runner, which reserves the receipt, then submits it immediately, queues it with zero bytes or holds it (§6.9 Delivery method and interaction priority). An immediate submission commits its durable in-progress row and selected method before child bytes, then records accepted or uncertain submission. Reuse the captured expiration for submission and any later retirement.
+7. Settle accepted delivery in one transaction that stamps `notified_at` or verifies ACK and marks the receipt settled/submitted. The serialized service verifies that same durable settled/submitted receipt and excludes every active pending writer before removing an unleased cache entry with no available attempt permit. Retirement uses the remaining original expiration and sends zero native bytes. Failure after possible input preserves the actual receipt state and notification stamp for reconciliation.
+
+8. Continue at step 5 while the budget and input state permit. Each new attempt is evaluated afresh by the runner; a request queued behind an earlier queued input receives the same queued result.
 
 A retirement failure after settlement preserves the committed sent prefix and `notification_sent=true`. Report `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining known run/input/key context and the original cause. This warning uses the existing attempt error shape; durable settlement remains authoritative and grants no submission replay.
 
-The lock owner retains the lock through final submission/settlement. Wrapped delivery follows the durable input contract (§6.9 Input arbitration and the original native answer); only absent receipts or certified ready/zero-byte state permit a new eligible attempt. Explicitly unwrapped delivery remains at-least-once: a failed stamp leaves the message pending, so later send/wait may repeat partial or complete input. Poll and ACK identify consumption independently of either transport.
+The lock owner retains the lock through final submission/settlement. Wrapped delivery follows the durable input contract (§6.9 Input arbitration and the original native answer); only absent receipts or certified ready/zero-byte state permit a new eligible attempt. Poll and ACK identify consumption independently of input delivery.
 
 The notification diagnostic (§6.3 Delivery outcome) applies to failed input attempts and database contention, retaining actual causes and the committed message. Mandatory finalization uses the later of the original deadline and one second after finalization begins, while the transport remains within its original deadline. Other fatal storage errors retain their cause; a send preserves its committed result. A held state remains pending for external retry and reports no successful notification; a queued preview is retried by the runner.
 
@@ -1342,7 +1316,7 @@ Transport and stamp failures after persistence remain diagnostics alongside a su
 
 ##### Accepted trade-offs
 
-The following trade-offs apply to explicitly unwrapped input and to wrapped delivery fallback, both of which lead with Escape. What a single Escape does depends on the backend, and a backend may need more than one Escape to interrupt a running session. Delivery is correct whatever Escape does: when Escape does not interrupt, the line is still typed into the composer and the host submits or queues it. Both trailing clauses are conditional, so they stay accurate either way.
+The following trade-offs apply to delivery fallback, which leads with Escape. What a single Escape does depends on the backend, and a backend may need more than one Escape to interrupt a running session. Delivery is correct whatever Escape does: when Escape does not interrupt, the line is still typed into the composer and the host submits or queues it. Both trailing clauses are conditional, so they stay accurate either way.
 
 - Where Escape interrupts an ordinary member's working turn, the resume clause tells the recipient to continue.
 - Where Escape dismisses an ordinary member's question, confirmation or approval prompt, the host can report a user rejection before the input arrives; Claude Code reports `The user doesn't want to proceed with this tool use.` The preview's dismissed-prompt clause marks that rejection as delivery-caused, and the member re-issues the required tool call or re-asks the question. `member prompt` and `member exec` input carries no clause; the Director checks the pane for an open prompt before that dispatch.
@@ -1878,7 +1852,7 @@ The availability errors are:
 
 Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
-CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root Director's pane, which receives no automatic pane input, or a detected one in a runner-managed member's pane, where input queues while the interaction is open (§6.9 Delivery method and interaction priority). Escape-first input can cancel an open prompt the runner did not detect: an explicitly unwrapped member's previews, `member prompt` and `member exec` input, and a runner-managed member's delivery fallback. Claude Code then reports a user rejection before the input arrives; the member treats a rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause as delivery-caused and re-asks the question or re-issues the call. A profile-delivered preview ends with the resume clause only and sends no Escape, so a rejection before it stands. A rejection followed by Director prompt or native-command input follows that input, and the Director checks the pane for an open prompt before such dispatch.
+CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root Director's pane, which receives no automatic pane input, or a detected one in a runner-managed member's pane, where input queues while the interaction is open (§6.9 Delivery method and interaction priority). Escape-first input can cancel an open prompt the runner did not detect: a runner-managed member's delivery fallback for previews, `member prompt` and `member exec`. Claude Code then reports a user rejection before the input arrives; the member treats a rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause as delivery-caused and re-asks the question or re-issues the call. A profile-delivered preview ends with the resume clause only and sends no Escape, so a rejection before it stands. A rejection followed by Director prompt or native-command input follows that input, and the Director checks the pane for an open prompt before such dispatch.
 
 **codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting. Retain one native execution session handle for Director inbox reception and explicitly read it while delegated work remains, independently of whether a host goal exists. The installed CAFleet skill's [Codex native recipe](https://github.com/himkt/cafleet/blob/main/skills/cafleet/reference/coding-agents.md#codex-native-director-reception) owns tool calls, bounded reads, leases and recovery. Preserve supplied goal activation, pause, completion and budget authority. A background process alone supplies no unsolicited per-line wake after a model turn ends; fully idle Codex reconciles its inbox on the next user/native activation.
 
@@ -2727,7 +2701,7 @@ The available update is not spooled: a runner lost before it commits loses only 
 
 #### CLI presentation contract
 
-Member create/show append a `runtime` object (null for an explicitly unwrapped member) and a wrapped text row appends a `Runtime:` line; `event show`, `input show`/`reconcile`, `member recover` and wrapped prompt/exec have their own runtime outputs. §6.3 CLI *Runtime presentation*, *Runtime event and input commands* and *`member recover`* fix their exact keys, order, nullability and text layouts. The registry-only runtime fields let the Director bind a recovery attestation to the inspected owner snapshot without probing a live socket, and printed submission or settlement establishes no native execution result.
+Member create/show append a `runtime` object (null only for the root Director) and a wrapped text row appends a `Runtime:` line; `event show`, `input show`/`reconcile`, `member recover` and wrapped prompt/exec have their own runtime outputs. §6.3 CLI *Runtime presentation*, *Runtime event and input commands* and *`member recover`* fix their exact keys, order, nullability and text layouts. The registry-only runtime fields let the Director bind a recovery attestation to the inspected owner snapshot without probing a live socket, and printed submission or settlement establishes no native execution result.
 
 #### Storage pressure and durability boundary
 
@@ -2775,7 +2749,7 @@ Durability begins at a successful SQLite commit; a spooled record is recoverable
 
 #### Input arbitration and the original native answer
 
-For a runner-managed member, every CAFleet-generated preview, `member prompt` and `member exec` goes through the pinned runner control socket rather than multiplexer pane input. The client validates and submits without retaining the outer pane input lock while awaiting the runner. The runner owns that lock for wrapped writes: it acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement, and retains it across an active staged write, so explicit press, deletion and other programmatic writers serialize correctly. It releases the lock while a request is merely queued. The runner serializes the final check and child writes with its own terminal-state loop. The legacy unwrapped path retains its client-owned lock.
+For a runner-managed member, every CAFleet-generated preview, `member prompt` and `member exec` goes through the pinned runner control socket rather than multiplexer pane input. The client validates and submits without retaining the outer pane input lock while awaiting the runner. The runner owns that lock for wrapped writes: it acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement, and retains it across an active staged write, so explicit press, deletion and other programmatic writers serialize correctly. It releases the lock while a request is merely queued. The runner serializes the final check and child writes with its own terminal-state loop.
 
 Control frames are length-prefixed JSON, capped at 64 KiB, with protocol version, run/nonce/owner epoch, operation key, kind and literal payload. Encode the serialized UTF-8 JSON body length as a four-byte unsigned big-endian prefix; the inclusive 65536-byte body limit excludes that prefix, and an oversized declared length fails immediately after the header is read. Requests and replies require the top-level integer `protocol_version: 1`; missing or unsupported versions and truncated frames fail explicitly. The runner supports `health`, handshake `prepare`/`start`, `receipt`, `submit_prompt`, `submit_exec`, `permission_inspect`, `permission_respond` and `shutdown`. `receipt` has `query`, `retire` and synchronized Director reconciliation actions. Submission replies distinguish `accepted`, `queued`, `held`, `rejected` and `uncertain`, carrying a nullable input ID, output-sequence evidence, byte/submission stage and the delivery projection; the ID is null for a zero-byte attempt with no durable row, and `queued` preserves zero-byte stage evidence. Conflicting reuse of an operation key with another payload digest fails; store no literal prompt/command in the receipt table.
 
@@ -2874,7 +2848,7 @@ Native-exec success means submission, not execution success. Queued and held mes
 
 Screen observation cannot create an atomic native request API: unread child output may race with a write, an unknown CLI can redraw unexpectedly, and a person can type concurrently. The runner therefore guarantees zero ordinary-input bytes for detected and candidate interactions and refuses uncertain states; tested composer profiles bound the remaining race for profile delivery, rather than asserting universal prompt preservation. Release evidence must include this race and preserve uncertainty instead of authorizing a second submission.
 
-Human keystrokes from the outer terminal pass to the child as native input, including the human's intentional approval, denial or cancellation. A Director may submit a request-bound allow or deny through the permission-response path below after applying its session decision policy; ordinary preview/prompt/exec input stays queued with zero bytes during the request. Keep attributed decisions, key submission, native outcomes and actual continuation separately observable. Unknown answer capability or uncertain request identity preserves manual original-surface operation. Only explicitly unwrapped members use direct multiplexer input, with its narrower semantics (§6.5 Prompt dispatch).
+Human keystrokes from the outer terminal pass to the child as native input, including the human's intentional approval, denial or cancellation. A Director may submit a request-bound allow or deny through the permission-response path below after applying its session decision policy; ordinary preview/prompt/exec input stays queued with zero bytes during the request. Keep attributed decisions, key submission, native outcomes and actual continuation separately observable. Unknown answer capability or uncertain request identity preserves manual original-surface operation.
 
 ##### Delivery method and interaction priority
 
@@ -2929,7 +2903,7 @@ Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` wi
 
 ##### Delivery reporting
 
-`message send`, `member prompt` and `member exec` JSON append a `delivery` object with ordered `status,method,reason` (§6.3 Runtime presentation). `method` is `profile`, `fallback`, `unwrapped` or null before selection; an explicitly unwrapped submission reports `unwrapped`. The shared projection is:
+`message send`, `member prompt` and `member exec` JSON append a `delivery` object with ordered `status,method,reason` (§6.3 Runtime presentation). `method` is `profile`, `fallback` or null before selection. The shared projection is:
 
 | Status | Meaning | CLI behavior |
 |---|---|---|
@@ -3399,7 +3373,7 @@ Section 6.9 specifies every runtime table field, enum, nullability constraint, f
 
 ## 9. Testing strategy
 
-Exercise current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; for explicitly unwrapped members, Escape-first argv order and oldest-first drains with one Escape per lock hold; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, uncertain-cause recording at every runner uncertain transition, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, ACK races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; backend/multiplexer smoke coverage; links, embedding and release builds. Preserve general timed pipe draining and owned-child cleanup coverage.
+Exercise current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, uncertain-cause recording at every runner uncertain transition, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, ACK races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; backend/multiplexer smoke coverage; links, embedding and release builds. Preserve general timed pipe draining and owned-child cleanup coverage.
 
 ## 10. CLI command checklist
 

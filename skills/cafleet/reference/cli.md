@@ -100,9 +100,11 @@ Failure preserves successful stdout and prints `Message NEW_ID was persisted. ` 
 message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; the next send to member MEMBER_ID or the next message wait retries it.
 ```
 
-A busy lock reports `message MESSAGE_ID was not notified to member MEMBER_ID: pane input remained busy; the next send to member MEMBER_ID or the next message wait retries it.` Causes include `pane input remained busy`, `pane input: <lock error>`, `insufficient pane input budget for literal input, settle and Enter`, multiplexer/transport/storage errors. Storage errors identify the current candidate, revalidated candidate or selected wait-rotation entry. Budget expiry after earlier deliveries leaves pending work without a diagnostic.
+A busy lock reports `message MESSAGE_ID was not notified to member MEMBER_ID: pane input remained busy; the next send to member MEMBER_ID or the next message wait retries it.` Other causes are runner lock/transport/submission or storage errors, with known run/input context. Storage failures identify the current candidate or selected wait-rotation entry. Budget expiry after earlier deliveries leaves pending work without a diagnostic.
 
 Receipt retirement failure reports `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining `notification_sent=true`. Pre-commit storage failure exits 1. Consume each committed ID once.
+
+For an ordinary recipient without a recorded run, `CAUSE` is `member MEMBER_ID has no recorded run`. The committed message stays pending, failed delivery has null method, stdout retains its successful record and exit 0, and later wait attempts report the same cause.
 
 ### `message poll`
 
@@ -142,7 +144,7 @@ Ordinary concrete panes receive previews; Directors and self-sends use broker re
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.
 ```
 
-Wrapped fallback and explicitly unwrapped input lead with Escape and use:
+Delivery fallback leads with Escape and uses:
 
 ```text
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
@@ -168,11 +170,11 @@ Zero-byte reasons are `pane_input_busy`, `storage_unavailable`, `observer_unavai
 
 ### Held delivery
 
-Degraded/recovering/lost observation, unavailable ownership/storage or uncertain receipts/reachability hold input without queue acceptance or writing. Pending/changed placements also hold. Held/queued previews leave notification unset and grant no permission. Pending sends retry on subsequent send/wait. Explicitly unwrapped delivery is at-least-once: failed notification stamps can repeat input.
+Degraded/recovering/lost observation, unavailable ownership/storage or uncertain receipts/reachability hold input without queue acceptance or writing. Pending/changed placements also hold. Held/queued previews leave notification unset and grant no permission. Pending sends retry on subsequent send/wait.
 
 ### Accepted trade-offs
 
-Escape-first wrapped fallback and explicitly unwrapped input can interrupt work, dismiss undetected prompts or combine unsent drafts. A host may need multiple Escapes; submission remains valid when the host queues instead of interrupting. Resume and dismissal clauses are conditional.
+Delivery fallback can interrupt work, dismiss undetected prompts or combine unsent drafts. A host may need multiple Escapes; submission remains valid when the host queues instead of interrupting. Resume and dismissal clauses are conditional.
 
 Claude may report `The user doesn't want to proceed with this tool use.`; only an Escape-dismissal preview establishes delivery-caused rejection. Prompt/exec carry no clause, so inspect open prompts first. Repeated previews are consumed by ID; concurrent sends may interrupt earlier turns, and interruption can end shell tools. The CLI defers termination during pane input. OpenCode captures may show only a status bar; inspect retained sessions for omitted output and broker poll/ACK for consumption.
 
@@ -208,7 +210,7 @@ Failure compensation shuts down owned runner/child, closes pane, removes descrip
 
 ### `member delete`
 
-`cafleet member delete MEMBER_ID [--json]` shuts down wrapped runner, closes the locked pane and deregisters. Busy: `member ID's pane input remained busy for 5 seconds; member was not deleted.`, exit 1 unchanged. Post-close database errors retain the cause and closed-pane evidence. Layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages.
+`cafleet member delete MEMBER_ID [--json]` shuts down a recorded runner, closes the locked pane and deregisters. Run-less teardown skips runner shutdown while retaining pane close/deregistration. Busy: `member ID's pane input remained busy for 5 seconds; member was not deleted.`, exit 1 unchanged. Post-close database errors retain the cause and closed-pane evidence. Layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages.
 
 ### `member list`
 
@@ -222,26 +224,24 @@ Failure compensation shuts down owned runner/child, closes pane, removes descrip
 
 `cafleet member prompt MEMBER_ID TEXT [--json]` requires a nonblank control-free line: `text must be one non-empty line without control characters.`, exit 2.
 
-Director target: `cannot prompt the Director's own pane`, exit 1. Wrapped delivery uses profile/fallback/queue; explicitly unwrapped input uses Escape, settle, literal, settle, Enter and may interrupt/dismiss prompts. Exit 0 establishes submission/queue acceptance. Result fields: `member_id,pane_id,text,input_id,delivery`; unwrapped input has null ID and method `unwrapped`.
+Director target: `cannot prompt the Director's own pane`, exit 1. An ordinary member requires a recorded run; absence fails before pane I/O with `member <ID> has no recorded run`, exit 1. Runner delivery uses profile/fallback/queue, and exit 0 establishes submission/queue acceptance. Result fields: `member_id,pane_id,text,input_id,delivery`.
 
 | Condition | Error body (exit 1) |
 |---|---|
-| Input lock still busy when the wait ends | `member ID's pane input remained busy; prompt was not dispatched.` |
-| Pre-write error, including an Escape failure or a held runner reply | `prompt was not dispatched to member ID: CAUSE` |
+| Pre-write error, including a held runner reply | `prompt was not dispatched to member ID: CAUSE` |
 | Partial uncertainty | `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
 
 ### `member exec`
 
 `cafleet member exec MEMBER_ID COMMAND [--json]` or `cafleet member exec MEMBER_ID --file PATH [--json]`; `--file -` reads UTF-8 stdin, stripping at most one final LF/CRLF. Exactly one source; a nonblank line excludes CR/LF, NUL, tabs and other C0/DEL: `command must be one non-empty line without control characters.`, exit 2 before I/O. Multiline tasks use one-line script invocations.
 
-Wrapped delivery submits `! ` plus command through profile/fallback/queue. Explicitly unwrapped input uses Escape/settle/native literal/settle/Enter. The host owns cwd, environment, permissions, output and exit. Exit 0 establishes submission or queue acceptance; JSON contains `member_id,pane_id,coding_agent,command,dispatched,input_id,delivery`, with `dispatched=false` when queued.
+An ordinary member requires a recorded run; absence fails before pane I/O with `member <ID> has no recorded run`, exit 1. The runner submits `! ` plus command through profile/fallback/queue. The host owns cwd, environment, permissions, output and exit. Exit 0 establishes submission/queue acceptance; JSON contains `member_id,pane_id,coding_agent,command,dispatched,input_id,delivery`, with `dispatched=false` when queued.
 
 | Condition | Error body (exit 1) |
 |---|---|
 | Root Director | `cannot exec in the Director's own pane` |
 | Pending placement | `member ID has no pane yet (pending placement) — nothing to exec.` |
-| Input lock still busy when the wait ends | `member ID's pane input remained busy; native command was not dispatched.` |
-| Escape or transport failure before typing | `native command was not dispatched to member ID: CAUSE` |
+| Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
 | Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
 
 A failing first write may partially type; failure after Enter may have executed. Inspect native output and reconcile receipts before a newly authorized retry. Receipts retain operation key/digest/state, without command text. After completion, explicitly prompt continuation if the host has not resumed.
@@ -283,13 +283,13 @@ Writers share one OS lock per concrete pane, including duplicate placements; cap
 
 Keys accept printable ASCII U+0021–U+007E, `Space`, `Escape`, `Enter`, `Tab`, `Backspace`, arrows, `F1`–`F12`, `Ctrl+a`–`Ctrl+z`, `Shift+Tab`. Printable case is preserved; names/modifiers are case-insensitive and control letters canonicalize lowercase.
 
-Explicitly unwrapped prompt/exec and a drain's first preview use Escape, 0.5-second settle, literal, settle, Enter; further previews use literal/settle/Enter. Runner-managed profile input omits Escape; fallback uses it. Native commands start `! `.
+Runner delivery follows [wrapped delivery methods](#wrapped-delivery-methods). Native commands start `! `.
 
 ## Member runtime
 
 ### Runtime presentation
 
-Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Explicitly unwrapped members have `runtime:null`. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,reachability,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`), `unresolved_input_ids` and nullable `effective_policy`.
+Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Every ordinary member has a recorded run; only the root Director has `runtime:null`. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,reachability,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`), `unresolved_input_ids` and nullable `effective_policy`.
 
 Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health. Effective policy contains `schema_version=1`, `automatic_review=available|unavailable`, nullable `observed_mode`, `rule_id`, nullable integer `event_id`, `observed_at`; null means no tested observation.
 
@@ -297,7 +297,7 @@ Uncertain errors preserve exit category and known receipt/context, including `ex
 
 ### Delivery reporting
 
-`delivery` contains `status,method,reason`. Method is `profile`, `fallback`, `unwrapped` or null before selection. Submission/queue exit 0; queued send has `notification_sent=false`, queued exec `dispatched=false`; submitted send/exec set these flags true. Held prompt/exec exits 1; held send retains commit. `uncertain` requires reconciliation; `not_submitted` certifies zero-byte cancellation; `not_applicable` is broker-only.
+`delivery` contains `status,method,reason`. Method is `profile`, `fallback` or null before selection. Submission/queue exit 0; queued send has `notification_sent=false`, queued exec `dispatched=false`; submitted send/exec set these flags true. Held prompt/exec exits 1; held send retains commit. `uncertain` requires reconciliation; `not_submitted` certifies zero-byte cancellation; `not_applicable` is broker-only.
 
 Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input`; fallback reasons `submission_plan_unavailable,idle_timeout`. Held send reasons: `observer_unavailable` (no observation), `notification_held` (placement/run/receipt hold), `notification_failed` (lock/transport/storage/submission failure), `delivery_budget_exhausted` (older previews consumed the budget). Queued previews stay unnotified until submission or ACK settlement; later results appear in receipts/events without changing original command output.
 
@@ -420,6 +420,7 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `member capture` / `member prompt` / `member exec` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&gt;.</code> | 1 |
 | `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` | 1 |
 | `member prompt` / `exec` / `capture` | A target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` | 1 |
+| `member prompt` / `member exec` | Ordinary member without a recorded run | `Error: member <ID> has no recorded run` | 1 |
 | `message send` / `member create` | Positional body empty or whitespace-only | `Error: text may not be empty.` | 2 |
 | `message send` / `member create` | `--file <path>` to an empty file | `Error: --file <path>: file is empty.` | 1 |
 | `message send` / `member create` | `--file -` with empty stdin | `Error: --file -: stdin is empty.` | 1 |
