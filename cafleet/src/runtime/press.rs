@@ -182,9 +182,6 @@ mod tests {
         fn run_for(&self, _: &[String], _: Duration) -> Result<String, RunError> {
             panic!("press does not renew a relative phase budget")
         }
-        fn sleep(&self, _: f64) {
-            panic!("explicit keys have no prompt settling phase")
-        }
         fn run_until(&self, args: &[String], until: Instant) -> Result<String, TimedRunError> {
             assert_eq!(until, self.until);
             assert!(

@@ -739,9 +739,6 @@ pub(crate) mod test_support {
             argv: Vec<String>,
             timeout_secs: Option<u64>,
         },
-        Sleep {
-            seconds: f64,
-        },
     }
 
     pub(crate) struct FakeRunner {
@@ -781,15 +778,11 @@ pub(crate) mod test_support {
             self.events.borrow().clone()
         }
 
-        /// Just the argv of each `Run` event, in order.
         pub(crate) fn run_argvs(&self) -> Vec<Vec<String>> {
             self.events
                 .borrow()
                 .iter()
-                .filter_map(|event| match event {
-                    Event::Run { argv, .. } => Some(argv.clone()),
-                    Event::Sleep { .. } => None,
-                })
+                .map(|Event::Run { argv, .. }| argv.clone())
                 .collect()
         }
     }
@@ -808,10 +801,6 @@ pub(crate) mod test_support {
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or_else(|| panic!("unexpected process call: {argv:?}"))
-        }
-
-        fn sleep(&self, seconds: f64) {
-            self.events.borrow_mut().push(Event::Sleep { seconds });
         }
     }
 
@@ -949,12 +938,6 @@ mod tests {
                 }
             }
             assert_eq!(actual, vec![expected]);
-            assert!(
-                runner
-                    .events()
-                    .iter()
-                    .all(|event| matches!(event, test_support::Event::Run { .. }))
-            );
             assert!(runner.responses.borrow().is_empty());
 
             let unreadable = FakeRunner::with_binary(backend);
@@ -1039,9 +1022,6 @@ mod tests {
         fn run_until(&self, _: &[String], deadline: Instant) -> Result<String, TimedRunError> {
             self.0.borrow_mut().push(deadline);
             Ok(String::new())
-        }
-        fn sleep(&self, _: f64) {
-            panic!("absolute execution has no phase sleep")
         }
     }
 

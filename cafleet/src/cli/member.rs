@@ -1114,7 +1114,7 @@ mod tests {
     use super::*;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
-    use crate::broker::runtime::DeliveryMethod;
+    use crate::broker::runtime::{DeliveryMethod, DeliveryStatus};
     use crate::db::test_support::migrated_conn;
     use crate::input::{Deadline, PaneLock};
     use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
@@ -1738,10 +1738,6 @@ mod tests {
                 }),
                 None => Ok(String::new()),
             }
-        }
-
-        fn sleep(&self, _: f64) {
-            panic!("pane deletion has no input settle");
         }
     }
 

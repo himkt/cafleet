@@ -1346,10 +1346,7 @@ mod tests {
                     stamped_under_guard.load(Ordering::SeqCst),
                     "actual stamp uses the supplied connection while holding the borrowed lock"
                 );
-                assert!(
-                    matches!(outcome.end, AttemptEnd::Drained | AttemptEnd::NoPending),
-                    "{outcome:?}"
-                );
+                assert_eq!(outcome.end, AttemptEnd::NoPending, "{outcome:?}");
                 crate::runtime::runner::service::test_support::input_service::wait_input_service_record(fixture, &expected, outer);
                 crate::runtime::runner::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
@@ -1457,8 +1454,9 @@ mod tests {
                 .unwrap();
                 assert_eq!(outcome.sent, vec![message.message_id], "{outcome:?}");
                 let settled = preview_row(&independent, run.run_id, message.message_id).unwrap();
-                assert!(
-                    matches!(outcome.end, AttemptEnd::Drained | AttemptEnd::NoPending),
+                assert_eq!(
+                    outcome.end,
+                    AttemptEnd::NoPending,
                     "retry requires actual retirement acknowledgment: {outcome:?}"
                 );
                 assert_eq!(settled.input_id, row.input_id);

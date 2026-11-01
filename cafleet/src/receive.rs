@@ -423,7 +423,7 @@ mod tests {
                 assert!(excluded.is_empty());
                 retried = true;
                 clock.advance(Duration::from_secs(1));
-                Ok(AttemptOutcome::ended(AttemptEnd::Drained))
+                Ok(AttemptOutcome::ended(AttemptEnd::NoPending))
             },
         };
         wait(&clock, &mut io, Duration::from_secs(1)).unwrap();
@@ -508,7 +508,7 @@ mod tests {
                     Duration::from_secs(5)
                 );
                 clock.advance(Duration::from_secs(2));
-                Ok(AttemptOutcome::ended(AttemptEnd::Drained))
+                Ok(AttemptOutcome::ended(AttemptEnd::NoPending))
             },
         };
         wait(&clock, &mut io, Duration::from_secs(1)).unwrap();
