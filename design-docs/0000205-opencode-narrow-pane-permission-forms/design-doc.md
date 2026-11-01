@@ -1,6 +1,6 @@
 # OpenCode Narrow-Pane Permission Forms and Profile Identifier Removal
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 22/22 tasks complete
 **Last Updated**: 2026-11-01
 
@@ -10,16 +10,16 @@ Detect, extract and answer the OpenCode 2.1.4 `cafleet-ask` shell permission for
 
 ## Success Criteria
 
-- [ ] At every width where OpenCode 2.1.4 `mini` renders the three choices on one row, the `cafleet-ask` shell permission form produces exactly one `interaction_opened` event, whether the control line shares the choice row or sits on its own row.
-- [ ] A command that wraps in the form is reported as its displayed rows joined with `\n`, with the continuation margin and the scrollbar column removed, and `operation_rows` equals the displayed row count; the request fingerprint keeps the row breaks.
-- [ ] A command clipped by the form's command box, and a form narrower than the lowest supported width, produce no `interaction_opened`; programmatic input stays held and the form is answered manually, as documented limits.
-- [ ] The existing allow (Enter) and deny (`h`, Enter, Enter on the empty rejection-reason dialog) plans answer the narrow form, with every stage gate proven on a narrow native pre-stage fixture, including the rejection-reason dialog whose control line splits from its textarea row.
-- [ ] Every existing 36x120 OpenCode fixture keeps identical detection, gate and request-identity results.
-- [ ] On both tmux and herdr, a 57-column `cafleet-ask` member with a wrapped command is answered by Director-auto allow and deny through `permission respond`, closing the episode `not_visible` with the native result.
-- [ ] The default database is `~/.local/share/cafleet/cafleet_v9.db` with `application_id` `1128351289` and one embedded migration, `V1__baseline.sql`; an existing `cafleet_v8.db` stays byte-identical, and an explicitly selected v8 file fails with the incompatible-format error.
-- [ ] Runs, events, interaction evidence, inspection, permission responses, composer plans and fingerprints carry no profile identifier, and `permission respond` binds a response to its inspection through the request token, answer rule, backend and native version.
-- [ ] Outside `design-docs/`, `git grep -nE 'profile_version|answer_profile_version|claude-2\.1\.302-(auto|default)-[0-9]|codex-0\.163\.0-(approve-for-me|on-request)-[0-9]|opencode-2\.1\.4-cafleet-ask-[0-9]|profile=ANSWER_PROFILE'` finds nothing.
-- [ ] `SPEC.md`, the docs, the skill references and the project rules describe the narrow layout, its limits, the identifier-free contracts and the v9 format; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
+- [x] At every width where OpenCode 2.1.4 `mini` renders the three choices on one row, the `cafleet-ask` shell permission form produces exactly one `interaction_opened` event, whether the control line shares the choice row or sits on its own row.
+- [x] A command that wraps in the form is reported as its displayed rows joined with `\n`, with the continuation margin and the scrollbar column removed, and `operation_rows` equals the displayed row count; the request fingerprint keeps the row breaks.
+- [x] A command clipped by the form's command box, and a form narrower than the lowest supported width, produce no `interaction_opened`; programmatic input stays held and the form is answered manually, as documented limits.
+- [x] The existing allow (Enter) and deny (`h`, Enter, Enter on the empty rejection-reason dialog) plans answer the narrow form, with every stage gate proven on a narrow native pre-stage fixture, including the rejection-reason dialog whose control line splits from its textarea row.
+- [x] Every existing 36x120 OpenCode fixture keeps identical detection, gate and request-identity results.
+- [x] On both tmux and herdr, a 57-column `cafleet-ask` member with a wrapped command is answered by Director-auto allow and deny through `permission respond`, closing the episode `not_visible` with the native result.
+- [x] The default database is `~/.local/share/cafleet/cafleet_v9.db` with `application_id` `1128351289` and one embedded migration, `V1__baseline.sql`; an existing `cafleet_v8.db` stays byte-identical, and an explicitly selected v8 file fails with the incompatible-format error.
+- [x] Runs, events, interaction evidence, inspection, permission responses, composer plans and fingerprints carry no profile identifier, and `permission respond` binds a response to its inspection through the request token, answer rule, backend and native version.
+- [x] Outside `design-docs/`, `git grep -nE 'profile_version|answer_profile_version|claude-2\.1\.302-(auto|default)-[0-9]|codex-0\.163\.0-(approve-for-me|on-request)-[0-9]|opencode-2\.1\.4-cafleet-ask-[0-9]|profile=ANSWER_PROFILE'` finds nothing.
+- [x] `SPEC.md`, the docs, the skill references and the project rules describe the narrow layout, its limits, the identifier-free contracts and the v9 format; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
 
 ---
 
@@ -551,3 +551,4 @@ Execution summary (2026-11-01, macOS, Rust 1.99.1, working tree on top of `HEAD`
 | 2026-11-01 | Initial draft |
 | 2026-11-01 | Review revision: shipped margin-then-trim extraction order, a capture anchored at the command box end, `max_rows` covering a growing long-command form, two-edge breakpoint bracketing, identifier-free runtime invariants, the version-dependent test changes, runner-owned resize tests and the acceptance pane-sizing procedure |
 | 2026-11-01 | Approved by the user |
+| 2026-11-01 | Implemented: compact layout and its own rules, majority-background focus resolution, layout-change stage guard, herdr pre-sized acceptance and resize limit; user approved the implementation |
