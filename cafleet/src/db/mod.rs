@@ -706,7 +706,7 @@ mod tests {
                 self.conn.execute(
                 "INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,committed_at,
              payload_json,notification_state,archive_reason)
-             VALUES(?1,?2,'coverage_unknown',?3,?3,'{\"schema_version\":1}',
+             VALUES(?1,?2,'coverage_unknown',?3,?3,'{\"schema_version\":2}',
              'archived','member_inactive')",
                 params![run, seq, NOW],
             )?;

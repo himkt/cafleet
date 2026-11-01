@@ -986,7 +986,6 @@ mod tests {
     use rusqlite::{Connection, params};
     use serde_json::{Value, json};
 
-    use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
     use crate::broker::runtime::test_support::*;
     use crate::broker::runtime::{self as storage, *};
@@ -1477,90 +1476,6 @@ mod tests {
             })
         }
 
-        /// A schema-version-1 opening event and its inbox message, written directly into the
-        /// baseline as an earlier writer produced them.
-        fn legacy_opening(archived: bool) -> (Fixture, RuntimeEventRecord) {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = crate::db::test_support::migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "legacy-events");
-            let member = register(&mut conn, fleet, "legacy-worker", Some("%2"));
-            let spec = Fixture::spec(&conn, fleet, director, member);
-            conn.execute(
-                "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,
-                 database_identity_json,launch_nonce,runtime_path,resolved_mode,mode_source,
-                 permission_argv_json,event_evidence,coverage,status,created_at,native_version,
-                 owner_epoch,owner_kind,owner_pid,owner_start_identity,reachability,
-                 cleanup_state,event_seq_reserved_through,observation_gap_count)
-                 VALUES(?1,?2,?3,'codex',?4,?5,?6,?7,'default',?8,'metadata','unknown','running',?9,
-                 ?10,2,'runner',?11,?12,'reachable','incomplete',256,0)",
-                params![
-                    member,
-                    fleet,
-                    director,
-                    spec.database_identity_json.to_string(),
-                    spec.launch_nonce,
-                    spec.runtime_path,
-                    spec.resolved_mode,
-                    spec.permission_argv_json.to_string(),
-                    NOW,
-                    spec.native_version,
-                    spec.owner_pid,
-                    spec.owner_start_identity
-                ],
-            )
-            .unwrap();
-            let run_id = conn.last_insert_rowid();
-            let evidence = metadata();
-            let tx = conn.transaction().unwrap();
-            tx.execute("INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json) VALUES(?1,1,'permission_request',?2,?3,?4)",params![run_id,evidence["evidence_digest"].as_str().unwrap(),NOW,evidence.to_string()]).unwrap();
-            let interaction = tx.last_insert_rowid();
-            let message = (!archived).then(|| {
-                crate::broker::messaging::insert_message_validated(&tx, member, director, "{}")
-                    .unwrap()
-                    .message_id
-            });
-            tx.execute("INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,payload_json,notification_state,message_id,archive_reason) VALUES(?1,1,?2,'interaction_opened',?3,?3,'{}',?4,?5,?6)",params![run_id,interaction,NOW,if archived {"archived"} else {"inbox"},message,archived.then_some("member_inactive")]).unwrap();
-            let event = tx.last_insert_rowid();
-            let payload = json!({
-        "schema_version":1,"event_id":event,"run_id":run_id,"event_seq":1,
-        "member_id":member,"fleet_id":fleet,"director_member_id":director,
-        "kind":"interaction_opened","interaction_id":interaction,"classification":"permission_request",
-        "observed_at":NOW,"source":"runner_screen","native_request_id":null,
-        "decision_outcome":"unknown","evidence":evidence,
-    }).to_string();
-            tx.execute(
-                "UPDATE member_runtime_events SET payload_json=?1 WHERE event_id=?2",
-                params![payload, event],
-            )
-            .unwrap();
-            if let Some(message) = message {
-                tx.execute(
-                    "UPDATE messages SET text=?1 WHERE message_id=?2",
-                    params![payload, message],
-                )
-                .unwrap();
-            }
-            tx.commit().unwrap();
-            if archived {
-                crate::broker::deregister_member(&mut conn, member).unwrap();
-            }
-            let run = storage::get_run(&conn, run_id).unwrap();
-            let fixture = Fixture {
-                _dir: dir,
-                conn,
-                fleet,
-                director,
-                member,
-                run,
-            };
-            let event = storage::get_event(&fixture.conn, event)
-                .expect("a schema-version-1 event stays readable")
-                .event;
-            assert_eq!(event.payload_json["schema_version"], 1);
-            assert!(event.payload_json.get("director_action").is_none());
-            (fixture, event)
-        }
-
         fn assert_v2(event: &RuntimeEventRecord) {
             assert_eq!(event.payload_json["schema_version"], 2);
             assert!(event.payload_json.get("director_action").is_some());
@@ -1706,113 +1621,10 @@ mod tests {
         }
 
         #[test]
-        fn runtime_payload_v1_inbox_upgrade_preserves_original_message_bytes_and_ids() {
-            let (mut fixture, event) = legacy_opening(false);
-            let message =
-                crate::broker::get_message(&fixture.conn, event.message_id.unwrap()).unwrap();
-            let before = durable_state(&fixture.conn);
-            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
-            assert_eq!(durable_state(&fixture.reopen()), before);
-            assert_eq!(
-                storage::get_event(&fixture.reopen(), event.event_id)
-                    .unwrap()
-                    .event,
-                event
-            );
-            assert_eq!(
-                crate::broker::get_message(&fixture.conn, message.message_id).unwrap(),
-                message
-            );
-        }
-
-        #[test]
-        fn runtime_payload_v1_archived_upgrade_and_replay_preserve_original_disposition() {
-            let (mut fixture, event) = legacy_opening(true);
-            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
-            let owner = fixture.recoverer();
-            let before = durable_state(&fixture.conn);
-            let repeated = storage::persist_event(
-                &mut fixture.conn,
-                &owner,
-                &opening(owner.run_id, 1, 1, metadata()),
-                PersistenceMode::Recovery,
-            )
-            .unwrap();
-            assert_eq!(repeated, event);
-            assert_eq!(repeated.notification_state, NotificationState::Archived);
-            assert_eq!(repeated.archive_reason, Some(ArchiveReason::MemberInactive));
-            assert_eq!(durable_state(&fixture.conn), before);
-            assert!(rows(&fixture.conn, "messages").is_empty());
-        }
-
-        #[test]
-        fn runtime_payload_v1_retry_after_closure_and_deregistration_retains_original_inbox() {
-            let (mut fixture, event) = legacy_opening(false);
-            let original = crate::broker::get_message(&fixture.conn, event.message_id.unwrap())
-                .unwrap()
-                .text;
-            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
-            let owner = fixture.run.owner();
-            storage::persist_event(
-                &mut fixture.conn,
-                &owner,
-                &closure(owner.run_id, 2, 1),
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
-            let recovery = fixture.recoverer();
-            let before = durable_state(&fixture.conn);
-            let repeated = storage::persist_event(
-                &mut fixture.conn,
-                &recovery,
-                &opening(owner.run_id, 1, 1, metadata()),
-                PersistenceMode::Recovery,
-            )
-            .unwrap();
-            assert_eq!(repeated, event);
-            assert_eq!(durable_state(&fixture.conn), before);
-            assert_eq!(
-                crate::broker::get_message(&fixture.conn, event.message_id.unwrap())
-                    .unwrap()
-                    .text,
-                original
-            );
-        }
-
-        #[test]
-        fn runtime_payload_v1_conflicting_original_transition_still_fails_after_upgrade() {
-            let (mut fixture, event) = legacy_opening(false);
-            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
-            let owner = fixture.run.owner();
-            let mut changed = opening(owner.run_id, 1, 1, metadata());
-            changed.observed_at = "2026-10-26T10:00:01.000000+00:00".into();
-            let before = durable_state(&fixture.conn);
-            assert!(
-                storage::persist_event(&mut fixture.conn, &owner, &changed, PersistenceMode::Live)
-                    .is_err()
-            );
-            assert_eq!(durable_state(&fixture.conn), before);
-            assert_eq!(
-                storage::get_event(&fixture.conn, event.event_id)
-                    .unwrap()
-                    .event,
-                event
-            );
-        }
-
-        #[test]
-        fn runtime_payload_v1_field_set_rejects_a_retroactive_action_even_with_matching_message() {
-            let (mut fixture, event) = legacy_opening(false);
-            let mut payload = event.payload_json.clone();
-            payload["director_action"] = Value::Null;
-            replace_public_payload(&mut fixture.conn, &event, payload);
-            assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
-        }
-
-        #[test]
         fn runtime_payload_v2_reader_accepts_an_independent_valid_action() {
-            let (mut fixture, event) = legacy_opening(false);
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let event = fixture.open(&owner);
             independent_v2(&mut fixture, &event);
         }
 
@@ -1829,7 +1641,9 @@ mod tests {
                 "missing",
                 "null",
             ] {
-                let (mut fixture, event) = legacy_opening(false);
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let event = fixture.open(&owner);
                 let mut payload = independent_v2(&mut fixture, &event);
                 match changed {
                     "kind" => payload["director_action"]["kind"] = json!("approve"),
@@ -1862,47 +1676,6 @@ mod tests {
                     "{changed}"
                 );
             }
-        }
-
-        #[test]
-        fn runtime_payload_v2_new_event_and_old_v1_message_coexist_without_rewriting_history() {
-            let (mut fixture, legacy) = legacy_opening(false);
-            let original = crate::broker::get_message(&fixture.conn, legacy.message_id.unwrap())
-                .unwrap()
-                .text;
-            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
-            let owner = fixture.run.owner();
-            storage::persist_event(
-                &mut fixture.conn,
-                &owner,
-                &closure(owner.run_id, 2, 1),
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            let fresh = storage::persist_event(
-                &mut fixture.conn,
-                &owner,
-                &opening(owner.run_id, 3, 2, metadata()),
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            assert_eq!(
-                storage::get_event(&fixture.conn, legacy.event_id)
-                    .unwrap()
-                    .event,
-                legacy
-            );
-            assert_eq!(
-                crate::broker::get_message(&fixture.conn, legacy.message_id.unwrap())
-                    .unwrap()
-                    .text,
-                original
-            );
-            assert_v2(&fresh);
-            assert_eq!(
-                fresh.payload_json["director_action"],
-                action(&fixture, &fresh)
-            );
         }
 
         #[test]
@@ -2914,7 +2687,7 @@ mod tests {
     fn event_read_rejects_a_tampered_message_body_or_public_identity() {
         for damage in [
             "UPDATE messages SET text='{}'",
-            "UPDATE member_runtime_events SET payload_json='{\"schema_version\":1,\"run_id\":404}'",
+            "UPDATE member_runtime_events SET payload_json='{\"schema_version\":2,\"run_id\":404}'",
         ] {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
