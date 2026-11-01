@@ -6,7 +6,7 @@
 
 [tasks.cafleet-test]
 dir = "{{config_root}}/cafleet"
-run = "cargo test --lib"
+run = "cargo test --bin cafleet"
 description = "Run inline unit tests (positional args forward to the cargo test harness)"
 
 [tasks.cafleet-lint]
