@@ -137,18 +137,12 @@ pub(crate) fn get_event(
         "decision_outcome",
         "evidence",
     ];
-    let version = payload.get("schema_version").and_then(Value::as_u64);
     require(
-        matches!(version, Some(1 | 2)),
+        payload.get("schema_version").and_then(Value::as_u64) == Some(2),
         "schema_version",
         "unsupported event schema",
     )?;
     let delivery_result = event.kind == RuntimeEventKind::InputDeliveryResult;
-    require(
-        !(automatic_review(event.kind) || delivery_result) || version == Some(2),
-        "schema_version",
-        "automatic review and delivery result events use the v2 schema",
-    )?;
     if event.kind == RuntimeEventKind::InteractionClosed {
         fields.push("close_reason");
     }
@@ -160,9 +154,7 @@ pub(crate) fn get_event(
     if delivery_result {
         fields.extend(["input_id", "message_id", "delivery", "stage"]);
     }
-    if version == Some(2) {
-        fields.push("director_action");
-    }
+    fields.push("director_action");
     require(
         payload
             .as_object()
@@ -217,21 +209,19 @@ pub(crate) fn get_event(
         "payload_json.native_request_id",
         "native request identity must match post-policy evidence",
     )?;
-    if version == Some(2) {
-        require(
-            payload.get("director_action")
-                == Some(&director_action(
-                    &run.run,
-                    event.kind,
-                    interaction.as_ref().map(|episode| episode.classification),
-                    event.event_id,
-                    event.interaction_id,
-                    &payload["evidence"],
-                )?),
-            "director_action",
-            "invalid bound review action",
-        )?;
-    }
+    require(
+        payload.get("director_action")
+            == Some(&director_action(
+                &run.run,
+                event.kind,
+                interaction.as_ref().map(|episode| episode.classification),
+                event.event_id,
+                event.interaction_id,
+                &payload["evidence"],
+            )?),
+        "director_action",
+        "invalid bound review action",
+    )?;
     if delivery_result {
         validate_delivery_result(conn, &event, payload)?;
     }
