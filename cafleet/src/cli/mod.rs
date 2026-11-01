@@ -90,7 +90,7 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
         Command::Setup(cmd) => setup::run(settings, cmd),
         Command::Doctor(cmd) => setup::doctor(settings, cmd),
         Command::MemberRun { descriptor } => {
-            let code = crate::runtime::runner::run(settings, &descriptor)?;
+            let code = crate::runtime::run(settings, &descriptor)?;
             std::process::exit(code)
         }
         Command::Member(member::MemberCommand::Press {
@@ -255,9 +255,9 @@ pub(crate) fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
 }
 
 #[cfg(test)]
-pub(crate) use fleet::test_support::guarded_delete_fleet;
+pub(crate) use crate::cli::fleet::test_support::guarded_delete_fleet;
 #[cfg(test)]
-pub(crate) use member::substitute_spawn_placeholders;
+pub(crate) use crate::cli::member::substitute_spawn_placeholders;
 
 #[cfg(test)]
 pub(crate) mod test_support {

@@ -1,3 +1,4 @@
+use crate::broker::runtime as storage;
 use crate::broker::runtime::DecisionSource;
 use crate::broker::runtime::DeliveryProjection;
 use crate::broker::runtime::DeliveryStatus;
@@ -7,10 +8,9 @@ use crate::broker::runtime::InputKind;
 use crate::broker::runtime::InputState;
 use crate::broker::runtime::InteractionClass;
 use crate::broker::runtime::PermissionDecision;
-use crate::runtime::runner::codec::decode_legacy_control_body;
-use crate::runtime::runner::codec::frame_control_body;
-use crate::runtime::runner::codec::validate_version;
-use crate::runtime::runner::*;
+use crate::broker::runtime::RunRecord;
+use crate::runtime::*;
+use rusqlite::Connection;
 use serde::Deserializer;
 use serde::de::DeserializeOwned;
 use serde::de::IgnoredAny;
@@ -21,6 +21,139 @@ use serde_json::Map;
 use serde_json::Number;
 use serde_json::json;
 use std::fmt;
+use std::io::ErrorKind;
+use std::io::Read;
+use std::io::Write;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::MetadataExt;
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::time::Instant;
+
+pub(crate) const CONTROL_PROTOCOL_VERSION: u32 = 1;
+pub(crate) const MAX_CONTROL_FRAME: usize = 65536;
+
+pub(super) fn validate_version(frame: &Value) -> Result<()> {
+    ensure(
+        frame.is_object()
+            && frame.get("protocol_version").and_then(Value::as_u64)
+                == Some(u64::from(CONTROL_PROTOCOL_VERSION)),
+        "control frame requires integer protocol_version 1",
+    )
+}
+
+pub(crate) fn encode_control_frame(frame: &Value) -> Result<Vec<u8>> {
+    validate_version(frame)?;
+    let body = serde_json::to_vec(frame).map_err(io_error)?;
+    frame_control_body(&body)
+}
+
+pub(super) fn frame_control_body(body: &[u8]) -> Result<Vec<u8>> {
+    ensure(
+        body.len() <= MAX_CONTROL_FRAME,
+        "control frame exceeds size limit",
+    )?;
+    let mut bytes = u32::try_from(body.len())
+        .map_err(io_error)?
+        .to_be_bytes()
+        .to_vec();
+    bytes.extend_from_slice(body);
+    Ok(bytes)
+}
+
+pub(super) fn decode_lifecycle_control_body(body: &[u8]) -> Result<Value> {
+    let frame = serde_json::from_slice(body).map_err(|_| error("malformed control JSON body"))?;
+    validate_version(&frame)?;
+    Ok(frame)
+}
+
+pub(super) struct AdmittedControlFrame {
+    body: Vec<u8>,
+    admitted_at: Instant,
+}
+impl AdmittedControlFrame {
+    pub(super) fn body(&self) -> &[u8] {
+        &self.body
+    }
+    pub(super) fn admitted_at(&self) -> Instant {
+        self.admitted_at
+    }
+}
+
+pub(crate) struct ControlDecoder {
+    header: [u8; 4],
+    header_len: usize,
+    body: Vec<u8>,
+    expected: Option<usize>,
+    admitted_at: Option<Instant>,
+}
+
+impl ControlDecoder {
+    pub(crate) fn new() -> Self {
+        Self {
+            header: [0; 4],
+            header_len: 0,
+            body: Vec::new(),
+            expected: None,
+            admitted_at: None,
+        }
+    }
+
+    pub(super) fn feed_admitted(
+        &mut self,
+        mut bytes: &[u8],
+        observed_at: Instant,
+    ) -> Result<Vec<AdmittedControlFrame>> {
+        let mut frames = Vec::new();
+        while !bytes.is_empty() {
+            if self.expected.is_none() {
+                if self.header_len == 0 {
+                    self.admitted_at = Some(observed_at);
+                }
+                let count = (4 - self.header_len).min(bytes.len());
+                self.header[self.header_len..self.header_len + count]
+                    .copy_from_slice(&bytes[..count]);
+                self.header_len += count;
+                bytes = &bytes[count..];
+                if self.header_len < 4 {
+                    continue;
+                }
+                let length = usize::try_from(u32::from_be_bytes(self.header)).map_err(io_error)?;
+                ensure(
+                    length <= MAX_CONTROL_FRAME,
+                    "control frame exceeds size limit",
+                )?;
+                self.expected = Some(length);
+            }
+            let length = self
+                .expected
+                .expect("a complete header declares the body length");
+            let count = (length - self.body.len()).min(bytes.len());
+            self.body.extend_from_slice(&bytes[..count]);
+            bytes = &bytes[count..];
+            if self.body.len() == length {
+                frames.push(AdmittedControlFrame {
+                    body: std::mem::take(&mut self.body),
+                    admitted_at: self
+                        .admitted_at
+                        .take()
+                        .expect("a complete frame consumed its first header byte"),
+                });
+                self.header_len = 0;
+                self.expected = None;
+            }
+        }
+        Ok(frames)
+    }
+
+    pub(crate) fn finish(&self) -> Result<()> {
+        ensure(
+            self.header_len == 0 && self.expected.is_none() && self.admitted_at.is_none(),
+            "truncated control frame",
+        )
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -531,7 +664,7 @@ fn decode_request_value(value: &Value) -> Result<InputControlRequest> {
                     && input.expected_owner_epoch == identity.owner_epoch,
                 "control permission identity mismatch",
             )?;
-            super::input_client::validate_respond(&input)?;
+            crate::runtime::input_client::validate_respond(&input)?;
             InputControlOperation::PermissionRespond(input)
         }
         "receipt" => {
@@ -570,23 +703,19 @@ fn decode_input_request(body: &[u8]) -> Result<InputControlRequest> {
     decode_request_value(&decode_strict_json(body)?)
 }
 
-pub(in crate::runtime::runner) enum ServiceControlRequest {
-    Legacy(Value),
+pub(in crate::runtime) enum ServiceControlRequest {
+    Lifecycle(Value),
     Input(Box<InputControlRequest>),
 }
-pub(in crate::runtime::runner) fn decode_service_request(
-    body: &[u8],
-) -> Result<ServiceControlRequest> {
+pub(in crate::runtime) fn decode_service_request(body: &[u8]) -> Result<ServiceControlRequest> {
     if routes_input(body)? {
         decode_input_request(body).map(|request| ServiceControlRequest::Input(Box::new(request)))
     } else {
-        decode_legacy_control_body(body).map(ServiceControlRequest::Legacy)
+        decode_lifecycle_control_body(body).map(ServiceControlRequest::Lifecycle)
     }
 }
 
-pub(in crate::runtime::runner) fn encode_input_request(
-    request: &InputControlRequest,
-) -> Result<Vec<u8>> {
+pub(in crate::runtime) fn encode_input_request(request: &InputControlRequest) -> Result<Vec<u8>> {
     let (kind, fields) = match &request.operation {
         InputControlOperation::SubmitPrompt(input) | InputControlOperation::SubmitExec(input) => {
             let kind = if matches!(request.operation, InputControlOperation::SubmitPrompt(_)) {
@@ -912,7 +1041,7 @@ fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) ->
     ensure(matches, "control reply kind or request identity mismatch")
 }
 
-pub(in crate::runtime::runner) fn decode_input_reply(
+pub(in crate::runtime) fn decode_input_reply(
     body: &[u8],
     request: &InputControlRequest,
 ) -> Result<InputControlReply> {
@@ -952,7 +1081,7 @@ fn encode_result(reply: &InputControlReply) -> Value {
     }
 }
 
-pub(in crate::runtime::runner) fn encode_input_reply(
+pub(in crate::runtime) fn encode_input_reply(
     reply: std::result::Result<&InputControlReply, &CafleetError>,
 ) -> Result<Vec<u8>> {
     let value = match reply {
@@ -966,9 +1095,455 @@ pub(in crate::runtime::runner) fn encode_input_reply(
     frame_control_body(&serde_json::to_vec(&value).map_err(io_error)?)
 }
 
+pub(super) fn pause(deadline: Instant) -> Result<()> {
+    check_deadline(Instant::now(), deadline)?;
+    nap_until(deadline);
+    Ok(())
+}
+pub(super) struct ControlClient {
+    pub(crate) stream: UnixStream,
+    decoder: ControlDecoder,
+}
+
+#[derive(Clone, Copy)]
+enum EndpointPhase {
+    Starting,
+    Ready,
+}
+
+impl ControlClient {
+    pub(super) fn connect(path: &Path, deadline: Instant) -> Result<Self> {
+        Self::connect_in_phase(path, deadline, EndpointPhase::Ready)
+    }
+
+    pub(super) fn connect_starting(path: &Path, deadline: Instant) -> Result<Self> {
+        Self::connect_in_phase(path, deadline, EndpointPhase::Starting)
+    }
+
+    fn connect_in_phase(path: &Path, deadline: Instant, phase: EndpointPhase) -> Result<Self> {
+        use nix::sys::socket::AddressFamily;
+        use nix::sys::socket::SockFlag;
+        use nix::sys::socket::SockType;
+        use nix::sys::socket::UnixAddr;
+        use nix::sys::socket::connect;
+        use nix::sys::socket::socket;
+        loop {
+            check_deadline(Instant::now(), deadline)?;
+            let meta = match std::fs::symlink_metadata(path) {
+                Ok(meta) => meta,
+                Err(cause)
+                    if cause.kind() == ErrorKind::NotFound
+                        && matches!(phase, EndpointPhase::Starting) =>
+                {
+                    pause(deadline)?;
+                    continue;
+                }
+                Err(cause) => return Err(io_error(cause)),
+            };
+            ensure(
+                meta.file_type().is_socket() && meta.uid() == nix::unistd::geteuid().as_raw(),
+                "private control socket identity required",
+            )?;
+            if meta.mode() & 0o777 != 0o600 {
+                if matches!(phase, EndpointPhase::Starting) {
+                    pause(deadline)?;
+                    continue;
+                }
+                return Err(error("private control socket identity required"));
+            }
+            let fd = socket(
+                AddressFamily::Unix,
+                SockType::Stream,
+                SockFlag::empty(),
+                None,
+            )
+            .map_err(io_error)?;
+            nix::fcntl::fcntl(
+                &fd,
+                nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
+            )
+            .map_err(io_error)?;
+            nix::fcntl::fcntl(
+                &fd,
+                nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC),
+            )
+            .map_err(io_error)?;
+            match connect(fd.as_raw_fd(), &UnixAddr::new(path).map_err(io_error)?) {
+                Ok(()) | Err(nix::errno::Errno::EINPROGRESS) => {
+                    return Ok(Self {
+                        stream: UnixStream::from(fd),
+                        decoder: ControlDecoder::new(),
+                    });
+                }
+                Err(nix::errno::Errno::EAGAIN) => pause(deadline)?,
+                Err(nix::errno::Errno::ECONNREFUSED | nix::errno::Errno::ENOENT)
+                    if matches!(phase, EndpointPhase::Starting) =>
+                {
+                    pause(deadline)?;
+                }
+                Err(cause) => return Err(io_error(cause)),
+            }
+        }
+    }
+    pub(super) fn exchange(&mut self, request: &Value, deadline: Instant) -> Result<Value> {
+        let bytes = encode_control_frame(request)?;
+        let frame = self.exchange_bytes(&bytes, deadline)?;
+        let value = decode_lifecycle_control_body(frame.body())?;
+        ensure(
+            value.get("result").is_some() ^ value.get("error").is_some(),
+            "control reply requires one result or error",
+        )?;
+        if let Some(cause) = value.get("error") {
+            let cause = cause
+                .as_str()
+                .ok_or_else(|| error("control error requires text"))?;
+            return Err(error(format!("runner control: {cause}")));
+        }
+        Ok(value
+            .get("result")
+            .expect("validated result envelope")
+            .clone())
+    }
+    pub(super) fn exchange_input(
+        &mut self,
+        request: &InputControlRequest,
+        deadline: Instant,
+    ) -> Result<InputControlReply> {
+        check_deadline(Instant::now(), deadline)?;
+        let bytes = encode_input_request(request)?;
+        let frame = self.exchange_bytes(&bytes, deadline)?;
+        let reply = decode_input_reply(frame.body(), request)?;
+        check_deadline(Instant::now(), deadline)?;
+        Ok(reply)
+    }
+    fn exchange_bytes(&mut self, bytes: &[u8], deadline: Instant) -> Result<AdmittedControlFrame> {
+        let mut offset = 0;
+        while offset < bytes.len() {
+            check_deadline(Instant::now(), deadline)?;
+            match self.stream.write(&bytes[offset..]) {
+                Ok(0) => return Err(error("control endpoint disconnected during write")),
+                Ok(count) => offset += count,
+                Err(cause)
+                    if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
+                {
+                    pause(deadline)?
+                }
+                Err(cause) => return Err(io_error(cause)),
+            }
+        }
+        loop {
+            check_deadline(Instant::now(), deadline)?;
+            let mut bytes = [0; 4096];
+            match self.stream.read(&mut bytes) {
+                Ok(0) => {
+                    self.decoder.finish()?;
+                    return Err(error("control endpoint disconnected before reply"));
+                }
+                Ok(count) => {
+                    let observed_at = Instant::now();
+                    let frames = self.decoder.feed_admitted(&bytes[..count], observed_at)?;
+                    if !frames.is_empty() {
+                        ensure(frames.len() == 1, "unexpected multiple control replies")?;
+                        self.decoder.finish()?;
+                        return Ok(frames.into_iter().next().expect("one control reply"));
+                    }
+                }
+                Err(cause)
+                    if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
+                {
+                    pause(deadline)?
+                }
+                Err(cause) => return Err(io_error(cause)),
+            }
+        }
+    }
+}
+pub(super) fn request(run: &RunRecord, kind: &str, deadline: Instant) -> Result<Value> {
+    let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)?;
+    let mut client = ControlClient::connect(&paths.control_socket, deadline)?;
+    client.exchange(
+        &json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"kind":kind,"identity":ControlIdentity::from_run(run)}),
+        deadline,
+    )
+}
+
+pub(crate) fn request_shutdown(
+    conn: &mut rusqlite::Connection,
+    run: &RunRecord,
+    deadline: Instant,
+) -> Result<ShutdownOutcome> {
+    validate_run_paths(conn, run)?;
+    let result = request(run, "shutdown", deadline)?;
+    let outcome: ShutdownOutcome = serde_json::from_value(result).map_err(io_error)?;
+    let current = storage::get_run(conn, run.run_id)?;
+    ensure(
+        current.owner_epoch == run.owner_epoch,
+        "shutdown ownership changed",
+    )?;
+    Ok(outcome)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct HealthSnapshot {
+    pub(crate) identity: ControlIdentity,
+    pub(crate) runner: ProcessIdentity,
+    pub(crate) child: Option<ProcessIdentity>,
+    pub(crate) output_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) observation: Option<ObservationHealth>,
+}
+impl HealthSnapshot {
+    pub(crate) fn decode(value: Value, run: &RunRecord) -> Result<Self> {
+        let result: Self = serde_json::from_value(value).map_err(io_error)?;
+        result.validate(run)?;
+        Ok(result)
+    }
+    pub(crate) fn validate(&self, run: &RunRecord) -> Result<()> {
+        self.identity.validate(run)?;
+        if let Some(observation) = &self.observation {
+            observation.validate()?;
+        }
+        ensure(
+            run.runner_pid == Some(self.runner.pid)
+                && run.runner_start_identity.as_deref()
+                    == Some(self.runner.start_identity.as_str())
+                && run.owner_pid == self.runner.pid
+                && run.owner_start_identity == self.runner.start_identity
+                && self.runner.matches()?,
+            "health runner generation mismatch",
+        )?;
+        match &self.child {
+            Some(child) => ensure(
+                run.child_pid == Some(child.pid)
+                    && run.child_start_identity.as_deref() == Some(child.start_identity.as_str())
+                    && child.matches()?,
+                "health child generation mismatch",
+            ),
+            None => ensure(
+                run.child_pid.is_none(),
+                "health omitted native child identity",
+            ),
+        }
+    }
+}
+pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
+    let reply = crate::runtime::control::request(run, "health", deadline)?;
+    HealthSnapshot::decode(reply, run)
+}
+pub(crate) struct RuntimeDiagnosis {
+    pub(crate) diagnostics: Vec<String>,
+}
+pub(crate) fn diagnose_runtime(
+    conn: &Connection,
+    run_id: i64,
+    deadline: Instant,
+) -> Result<RuntimeDiagnosis> {
+    let source = conn
+        .path()
+        .ok_or_else(|| error("runtime diagnosis requires a file-backed registry"))?;
+    let mut observed = crate::db::connect_read_only(&format!("sqlite:///{source}"))?;
+    with_database_deadline(&mut observed, deadline, |conn| {
+        diagnose_runtime_observed(conn, run_id, deadline)
+    })
+}
+fn diagnose_runtime_observed(
+    conn: &Connection,
+    run_id: i64,
+    deadline: Instant,
+) -> Result<RuntimeDiagnosis> {
+    check_deadline(Instant::now(), deadline)?;
+    let run = storage::get_run(conn, run_id)?;
+    let mut diagnostics = Vec::new();
+    match validate_run_paths(conn, &run) {
+        Ok(paths) => {
+            if paths.descriptor.try_exists().map_err(io_error)? {
+                diagnostics.push(
+                    "leftover launch descriptor; use member recover after ownership validation"
+                        .into(),
+                );
+            }
+            match RunLock::acquire(conn,&run.owner()){
+                Ok(Some(_))=>diagnostics.push("matching owner lock is currently available; explicit recovery establishes loss".into()),
+                Ok(None)=>diagnostics.push("matching owner lock held: live_or_unreachable".into()),
+                Err(cause)=>diagnostics.push(cause.message().into_owned()),
+            }
+            if Instant::now() < deadline {
+                match probe_health(&run, deadline) {
+                    Ok(_) => diagnostics.push("matching runtime health reply observed".into()),
+                    Err(cause) => diagnostics.push(format!(
+                        "runtime endpoint unavailable: {cause}; inspect with member recover"
+                    )),
+                }
+            }
+        }
+        Err(cause) => diagnostics.push(format!("{cause}; explicit member recover required")),
+    }
+    Ok(RuntimeDiagnosis { diagnostics })
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
-    use crate::runtime::runner::input_protocol::*;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::FileTypeExt;
+    use std::os::unix::fs::PermissionsExt;
+
+    use std::os::unix::net::UnixListener;
+
+    use std::path::Path;
+
+    use nix::sys::socket::AddressFamily;
+    use nix::sys::socket::Backlog;
+    use nix::sys::socket::SockFlag;
+    use nix::sys::socket::SockType;
+    use nix::sys::socket::UnixAddr;
+    use nix::sys::socket::bind;
+    use nix::sys::socket::listen;
+    use nix::sys::socket::socket;
+
+    use crate::runtime::control::*;
+    use crate::runtime::test_support::Fixture;
+
+    pub(in crate::runtime) struct Endpoint {
+        pub(in crate::runtime) fixture: Fixture,
+        artifacts: RunArtifacts,
+        pub(in crate::runtime) descriptor: LaunchDescriptor,
+    }
+
+    impl Endpoint {
+        pub(in crate::runtime) fn new() -> Self {
+            let mut fixture = Fixture::new();
+            let artifacts = fixture.artifacts();
+            let descriptor = LaunchDescriptor::new(&fixture.run, fixture.spec()).unwrap();
+            Self {
+                fixture,
+                artifacts,
+                descriptor,
+            }
+        }
+
+        pub(in crate::runtime) fn path(&self) -> &Path {
+            &self.artifacts.paths.control_socket
+        }
+
+        pub(in crate::runtime) fn prepared(&self) -> Prepared {
+            let mut identity = ControlIdentity::from_run(&self.fixture.run);
+            identity.owner_epoch += 1;
+            Prepared {
+                identity,
+                runner: ProcessIdentity::current().unwrap(),
+            }
+        }
+    }
+
+    pub(in crate::runtime) fn bound_socket(
+        path: &Path,
+        mode: u32,
+        listening: bool,
+    ) -> UnixListener {
+        let fd = socket(
+            AddressFamily::Unix,
+            SockType::Stream,
+            SockFlag::empty(),
+            None,
+        )
+        .unwrap();
+        bind(fd.as_raw_fd(), &UnixAddr::new(path).unwrap()).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+        let listener = UnixListener::from(fd);
+        listener.set_nonblocking(true).unwrap();
+        assert!(
+            std::fs::symlink_metadata(path)
+                .unwrap()
+                .file_type()
+                .is_socket()
+        );
+        if listening {
+            listen(&listener, Backlog::new(8).unwrap()).unwrap();
+        }
+        listener
+    }
+
+    #[derive(Clone, Copy)]
+    pub(in crate::runtime) enum StartupInterval {
+        Bound,
+        BeforePrivateMode,
+    }
+
+    /// A `u32` big-endian length prefix followed by `body`, built without the production framer.
+    pub(crate) fn independent_frame(body: &[u8]) -> Vec<u8> {
+        let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    pub(crate) fn feed_values(decoder: &mut ControlDecoder, bytes: &[u8]) -> Result<Vec<Value>> {
+        decoder
+            .feed_admitted(bytes, Instant::now())?
+            .into_iter()
+            .map(|frame| decode_lifecycle_control_body(frame.body()))
+            .collect()
+    }
+
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use rusqlite::params;
+
+    pub(crate) fn activate(fixture: &mut Fixture) -> (RunArtifacts, RunLock) {
+        let artifacts = fixture.artifacts();
+        let held = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+            .unwrap()
+            .unwrap();
+        let process = ProcessIdentity::current().unwrap();
+        let next = held
+            .transfer_to_runner(&mut fixture.conn, &fixture.run.owner(), process.clone())
+            .unwrap();
+        fixture.conn.execute("UPDATE member_runs SET status='running',runner_pid=?1,runner_start_identity=?2,child_pid=?1,child_start_identity=?2 WHERE run_id=?3",params![process.pid,process.start_identity,next.run_id]).unwrap();
+        fixture.run = storage::get_run(&fixture.conn, next.run_id).unwrap();
+        (artifacts, held)
+    }
+
+    pub(crate) struct SilentServer {
+        pub(crate) stop: Arc<AtomicBool>,
+        pub(crate) thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl SilentServer {
+        pub(crate) fn start(path: &std::path::Path) -> Self {
+            let listener = UnixListener::bind(path).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let stop = Arc::new(AtomicBool::new(false));
+            let observed = stop.clone();
+            let thread = std::thread::spawn(move || {
+                let end = Instant::now() + Duration::from_secs(2);
+                let mut connections = Vec::new();
+                while !observed.load(Ordering::SeqCst) && Instant::now() < end {
+                    match listener.accept() {
+                        Ok((connection, _)) => connections.push(connection),
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                        Err(error) => panic!("fixture socket accept failed: {error}"),
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            });
+            Self {
+                stop,
+                thread: Some(thread),
+            }
+        }
+    }
+
+    impl Drop for SilentServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            self.thread.take().unwrap().join().unwrap();
+        }
+    }
+
     use serde_json::json;
 
     /// A tested, visible permission inspection with every identity field set.
@@ -988,10 +1563,1199 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::runner::input_protocol::*;
-    use crate::runtime::runner::test_support::Fixture;
-    use serde_json::Value;
+    use crate::runtime::control::test_support::feed_values;
+    use crate::runtime::control::test_support::independent_frame as frame;
+    use crate::runtime::control::*;
+    mod input_frames_tests {
+        use crate::runtime::control::tests::*;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        fn later(origin: Instant, millis: u64) -> Instant {
+            origin.checked_add(Duration::from_millis(millis)).unwrap()
+        }
+
+        #[test]
+        fn frames_every_split_and_single_byte_feed_retains_first_consumption_time() {
+            let body = br#"{"protocol_version":1,"kind":"health","text":"literal \u4e16\u754c"}"#;
+            let value: Value = serde_json::from_slice(body).unwrap();
+            let bytes = frame(body);
+            let t = Instant::now();
+            for cut in 0..bytes.len() {
+                let mut decoder = ControlDecoder::new();
+                assert!(decoder.feed_admitted(&bytes[..cut], t).unwrap().is_empty());
+                let frames = decoder.feed_admitted(&bytes[cut..], later(t, 100)).unwrap();
+                assert_eq!(frames.len(), 1, "split {cut}");
+                assert_eq!(frames[0].body(), body, "split {cut}");
+                assert_eq!(
+                    decode_lifecycle_control_body(frames[0].body()).unwrap(),
+                    value,
+                    "split {cut}"
+                );
+                assert_eq!(
+                    frames[0].admitted_at(),
+                    if cut == 0 { later(t, 100) } else { t },
+                    "split {cut}"
+                );
+                decoder.finish().unwrap();
+            }
+            let mut decoder = ControlDecoder::new();
+            let mut frames = Vec::new();
+            for (index, byte) in bytes.iter().enumerate() {
+                frames.extend(
+                    decoder
+                        .feed_admitted(&[*byte], later(t, u64::try_from(index).unwrap()))
+                        .unwrap(),
+                );
+            }
+            assert_eq!(frames.len(), 1);
+            assert_eq!(frames[0].body(), body);
+            assert_eq!(frames[0].admitted_at(), t);
+            decoder.finish().unwrap();
+        }
+
+        #[test]
+        fn frames_empty_feeds_leave_admission_unset_and_preserve_partial_frame_time() {
+            let t = Instant::now();
+            let body = br#"{"protocol_version":1,"kind":"health"}"#;
+            let bytes = frame(body);
+            let mut decoder = ControlDecoder::new();
+            assert!(decoder.feed_admitted(&[], t).unwrap().is_empty());
+            decoder.finish().unwrap();
+            assert!(
+                decoder
+                    .feed_admitted(&bytes[..1], later(t, 10))
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(decoder.finish().is_err());
+            assert!(decoder.feed_admitted(&[], later(t, 20)).unwrap().is_empty());
+            let frames = decoder.feed_admitted(&bytes[1..], later(t, 30)).unwrap();
+            assert_eq!(frames.len(), 1);
+            assert_eq!(frames[0].body(), body);
+            assert_eq!(frames[0].admitted_at(), later(t, 10));
+            decoder.finish().unwrap();
+        }
+
+        #[test]
+        fn frames_partial_complete_and_new_tail_keep_each_first_header_time() {
+            let bodies = [b"first".as_slice(), b"second", b"third"];
+            let encoded = bodies.map(frame);
+            let t = Instant::now();
+            let mut decoder = ControlDecoder::new();
+            assert!(
+                decoder
+                    .feed_admitted(&encoded[0][..2], t)
+                    .unwrap()
+                    .is_empty()
+            );
+            let mut next = encoded[0][2..].to_vec();
+            next.extend_from_slice(&encoded[1]);
+            next.extend_from_slice(&encoded[2][..1]);
+            let frames = decoder.feed_admitted(&next, later(t, 10)).unwrap();
+            assert_eq!(frames.len(), 2);
+            assert_eq!(frames[0].body(), bodies[0]);
+            assert_eq!(frames[0].admitted_at(), t);
+            assert_eq!(frames[1].body(), bodies[1]);
+            assert_eq!(frames[1].admitted_at(), later(t, 10));
+            assert!(decoder.finish().is_err());
+            let tail = decoder
+                .feed_admitted(&encoded[2][1..], later(t, 20))
+                .unwrap();
+            assert_eq!(tail.len(), 1);
+            assert_eq!(tail[0].body(), bodies[2]);
+            assert_eq!(tail[0].admitted_at(), later(t, 10));
+            decoder.finish().unwrap();
+        }
+
+        #[test]
+        fn frames_inclusive_body_limit_and_header_only_oversize_rejection() {
+            let t = Instant::now();
+            let body = vec![b'x'; 65536];
+            let mut decoder = ControlDecoder::new();
+            let frames = decoder.feed_admitted(&frame(&body), t).unwrap();
+            assert_eq!(frames.len(), 1);
+            assert_eq!(frames[0].body(), body);
+            assert_eq!(frames[0].admitted_at(), t);
+            decoder.finish().unwrap();
+            for size in [65537u32, u32::MAX] {
+                let mut decoder = ControlDecoder::new();
+                let header = size.to_be_bytes();
+                for byte in &header[..3] {
+                    assert!(decoder.feed_admitted(&[*byte], t).unwrap().is_empty());
+                }
+                assert!(
+                    decoder.feed_admitted(&header[3..], later(t, 10)).is_err(),
+                    "declared {size}"
+                );
+            }
+        }
+
+        #[test]
+        fn frames_eof_rejects_each_partial_boundary_and_empty_body_reaches_consumer() {
+            let t = Instant::now();
+            let body = br#"{"protocol_version":1,"kind":"health"}"#;
+            let bytes = frame(body);
+            ControlDecoder::new().finish().unwrap();
+            for cut in 1..bytes.len() {
+                let mut decoder = ControlDecoder::new();
+                assert!(decoder.feed_admitted(&bytes[..cut], t).unwrap().is_empty());
+                assert!(decoder.finish().is_err(), "prefix {cut}");
+            }
+            let mut decoder = ControlDecoder::new();
+            let frames = decoder.feed_admitted(&frame(&[]), t).unwrap();
+            assert_eq!(frames.len(), 1);
+            assert!(frames[0].body().is_empty());
+            assert_eq!(frames[0].admitted_at(), t);
+            decoder.finish().unwrap();
+            assert!(feed_values(&mut ControlDecoder::new(), &frame(&[])).is_err());
+        }
+
+        #[test]
+        fn frames_raw_bytes_preserve_whitespace_and_invalid_json_for_consumer_validation() {
+            let t = Instant::now();
+            for (body, valid) in [
+            (
+                b"{\n \"protocol_version\":1,\"kind\":\"health\",\"text\":\"literal \\u00e9\"\n}"
+                    .as_slice(),
+                true,
+            ),
+            (b"{".as_slice(), false),
+            (b"\xff".as_slice(), false),
+            (b"null".as_slice(), false),
+        ] {
+            let mut decoder = ControlDecoder::new();
+            let frames = decoder.feed_admitted(&frame(body), t).unwrap();
+            assert_eq!(frames.len(), 1);
+            assert_eq!(frames[0].body(), body);
+            assert_eq!(frames[0].admitted_at(), t);
+            decoder.finish().unwrap();
+            assert_eq!(
+                feed_values(&mut ControlDecoder::new(), &frame(body)).is_ok(),
+                valid
+            );
+        }
+        }
+    }
+    mod control_codec_tests {
+        use crate::broker::runtime as storage;
+        use crate::runtime::control::tests::*;
+        use crate::runtime::test_support::Fixture;
+        use crate::runtime::test_support::read_fixture_bytes;
+        use crate::runtime::test_support::write_fixture_bytes;
+        use serde_json::Value;
+        use serde_json::json;
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixListener;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        #[test]
+        fn runner_review_codec_encoding_pins_big_endian_length_and_required_version() {
+            assert_eq!(CONTROL_PROTOCOL_VERSION, 1);
+            assert_eq!(MAX_CONTROL_FRAME, 65536);
+            for value in [
+                json!({"protocol_version":1,"kind":"health","identity":{},"text":"literal\n世界"}),
+                json!({"protocol_version":1,"result":{"text":"literal\nreply"}}),
+                json!({"protocol_version":1,"error":"literal\nerror"}),
+            ] {
+                let body = serde_json::to_vec(&value).unwrap();
+                assert_eq!(encode_control_frame(&value).unwrap(), frame(&body));
+            }
+        }
+
+        #[test]
+        fn runner_review_codec_keeps_json_whitespace_and_multiple_frames_independent() {
+            let request = b"{\n  \"protocol_version\": 1,\n  \"kind\": \"health\"\n}";
+            let reply = json!({"protocol_version":1,"result":"line one\nline two"});
+            let mut bytes = frame(request);
+            bytes.extend(frame(&serde_json::to_vec(&reply).unwrap()));
+            let mut decoder = ControlDecoder::new();
+            assert_eq!(
+                feed_values(&mut decoder, &bytes).unwrap(),
+                [serde_json::from_slice::<Value>(request).unwrap(), reply]
+            );
+            decoder.finish().unwrap();
+        }
+
+        #[test]
+        fn runner_review_codec_requires_integer_supported_versions_in_requests_and_replies() {
+            for envelope in [
+                json!({"kind":"health"}),
+                json!({"result":null}),
+                json!({"error":"failure"}),
+            ] {
+                for version in [
+                    None,
+                    Some(Value::Null),
+                    Some(json!("1")),
+                    Some(json!(1.0)),
+                    Some(json!(2)),
+                    Some(json!(-1)),
+                ] {
+                    let mut value = envelope.clone();
+                    if let Some(version) = version {
+                        value["protocol_version"] = version;
+                    }
+                    assert!(encode_control_frame(&value).is_err(), "{value}");
+                    let mut decoder = ControlDecoder::new();
+                    assert!(
+                        feed_values(&mut decoder, &frame(&serde_json::to_vec(&value).unwrap()))
+                            .is_err(),
+                        "{value}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn runner_review_codec_rejects_empty_malformed_and_nonobject_bodies() {
+            for body in [b"".as_slice(), b"{", b"\xff", b"[]", b"null", b"1"] {
+                let mut decoder = ControlDecoder::new();
+                assert!(feed_values(&mut decoder, &frame(body)).is_err(), "{body:?}");
+            }
+            for value in [Value::Null, json!([]), json!(1)] {
+                assert!(encode_control_frame(&value).is_err());
+            }
+        }
+
+        #[test]
+        fn runner_review_codec_accepts_the_inclusive_body_cap_without_an_aggregate_frame_cap() {
+            let mut value = json!({"protocol_version":1,"result":""});
+            let overhead = serde_json::to_vec(&value).unwrap().len();
+            value["result"] = json!("x".repeat(65536 - overhead));
+            let body = serde_json::to_vec(&value).unwrap();
+            assert_eq!(body.len(), 65536);
+            let encoded = encode_control_frame(&value).unwrap();
+            assert_eq!(encoded.len(), 65540);
+            assert_eq!(&encoded[..4], &65536u32.to_be_bytes());
+            let t = Instant::now();
+            let mut decoder = ControlDecoder::new();
+            let frames = decoder.feed_admitted(&frame(&body).repeat(3), t).unwrap();
+            assert_eq!(frames.len(), 3);
+            for observed in frames {
+                assert_eq!(observed.admitted_at(), t);
+                assert_eq!(
+                    decode_lifecycle_control_body(observed.body()).unwrap(),
+                    value
+                );
+            }
+            decoder.finish().unwrap();
+            value["result"] = json!("x".repeat(65537 - overhead));
+            assert!(encode_control_frame(&value).is_err());
+        }
+
+        #[test]
+        fn runner_review_actual_health_client_uses_framing_and_validates_reply_versions() {
+            for version in [
+                Some(json!(1)),
+                None,
+                Some(json!(2)),
+                Some(json!("1")),
+                Some(json!(1.0)),
+            ] {
+                let mut fixture = Fixture::new();
+                let artifacts = fixture.artifacts();
+                let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                    .unwrap()
+                    .unwrap();
+                let process = ProcessIdentity::current().unwrap();
+                lock.transfer_to_runner(&mut fixture.conn, &fixture.run.owner(), process.clone())
+                    .unwrap();
+                fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET runner_pid=?1,runner_start_identity=?2 WHERE run_id=?3",
+                    rusqlite::params![process.pid, process.start_identity, fixture.run.run_id],
+                )
+                .unwrap();
+                let run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                let listener = UnixListener::bind(&artifacts.paths.control_socket).unwrap();
+                std::fs::set_permissions(
+                    &artifacts.paths.control_socket,
+                    std::fs::Permissions::from_mode(0o600),
+                )
+                .unwrap();
+                listener.set_nonblocking(true).unwrap();
+                let mut reply = json!({"result": {"identity":ControlIdentity::from_run(&run),"runner":process,"child":null,"output_seq":7}});
+                if let Some(version) = &version {
+                    reply["protocol_version"] = version.clone();
+                }
+                let expected_identity = ControlIdentity::from_run(&run);
+                let valid = version == Some(json!(1));
+                let deadline = Instant::now() + Duration::from_secs(2);
+                std::thread::scope(|scope| {
+                    let server = scope.spawn(move || {
+                        let mut stream = loop {
+                            match listener.accept() {
+                                Ok((stream, _)) => break stream,
+                                Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {}
+                                Err(cause) => panic!("fixture socket accept failed: {cause}"),
+                            }
+                            assert!(Instant::now() < deadline, "fixture socket accept timed out");
+                            std::thread::sleep(
+                                Duration::from_millis(2)
+                                    .min(deadline.saturating_duration_since(Instant::now())),
+                            );
+                        };
+                        stream.set_nonblocking(true).unwrap();
+                        let flags = nix::fcntl::OFlag::from_bits_retain(
+                            nix::fcntl::fcntl(&stream, nix::fcntl::FcntlArg::F_GETFL).unwrap(),
+                        );
+                        assert!(flags.contains(nix::fcntl::OFlag::O_NONBLOCK));
+                        let read_deadline = deadline.min(Instant::now() + Duration::from_secs(1));
+                        let mut header = [0; 4];
+                        read_fixture_bytes(&mut stream, &mut header, read_deadline);
+                        let length = usize::try_from(u32::from_be_bytes(header)).unwrap();
+                        assert!(
+                            length > 0 && length <= 65536,
+                            "actual client sent invalid length {length}"
+                        );
+                        let mut body = vec![0; length];
+                        read_fixture_bytes(&mut stream, &mut body, read_deadline);
+                        let request: Value = serde_json::from_slice(&body).unwrap();
+                        assert_eq!(request["protocol_version"], 1);
+                        assert_eq!(request["kind"], "health");
+                        assert_eq!(
+                            request["identity"],
+                            serde_json::to_value(expected_identity).unwrap()
+                        );
+                        for byte in frame(&serde_json::to_vec(&reply).unwrap()) {
+                            write_fixture_bytes(&mut stream, &[byte], deadline);
+                        }
+                    });
+                    let observed = probe_health(&run, deadline);
+                    assert_eq!(observed.is_ok(), valid, "{observed:?}");
+                    if let Ok(health) = observed {
+                        assert_eq!(health.output_seq, 7);
+                    }
+                    server.join().unwrap();
+                });
+            }
+        }
+    }
+
+    use std::time::Duration;
+
+    mod input_client_tests {
+        use crate::broker::runtime::InputKind;
+        use crate::runtime::control::InputControlOperation;
+        use crate::runtime::control::InputControlReply;
+        use crate::runtime::control::InputControlRequest;
+        use crate::runtime::control::SubmissionStage;
+        use crate::runtime::control::SubmissionStatus;
+        use crate::runtime::control::SubmitInput;
+        use crate::runtime::control::tests::*;
+        use crate::runtime::test_support::Fixture;
+        use serde_json::json;
+        use std::net::Shutdown;
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixListener;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+
+        type PeerResult<T> = std::result::Result<T, String>;
+        use crate::runtime::control::test_support::independent_frame as frame;
+        fn request(fixture: &Fixture) -> InputControlRequest {
+            InputControlRequest {
+                identity: ControlIdentity::from_run(&fixture.run),
+                expires_at_mono_ns: 50_000_000_000,
+                operation: InputControlOperation::SubmitPrompt(SubmitInput {
+                    operation_key: "fixture:typed-client".into(),
+                    input_kind: InputKind::Prompt,
+                    message_id: None,
+                    literal: "literal 世界 '$x'".into(),
+                }),
+            }
+        }
+        fn expected(fixture: &Fixture) -> Value {
+            let run = &fixture.run;
+            json!({"protocol_version":1,"kind":"submit_prompt","identity":{"database_identity_json":run.database_identity_json,"fleet_id":run.fleet_id,"member_id":run.member_id,"director_member_id":run.director_member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce},"expires_at_mono_ns":50_000_000_000u64,"operation_key":"fixture:typed-client","input_kind":"prompt","message_id":null,"literal":"literal 世界 '$x'"})
+        }
+        fn reply(status: &str, stage: &str) -> Vec<u8> {
+            let reason = if status == "accepted" {
+                Value::Null
+            } else {
+                json!("fixture uncertainty")
+            };
+            let delivery = if status == "accepted" {
+                json!({"status":"submitted","method":"profile","reason":null})
+            } else {
+                json!({"status":"uncertain","method":"fallback","reason":"submission_plan_unavailable"})
+            };
+            frame(
+            &serde_json::to_vec(
+                &json!({"protocol_version":1,"result":{"kind":"submission","submission":{
+                    "status":status,"input_id":13,"stage":stage,"output_seq":null,"reason":reason,"delivery":delivery
+                }}}),
+            )
+            .unwrap(),
+        )
+        }
+        fn pair() -> (ControlClient, UnixStream) {
+            let (stream, peer) = UnixStream::pair().unwrap();
+            stream.set_nonblocking(true).unwrap();
+            peer.set_nonblocking(true).unwrap();
+            (
+                ControlClient {
+                    stream,
+                    decoder: ControlDecoder::new(),
+                },
+                peer,
+            )
+        }
+        fn active(stop: &AtomicBool, deadline: Instant) -> PeerResult<()> {
+            if stop.load(Ordering::Acquire) {
+                return Err("owned peer cancelled".into());
+            }
+            if Instant::now() >= deadline {
+                return Err("owned peer deadline expired".into());
+            }
+            Ok(())
+        }
+        fn write_peer(
+            stream: &mut UnixStream,
+            mut bytes: &[u8],
+            stop: &AtomicBool,
+            deadline: Instant,
+        ) -> PeerResult<()> {
+            while !bytes.is_empty() {
+                active(stop, deadline)?;
+                match stream.write(bytes) {
+                    Ok(0) => return Err("peer write made no progress".into()),
+                    Ok(count) => bytes = &bytes[count..],
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::WouldBlock | ErrorKind::Interrupted
+                        ) =>
+                    {
+                        std::thread::yield_now()
+                    }
+                    Err(error) => return Err(format!("peer write: {error}")),
+                }
+            }
+            Ok(())
+        }
+        fn read_peer(
+            stream: &mut UnixStream,
+            mut bytes: &mut [u8],
+            stop: &AtomicBool,
+            deadline: Instant,
+        ) -> PeerResult<()> {
+            while !bytes.is_empty() {
+                active(stop, deadline)?;
+                match stream.read(bytes) {
+                    Ok(0) => return Err("peer received truncated request".into()),
+                    Ok(count) => bytes = &mut bytes[count..],
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::WouldBlock | ErrorKind::Interrupted
+                        ) =>
+                    {
+                        std::thread::yield_now()
+                    }
+                    Err(error) => return Err(format!("peer read: {error}")),
+                }
+            }
+            Ok(())
+        }
+        fn read_request(
+            stream: &mut UnixStream,
+            stop: &AtomicBool,
+            deadline: Instant,
+        ) -> PeerResult<Value> {
+            let mut header = [0; 4];
+            read_peer(stream, &mut header, stop, deadline)?;
+            let size =
+                usize::try_from(u32::from_be_bytes(header)).map_err(|error| error.to_string())?;
+            if size > 65536 {
+                return Err("peer received oversized request".into());
+            }
+            let mut body = vec![0; size];
+            read_peer(stream, &mut body, stop, deadline)?;
+            serde_json::from_slice(&body).map_err(|error| error.to_string())
+        }
+        struct Observed {
+            request: Value,
+            at: Instant,
+            fragments_at: Option<(Instant, Instant)>,
+            drained_after_return_at: Option<Instant>,
+            extra_connections: usize,
+            extra_request_bytes: usize,
+        }
+        fn describe(result: &Result<InputControlReply>) -> String {
+            match result {
+                Err(error) => format!("Err({error:?})"),
+                Ok(InputControlReply::Submission(value)) => format!(
+                    "Ok(Submission status={:?}, input_id={:?}, stage={:?}, output_seq={:?}, reason={:?})",
+                    value.status, value.input_id, value.stage, value.output_seq, value.reason
+                ),
+                Ok(InputControlReply::Inspection(_)) => "Ok(Inspection)".into(),
+                Ok(InputControlReply::PermissionResponse(_)) => "Ok(PermissionResponse)".into(),
+                Ok(InputControlReply::Receipt(_)) => "Ok(Receipt)".into(),
+            }
+        }
+        /// Runs `work` as a scoped peer while `exchange` runs here, then stops and joins the peer.
+        fn exchange_with_peer(
+            work: impl FnOnce(&AtomicBool, Instant) -> PeerResult<Observed> + Send,
+            exchange: impl FnOnce() -> Result<InputControlReply>,
+        ) -> (Result<InputControlReply>, Observed) {
+            let stop = AtomicBool::new(false);
+            let until = Instant::now() + Duration::from_secs(2);
+            std::thread::scope(|scope| {
+                let peer = scope.spawn(|| work(&stop, until));
+                let result = exchange();
+                stop.store(true, Ordering::Release);
+                let observed =
+                    peer.join()
+                        .expect("owned peer panicked")
+                        .unwrap_or_else(|cleanup| {
+                            panic!(
+                                "primary exchange result: {}; owned peer: {cleanup}",
+                                describe(&result)
+                            )
+                        });
+                (result, observed)
+            })
+        }
+        fn accepted(result: Result<InputControlReply>) {
+            match result.unwrap() {
+                InputControlReply::Submission(submission) => {
+                    assert_eq!(submission.status, SubmissionStatus::Accepted);
+                    assert_eq!(submission.input_id, Some(13));
+                    assert_eq!(submission.stage, SubmissionStage::Submitted);
+                    assert_eq!(submission.output_seq, None);
+                    assert_eq!(submission.reason, None);
+                }
+                _ => panic!("actual typed exchange returns submission"),
+            }
+        }
+        fn preloaded(fixture: &Fixture, response: &[u8]) -> (Result<InputControlReply>, Value) {
+            let (mut client, mut peer) = pair();
+            let until = Instant::now() + Duration::from_secs(1);
+            let stop = AtomicBool::new(false);
+            write_peer(&mut peer, response, &stop, until).unwrap();
+            let result = client.exchange_input(&request(fixture), until);
+            let actual = read_request(&mut peer, &stop, until).unwrap();
+            (result, actual)
+        }
+        #[test]
+        fn typed_exchange_sends_an_independent_flat_request_with_the_original_expiry() {
+            let fixture = Fixture::new();
+            let (result, actual) = preloaded(&fixture, &reply("accepted", "submitted"));
+            accepted(result);
+            assert_eq!(actual, expected(&fixture));
+        }
+        #[test]
+        fn exchange_validates_fragmented_duplicate_and_wrong_kind_replies() {
+            let fixture = Fixture::new();
+            let (mut client, mut stream) = pair();
+            let response = reply("accepted", "submitted");
+            let (result, observed) = exchange_with_peer(
+                move |stop, until| {
+                    let request = read_request(&mut stream, stop, until)?;
+                    let at = Instant::now();
+                    for chunk in response.chunks(3) {
+                        write_peer(&mut stream, chunk, stop, until)?;
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Ok(Observed {
+                        request,
+                        at,
+                        fragments_at: None,
+                        drained_after_return_at: None,
+                        extra_connections: 0,
+                        extra_request_bytes: 0,
+                    })
+                },
+                || {
+                    client
+                        .exchange_input(&request(&fixture), Instant::now() + Duration::from_secs(1))
+                },
+            );
+            accepted(result);
+            assert_eq!(observed.request, expected(&fixture));
+            let duplicate=frame(br#"{"protocol_version":1,"result":{"kind":"submission","submission":{"status":"accepted","input_id":13,"input_id":13,"stage":"submitted","output_seq":null,"reason":null,"delivery":{"status":"submitted","method":"profile","reason":null}}}}"#);
+            let wrong=frame(br#"{"protocol_version":1,"result":{"kind":"receipt","receipt":{"status":"missing","input_id":null,"submission":null}}}"#);
+            for response in [duplicate, wrong] {
+                let (result, actual) = preloaded(&fixture, &response);
+                assert!(result.is_err());
+                assert_eq!(actual, expected(&fixture));
+            }
+        }
+        #[test]
+        fn exchange_rejects_extra_reply_trailing_partial_and_premature_eof() {
+            let fixture = Fixture::new();
+            let good = reply("accepted", "submitted");
+            let mut extra = good.clone();
+            extra.extend_from_slice(&good);
+            let mut partial = good.clone();
+            partial.extend_from_slice(&good[..2]);
+            for response in [extra, partial] {
+                let (result, actual) = preloaded(&fixture, &response);
+                assert!(result.is_err());
+                assert_eq!(actual, expected(&fixture));
+            }
+            let (mut client, mut peer) = pair();
+            let until = Instant::now() + Duration::from_secs(1);
+            let stop = AtomicBool::new(false);
+            write_peer(&mut peer, &good[..good.len() - 1], &stop, until).unwrap();
+            peer.shutdown(Shutdown::Write).unwrap();
+            let result = client.exchange_input(&request(&fixture), until);
+            let actual = read_request(&mut peer, &stop, until).unwrap();
+            assert!(result.is_err());
+            assert_eq!(actual, expected(&fixture));
+        }
+        #[test]
+        fn expired_and_stalled_exchanges_keep_the_original_deadline() {
+            let fixture = Fixture::new();
+            let (mut client, mut peer) = pair();
+            let expired = Instant::now()
+                .checked_sub(Duration::from_millis(1))
+                .unwrap();
+            assert!(client.exchange_input(&request(&fixture), expired).is_err());
+            let mut byte = [0];
+            let observation_deadline = Instant::now() + Duration::from_millis(100);
+            loop {
+                assert!(Instant::now() < observation_deadline);
+                match peer.read(&mut byte) {
+                    Ok(0) => break,
+                    Ok(_) => panic!("an expired invocation sends zero request bytes"),
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                    Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                    Err(error) => panic!("observe expired exchange bytes: {error}"),
+                }
+            }
+            let (mut client, mut stream) = pair();
+            let budget = Duration::from_millis(800);
+            let fragment_delay = Duration::from_millis(350);
+            let return_tolerance = Duration::from_millis(100);
+            let started = Instant::now();
+            let deadline = started + budget;
+            let mut returned = None;
+            let (result, observed) = exchange_with_peer(
+                move |stop, until| {
+                    let request = read_request(&mut stream, stop, until)?;
+                    let at = Instant::now();
+                    write_peer(&mut stream, &[0, 0], stop, until)?;
+                    let first_fragment_at = Instant::now();
+                    let next_fragment_at = first_fragment_at + fragment_delay;
+                    while Instant::now() < next_fragment_at {
+                        active(stop, until)?;
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    write_peer(&mut stream, &[0, 20], stop, until)?;
+                    let later_fragment_at = Instant::now();
+                    while !stop.load(Ordering::Acquire) && Instant::now() < until {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Ok(Observed {
+                        request,
+                        at,
+                        fragments_at: Some((first_fragment_at, later_fragment_at)),
+                        drained_after_return_at: None,
+                        extra_connections: 0,
+                        extra_request_bytes: 0,
+                    })
+                },
+                || {
+                    let result = client.exchange_input(&request(&fixture), deadline);
+                    returned = Some(Instant::now());
+                    result
+                },
+            );
+            let returned = returned.expect("the exchange records its return");
+            let (first_fragment_at, later_fragment_at) = observed.fragments_at.unwrap();
+            assert!(result.is_err());
+            assert_eq!(observed.request, expected(&fixture));
+            assert!(
+                observed.at < deadline,
+                "peer observed the actual request before the tested expiry"
+            );
+            assert!(observed.at <= first_fragment_at);
+            assert!(first_fragment_at < later_fragment_at);
+            assert!(later_fragment_at < deadline);
+            assert!(later_fragment_at.duration_since(first_fragment_at) >= fragment_delay);
+            assert!(later_fragment_at.duration_since(started) >= fragment_delay);
+            assert!(return_tolerance < later_fragment_at.duration_since(first_fragment_at));
+            assert!(returned >= deadline);
+            assert!(
+                returned < deadline + return_tolerance,
+                "actual exchange shares its original budget"
+            );
+            assert!(returned < later_fragment_at + budget);
+        }
+        #[test]
+        fn disconnect_after_the_request_has_no_reconnect_or_second_request() {
+            let fixture = Fixture::new();
+            let directory = crate::runtime::test_support::short_tempdir();
+            let path = directory.path().join("control.sock");
+            let listener = UnixListener::bind(&path).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let exchange_returned = Arc::new(AtomicBool::new(false));
+            let returned_signal = exchange_returned.clone();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            let mut returned_at = None;
+            let (result, observed) = exchange_with_peer(
+                move |stop, until| {
+                    let (mut stream, _) = loop {
+                        active(stop, until)?;
+                        match listener.accept() {
+                            Ok(value) => break value,
+                            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                                std::thread::yield_now()
+                            }
+                            Err(error) => return Err(error.to_string()),
+                        }
+                    };
+                    stream
+                        .set_nonblocking(true)
+                        .map_err(|error| error.to_string())?;
+                    let request = read_request(&mut stream, stop, until)?;
+                    let at = Instant::now();
+                    let mut trailing = [0; 4096];
+                    let mut extra_request_bytes = 0;
+                    stream
+                        .shutdown(Shutdown::Write)
+                        .map_err(|error| error.to_string())?;
+                    let mut extra_connections = 0;
+                    let drained_after_return_at = loop {
+                        if Instant::now() >= until {
+                            return Err("disconnect observer expired before final drain".into());
+                        }
+                        let after_return = exchange_returned.load(Ordering::Acquire);
+                        loop {
+                            if Instant::now() >= until {
+                                return Err("disconnect request drain exceeded its bound".into());
+                            }
+                            match stream.read(&mut trailing) {
+                                Ok(0) => break,
+                                Ok(count) => extra_request_bytes += count,
+                                Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                                Err(error) => return Err(error.to_string()),
+                            }
+                        }
+                        loop {
+                            if Instant::now() >= until {
+                                return Err("disconnect listener drain exceeded its bound".into());
+                            }
+                            match listener.accept() {
+                                Ok((extra, _)) => {
+                                    extra_connections += 1;
+                                    drop(extra);
+                                }
+                                Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                                Err(error) => return Err(error.to_string()),
+                            }
+                        }
+                        if after_return {
+                            break Instant::now();
+                        }
+                        if stop.load(Ordering::Acquire)
+                            && !exchange_returned.load(Ordering::Acquire)
+                        {
+                            return Err(
+                                "disconnect observer cancelled before actual exchange return"
+                                    .into(),
+                            );
+                        }
+                        std::thread::yield_now();
+                    };
+                    Ok(Observed {
+                        request,
+                        at,
+                        fragments_at: None,
+                        drained_after_return_at: Some(drained_after_return_at),
+                        extra_connections,
+                        extra_request_bytes,
+                    })
+                },
+                || {
+                    let mut client = ControlClient::connect(&path, deadline).unwrap();
+                    let result = client.exchange_input(&request(&fixture), deadline);
+                    returned_at = Some(Instant::now());
+                    returned_signal.store(true, Ordering::Release);
+                    result
+                },
+            );
+            assert!(result.is_err());
+            assert_eq!(observed.request, expected(&fixture));
+            assert_eq!(observed.extra_connections, 0);
+            assert_eq!(observed.extra_request_bytes, 0);
+            assert!(
+                observed.drained_after_return_at.unwrap()
+                    >= returned_at.expect("the exchange records its return")
+            );
+        }
+
+        #[test]
+        fn textual_error_remains_error_and_structured_uncertainty_remains_result() {
+            let fixture = Fixture::new();
+            let error = frame(br#"{"protocol_version":1,"error":"fixture failure"}"#);
+            let (result, actual) = preloaded(&fixture, &error);
+            assert_eq!(actual, expected(&fixture));
+            match result {
+                Err(CafleetError::App(message)) => {
+                    assert_eq!(message, "runner control: fixture failure")
+                }
+                Err(other) => panic!("ordinary application error expected: {other}"),
+                Ok(_) => panic!("textual server failure is an error"),
+            }
+            for stage in ["partial", "unknown"] {
+                let (result, actual) = preloaded(&fixture, &reply("uncertain", stage));
+                assert_eq!(actual, expected(&fixture));
+                match result.unwrap() {
+                    InputControlReply::Submission(submission) => {
+                        assert_eq!(submission.status, SubmissionStatus::Uncertain);
+                        assert_eq!(submission.stage.as_str(), stage);
+                        assert_eq!(submission.input_id, Some(13));
+                    }
+                    _ => panic!("structured uncertainty remains a submission result"),
+                }
+            }
+        }
+    }
+
+    mod launch_readiness_tests {
+        use std::io::ErrorKind;
+
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use crate::runtime::control::*;
+
+        use crate::runtime::control::test_support::Endpoint;
+        use crate::runtime::control::test_support::StartupInterval;
+        use crate::runtime::control::test_support::bound_socket;
+
+        #[test]
+        fn runner_readiness_post_start_health_preserves_strict_endpoint_failures() {
+            for interval in [StartupInterval::Bound, StartupInterval::BeforePrivateMode] {
+                let mut endpoint = Endpoint::new();
+                let held = RunLock::acquire(&endpoint.fixture.conn, &endpoint.fixture.run.owner())
+                    .unwrap()
+                    .unwrap();
+                let process = ProcessIdentity::current().unwrap();
+                held.transfer_to_runner(
+                    &mut endpoint.fixture.conn,
+                    &endpoint.fixture.run.owner(),
+                    process.clone(),
+                )
+                .unwrap();
+                endpoint.fixture.conn.execute(
+                        "UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2 WHERE run_id=?3",
+                        rusqlite::params![process.pid,process.start_identity,endpoint.fixture.run.run_id],
+                    ).unwrap();
+                endpoint.fixture.run =
+                    storage::get_run(&endpoint.fixture.conn, endpoint.fixture.run.run_id).unwrap();
+                let listener = match interval {
+                    StartupInterval::Bound => bound_socket(endpoint.path(), 0o600, false),
+                    StartupInterval::BeforePrivateMode => {
+                        bound_socket(endpoint.path(), 0o644, true)
+                    }
+                };
+                let started = Instant::now();
+                let result = probe_health(&endpoint.fixture.run, started + Duration::from_secs(1));
+                assert!(result.is_err(), "{result:?}");
+                assert!(started.elapsed() < Duration::from_millis(500));
+                if matches!(interval, StartupInterval::BeforePrivateMode) {
+                    assert_eq!(listener.accept().unwrap_err().kind(), ErrorKind::WouldBlock);
+                }
+            }
+        }
+    }
+
+    use std::time::Instant;
+
+    use crate::runtime::control::test_support::*;
+
+    use crate::runtime::test_support::Fixture;
     use serde_json::json;
+
+    #[test]
+    fn runner_health_real_silent_endpoint_is_bounded_and_probe_is_read_only() {
+        let mut fixture = Fixture::new();
+        let (artifacts, _held) = activate(&mut fixture);
+        let _server = SilentServer::start(&artifacts.paths.control_socket);
+        let before = std::fs::read(fixture.conn.path().unwrap()).unwrap();
+        let start = Instant::now();
+        assert!(probe_health(&fixture.run, start + Duration::from_millis(80)).is_err());
+        assert!(start.elapsed() < Duration::from_millis(750));
+        assert_eq!(std::fs::read(fixture.conn.path().unwrap()).unwrap(), before);
+    }
+
+    mod observation_contract {
+        use crate::runtime::control::tests::*;
+
+        fn wire(run: &RunRecord) -> serde_json::Value {
+            json!({"identity":ControlIdentity::from_run(run),"runner":{"pid":run.runner_pid.unwrap(),"start_identity":run.runner_start_identity.as_ref().unwrap()},"child":{"pid":run.child_pid.unwrap(),"start_identity":run.child_start_identity.as_ref().unwrap()},"output_seq":17,"observation":{"visibility":"unknown","eligibility":{"state":"hold","reason":"unknown"},"pending_count":0,"pending_evidence":false,"gap_count":0,"degraded":false,"diagnostic":null}})
+        }
+
+        #[test]
+        fn health_decode_without_observation_validates_identity_without_granting_composer_proof() {
+            let mut fixture = Fixture::new();
+            let (_artifacts, _lock) = activate(&mut fixture);
+            let mut value = wire(&fixture.run);
+            value.as_object_mut().unwrap().remove("observation");
+            let decoded = HealthSnapshot::decode(value, &fixture.run).unwrap();
+            assert!(decoded.observation.is_none());
+        }
+
+        #[test]
+        fn health_decode_accepts_bounded_hold_and_checked_empty_composer_states() {
+            let mut fixture = Fixture::new();
+            let (_artifacts, _lock) = activate(&mut fixture);
+            for visibility in ["visible", "obscured", "not_visible", "unknown"] {
+                let mut value = wire(&fixture.run);
+                value["observation"]["visibility"] = json!(visibility);
+                value["observation"]["pending_count"] = json!(130);
+                value["observation"]["pending_evidence"] = json!(true);
+                value["observation"]["degraded"] = json!(true);
+                value["observation"]["diagnostic"] = json!("sink_unavailable");
+                let decoded = HealthSnapshot::decode(value, &fixture.run).unwrap();
+                decoded.observation.unwrap().validate().unwrap();
+            }
+            let mut value = wire(&fixture.run);
+            value["observation"]["visibility"] = json!("not_visible");
+            value["observation"]["eligibility"] = json!({"state":"composer_empty"});
+            assert!(HealthSnapshot::decode(value, &fixture.run).is_ok());
+        }
+
+        #[test]
+        fn health_decode_rejects_unknown_wire_fields_enums_unbounded_and_private_diagnostics() {
+            let mut fixture = Fixture::new();
+            let (_artifacts, _lock) = activate(&mut fixture);
+            for field in [
+                "unknown_field",
+                "visibility",
+                "state",
+                "reason",
+                "pending",
+                "negative",
+                "float",
+                "raw_diagnostic",
+                "long_diagnostic",
+                "unicode_diagnostic",
+            ] {
+                let mut value = wire(&fixture.run);
+                let status = &mut value["observation"];
+                match field {
+                    "unknown_field" => status["screen"] = json!("private screen"),
+                    "visibility" => status["visibility"] = json!("invented"),
+                    "state" => status["eligibility"]["state"] = json!("allow"),
+                    "reason" => status["eligibility"]["reason"] = json!("invented"),
+                    "pending" => status["pending_count"] = json!(131),
+                    "negative" => status["gap_count"] = json!(-1),
+                    "float" => status["pending_count"] = json!(0.5),
+                    "raw_diagnostic" => {
+                        status["diagnostic"] = json!("private exception configuration canary")
+                    }
+                    "long_diagnostic" => status["diagnostic"] = json!("x".repeat(129)),
+                    _ => status["diagnostic"] = json!("世界"),
+                }
+                assert!(
+                    HealthSnapshot::decode(value, &fixture.run).is_err(),
+                    "{field}"
+                );
+            }
+        }
+
+        #[test]
+        fn health_decode_requires_hold_for_visibility_pressure_and_degradation() {
+            let mut fixture = Fixture::new();
+            let (_artifacts, _lock) = activate(&mut fixture);
+            for field in [
+                "visible",
+                "obscured",
+                "unknown",
+                "pending_count",
+                "pending_evidence",
+                "degraded",
+            ] {
+                let mut value = wire(&fixture.run);
+                value["observation"]["visibility"] = json!("not_visible");
+                value["observation"]["eligibility"] = json!({"state":"composer_empty"});
+                match field {
+                    "pending_count" => value["observation"][field] = json!(1),
+                    "pending_evidence" | "degraded" => value["observation"][field] = json!(true),
+                    _ => value["observation"]["visibility"] = json!(field),
+                }
+                assert!(
+                    HealthSnapshot::decode(value, &fixture.run).is_err(),
+                    "{field}"
+                );
+            }
+        }
+
+        #[test]
+        fn health_decode_preserves_process_generation_and_control_identity_checks() {
+            let mut fixture = Fixture::new();
+            let (_artifacts, _lock) = activate(&mut fixture);
+            for field in ["epoch", "nonce", "runner", "child"] {
+                let mut value = wire(&fixture.run);
+                match field {
+                    "epoch" => {
+                        value["identity"]["owner_epoch"] = json!(fixture.run.owner_epoch + 1)
+                    }
+                    "nonce" => value["identity"]["launch_nonce"] = json!("b".repeat(64)),
+                    "runner" => value["runner"]["start_identity"] = json!("stale generation"),
+                    _ => value["child"]["start_identity"] = json!("stale generation"),
+                }
+                assert!(
+                    HealthSnapshot::decode(value, &fixture.run).is_err(),
+                    "{field}"
+                );
+            }
+        }
+    }
+
+    mod recovery_entry {
+        use std::io::Write;
+        use std::os::unix::fs::MetadataExt;
+        use std::path::PathBuf;
+
+        use crate::runtime::control::tests::*;
+
+        const SPOOL_CANARY: &[u8] = b"private-recovery-diagnosis-canary:not-a-complete-valid-frame";
+
+        fn registry_snapshot(conn: &Connection) -> Vec<crate::db::test_support::TableSnapshot> {
+            crate::db::test_support::table_snapshot(conn, |_| true)
+        }
+
+        #[derive(Debug, PartialEq)]
+        struct FileSnapshot {
+            path: PathBuf,
+            device: u64,
+            inode: u64,
+            mode: u32,
+            bytes: Vec<u8>,
+        }
+
+        #[derive(Debug, PartialEq)]
+        struct OwnedArtifacts {
+            directories: Vec<(PathBuf, u64, u64, u32)>,
+            files: Vec<FileSnapshot>,
+        }
+
+        fn owned_snapshot(
+            fixture: &Fixture,
+            artifacts: &RunArtifacts,
+            held: &RunLock,
+        ) -> OwnedArtifacts {
+            held.validate(&fixture.conn, &fixture.run.owner()).unwrap();
+            let directories = [&artifacts.paths.namespace_dir, &artifacts.paths.run_dir]
+                .into_iter()
+                .map(|path| {
+                    let metadata = std::fs::symlink_metadata(path).unwrap();
+                    assert!(metadata.is_dir());
+                    (
+                        path.clone(),
+                        metadata.dev(),
+                        metadata.ino(),
+                        metadata.mode(),
+                    )
+                })
+                .collect();
+            let files = [
+                &artifacts.paths.namespace_manifest,
+                &artifacts.paths.owner_lock,
+                &artifacts.paths.outbox,
+                &artifacts.paths.descriptor,
+            ]
+            .into_iter()
+            .map(|path| {
+                let metadata = std::fs::symlink_metadata(path).unwrap();
+                assert!(metadata.is_file());
+                FileSnapshot {
+                    path: path.clone(),
+                    device: metadata.dev(),
+                    inode: metadata.ino(),
+                    mode: metadata.mode(),
+                    bytes: std::fs::read(path).unwrap(),
+                }
+            })
+            .collect();
+            OwnedArtifacts { directories, files }
+        }
+
+        fn seed_owned_spool(fixture: &Fixture, artifacts: &RunArtifacts, held: &RunLock) {
+            held.validate(&fixture.conn, &fixture.run.owner()).unwrap();
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&artifacts.paths.outbox)
+                .unwrap();
+            file.write_all(SPOOL_CANARY).unwrap();
+            file.sync_all().unwrap();
+            artifacts
+                .write_descriptor(&LaunchDescriptor::new(&fixture.run, fixture.spec()).unwrap())
+                .unwrap();
+        }
+
+        fn diagnose_without_content_effects(fixture: &Fixture, expected_lock: &str) {
+            let started = Instant::now();
+            let diagnosis = diagnose_runtime(
+                &fixture.conn,
+                fixture.run.run_id,
+                started + Duration::from_millis(80),
+            )
+            .unwrap();
+            assert!(started.elapsed() < Duration::from_millis(750));
+            let text = diagnosis.diagnostics.join("\n");
+            assert!(text.contains(expected_lock), "{text}");
+            assert!(text.contains("recover"), "{text}");
+            assert!(text.contains("descriptor"), "{text}");
+            assert!(!text.contains(std::str::from_utf8(SPOOL_CANARY).unwrap()));
+        }
+
+        #[test]
+        fn runner_recovery_entry_doctor_preserves_held_owner_corrupt_spool_rows_and_identities() {
+            let mut fixture = Fixture::new();
+            let (artifacts, held) = activate(&mut fixture);
+            seed_owned_spool(&fixture, &artifacts, &held);
+            let before_rows = registry_snapshot(&fixture.conn);
+            let before_artifacts = owned_snapshot(&fixture, &artifacts, &held);
+            diagnose_without_content_effects(
+                &fixture,
+                "matching owner lock held: live_or_unreachable",
+            );
+            assert_eq!(registry_snapshot(&fixture.conn), before_rows);
+            assert_eq!(
+                owned_snapshot(&fixture, &artifacts, &held),
+                before_artifacts
+            );
+        }
+
+        #[test]
+        fn runner_recovery_entry_doctor_preserves_available_owner_corrupt_spool_without_takeover() {
+            let mut fixture = Fixture::new();
+            let (artifacts, held) = activate(&mut fixture);
+            seed_owned_spool(&fixture, &artifacts, &held);
+            let before_rows = registry_snapshot(&fixture.conn);
+            let before_artifacts = owned_snapshot(&fixture, &artifacts, &held);
+            drop(held);
+            diagnose_without_content_effects(
+                &fixture,
+                "matching owner lock is currently available",
+            );
+            let held = RunLock::acquire_released(&fixture.conn, &fixture.run.owner())
+                .unwrap()
+                .expect("diagnosis releases its probe and preserves the original owner identity");
+            assert_eq!(registry_snapshot(&fixture.conn), before_rows);
+            assert_eq!(
+                owned_snapshot(&fixture, &artifacts, &held),
+                before_artifacts
+            );
+        }
+    }
+
+    use serde_json::Value;
 
     struct Case {
         fixture: Fixture,
@@ -1259,7 +3023,7 @@ mod tests {
         for kind in ["health", "prepare", "start", "shutdown"] {
             let value = json!({"protocol_version":1,"kind":kind,"identity":case.request("submit_prompt",None)["identity"],"fixture_legacy":true});
             match decode_service_request(&bytes(&value)).unwrap() {
-                ServiceControlRequest::Legacy(actual) => assert_eq!(actual, value),
+                ServiceControlRequest::Lifecycle(actual) => assert_eq!(actual, value),
                 ServiceControlRequest::Input(_) => panic!("legacy routing remains compatible"),
             }
         }
@@ -2097,7 +3861,7 @@ mod tests {
     }
 
     mod identity {
-        use crate::runtime::runner::input_protocol::tests::*;
+        use crate::runtime::control::tests::*;
 
         const PAYLOAD_CANARY: &str = "WIRE_R1_PRIVATE_LITERAL_CANARY";
         const IDENTITY_CANARY: &str = "WIRE_R1_PRIVATE_IDENTITY_CANARY";

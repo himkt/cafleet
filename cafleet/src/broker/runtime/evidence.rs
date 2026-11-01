@@ -1,10 +1,12 @@
-use std::collections::BTreeSet;
-
-use regex::Regex;
-use serde_json::{Map, Value, json};
-
-use super::{EventEvidence, invalid, require};
+use crate::broker::runtime::EventEvidence;
+use crate::broker::runtime::invalid;
+use crate::broker::runtime::require;
 use crate::error::CafleetError;
+use regex::Regex;
+use serde_json::Map;
+use serde_json::Value;
+use serde_json::json;
+use std::collections::BTreeSet;
 
 const SCREEN_FIELDS: [&str; 4] = ["operation", "choices", "native_request_id", "excerpt"];
 const EVIDENCE_LIMIT: usize = 12 * 1024;
@@ -259,7 +261,7 @@ fn validate_operation_rows(object: &Map<String, Value>) -> Result<(), CafleetErr
 
 /// The metadata evidence of a run-scoped event that no screen form produced.
 pub(crate) fn run_metadata(
-    run: &super::RunRecord,
+    run: &crate::broker::runtime::RunRecord,
     rule_id: &str,
     screen_seq: u64,
 ) -> Result<Value, CafleetError> {

@@ -1,3 +1,4 @@
+use crate::broker::MemberStatus;
 use crate::broker::Placement;
 use crate::broker::runtime as storage;
 use crate::broker::runtime::*;
@@ -5,10 +6,15 @@ use crate::config::Settings;
 use crate::db::bounded_by_inherited;
 use crate::db::with_database_budget;
 use crate::pane_lock::PaneLock;
-use crate::runtime::runner::*;
+use crate::runtime::*;
 use crate::time::Deadline;
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
+use rusqlite::TransactionBehavior;
+use rusqlite::params;
+use std::marker::PhantomData;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
 pub(crate) struct PreparedSubmission<'a> {
@@ -146,7 +152,7 @@ impl InputCommandHost for NativeInputHost {
         let result = (|| {
             let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)?;
             let mut client =
-                super::control::ControlClient::connect(&paths.control_socket, deadline)?;
+                crate::runtime::control::ControlClient::connect(&paths.control_socket, deadline)?;
             client.exchange_input(request, deadline)
         })();
         result.map_err(host_failure)
@@ -208,9 +214,10 @@ pub(crate) fn find_submission(
         with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction()?;
             let run = selected_run(&tx, identity.run_id)?;
-            ensure(
-                run.database_identity_json == identity.database_identity_json,
-                "submission database identity mismatch",
+            crate::runtime::artifacts::validate_database(
+                &run.database_identity_json,
+                &identity.database_identity_json,
+                || error("submission database identity mismatch"),
             )?;
             let retained = storage::find_input(&tx, identity.run_id, &request.operation_key)?;
             if let Some(input) = &retained {
@@ -361,24 +368,15 @@ pub(crate) fn validate_submission_target(
         "file-backed input database required",
         "submission connection and configured database differ",
     )?;
-    let current = storage::validate_owner(conn, &expected.owner())?;
-    ensure(
-        stable_run_identity(&current) == stable_run_identity(expected)
-            && current.status == RunStatus::Running
-            && current.owner_kind == OwnerKind::Runner
-            && current.native_version == expected.native_version,
-        "submission run identity changed",
-    )?;
-    ensure(
-        crate::broker::active_member_fleet(conn, expected.member_id)? == Some(expected.fleet_id),
-        "input member is inactive",
-    )?;
-    let member = crate::broker::get_member(conn, expected.member_id, expected.fleet_id)?
-        .ok_or_else(|| error("input member is absent"))?;
-    ensure(
-        member.kind == crate::broker::MemberKind::Member
-            && member.placement.as_ref() == Some(placement),
-        "submission member placement changed",
+    let current = revalidate_run_snapshot(
+        conn,
+        expected,
+        placement,
+        SnapshotPolicy::Live,
+        SnapshotMessages {
+            run_changed: "submission run identity changed",
+            placement_changed: "submission member placement changed",
+        },
     )?;
     validate_run_paths(conn, &current)?;
     Ok(())
@@ -611,14 +609,15 @@ fn validate_receipt_target(
     placement: &Placement,
 ) -> Result<()> {
     validate_receipt_database(conn, settings)?;
-    let current = storage::validate_owner(conn, &expected.owner())?;
-    ensure(
-        stable_run_identity(&current) == stable_run_identity(expected),
-        "receipt run identity changed",
-    )?;
-    ensure(
-        super::input_recovery::receipt_placement(conn, &current)?.as_ref() == Some(placement),
-        "receipt member placement changed",
+    let current = revalidate_run_snapshot(
+        conn,
+        expected,
+        placement,
+        SnapshotPolicy::HistoricalReceipt,
+        SnapshotMessages {
+            run_changed: "receipt run identity changed",
+            placement_changed: "receipt member placement changed",
+        },
     )?;
     validate_run_paths(conn, &current).map(|_| ())
 }
@@ -682,7 +681,7 @@ fn reconcile_ordinary_with_host(
         disposition,
         evidence_ref,
         deadline,
-        (host, &mut super::recovery::NativeRecoveryHost),
+        (host, &mut crate::runtime::recovery::NativeRecoveryHost),
     )
 }
 
@@ -728,7 +727,7 @@ fn reconcile_receipt_with_hosts(
                 )?;
                 None
             } else {
-                super::input_recovery::receipt_placement(&tx, &run)?
+                crate::runtime::input_client::receipt_placement(&tx, &run)?
             };
             deadline.remaining()?;
             tx.commit()?;
@@ -738,7 +737,7 @@ fn reconcile_receipt_with_hosts(
             return Ok(original);
         }
         let Some(placement) = placement else {
-            return super::input_recovery::reconcile_input_with_host(
+            return crate::runtime::input_client::reconcile_input_with_host(
                 conn,
                 settings,
                 &original,
@@ -765,13 +764,7 @@ fn reconcile_receipt_with_hosts(
                     validate_receipt_target(&tx, settings, &run, &placement)?;
                     let input = storage::get_input(&tx, input_id)?;
                     ensure(
-                        input.run_id == original.run_id
-                            && input.operation_key == original.operation_key
-                            && input.kind == original.kind
-                            && input.payload_digest == original.payload_digest
-                            && input.message_id == original.message_id
-                            && input.created_at == original.created_at
-                            && input.permission_response == original.permission_response,
+                        input.same_identity(&original),
                         "receipt immutable input identity changed",
                     )?;
                     deadline.remaining()?;
@@ -831,7 +824,7 @@ fn reconcile_receipt_with_hosts(
         match live {
             Ok(settled) => Ok(settled),
             Err(original_failure) => {
-                let guard = match super::input_recovery::ExclusiveReceiptGuard::acquire(
+                let guard = match crate::runtime::input_client::ExclusiveReceiptGuard::acquire(
                     conn,
                     settings,
                     &original,
@@ -914,12 +907,12 @@ fn selected_run(conn: &Connection, run_id: i64) -> Result<RunRecord> {
 fn selected_run_reporting(conn: &Connection, run_id: i64, field: &str) -> Result<RunRecord> {
     let identity = storage::database_identity(conn)?;
     let run = storage::get_run(conn, run_id)?;
-    if identity != run.database_identity_json {
-        return Err(CafleetError::InvalidStoredValue {
+    crate::runtime::artifacts::validate_database(&identity, &run.database_identity_json, || {
+        CafleetError::InvalidStoredValue {
             field: field.into(),
             value: "selected database identity mismatch".into(),
-        });
-    }
+        }
+    })?;
     Ok(run)
 }
 fn association(
@@ -1077,7 +1070,8 @@ fn prepare_response(
                 input.expected_owner_epoch == run.owner_epoch,
                 "permission owner epoch changed",
             )?;
-            let original = super::input::inspection_association(&tx, &run, &input.inspection())?;
+            let original =
+                crate::runtime::input::inspection_association(&tx, &run, &input.inspection())?;
             ResponsePreparation::Live(Box::new((run, original, retained)))
         };
         deadline.remaining()?;
@@ -1125,7 +1119,8 @@ pub(crate) fn respond_permission_with_host(
             with_database_budget(conn, deadline, |conn| {
                 let tx = conn.transaction()?;
                 validate_submission_target(&tx, settings, &run, &placement)?;
-                let view = super::input::inspection_association(&tx, &run, &input.inspection())?;
+                let view =
+                    crate::runtime::input::inspection_association(&tx, &run, &input.inspection())?;
                 ensure(
                     same_association(&view, &original),
                     "permission response association changed",
@@ -1255,7 +1250,7 @@ fn inspect_permission_with_host(
             context.run_id = Some(run.run_id);
             let placement = permission_placement(&tx, &run)?;
             validate_submission_target(&tx, settings, &run, &placement)?;
-            let view = super::input::inspection_association(&tx, &run, input)?;
+            let view = crate::runtime::input::inspection_association(&tx, &run, input)?;
             deadline.remaining()?;
             tx.commit()?;
             Ok((run, placement, view))
@@ -1271,7 +1266,7 @@ fn inspect_permission_with_host(
             with_database_budget(conn, deadline, |conn| {
                 let tx = conn.transaction()?;
                 validate_submission_target(&tx, settings, &run, &placement)?;
-                let view = super::input::inspection_association(&tx, &run, input)?;
+                let view = crate::runtime::input::inspection_association(&tx, &run, input)?;
                 ensure(
                     same_association(&view, &original),
                     "permission inspection association changed",
@@ -1314,7 +1309,7 @@ fn inspect_permission_with_host(
                 && reply.evidence["screen_seq"].as_u64() == Some(reply.output_seq),
             "permission inspection evidence identity mismatch",
         )?;
-        let missing = super::input::inspection_missing_evidence(&reply.evidence)?;
+        let missing = crate::runtime::input::inspection_missing_evidence(&reply.evidence)?;
         ensure(
             reply
                 .missing_evidence
@@ -1355,13 +1350,410 @@ fn inspect_permission_with_host(
     result.map_err(|source| context.failure(source))
 }
 
+pub(super) enum SnapshotPolicy {
+    Live,
+    HistoricalReceipt,
+}
+
+pub(super) struct SnapshotMessages {
+    pub(super) run_changed: &'static str,
+    pub(super) placement_changed: &'static str,
+}
+
+pub(super) fn revalidate_run_snapshot(
+    conn: &Connection,
+    expected: &RunRecord,
+    placement: &Placement,
+    policy: SnapshotPolicy,
+    messages: SnapshotMessages,
+) -> Result<RunRecord> {
+    let current = storage::validate_owner(conn, &expected.owner())?;
+    match policy {
+        SnapshotPolicy::Live => {
+            ensure(
+                stable_run_identity(&current) == stable_run_identity(expected)
+                    && current.status == RunStatus::Running
+                    && current.owner_kind == OwnerKind::Runner
+                    && current.native_version == expected.native_version,
+                messages.run_changed,
+            )?;
+            ensure(
+                crate::broker::active_member_fleet(conn, expected.member_id)?
+                    == Some(expected.fleet_id),
+                "input member is inactive",
+            )?;
+            let member = crate::broker::get_member(conn, expected.member_id, expected.fleet_id)?
+                .ok_or_else(|| error("input member is absent"))?;
+            ensure(
+                member.kind == crate::broker::MemberKind::Member
+                    && member.placement.as_ref() == Some(placement),
+                messages.placement_changed,
+            )?;
+        }
+        SnapshotPolicy::HistoricalReceipt => {
+            ensure(
+                stable_run_identity(&current) == stable_run_identity(expected),
+                messages.run_changed,
+            )?;
+            ensure(
+                receipt_placement(conn, &current)?.as_ref() == Some(placement),
+                messages.placement_changed,
+            )?;
+        }
+    }
+    Ok(current)
+}
+
+pub(super) fn receipt_placement(conn: &Connection, run: &RunRecord) -> Result<Option<Placement>> {
+    let (status, deleted): (MemberStatus, Option<String>) = conn
+        .query_row(
+            "SELECT m.status,f.deleted_at FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id WHERE m.member_id=?1 AND m.fleet_id=?2",
+            params![run.member_id, run.fleet_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+    let placement = crate::runtime::artifacts::placement_of(conn, run.member_id)?;
+    ensure(
+        placement.is_some() || status != MemberStatus::Active || deleted.is_some(),
+        "active receipt member requires its recorded placement",
+    )?;
+    Ok(placement)
+}
+
+fn validate_snapshot(
+    conn: &Connection,
+    settings: &Settings,
+    expected_input: &InputOperation,
+    expected_run: &RunRecord,
+    placement: Option<&Placement>,
+    held: Option<&PaneLock>,
+) -> Result<RunRecord> {
+    ensure(
+        placement.is_some() == held.is_some(),
+        "receipt placement and pane guard must form a matching pair",
+    )?;
+    if let (Some(placement), Some(held)) = (placement, held) {
+        held.validate_binding(&settings.database_url, placement)?;
+    }
+    crate::runtime::input_client::validate_receipt_database(conn, settings)?;
+    let current = storage::validate_owner(conn, &expected_run.owner())?;
+    ensure(
+        stable_run_identity(&current) == stable_run_identity(expected_run),
+        "exclusive receipt run identity changed",
+    )?;
+    ensure(
+        receipt_placement(conn, &current)?.as_ref() == placement,
+        "exclusive receipt placement changed",
+    )?;
+    let input = storage::get_input(conn, expected_input.input_id)?;
+    ensure(
+        input.same_identity(expected_input)
+            && input.run_id == expected_run.run_id
+            && input.state == expected_input.state,
+        "exclusive receipt input identity or expected state changed",
+    )?;
+    Ok(current)
+}
+
+fn exclude_previous_owner(
+    run: &RunRecord,
+    placement: Option<&Placement>,
+    deadline: Instant,
+    host: &mut impl RecoveryHost,
+) -> Result<()> {
+    let process = ProcessIdentity {
+        pid: run.owner_pid,
+        start_identity: run.owner_start_identity.clone(),
+    };
+    ensure(
+        matches!(
+            host.process_evidence(&process, deadline)?,
+            ProcessEvidence::Terminated
+        ),
+        "exclusive receipt owner termination is unproven",
+    )?;
+    check_deadline(Instant::now(), deadline)?;
+    ensure(
+        matches!(
+            host.startup_process_evidence(run, placement, deadline)?,
+            ProcessEvidence::Terminated
+        ),
+        "exclusive receipt startup termination is unproven",
+    )?;
+    check_deadline(Instant::now(), deadline)?;
+    match host.health(run, deadline)? {
+        RecoveryHealth::Matching(health) => {
+            health.validate(run)?;
+            return Err(error("exclusive receipt owner is live"));
+        }
+        RecoveryHealth::Unavailable(reason) | RecoveryHealth::Mismatched(reason) => {
+            ensure(
+                !reason.is_empty(),
+                "receipt health uncertainty requires a diagnostic",
+            )?;
+        }
+    }
+    check_deadline(Instant::now(), deadline)
+}
+
+pub(crate) struct ExclusiveReceiptGuard<'a> {
+    settings: &'a Settings,
+    input: &'a InputOperation,
+    run: &'a RunRecord,
+    placement: Option<&'a Placement>,
+    held: Option<&'a PaneLock>,
+    lock: Arc<RunLock>,
+    process: ProcessIdentity,
+    deadline: Instant,
+    local: PhantomData<Rc<()>>,
+}
+
+impl<'a> ExclusiveReceiptGuard<'a> {
+    pub(super) fn acquire(
+        conn: &mut Connection,
+        settings: &'a Settings,
+        input: &'a InputOperation,
+        run: &'a RunRecord,
+        pane: (Option<&'a Placement>, Option<&'a PaneLock>),
+        deadline: Instant,
+        host: &mut impl RecoveryHost,
+    ) -> Result<Self> {
+        let deadline = bounded_by_inherited(conn, deadline);
+        check_deadline(Instant::now(), deadline)?;
+        ensure(
+            input.input_id > 0,
+            "positive exclusive receipt input ID required",
+        )?;
+        ensure(
+            input.state != InputState::Settled,
+            "exclusive receipt requires an unresolved input",
+        )?;
+        with_database_deadline(conn, deadline, |conn| {
+            let tx = conn.transaction()?;
+            validate_snapshot(&tx, settings, input, run, pane.0, pane.1)?;
+            check_deadline(Instant::now(), deadline)?;
+            tx.commit().map_err(crate::error::CafleetError::from)
+        })?;
+        host.checkpoint(RecoveryBoundary::AfterSnapshot, run, deadline)?;
+        check_deadline(Instant::now(), deadline)?;
+        let lock = with_database_deadline(conn, deadline, |conn| {
+            validate_snapshot(conn, settings, input, run, pane.0, pane.1)?;
+            RunLock::acquire(conn, &run.owner())?
+                .ok_or_else(|| error("exclusive receipt original run lock is held"))
+        })?;
+        exclude_previous_owner(run, pane.0, deadline, host)?;
+        let process = host.current_process()?;
+        check_deadline(Instant::now(), deadline)?;
+        Ok(Self {
+            settings,
+            input,
+            run,
+            placement: pane.0,
+            held: pane.1,
+            lock: Arc::new(lock),
+            process,
+            deadline,
+            local: PhantomData,
+        })
+    }
+
+    pub(crate) fn zero_byte_retirement(
+        &self,
+        owner: &RunOwner,
+        input_id: i64,
+        interaction_id: i64,
+    ) -> Result<ZeroByteRetirement<'_>> {
+        ZeroByteRetirement::from_exclusive_guard(self, owner, input_id, interaction_id)
+    }
+
+    pub(crate) fn retirement_binding(
+        &self,
+        owner: &RunOwner,
+        input_id: i64,
+        interaction_id: i64,
+    ) -> Result<&InputOperation> {
+        check_deadline(Instant::now(), self.deadline)?;
+        let audit = self
+            .input
+            .permission_response
+            .as_ref()
+            .ok_or_else(|| error("exclusive permission response audit required"))?;
+        ensure(
+            self.input.kind == InputKind::PermissionResponse
+                && self.input.state == InputState::Ready
+                && self.input.input_id == input_id
+                && self.input.run_id == self.run.run_id
+                && audit.metadata.interaction_id == interaction_id,
+            "exclusive proof requires the exact durable Ready permission input",
+        )?;
+        let mut expected_owner = self.run.owner();
+        expected_owner.owner_epoch = expected_owner
+            .owner_epoch
+            .checked_add(1)
+            .ok_or_else(|| error("owner epoch exhausted"))?;
+        expected_owner.owner_kind = OwnerKind::Reconciler;
+        expected_owner.owner_pid = self.process.pid;
+        expected_owner.owner_start_identity = self.process.start_identity.clone();
+        ensure(
+            *owner == expected_owner,
+            "exclusive proof reconciler identity changed",
+        )?;
+        Ok(self.input)
+    }
+
+    fn validate_locked_snapshot(
+        &self,
+        conn: &Connection,
+        input: &InputOperation,
+        run: &RunRecord,
+    ) -> Result<()> {
+        let checked =
+            validate_snapshot(conn, self.settings, input, run, self.placement, self.held)?;
+        ensure(
+            checked == *run,
+            "receipt run history changed while ownership was held",
+        )?;
+        self.lock.validate(conn, &run.owner())
+    }
+
+    pub(super) fn settle(
+        self,
+        conn: &mut Connection,
+        disposition: InputDisposition,
+        evidence_ref: &str,
+        host: &mut impl RecoveryHost,
+    ) -> Result<InputOperation> {
+        ensure(
+            !evidence_ref.trim().is_empty(),
+            "nonempty reconciliation evidence required",
+        )?;
+        host.checkpoint(RecoveryBoundary::BeforeTakeover, self.run, self.deadline)?;
+        check_deadline(Instant::now(), self.deadline)?;
+        with_database_deadline(conn, self.deadline, |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            check_deadline(Instant::now(), self.deadline)?;
+            let current = validate_snapshot(
+                &tx,
+                self.settings,
+                self.input,
+                self.run,
+                self.placement,
+                self.held,
+            )?;
+            self.lock.validate(&tx, &current.owner())?;
+            exclude_previous_owner(self.run, self.placement, self.deadline, host)?;
+            ensure(
+                host.current_process()? == self.process,
+                "receipt reconciler process identity changed",
+            )?;
+            check_deadline(Instant::now(), self.deadline)?;
+            self.validate_locked_snapshot(&tx, self.input, &current)?;
+            check_deadline(Instant::now(), self.deadline)?;
+            let epoch = current
+                .owner_epoch
+                .checked_add(1)
+                .ok_or_else(|| error("owner epoch exhausted"))?;
+            let changed = tx.execute(
+                "UPDATE member_runs SET owner_epoch=?1,owner_kind='reconciler',owner_pid=?2,owner_start_identity=?3 WHERE run_id=?4 AND owner_epoch=?5 AND owner_kind=?6 AND owner_pid=?7 AND owner_start_identity=?8",
+                params![epoch,self.process.pid,self.process.start_identity,current.run_id,current.owner_epoch,current.owner_kind.as_str(),current.owner_pid,current.owner_start_identity],
+            )?;
+            ensure(changed == 1, "exclusive receipt ownership CAS failed")?;
+            let mut expected = current;
+            expected.owner_epoch = epoch;
+            expected.owner_kind = OwnerKind::Reconciler;
+            expected.owner_pid = self.process.pid;
+            expected.owner_start_identity = self.process.start_identity.clone();
+            let owned = storage::get_run(&tx, self.run.run_id)?;
+            ensure(
+                owned == expected,
+                "receipt ownership CAS changed run history",
+            )?;
+            host.checkpoint(RecoveryBoundary::AfterTakeover, &owned, self.deadline)?;
+            check_deadline(Instant::now(), self.deadline)?;
+            exclude_previous_owner(self.run, self.placement, self.deadline, host)?;
+            self.validate_locked_snapshot(&tx, self.input, &owned)?;
+            check_deadline(Instant::now(), self.deadline)?;
+            let proof = if self.input.kind == InputKind::PermissionResponse
+                && self.input.state == InputState::Ready
+                && disposition == InputDisposition::NotSubmitted
+            {
+                let audit = self
+                    .input
+                    .permission_response
+                    .as_ref()
+                    .expect("validated permission input retains its audit");
+                Some(self.zero_byte_retirement(
+                    &owned.owner(),
+                    self.input.input_id,
+                    audit.metadata.interaction_id,
+                )?)
+            } else {
+                None
+            };
+            let settled = storage::settle_any_input_in_transaction(
+                &tx,
+                &owned.owner(),
+                self.input,
+                disposition,
+                evidence_ref,
+                proof.as_ref(),
+                self.deadline,
+            )?;
+            check_deadline(Instant::now(), self.deadline)?;
+            self.validate_locked_snapshot(&tx, &settled, &owned)?;
+            check_deadline(Instant::now(), self.deadline)?;
+            tx.commit()?;
+            Ok(settled)
+        })
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "receipt ownership binds the explicit fixed snapshot, borrowed guard and settlement inputs"
+)]
+pub(crate) fn reconcile_input_with_host(
+    conn: &mut Connection,
+    settings: &Settings,
+    expected_input: &InputOperation,
+    expected_run: &RunRecord,
+    expected_placement: Option<&Placement>,
+    held: Option<&PaneLock>,
+    disposition: InputDisposition,
+    evidence_ref: &str,
+    deadline: Instant,
+    host: &mut impl RecoveryHost,
+) -> std::result::Result<InputOperation, InputFailure> {
+    let result = (|| {
+        let guard = ExclusiveReceiptGuard::acquire(
+            conn,
+            settings,
+            expected_input,
+            expected_run,
+            (expected_placement, held),
+            deadline,
+            host,
+        )?;
+        guard.settle(conn, disposition, evidence_ref, host)
+    })();
+    result.map_err(|source| InputFailure {
+        source,
+        run_id: Some(expected_input.run_id),
+        interaction_id: expected_input
+            .permission_response
+            .as_ref()
+            .map(|audit| audit.metadata.interaction_id),
+        input_id: Some(expected_input.input_id),
+        operation_key: Some(expected_input.operation_key.clone()),
+    })
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::broker::runtime as storage;
     use crate::broker::runtime::*;
     use crate::config::Settings;
-    use crate::runtime::runner::test_support::Fixture;
-    use crate::runtime::runner::*;
+    use crate::runtime::test_support::Fixture;
+    use crate::runtime::*;
     use serde_json::json;
     use std::sync::Arc;
     use std::time::Duration;
@@ -1601,18 +1993,157 @@ pub(crate) mod test_support {
             }
         }
     }
+
+    use crate::broker::Placement;
+
+    use crate::time::Deadline;
+
+    pub(crate) enum Termination {
+        Terminated,
+        Alive,
+        Unknown,
+    }
+
+    pub(crate) type BoundaryAction =
+        Box<dyn FnMut(RecoveryBoundary, &RunRecord, Instant) -> Result<()>>;
+
+    pub(crate) struct TypedHost {
+        pub(crate) until: Instant,
+        pub(crate) owner: Termination,
+        pub(crate) startup: Termination,
+        pub(crate) matching_health: bool,
+        pub(crate) calls: Vec<&'static str>,
+        pub(crate) processes: Vec<ProcessIdentity>,
+        pub(crate) startups: Vec<(RunRecord, Option<Placement>)>,
+        pub(crate) action: Option<BoundaryAction>,
+    }
+
+    impl TypedHost {
+        pub(crate) fn new(until: Instant) -> Self {
+            Self {
+                until,
+                owner: Termination::Terminated,
+                startup: Termination::Terminated,
+                matching_health: false,
+                calls: Vec::new(),
+                processes: Vec::new(),
+                startups: Vec::new(),
+                action: None,
+            }
+        }
+
+        pub(crate) fn check(&self, until: Instant) -> Result<()> {
+            assert_eq!(
+                until, self.until,
+                "evidence uses the original effective bound"
+            );
+            Deadline::until(until).remaining().map(|_| ())
+        }
+
+        pub(crate) fn evidence(value: &Termination) -> ProcessEvidence {
+            match value {
+                Termination::Terminated => ProcessEvidence::Terminated,
+                Termination::Alive => ProcessEvidence::Alive,
+                Termination::Unknown => {
+                    ProcessEvidence::Unknown("owned process-set uncertainty".into())
+                }
+            }
+        }
+    }
+
+    impl RecoveryHost for TypedHost {
+        fn current_process(&mut self) -> Result<ProcessIdentity> {
+            self.calls.push("current");
+            self.check(self.until)?;
+            ProcessIdentity::current()
+        }
+
+        fn process_evidence(
+            &mut self,
+            process: &ProcessIdentity,
+            until: Instant,
+        ) -> Result<ProcessEvidence> {
+            self.check(until)?;
+            self.calls.push("owner");
+            self.processes.push(process.clone());
+            Ok(Self::evidence(&self.owner))
+        }
+
+        fn startup_process_evidence(
+            &mut self,
+            run: &RunRecord,
+            placement: Option<&Placement>,
+            until: Instant,
+        ) -> Result<ProcessEvidence> {
+            self.check(until)?;
+            self.calls.push("startup");
+            self.startups.push((run.clone(), placement.cloned()));
+            Ok(Self::evidence(&self.startup))
+        }
+
+        fn health(&mut self, run: &RunRecord, until: Instant) -> Result<RecoveryHealth> {
+            self.check(until)?;
+            self.calls.push("health");
+            if self.matching_health {
+                Ok(RecoveryHealth::Matching(HealthSnapshot {
+                    identity: ControlIdentity::from_run(run),
+                    runner: ProcessIdentity {
+                        pid: run
+                            .runner_pid
+                            .expect("fixture has a real registered runner identity"),
+                        start_identity: run.runner_start_identity.clone().unwrap(),
+                    },
+                    child: None,
+                    output_seq: 1,
+                    observation: None,
+                }))
+            } else {
+                Ok(RecoveryHealth::Unavailable(
+                    "owned receipt endpoint unavailable".into(),
+                ))
+            }
+        }
+
+        fn cleanup_owned(&mut self, _: &RunRecord, _: ShutdownClock) -> Result<ShutdownOutcome> {
+            panic!("receipt-only settlement has no child cleanup capability")
+        }
+
+        fn unlink_descriptor(&mut self, _: &std::path::Path, _: Instant) -> Result<()> {
+            panic!("receipt-only settlement preserves its descriptor")
+        }
+
+        fn checkpoint(
+            &mut self,
+            boundary: RecoveryBoundary,
+            run: &RunRecord,
+            until: Instant,
+        ) -> Result<()> {
+            self.check(until)?;
+            let name = match boundary {
+                RecoveryBoundary::AfterSnapshot => "snapshot",
+                RecoveryBoundary::BeforeTakeover => "before",
+                RecoveryBoundary::AfterTakeover => "after",
+                _ => panic!("receipt-only settlement uses no replay/cleanup boundary"),
+            };
+            self.calls.push(name);
+            if let Some(action) = &mut self.action {
+                action(boundary, run, until)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::runner::input_client::*;
-    use crate::runtime::runner::service::test_support::ServiceFixture;
-    use crate::runtime::runner::service::test_support::input_service::input_service_barrier;
-    use crate::runtime::runner::service::test_support::input_service::input_service_composer;
-    use crate::runtime::runner::service::test_support::input_service::input_service_records;
-    use crate::runtime::runner::service::test_support::input_service::wait_input_service_record;
-    use crate::runtime::runner::service::test_support::input_service::with_input_service;
-    use crate::runtime::runner::test_support::Fixture;
+    use crate::runtime::input_client::*;
+    use crate::runtime::service::test_support::ServiceFixture;
+    use crate::runtime::service::test_support::input_service::input_service_barrier;
+    use crate::runtime::service::test_support::input_service::input_service_composer;
+    use crate::runtime::service::test_support::input_service::input_service_records;
+    use crate::runtime::service::test_support::input_service::wait_input_service_record;
+    use crate::runtime::service::test_support::input_service::with_input_service;
+    use crate::runtime::test_support::Fixture;
     use std::io::Write;
     use std::net::Shutdown;
     use std::time::Duration;
@@ -1723,7 +2254,7 @@ mod tests {
     #[test]
     fn permission_inspection_actual_service_projects_current_unsupported_request_without_answering()
     {
-        use crate::runtime::runner::observation::test_support::synthetic;
+        use crate::runtime::observation::test_support::synthetic;
 
         let mut fixture = ServiceFixture::configured(false, synthetic);
         fixture.start_running();
@@ -1791,8 +2322,8 @@ mod tests {
 
     #[test]
     fn permission_inspection_reply_binds_backend_native_version_and_tested_capability_fields() {
-        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
-        use crate::runtime::runner::observation::test_support::synthetic;
+        use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
+        use crate::runtime::observation::test_support::synthetic;
 
         let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
             synthetic(fixture, spec);
@@ -1900,8 +2431,8 @@ mod tests {
 
     #[test]
     fn permission_inspection_client_uses_real_guard_original_sql_bound_and_validates_live_reply() {
-        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
-        use crate::runtime::runner::observation::test_support::synthetic;
+        use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
+        use crate::runtime::observation::test_support::synthetic;
 
         let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
             synthetic(fixture, spec);
@@ -2053,8 +2584,8 @@ mod tests {
 
     #[test]
     fn permission_response_history_honors_expired_inherited_budget_before_sql_or_live_calls() {
-        use crate::runtime::runner::input_client::test_support::Case;
-        use crate::runtime::runner::input_client::test_support::Retained;
+        use crate::runtime::input_client::test_support::Case;
+        use crate::runtime::input_client::test_support::Retained;
         use rusqlite::hooks::AuthAction;
         use rusqlite::hooks::AuthContext;
         use rusqlite::hooks::Authorization;
@@ -2170,9 +2701,9 @@ mod tests {
     }
 
     fn response_services(fixture: &mut Fixture, spec: &mut SpawnSpec) {
-        crate::runtime::runner::observation::test_support::synthetic(fixture, spec);
+        crate::runtime::observation::test_support::synthetic(fixture, spec);
         let mut catalog =
-            crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition();
+            crate::coding_agent::catalog::test_support::inspection_fixture_definition();
         catalog["profiles"][0]["capabilities"]["answers"][0]["stages"] = serde_json::json!([{
             "bytes_hex":"790d","required_rule_id":"synthetic-permission","required_choice_id":"allow-once"
         }]);
@@ -2705,9 +3236,9 @@ mod tests {
 
     #[test]
     fn permission_receipt_live_failure_preserves_original_error_without_exclusive_effects() {
-        use crate::runtime::runner::input_client::test_support::Case;
-        use crate::runtime::runner::input_client::test_support::Retained;
-        use crate::runtime::runner::input_recovery::test_support::TypedHost;
+        use crate::runtime::input_client::test_support::Case;
+        use crate::runtime::input_client::test_support::Retained;
+        use crate::runtime::input_client::test_support::TypedHost;
 
         let mut case = Case::new(Retained::Accepted);
         let original = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
@@ -2773,9 +3304,9 @@ mod tests {
 
     #[test]
     fn exclusive_permission_receipt_client_preserves_uncertain_claim_and_continuous_guard() {
-        use crate::runtime::runner::input_client::test_support::Case;
-        use crate::runtime::runner::input_client::test_support::Retained;
-        use crate::runtime::runner::input_recovery::test_support::TypedHost;
+        use crate::runtime::input_client::test_support::Case;
+        use crate::runtime::input_client::test_support::Retained;
+        use crate::runtime::input_client::test_support::TypedHost;
 
         for absent in [false, true] {
             let mut case = Case::new(Retained::Uncertain);
@@ -2981,8 +3512,8 @@ mod tests {
 
     #[test]
     fn exclusive_receipt_client_keeps_one_guard_original_row_and_error_across_live_fallback() {
-        use crate::runtime::runner::input_recovery::test_support::Termination;
-        use crate::runtime::runner::input_recovery::test_support::TypedHost;
+        use crate::runtime::input_client::test_support::Termination;
+        use crate::runtime::input_client::test_support::TypedHost;
 
         for mode in [
             "eligible",
@@ -3279,9 +3810,7 @@ mod tests {
             );
             let health = match self.health_reply.take() {
                 Some(health) => health,
-                None => {
-                    crate::runtime::runner::probe_health(run, deadline).map_err(host_failure)?
-                }
+                None => crate::runtime::probe_health(run, deadline).map_err(host_failure)?,
             };
             if let Some(callback) = &mut self.after_health {
                 callback();
@@ -3330,8 +3859,7 @@ mod tests {
             }
             self.requests.push(
                 serde_json::from_slice(
-                    &crate::runtime::runner::input_protocol::encode_input_request(request).unwrap()
-                        [4..],
+                    &crate::runtime::control::encode_input_request(request).unwrap()[4..],
                 )
                 .unwrap(),
             );
@@ -3376,19 +3904,17 @@ mod tests {
             }
             let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)
                 .map_err(host_failure)?;
-            let mut client = crate::runtime::runner::control::ControlClient::connect(
-                &paths.control_socket,
-                deadline,
-            )
-            .map_err(host_failure)?;
+            let mut client =
+                crate::runtime::control::ControlClient::connect(&paths.control_socket, deadline)
+                    .map_err(host_failure)?;
             if matches!(self.reply, ReplyMode::Disconnected) {
                 client
                     .stream
                     .shutdown(Shutdown::Read)
                     .map_err(io_error)
                     .map_err(host_failure)?;
-                let bytes = crate::runtime::runner::input_protocol::encode_input_request(request)
-                    .map_err(host_failure)?;
+                let bytes =
+                    crate::runtime::control::encode_input_request(request).map_err(host_failure)?;
                 let mut offset = 0;
                 while offset < bytes.len() {
                     check_deadline(Instant::now(), deadline).map_err(host_failure)?;
@@ -3401,8 +3927,7 @@ mod tests {
                                 std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
                             ) =>
                         {
-                            crate::runtime::runner::control::pause(deadline)
-                                .map_err(host_failure)?;
+                            crate::runtime::control::pause(deadline).map_err(host_failure)?;
                         }
                         Err(cause) => return Err(host_failure(io_error(cause))),
                     }
@@ -3423,7 +3948,7 @@ mod tests {
                     if retained.is_some_and(|input| input.state == InputState::Accepted) {
                         break;
                     }
-                    crate::runtime::runner::control::pause(deadline).map_err(host_failure)?;
+                    crate::runtime::control::pause(deadline).map_err(host_failure)?;
                 }
                 drop(client);
                 return Err(host_failure(CafleetError::App(
@@ -3632,8 +4157,8 @@ mod tests {
         }
         case.assert_unchanged(changes);
 
-        use crate::runtime::runner::input_client::test_support::Case;
-        use crate::runtime::runner::input_client::test_support::Retained;
+        use crate::runtime::input_client::test_support::Case;
+        use crate::runtime::input_client::test_support::Retained;
         let mut permission = Case::new(Retained::Submitted);
         let audit = storage::get_permission_response(&permission.fixture.conn, permission.input_id)
             .unwrap();
@@ -4114,7 +4639,7 @@ mod tests {
         let control = PreparedSubmission::new(
             &case.request,
             control_deadline,
-            &mut crate::runtime::runner::RealInputDeadlineClock,
+            &mut crate::runtime::RealInputDeadlineClock,
         )
         .unwrap();
         let result = submit_wrapped_input_under_pane_lock_with_host(
@@ -4135,7 +4660,7 @@ mod tests {
         let expired_attempt = PreparedSubmission::new(
             &case.request,
             original,
-            &mut crate::runtime::runner::RealInputDeadlineClock,
+            &mut crate::runtime::RealInputDeadlineClock,
         )
         .unwrap();
         std::thread::sleep(
@@ -4182,7 +4707,7 @@ mod tests {
         let active_attempt = PreparedSubmission::new(
             &case.request,
             original_active,
-            &mut crate::runtime::runner::RealInputDeadlineClock,
+            &mut crate::runtime::RealInputDeadlineClock,
         )
         .unwrap();
         let inherited = Deadline::until(Instant::now() + Duration::from_secs(2));
@@ -4360,7 +4885,7 @@ mod tests {
             let attempt = PreparedSubmission::new(
                 &request,
                 until,
-                &mut crate::runtime::runner::RealInputDeadlineClock,
+                &mut crate::runtime::RealInputDeadlineClock,
             )
             .unwrap();
             let expiration = attempt.expiration.monotonic_ns();
@@ -4508,7 +5033,7 @@ mod tests {
             let attempt = PreparedSubmission::new(
                 &request,
                 until,
-                &mut crate::runtime::runner::RealInputDeadlineClock,
+                &mut crate::runtime::RealInputDeadlineClock,
             )
             .unwrap();
             let held = PaneLock::try_acquire(&settings.database_url, &placement)
@@ -4550,7 +5075,7 @@ mod tests {
             let attempt = PreparedSubmission::new(
                 &request,
                 until,
-                &mut crate::runtime::runner::RealInputDeadlineClock,
+                &mut crate::runtime::RealInputDeadlineClock,
             )
             .unwrap();
             let held = PaneLock::try_acquire(&settings.database_url, &placement)
@@ -4928,8 +5453,8 @@ mod tests {
     }
 
     mod prepared_submission {
-        use crate::runtime::runner::input_client::tests::*;
-        use crate::runtime::runner::input_clock::test_support::*;
+        use crate::runtime::input::test_support::*;
+        use crate::runtime::input_client::tests::*;
 
         fn request() -> SubmitInput {
             SubmitInput {
@@ -4988,9 +5513,9 @@ mod tests {
         use crate::db::with_database_budget;
         use crate::error::CafleetError;
         use crate::pane_lock::PaneLock;
-        use crate::runtime::runner::input_client::test_support::*;
-        use crate::runtime::runner::test_support::Fixture;
-        use crate::runtime::runner::*;
+        use crate::runtime::input_client::test_support::*;
+        use crate::runtime::test_support::Fixture;
+        use crate::runtime::*;
         use crate::time::Deadline;
         use rusqlite::Connection;
         use serde_json::json;
@@ -5022,9 +5547,9 @@ mod tests {
         }
 
         mod inspect_errors {
-            use crate::runtime::runner::PermissionInspectInput;
-            use crate::runtime::runner::input_client::tests::permission_history::*;
-            use crate::runtime::runner::inspect_permission;
+            use crate::runtime::PermissionInspectInput;
+            use crate::runtime::input_client::tests::permission_history::*;
+            use crate::runtime::inspect_permission;
 
             fn opened(case: &Case) -> (i64, i64) {
                 case.fixture
@@ -5170,16 +5695,16 @@ mod tests {
         }
 
         mod entry {
-            use crate::runtime::runner::InputCommandHost;
-            use crate::runtime::runner::InputControlReply;
-            use crate::runtime::runner::InputControlRequest;
-            use crate::runtime::runner::InputFailure;
-            use crate::runtime::runner::PermissionRespondInput;
-            use crate::runtime::runner::PermissionResponseResult;
-            use crate::runtime::runner::SubmissionStage;
-            use crate::runtime::runner::SubmissionStatus;
-            use crate::runtime::runner::input_client::tests::permission_history::*;
-            use crate::runtime::runner::respond_permission_with_host;
+            use crate::runtime::InputCommandHost;
+            use crate::runtime::InputControlReply;
+            use crate::runtime::InputControlRequest;
+            use crate::runtime::InputFailure;
+            use crate::runtime::PermissionRespondInput;
+            use crate::runtime::PermissionResponseResult;
+            use crate::runtime::SubmissionStage;
+            use crate::runtime::SubmissionStatus;
+            use crate::runtime::input_client::tests::permission_history::*;
+            use crate::runtime::respond_permission_with_host;
 
             #[derive(Default)]
             struct NoLive {
@@ -5856,7 +6381,7 @@ mod tests {
             }
 
             mod claim_and_association_history {
-                use crate::runtime::runner::input_client::tests::permission_history::entry::*;
+                use crate::runtime::input_client::tests::permission_history::entry::*;
                 use rusqlite::hooks::AuthAction;
                 use rusqlite::hooks::AuthContext;
                 use rusqlite::hooks::Authorization;
@@ -6186,7 +6711,7 @@ mod tests {
             }
 
             mod staged {
-                use crate::runtime::runner::input_client::tests::permission_history::entry::*;
+                use crate::runtime::input_client::tests::permission_history::entry::*;
 
                 fn response_context(
                     case: &Case,
@@ -6298,9 +6823,9 @@ mod tests {
 
     mod uncertain_reason {
         use crate::broker::runtime::test_support::Fixture as StorageFixture;
-        use crate::runtime::runner::input_client::test_support::Case;
-        use crate::runtime::runner::input_client::test_support::Retained;
-        use crate::runtime::runner::input_client::tests::*;
+        use crate::runtime::input_client::test_support::Case;
+        use crate::runtime::input_client::test_support::Retained;
+        use crate::runtime::input_client::tests::*;
 
         const MESSAGES: [&str; 4] = ["identity", "contradiction", "missing", "unmatched"];
 
@@ -6425,6 +6950,928 @@ mod tests {
                 repeated.submission.reason.as_deref(),
                 Some("prior transmission remains uncertain")
             );
+        }
+    }
+
+    use crate::broker::Placement;
+    use crate::broker::runtime as storage;
+    use crate::config::Settings;
+    use crate::db::with_database_budget;
+    use crate::pane_lock::PaneLock;
+    use crate::runtime::input_client::test_support::*;
+
+    use crate::time::Deadline;
+    use rusqlite::Connection;
+    use serde_json::json;
+    use std::os::unix::fs::MetadataExt;
+
+    use std::time::Instant;
+
+    struct ReceiptCase {
+        fixture: Fixture,
+        artifacts: RunArtifacts,
+        settings: Settings,
+        placement: Placement,
+        input: InputOperation,
+    }
+
+    impl ReceiptCase {
+        fn new() -> Self {
+            let mut fixture = Fixture::new();
+            let artifacts = fixture.artifacts();
+            let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                .unwrap()
+                .unwrap();
+            let owner = lock
+                .transfer_to_runner(
+                    &mut fixture.conn,
+                    &fixture.run.owner(),
+                    ProcessIdentity::current().unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET status='running',started_at=?1 WHERE run_id=?2",
+                        rusqlite::params!["2026-10-27T18:12:59Z", owner.run_id],
+                    )
+                    .unwrap(),
+                1,
+            );
+            fixture.run = storage::get_run(&fixture.conn, owner.run_id).unwrap();
+            let message = crate::broker::send_message(
+                &mut fixture.conn,
+                fixture.run.director_member_id,
+                fixture.run.member_id,
+                "owned exclusive receipt preview",
+            )
+            .unwrap();
+            let input = storage::reserve_input(
+                &mut fixture.conn,
+                &owner,
+                &NewInput {
+                    operation_key: format!("preview:{}:{}", owner.run_id, message.message_id),
+                    kind: InputKind::Preview,
+                    payload_digest: "d".repeat(64),
+                    message_id: Some(message.message_id),
+                },
+            )
+            .unwrap();
+            let input = storage::record_input_uncertain(
+                &mut fixture.conn,
+                &owner,
+                input.input_id,
+                storage::UncertainCause::WriteFailed,
+            )
+            .unwrap();
+            storage::reserve_event_sequences(&mut fixture.conn, &owner).unwrap();
+            fixture.conn.execute(
+                "UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=7,ended_at='2026-10-27T18:13:00Z',cleanup_diagnostics_json=?1 WHERE run_id=?2",
+                rusqlite::params![json!([{"kind":"owned_terminal_history"}]).to_string(), owner.run_id],
+            ).unwrap();
+            fixture.run = storage::get_run(&fixture.conn, owner.run_id).unwrap();
+            lock.validate(&fixture.conn, &fixture.run.owner()).unwrap();
+            std::fs::write(&artifacts.paths.outbox, [0, 0]).unwrap();
+            let placement = member_placement(&fixture.conn, &fixture.run);
+            let settings =
+                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()), None);
+            drop(lock);
+            Self {
+                fixture,
+                artifacts,
+                settings,
+                placement,
+                input,
+            }
+        }
+
+        fn invoke(
+            &mut self,
+            held: Option<&PaneLock>,
+            host: &mut TypedHost,
+        ) -> std::result::Result<InputOperation, InputFailure> {
+            crate::runtime::input_client::reconcile_input_with_host(
+                &mut self.fixture.conn,
+                &self.settings,
+                &self.input,
+                &self.fixture.run,
+                held.map(|_| &self.placement),
+                held,
+                InputDisposition::Submitted,
+                "fixture:exclusive-receipt",
+                host.until,
+                host,
+            )
+        }
+
+        fn assert_original_lock_available(&self) {
+            let run = storage::get_run(&self.fixture.conn, self.input.run_id).unwrap();
+            assert_lock_released(&self.fixture.conn, &run);
+        }
+
+        fn spool(&self) -> (Vec<u8>, u64, u64) {
+            outbox_spool(&self.artifacts.paths.outbox)
+        }
+    }
+
+    fn outbox_spool(outbox: &std::path::Path) -> (Vec<u8>, u64, u64) {
+        let metadata = std::fs::symlink_metadata(outbox).unwrap();
+        (
+            std::fs::read(outbox).unwrap(),
+            metadata.dev(),
+            metadata.ino(),
+        )
+    }
+
+    fn assert_lock_released(conn: &Connection, run: &RunRecord) {
+        RunLock::acquire_released(conn, &run.owner())
+            .unwrap()
+            .expect("receipt-only ownership releases its original namespace on return")
+            .validate(conn, &run.owner())
+            .unwrap();
+    }
+
+    fn recovery_notified_at(conn: &Connection, message_id: i64) -> Option<String> {
+        conn.query_row(
+            "SELECT notified_at FROM messages WHERE message_id=?1",
+            [message_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn member_placement(conn: &Connection, run: &RunRecord) -> Placement {
+        crate::broker::get_member(conn, run.member_id, run.fleet_id)
+            .unwrap()
+            .unwrap()
+            .placement
+            .unwrap()
+    }
+
+    fn rows(conn: &Connection, excluded: &[&str]) -> Vec<crate::db::test_support::TableSnapshot> {
+        crate::db::test_support::table_snapshot(conn, |name| !excluded.contains(&name))
+    }
+
+    fn assert_owner_only(before: &RunRecord, after: &RunRecord) {
+        let process = ProcessIdentity::current().unwrap();
+        let mut expected = before.clone();
+        expected.owner_epoch += 1;
+        expected.owner_kind = OwnerKind::Reconciler;
+        expected.owner_pid = process.pid;
+        expected.owner_start_identity = process.start_identity;
+        assert_eq!(*after, expected);
+    }
+
+    #[test]
+    fn exclusive_permission_ready_proof_and_claim_release_share_the_owner_transaction() {
+        use crate::runtime::input_client::test_support::Case;
+        use crate::runtime::input_client::test_support::Retained;
+
+        let mut case = Case::new(Retained::InProgress);
+        storage::record_input_state(
+            &mut case.fixture.conn,
+            &case.fixture.run.owner(),
+            case.input_id,
+            InputState::InProgress,
+            InputState::Ready,
+        )
+        .unwrap();
+        case.fixture.conn.execute(
+            "UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=7,ended_at='2026-10-27T18:13:00Z' WHERE run_id=?1",
+            [case.fixture.run.run_id],
+        ).unwrap();
+        let run = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
+        let original = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+        let placement = member_placement(&case.fixture.conn, &run);
+        let held = PaneLock::try_acquire(&case.settings.database_url, &placement)
+            .unwrap()
+            .unwrap();
+        let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id).unwrap();
+        std::fs::write(&paths.outbox, [0, 0]).unwrap();
+        let spool = || outbox_spool(&paths.outbox);
+        let original_spool = spool();
+        let before = rows(&case.fixture.conn, &[]);
+        drop(case._lock);
+        let until = Instant::now() + Duration::from_secs(2);
+        let input_id = case.input_id;
+        let epoch = run.owner_epoch + 1;
+        case.fixture
+            .conn
+            .execute_batch(&format!(
+                "CREATE TRIGGER reject_exclusive_permission_claim_delete
+             BEFORE DELETE ON member_permission_response_claims WHEN OLD.input_id={input_id}
+             BEGIN
+               SELECT CASE WHEN EXISTS(
+                 SELECT 1 FROM member_input_operations i JOIN member_runs r ON r.run_id=i.run_id
+                 WHERE i.input_id=OLD.input_id AND i.state='settled'
+                   AND i.disposition='not_submitted'
+                   AND i.evidence_ref='fixture:exclusive-permission-zero'
+                   AND r.owner_epoch={epoch} AND r.owner_kind='reconciler'
+               ) THEN RAISE(ABORT,'owned exclusive permission claim delete failure')
+                 ELSE RAISE(ABORT,'owned exclusive permission delete missing settlement') END;
+             END"
+            ))
+            .unwrap();
+        let mut host = TypedHost::new(until);
+        let expected_run = run.clone();
+        let settings = case.settings.clone();
+        let pinned = placement.clone();
+        host.action = Some(Box::new(move |boundary, current, actual| {
+            assert_eq!(actual, until);
+            assert!(
+                PaneLock::try_acquire(&settings.database_url, &pinned)
+                    .unwrap()
+                    .is_none()
+            );
+            if matches!(boundary, RecoveryBoundary::AfterTakeover) {
+                assert_owner_only(&expected_run, current);
+            }
+            Ok(())
+        }));
+        let failed = crate::runtime::input_client::reconcile_input_with_host(
+            &mut case.fixture.conn,
+            &case.settings,
+            &original.input,
+            &run,
+            Some(&placement),
+            Some(&held),
+            InputDisposition::NotSubmitted,
+            "fixture:exclusive-permission-zero",
+            until,
+            &mut host,
+        );
+        let removed = case
+            .fixture
+            .conn
+            .execute_batch("DROP TRIGGER reject_exclusive_permission_claim_delete");
+        assert!(
+            removed.is_ok(),
+            "primary={:?}; trigger_cleanup={removed:?}",
+            failed.as_ref().err()
+        );
+        let failure = failed.unwrap_err();
+        assert!(
+            failure
+                .source
+                .message()
+                .contains("owned exclusive permission claim delete failure"),
+            "actual={failure:?}"
+        );
+        assert_eq!(
+            (failure.run_id, failure.interaction_id, failure.input_id),
+            (
+                Some(run.run_id),
+                Some(original.response.metadata.interaction_id),
+                Some(input_id)
+            )
+        );
+        assert_eq!(
+            failure.operation_key.as_deref(),
+            Some(original.input.operation_key.as_str())
+        );
+        assert!(host.calls.contains(&"after"));
+        assert_eq!(rows(&case.fixture.conn, &[]), before);
+        assert_eq!(spool(), original_spool);
+        assert_lock_released(&case.fixture.conn, &run);
+        let mut retry = TypedHost::new(until);
+        let settled = crate::runtime::input_client::reconcile_input_with_host(
+            &mut case.fixture.conn,
+            &case.settings,
+            &original.input,
+            &run,
+            Some(&placement),
+            Some(&held),
+            InputDisposition::NotSubmitted,
+            "fixture:exclusive-permission-zero",
+            until,
+            &mut retry,
+        )
+        .unwrap();
+        let receipt = storage::get_permission_response(&case.fixture.conn, input_id).unwrap();
+        assert_eq!(settled, receipt.input);
+        let mut expected = original.input.clone();
+        expected.state = InputState::Settled;
+        expected.disposition = Some(InputDisposition::NotSubmitted);
+        expected.evidence_ref = Some("fixture:exclusive-permission-zero".into());
+        expected.updated_at = settled.updated_at.clone();
+        assert_eq!(settled, expected);
+        assert_eq!(receipt.response, original.response);
+        assert!(receipt.claim.is_none());
+        let current = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
+        assert_owner_only(&run, &current);
+        assert!(current.owner_epoch > receipt.response.metadata.expected_owner_epoch);
+        let excluded = &[
+            "member_runs",
+            "member_input_operations",
+            "member_permission_response_claims",
+        ];
+        let expected_history: Vec<_> = before
+            .into_iter()
+            .filter(|table| !excluded.contains(&table.name.as_str()))
+            .collect();
+        assert_eq!(rows(&case.fixture.conn, excluded), expected_history);
+        assert_eq!(spool(), original_spool);
+        held.validate_binding(&case.settings.database_url, &placement)
+            .unwrap();
+        assert_lock_released(&case.fixture.conn, &current);
+    }
+
+    #[test]
+    fn exclusive_permission_receipt_pins_original_audit_and_creation_after_snapshot() {
+        use crate::runtime::input_client::test_support::Case;
+        use crate::runtime::input_client::test_support::Retained;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+
+        for changed in ["decided_at", "created_at"] {
+            let mut case = Case::new(Retained::Uncertain);
+            let run = case.fixture.run.clone();
+            let original =
+                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+            let placement = member_placement(&case.fixture.conn, &run);
+            let held = PaneLock::try_acquire(&case.settings.database_url, &placement)
+                .unwrap()
+                .unwrap();
+            let excluded = if changed == "decided_at" {
+                "member_permission_responses"
+            } else {
+                "member_input_operations"
+            };
+            let before = rows(&case.fixture.conn, &[excluded]);
+            let path = case.fixture.conn.path().unwrap().to_owned();
+            let input_id = case.input_id;
+            let observed = Arc::new(AtomicBool::new(false));
+            let wrote = observed.clone();
+            drop(case._lock);
+            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
+            host.action = Some(Box::new(move |boundary, _, _| {
+                if matches!(boundary, RecoveryBoundary::AfterSnapshot) {
+                    let conn = Connection::open(&path).unwrap();
+                    let sql = if changed == "decided_at" {
+                        "UPDATE member_permission_responses SET decided_at='2026-10-27T21:55:00Z' WHERE input_id=?1"
+                    } else {
+                        "UPDATE member_input_operations SET created_at='2026-10-27T21:55:00Z' WHERE input_id=?1"
+                    };
+                    assert_eq!(conn.execute(sql, [input_id]).unwrap(), 1);
+                    wrote.store(true, Ordering::Release);
+                }
+                Ok(())
+            }));
+            let result = crate::runtime::input_client::reconcile_input_with_host(
+                &mut case.fixture.conn,
+                &case.settings,
+                &original.input,
+                &run,
+                Some(&placement),
+                Some(&held),
+                InputDisposition::NotSubmitted,
+                "fixture:exclusive-fixed-permission",
+                host.until,
+                &mut host,
+            );
+            assert!(
+                observed.load(Ordering::Acquire),
+                "actual snapshot callback must update {changed}; result={result:?}"
+            );
+            let failure = result.unwrap_err();
+            assert_eq!(
+                (failure.run_id, failure.interaction_id, failure.input_id),
+                (
+                    Some(run.run_id),
+                    Some(original.response.metadata.interaction_id),
+                    Some(input_id)
+                )
+            );
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(original.input.operation_key.as_str())
+            );
+            assert_eq!(host.calls, vec!["snapshot"]);
+            let mut expected = original.clone();
+            if changed == "decided_at" {
+                expected.response.decided_at = "2026-10-27T21:55:00Z".into();
+                expected
+                    .input
+                    .permission_response
+                    .as_mut()
+                    .unwrap()
+                    .decided_at = expected.response.decided_at.clone();
+            } else {
+                expected.input.created_at = "2026-10-27T21:55:00Z".into();
+            }
+            assert_eq!(
+                storage::get_permission_response(&case.fixture.conn, input_id).unwrap(),
+                expected
+            );
+            assert_eq!(rows(&case.fixture.conn, &[excluded]), before);
+            assert_lock_released(&case.fixture.conn, &run);
+            held.validate_binding(&case.settings.database_url, &placement)
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn exclusive_receipt_terminal_preview_commits_only_owner_disposition_and_stamp() {
+        let mut case = ReceiptCase::new();
+        let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
+            .unwrap()
+            .unwrap();
+        let before = case.fixture.run.clone();
+        let history = rows(
+            &case.fixture.conn,
+            &["member_runs", "member_input_operations", "messages"],
+        );
+        let message =
+            crate::broker::get_message(&case.fixture.conn, case.input.message_id.unwrap()).unwrap();
+        assert!(recovery_notified_at(&case.fixture.conn, message.message_id).is_none());
+        let spool = case.spool();
+        let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
+        let settled = case.invoke(Some(&held), &mut host).unwrap();
+        assert_eq!(settled.input_id, case.input.input_id);
+        assert_eq!(settled.state, InputState::Settled);
+        assert_eq!(settled.disposition, Some(InputDisposition::Submitted));
+        assert_eq!(
+            settled.evidence_ref.as_deref(),
+            Some("fixture:exclusive-receipt")
+        );
+        let mut expected = case.input.clone();
+        expected.state = settled.state;
+        expected.disposition = settled.disposition;
+        expected.evidence_ref = settled.evidence_ref.clone();
+        expected.updated_at = settled.updated_at.clone();
+        assert_eq!(settled, expected);
+        assert_owner_only(
+            &before,
+            &storage::get_run(&case.fixture.conn, before.run_id).unwrap(),
+        );
+        let stamped = crate::broker::get_message(&case.fixture.conn, message.message_id).unwrap();
+        assert!(recovery_notified_at(&case.fixture.conn, message.message_id).is_some());
+        assert_eq!(stamped, message);
+        assert_eq!(
+            rows(
+                &case.fixture.conn,
+                &["member_runs", "member_input_operations", "messages"]
+            ),
+            history
+        );
+        assert_eq!(case.spool(), spool);
+        for boundary in ["snapshot", "owner", "startup", "health", "before", "after"] {
+            assert!(host.calls.contains(&boundary), "{boundary}");
+        }
+        assert!(host.processes.contains(&ProcessIdentity {
+            pid: before.owner_pid,
+            start_identity: before.owner_start_identity.clone()
+        }));
+        assert!(
+            host.startups
+                .iter()
+                .any(|(run, placement)| *run == before
+                    && placement.as_ref() == Some(&case.placement))
+        );
+        held.validate_binding(&case.settings.database_url, &case.placement)
+            .unwrap();
+        assert!(
+            PaneLock::try_acquire(&case.settings.database_url, &case.placement)
+                .unwrap()
+                .is_none()
+        );
+        case.assert_original_lock_available();
+    }
+
+    #[test]
+    fn exclusive_receipt_absent_placement_requires_real_inactive_history_and_a_matched_pair() {
+        for deleted_fleet in [false, true] {
+            let mut case = ReceiptCase::new();
+            if deleted_fleet {
+                crate::broker::fleets::delete_fleet_rows(
+                    &case.fixture.conn,
+                    case.fixture.run.fleet_id,
+                )
+                .unwrap();
+            } else {
+                assert!(
+                    crate::broker::members::test_support::deregister_member(
+                        &mut case.fixture.conn,
+                        case.fixture.run.member_id
+                    )
+                    .unwrap()
+                );
+            }
+            let count: i64 = case
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM member_placements WHERE member_id=?1",
+                    [case.fixture.run.member_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0);
+            let history = rows(
+                &case.fixture.conn,
+                &["member_runs", "member_input_operations", "messages"],
+            );
+            let spool = case.spool();
+            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
+            case.invoke(None, &mut host).unwrap();
+            assert!(
+                host.startups
+                    .iter()
+                    .any(|(run, placement)| { run == &case.fixture.run && placement.is_none() })
+            );
+            assert_owner_only(
+                &case.fixture.run,
+                &storage::get_run(&case.fixture.conn, case.input.run_id).unwrap(),
+            );
+            assert_eq!(
+                rows(
+                    &case.fixture.conn,
+                    &["member_runs", "member_input_operations", "messages"]
+                ),
+                history
+            );
+            assert_eq!(case.spool(), spool);
+            case.assert_original_lock_available();
+        }
+
+        let mut case = ReceiptCase::new();
+        let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
+            .unwrap()
+            .unwrap();
+        let before = rows(&case.fixture.conn, &[]);
+        for (placement, guard) in [(Some(&case.placement), None), (None, Some(&held))] {
+            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(1));
+            assert!(
+                crate::runtime::input_client::reconcile_input_with_host(
+                    &mut case.fixture.conn,
+                    &case.settings,
+                    &case.input,
+                    &case.fixture.run,
+                    placement,
+                    guard,
+                    InputDisposition::Submitted,
+                    "fixture:invalid-pair",
+                    host.until,
+                    &mut host,
+                )
+                .is_err()
+            );
+            assert!(host.calls.is_empty());
+            assert_eq!(rows(&case.fixture.conn, &[]), before);
+        }
+        case.fixture
+            .conn
+            .execute(
+                "DELETE FROM member_placements WHERE member_id=?1",
+                [case.fixture.run.member_id],
+            )
+            .unwrap();
+        let before = rows(&case.fixture.conn, &[]);
+        let mut host = TypedHost::new(Instant::now() + Duration::from_secs(1));
+        assert!(case.invoke(None, &mut host).is_err());
+        assert_eq!(rows(&case.fixture.conn, &[]), before);
+        assert!(host.calls.is_empty());
+    }
+
+    #[test]
+    fn exclusive_receipt_transaction_failure_rolls_back_owner_stamp_and_input_before_retry() {
+        for after_cas in [false, true] {
+            let mut case = ReceiptCase::new();
+            let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
+                .unwrap()
+                .unwrap();
+            let before = rows(&case.fixture.conn, &[]);
+            let spool = case.spool();
+            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
+            if after_cas {
+                let epoch = case.fixture.run.owner_epoch;
+                host.action = Some(Box::new(move |boundary, run, _| {
+                    if matches!(boundary, RecoveryBoundary::AfterTakeover) {
+                        assert_eq!(run.owner_epoch, epoch + 1);
+                        return Err(error("owned after-CAS receipt failure"));
+                    }
+                    Ok(())
+                }));
+            } else {
+                case.fixture.conn.execute_batch("CREATE TRIGGER exclusive_receipt_failure BEFORE UPDATE OF state ON member_input_operations WHEN NEW.state='settled' BEGIN SELECT RAISE(FAIL,'owned exclusive settlement failure'); END").unwrap();
+            }
+            let result = case.invoke(Some(&held), &mut host);
+            let removed = if after_cas {
+                Ok(())
+            } else {
+                case.fixture
+                    .conn
+                    .execute_batch("DROP TRIGGER exclusive_receipt_failure")
+            };
+            assert!(
+                removed.is_ok(),
+                "primary={:?}; trigger_cleanup={removed:?}",
+                result.as_ref().err()
+            );
+            let failure = result.unwrap_err();
+            assert!(failure.source.to_string().contains(if after_cas {
+                "owned after-CAS receipt failure"
+            } else {
+                "owned exclusive settlement failure"
+            }));
+            assert_eq!(failure.input_id, Some(case.input.input_id));
+            assert_eq!(failure.run_id, Some(case.input.run_id));
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(case.input.operation_key.as_str())
+            );
+            assert!(host.calls.contains(&"after"));
+            assert_eq!(rows(&case.fixture.conn, &[]), before);
+            assert_eq!(case.spool(), spool);
+            case.assert_original_lock_available();
+            let mut retry = TypedHost::new(host.until);
+            case.invoke(Some(&held), &mut retry).unwrap();
+            assert_owner_only(
+                &case.fixture.run,
+                &storage::get_run(&case.fixture.conn, case.input.run_id).unwrap(),
+            );
+            case.assert_original_lock_available();
+        }
+    }
+
+    #[test]
+    fn exclusive_receipt_requires_original_lock_and_positive_owner_startup_and_health_exclusion() {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        for condition in [
+            "held_lock",
+            "missing_lock",
+            "replaced_lock",
+            "live_reconciler",
+            "unknown_owner",
+            "unknown_startup",
+            "live_startup",
+            "matching_health",
+        ] {
+            let mut case = ReceiptCase::new();
+            let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
+                .unwrap()
+                .unwrap();
+            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
+            let mut original_lock = None;
+            match condition {
+                "held_lock" => {
+                    original_lock =
+                        RunLock::acquire_released(&case.fixture.conn, &case.fixture.run.owner())
+                            .unwrap()
+                }
+                "missing_lock" => std::fs::remove_file(&case.artifacts.paths.owner_lock).unwrap(),
+                "replaced_lock" => {
+                    std::fs::rename(
+                        &case.artifacts.paths.owner_lock,
+                        case.fixture._dir.path().join("original-owner.lock"),
+                    )
+                    .unwrap();
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(&case.artifacts.paths.owner_lock)
+                        .unwrap();
+                }
+                "live_reconciler" | "unknown_startup" => {
+                    case.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_runs SET owner_kind='reconciler' WHERE run_id=?1",
+                            [case.fixture.run.run_id],
+                        )
+                        .unwrap();
+                    case.fixture.run =
+                        storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
+                    if condition == "live_reconciler" {
+                        host.owner = Termination::Alive;
+                    } else {
+                        host.startup = Termination::Unknown;
+                    }
+                }
+                "unknown_owner" => host.owner = Termination::Unknown,
+                "live_startup" => host.startup = Termination::Alive,
+                "matching_health" => host.matching_health = true,
+                _ => unreachable!(),
+            }
+            if condition == "held_lock" {
+                assert!(original_lock.is_some());
+            }
+            let before = rows(&case.fixture.conn, &[]);
+            let spool = case.spool();
+            let failure = case.invoke(Some(&held), &mut host).unwrap_err();
+            assert_eq!(failure.input_id, Some(case.input.input_id), "{condition}");
+            assert_eq!(failure.run_id, Some(case.input.run_id), "{condition}");
+            assert_eq!(rows(&case.fixture.conn, &[]), before, "{condition}");
+            assert_eq!(case.spool(), spool, "{condition}");
+            assert!(!host.calls.contains(&"after"), "{condition}");
+            if matches!(condition, "unknown_startup" | "live_startup") {
+                assert!(
+                    host.calls.contains(&"startup"),
+                    "noncreator history still requires startup exclusion"
+                );
+            }
+            held.validate_binding(&case.settings.database_url, &case.placement)
+                .unwrap();
+            if let Some(lock) = original_lock {
+                lock.validate(&case.fixture.conn, &case.fixture.run.owner())
+                    .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn exclusive_receipt_revalidates_original_input_placement_and_budget_after_real_sql_entry() {
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use rusqlite::hooks::TransactionOperation;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+        use std::sync::mpsc;
+
+        for change in ["digest", "state", "placement", "appearance", "deadline"] {
+            let mut case = ReceiptCase::new();
+            let journal: String = case
+                .fixture
+                .conn
+                .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(journal, "wal");
+            let placement_row = case.fixture.conn.query_row(
+                "SELECT mux_session,mux_window_id,mux_pane_id,backend,coding_agent,created_at FROM member_placements WHERE member_id=?1",
+                [case.fixture.run.member_id], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, Option<String>>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, String>(5)?)),
+            ).unwrap();
+            let held = if change == "appearance" {
+                crate::broker::members::test_support::deregister_member(
+                    &mut case.fixture.conn,
+                    case.fixture.run.member_id,
+                )
+                .unwrap();
+                None
+            } else {
+                Some(
+                    PaneLock::try_acquire(&case.settings.database_url, &case.placement)
+                        .unwrap()
+                        .unwrap(),
+                )
+            };
+            let before = rows(&case.fixture.conn, &[]);
+            let spool = case.spool();
+            let started = Instant::now();
+            let cap = started
+                + if change == "deadline" {
+                    Duration::from_millis(200)
+                } else {
+                    Duration::from_secs(2)
+                };
+            let mut host = TypedHost::new(cap);
+            let (start, started_writer) = mpsc::sync_channel(1);
+            let (locked, writer_locked) = mpsc::sync_channel(1);
+            let (begin, began) = mpsc::sync_channel(1);
+            let armed = Arc::new(AtomicBool::new(false));
+            let observed = Arc::new(AtomicBool::new(false));
+            let budgets = Arc::new(Mutex::new(Vec::new()));
+            let enabled = armed.clone();
+            let observed_begin = observed.clone();
+            let sql_budgets = budgets.clone();
+            let mut begin = Some(begin);
+            case.fixture
+                .conn
+                .authorizer(Some(move |context: AuthContext<'_>| {
+                    if matches!(
+                        context.action,
+                        AuthAction::Read { .. }
+                            | AuthAction::Insert { .. }
+                            | AuthAction::Update { .. }
+                            | AuthAction::Delete { .. }
+                            | AuthAction::Transaction { .. }
+                    ) {
+                        sql_budgets
+                            .lock()
+                            .unwrap()
+                            .push(Deadline::inherited_or_new().instant());
+                    }
+                    if enabled.load(Ordering::Acquire)
+                        && matches!(
+                            context.action,
+                            AuthAction::Transaction {
+                                operation: TransactionOperation::Begin
+                            }
+                        )
+                        && let Some(begin) = begin.take()
+                    {
+                        observed_begin.store(true, Ordering::Release);
+                        begin.send(()).unwrap();
+                    }
+                    Authorization::Allow
+                }))
+                .unwrap();
+            let mut start = Some(start);
+            host.action = Some(Box::new(move |boundary, _, until| {
+                if matches!(boundary, RecoveryBoundary::BeforeTakeover)
+                    && let Some(start) = start.take()
+                {
+                    start.send(()).unwrap();
+                    writer_locked
+                        .recv_timeout(until.saturating_duration_since(Instant::now()))
+                        .unwrap();
+                    armed.store(true, Ordering::Release);
+                }
+                Ok(())
+            }));
+            let path = case.fixture.conn.path().unwrap().to_owned();
+            let input_id = case.input.input_id;
+            let member_id = case.fixture.run.member_id;
+            let expected = Arc::new(Mutex::new(None));
+            let published = expected.clone();
+            let result = std::thread::scope(|scope| {
+                let writer = scope.spawn(move || {
+                    started_writer.recv_timeout(cap.saturating_duration_since(Instant::now())).unwrap();
+                    let conn = Connection::open(path).unwrap();
+                    conn.busy_timeout(Duration::ZERO).unwrap();
+                    conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+                    match change {
+                        "digest" => { conn.execute("UPDATE member_input_operations SET payload_digest=?1 WHERE input_id=?2", rusqlite::params!["e".repeat(64), input_id]).unwrap(); }
+                        "state" => { conn.execute("UPDATE member_input_operations SET state='accepted',uncertain_cause=NULL WHERE input_id=?1", [input_id]).unwrap(); }
+                        "placement" => { conn.execute("DELETE FROM member_placements WHERE member_id=?1", [member_id]).unwrap(); }
+                        "appearance" => { conn.execute(
+                            "INSERT INTO member_placements(member_id,mux_session,mux_window_id,mux_pane_id,backend,coding_agent,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+                            rusqlite::params![member_id,placement_row.0,placement_row.1,placement_row.2,placement_row.3,placement_row.4,placement_row.5],
+                        ).unwrap(); }
+                        "deadline" => {}
+                        _ => unreachable!(),
+                    }
+                    *published.lock().unwrap() = Some(rows(&conn, &[]));
+                    locked.send(()).unwrap();
+                    began.recv_timeout(cap.saturating_duration_since(Instant::now())).unwrap();
+                    let release = if change == "deadline" { cap } else { (Instant::now() + Duration::from_millis(40)).min(cap) };
+                    std::thread::sleep(release.saturating_duration_since(Instant::now()));
+                    conn.execute_batch("COMMIT").unwrap();
+                });
+                let result =
+                    with_database_budget(&mut case.fixture.conn, Deadline::until(cap), |conn| {
+                        Ok(crate::runtime::input_client::reconcile_input_with_host(
+                            conn,
+                            &case.settings,
+                            &case.input,
+                            &case.fixture.run,
+                            held.as_ref().map(|_| &case.placement),
+                            held.as_ref(),
+                            InputDisposition::Submitted,
+                            "fixture:fixed-after-wait",
+                            cap + Duration::from_secs(1),
+                            &mut host,
+                        ))
+                    });
+                let joined = writer.join();
+                (result, joined)
+            });
+            let removed = case
+                .fixture
+                .conn
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+            assert!(
+                removed.is_ok(),
+                "primary={:?}; writer={:?}; hook_cleanup={removed:?}",
+                result.0.as_ref().map(|value| value.as_ref().err()),
+                result.1.as_ref().err()
+            );
+            assert!(
+                result.1.is_ok(),
+                "owned SQL writer completed; primary={:?}",
+                result.0.as_ref().map(|value| value.as_ref().err())
+            );
+            let failure = result.0.unwrap().unwrap_err();
+            assert_eq!(failure.input_id, Some(case.input.input_id));
+            assert!(
+                observed.load(Ordering::Acquire),
+                "{change}: real BEGIN is attempted while the separate writer owns Immediate"
+            );
+            assert!(!host.calls.contains(&"after"), "{change}");
+            assert_eq!(
+                rows(&case.fixture.conn, &[]),
+                *expected.lock().unwrap().as_ref().unwrap(),
+                "{change}"
+            );
+            if change == "deadline" {
+                assert_eq!(rows(&case.fixture.conn, &[]), before);
+                assert!(Instant::now() >= cap);
+                assert!(
+                    started.elapsed() < Duration::from_millis(750),
+                    "the 200ms original bound has a fixed 550ms scheduling tolerance"
+                );
+            }
+            let budgets = budgets.lock().unwrap();
+            assert!(!budgets.is_empty());
+            assert!(budgets.iter().all(|until| *until <= cap));
+            assert_eq!(case.spool(), spool);
+            case.assert_original_lock_available();
         }
     }
 }

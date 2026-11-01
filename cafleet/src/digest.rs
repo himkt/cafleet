@@ -42,7 +42,8 @@ pub(crate) fn canonical_json(value: &Value) -> String {
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::digest::hex;
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use sha2::Sha256;
     pub(crate) fn sha256_file_hex(path: &std::path::Path) -> std::io::Result<String> {
         use std::io::Read;
         let mut file = std::fs::File::open(path)?;

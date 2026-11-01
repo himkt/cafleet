@@ -1,39 +1,44 @@
+mod events;
+pub(crate) mod evidence;
+mod inputs;
+pub(crate) use inputs::UnpublishedDeliveryResult;
+
 use crate::broker::MemberStatus;
-pub(crate) use crate::broker::runtime::effective_policy::persist_transition_with_effective_policy;
-pub(crate) use crate::broker::runtime::effective_policy::record_effective_policy;
 pub(crate) use crate::broker::runtime::events::get_event;
 pub(crate) use crate::broker::runtime::events::input_delivery_result_cause;
 pub(crate) use crate::broker::runtime::events::latest_event_seq;
 pub(crate) use crate::broker::runtime::events::original as original_transition;
 pub(crate) use crate::broker::runtime::events::persist_transition;
 pub(crate) use crate::broker::runtime::events::persist_transition_in_transaction;
+pub(crate) use crate::broker::runtime::events::persist_transition_with_effective_policy;
+pub(crate) use crate::broker::runtime::events::record_effective_policy;
 pub(crate) use crate::broker::runtime::events::update_interaction_evidence;
 pub(crate) use crate::broker::runtime::events::validate_transition as validate_observed_transition;
 pub(crate) use crate::broker::runtime::inputs::InputReservation;
 pub(crate) use crate::broker::runtime::inputs::NewReservation;
 pub(crate) use crate::broker::runtime::inputs::UNRESOLVED_INPUT;
+pub(crate) use crate::broker::runtime::inputs::ZeroByteRetirement;
 pub(crate) use crate::broker::runtime::inputs::begin_deferred_attempt;
 pub(crate) use crate::broker::runtime::inputs::find_input;
 pub(crate) use crate::broker::runtime::inputs::get_input;
+pub(crate) use crate::broker::runtime::inputs::get_permission_response;
 pub(crate) use crate::broker::runtime::inputs::has_unresolved_ordinary_attempt;
 pub(crate) use crate::broker::runtime::inputs::input_payload_digest;
+pub(crate) use crate::broker::runtime::inputs::lookup_permission_response;
+pub(crate) use crate::broker::runtime::inputs::permission_response_digest;
+pub(crate) use crate::broker::runtime::inputs::rearm_permission_response;
 pub(crate) use crate::broker::runtime::inputs::record_input_state;
 pub(crate) use crate::broker::runtime::inputs::record_input_uncertain;
 pub(crate) use crate::broker::runtime::inputs::requeue_zero_byte_immediate;
 pub(crate) use crate::broker::runtime::inputs::reserve_input_with_provenance;
+pub(crate) use crate::broker::runtime::inputs::reserve_permission_response;
+pub(crate) use crate::broker::runtime::inputs::settle_any_input_in_transaction;
 pub(crate) use crate::broker::runtime::inputs::settle_lost_deferred;
 pub(crate) use crate::broker::runtime::inputs::settle_lost_deferred_in_transaction;
 pub(crate) use crate::broker::runtime::inputs::settle_preview;
 pub(crate) use crate::broker::runtime::inputs::settle_zero_byte_deferred;
 pub(crate) use crate::broker::runtime::inputs::unpublished_delivery_results;
-pub(crate) use crate::broker::runtime::permissions::ZeroByteRetirement;
-pub(crate) use crate::broker::runtime::permissions::get_permission_response;
-pub(crate) use crate::broker::runtime::permissions::lookup_permission_response;
-pub(crate) use crate::broker::runtime::permissions::permission_response_digest;
-pub(crate) use crate::broker::runtime::permissions::rearm_permission_response;
-pub(crate) use crate::broker::runtime::permissions::reserve_permission_response;
-pub(crate) use crate::broker::runtime::permissions::settle_any_input_in_transaction;
-pub(crate) use crate::broker::runtime::records::*;
+use crate::broker::stored_enum;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::time::Deadline;
@@ -42,20 +47,15 @@ use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 use rusqlite::TransactionBehavior;
 use rusqlite::params;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
 use std::ops::RangeInclusive;
 use std::os::unix::fs::MetadataExt;
 
-mod effective_policy;
-mod events;
-pub(crate) mod evidence;
-mod inputs;
-mod permissions;
-mod records;
-
 #[cfg(test)]
-pub(crate) use crate::broker::runtime::effective_policy::persist_event_with_effective_policy;
+pub(crate) use crate::broker::runtime::events::persist_event_with_effective_policy;
 
 #[cfg(test)]
 pub(crate) use crate::broker::runtime::events::persist_event;
@@ -66,7 +66,7 @@ pub(crate) use crate::broker::runtime::inputs::reserve_input;
 pub(crate) use crate::broker::runtime::inputs::settle_input;
 
 #[cfg(test)]
-pub(crate) use crate::broker::runtime::permissions::release_permission_claim;
+pub(crate) use crate::broker::runtime::inputs::release_permission_claim;
 
 pub(super) fn invalid(field: &str, description: impl Into<String>) -> CafleetError {
     CafleetError::InvalidStoredValue {
@@ -235,7 +235,7 @@ pub(crate) fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, Cafle
         "member_runs.permission_argv_json",
         "string arguments required",
     )?;
-    effective_policy::validate(&run)?;
+    events::validate(&run)?;
     Ok(run)
 }
 
@@ -272,12 +272,12 @@ pub(super) fn historical_ownership(
     run: &RunRecord,
 ) -> Result<Option<ArchiveReason>, CafleetError> {
     let present = |member_id| {
-        super::members::member_fleet_status(conn, member_id)?
+        crate::broker::members::member_fleet_status(conn, member_id)?
             .ok_or(CafleetError::from(rusqlite::Error::QueryReturnedNoRows))
     };
     let member = present(run.member_id)?;
     let director = present(run.director_member_id)?;
-    let fleet = super::fleets::get_fleet(conn, run.fleet_id)?
+    let fleet = crate::broker::fleets::get_fleet(conn, run.fleet_id)?
         .ok_or_else(|| invalid("member_runs.fleet_id", "fleet missing"))?;
     require(
         member.0 == run.fleet_id
@@ -365,11 +365,12 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
         "database_identity_json",
         "database identity mismatch",
     )?;
-    let fleet = super::fleets::require_live_fleet(conn, new.fleet_id)?;
+    let fleet = crate::broker::fleets::require_live_fleet(conn, new.fleet_id)?;
     require(
         fleet.director_member_id == Some(new.director_member_id)
             && new.member_id != new.director_member_id
-            && super::members::active_member_fleet(conn, new.member_id)? == Some(new.fleet_id),
+            && crate::broker::members::active_member_fleet(conn, new.member_id)?
+                == Some(new.fleet_id),
         "member_runs.ownership",
         "member/fleet/Director mismatch",
     )?;
@@ -394,25 +395,64 @@ pub(crate) fn reserve_event_sequences(
     owner: &RunOwner,
 ) -> Result<RangeInclusive<i64>, CafleetError> {
     owned_transaction(conn, owner, |conn, run| {
-        let first = run
-            .event_seq_reserved_through
-            .checked_add(1)
-            .ok_or_else(|| invalid("event_seq_reserved_through", "sequence overflow"))?;
-        let last = run
-            .event_seq_reserved_through
-            .checked_add(256)
-            .ok_or_else(|| invalid("event_seq_reserved_through", "sequence overflow"))?;
-        let changed = conn.execute(
-            "UPDATE member_runs SET event_seq_reserved_through=?1 WHERE run_id=?2 AND owner_epoch=?3 AND event_seq_reserved_through=?4",
-            params![last,run.run_id,run.owner_epoch,run.event_seq_reserved_through],
-        )?;
-        require(
-            changed == 1,
-            "member_runs.owner",
-            "sequence reservation lost ownership",
-        )?;
-        Ok(first..=last)
+        reserve_event_sequences_in_transaction(conn, run, SequenceReservation::CurrentOwnerBlock)
     })
+}
+
+pub(crate) enum SequenceReservation {
+    CurrentOwnerBlock,
+    RecoveryRange { ceiling: i64, count: i64 },
+}
+
+pub(crate) fn reserve_event_sequences_in_transaction(
+    conn: &Connection,
+    run: &RunRecord,
+    reservation: SequenceReservation,
+) -> Result<RangeInclusive<i64>, CafleetError> {
+    assert!(
+        !conn.is_autocommit(),
+        "sequence reservation requires its caller transaction"
+    );
+    let (ceiling, count) = match &reservation {
+        SequenceReservation::CurrentOwnerBlock => (run.event_seq_reserved_through, 256),
+        SequenceReservation::RecoveryRange { ceiling, count } => {
+            assert!(
+                *count > 0,
+                "recovery reservation requires a nonempty result count"
+            );
+            (*ceiling, *count)
+        }
+    };
+    let overflow = || match &reservation {
+        SequenceReservation::CurrentOwnerBlock => {
+            invalid("event_seq_reserved_through", "sequence overflow")
+        }
+        SequenceReservation::RecoveryRange { .. } => {
+            CafleetError::App("recovery sequence overflow".into())
+        }
+    };
+    let first = ceiling.checked_add(1).ok_or_else(overflow)?;
+    let last = ceiling.checked_add(count).ok_or_else(overflow)?;
+    match reservation {
+        SequenceReservation::CurrentOwnerBlock => {
+            let changed = conn.execute(
+                "UPDATE member_runs SET event_seq_reserved_through=?1 WHERE run_id=?2 AND owner_epoch=?3 AND event_seq_reserved_through=?4",
+                params![last, run.run_id, run.owner_epoch, run.event_seq_reserved_through],
+            )?;
+            require(
+                changed == 1,
+                "member_runs.owner",
+                "sequence reservation lost ownership",
+            )?;
+        }
+        SequenceReservation::RecoveryRange { .. } => {
+            conn.execute(
+                "UPDATE member_runs SET event_seq_reserved_through=?1 WHERE run_id=?2",
+                params![last, run.run_id],
+            )?;
+        }
+    }
+    Ok(first..=last)
 }
 
 pub(crate) fn runtime_snapshot(
@@ -452,6 +492,353 @@ pub(crate) fn member_runtime(
         )
         .optional()?;
     id.map(|id| runtime_snapshot(conn, id)).transpose()
+}
+
+stored_enum!(RunStatus, "member_runs.status", {
+    Starting => "starting", Prepared => "prepared", Running => "running",
+    Degraded => "degraded", Stopping => "stopping", Recovering => "recovering",
+    Exited => "exited", Failed => "failed", Lost => "lost"
+});
+stored_enum!(ModeSource, "member_runs.mode_source", { Default => "default", Explicit => "explicit" });
+stored_enum!(OwnerKind, "member_runs.owner_kind", { Creator => "creator", Runner => "runner", Reconciler => "reconciler" });
+stored_enum!(Reachability, "member_runs.reachability", { Reachable => "reachable", Suspect => "suspect" });
+stored_enum!(CleanupState, "member_runs.cleanup_state", { Complete => "complete", Incomplete => "incomplete" });
+stored_enum!(Coverage, "member_runs.coverage", { Tested => "tested", Unknown => "unknown" });
+stored_enum!(EventEvidence, "member_runs.event_evidence", { Metadata => "metadata", Redacted => "redacted" });
+stored_enum!(AutomaticReview, "effective_policy.automatic_review", { Available => "available", Unavailable => "unavailable" });
+stored_enum!(InteractionClass, "member_interactions.classification", {
+    PermissionRequest => "permission_request", Question => "question", Trust => "trust",
+    Update => "update", UnknownInteraction => "unknown_interaction"
+});
+stored_enum!(InteractionCloseReason, "member_interactions.close_reason", {
+    NotVisible => "not_visible", Superseded => "superseded",
+    ProcessExited => "process_exited", MonitorLost => "monitor_lost"
+});
+stored_enum!(RuntimeEventKind,"member_runtime_events.kind", {
+    CoverageUnknown => "coverage_unknown", InteractionOpened => "interaction_opened",
+    InteractionObscured => "interaction_obscured", InteractionClosed => "interaction_closed",
+    PermissionDeniedObserved => "permission_denied_observed",
+    AutomaticRefusalObserved => "automatic_refusal_observed",
+    AutomaticReviewUnavailable => "automatic_review_unavailable",
+    InputDeliveryResult => "input_delivery_result", RunnerDegraded => "runner_degraded",
+    RunnerLost => "runner_lost", RunnerExited => "runner_exited"
+});
+stored_enum!(RuntimeCauseKind, "cause.kind", {
+    CoverageUnknown => "coverage_unknown", NativeExit => "native_exit",
+    StoragePressure => "storage_pressure", StorageRecovered => "storage_recovered",
+    ObserverError => "observer_error", MonitorLost => "monitor_lost",
+    RuntimePathMissing => "runtime_path_missing"
+});
+stored_enum!(NotificationState, "member_runtime_events.notification_state", { Inbox => "inbox", Archived => "archived" });
+stored_enum!(ArchiveReason, "member_runtime_events.archive_reason", {
+    MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive"
+});
+stored_enum!(InputKind, "member_input_operations.kind", { Preview => "preview", Prompt => "prompt", Exec => "exec", PermissionResponse => "permission_response" });
+stored_enum!(InputState, "member_input_operations.state", {
+    Ready => "ready", InProgress => "in_progress", Accepted => "accepted",
+    Uncertain => "uncertain", Settled => "settled"
+});
+stored_enum!(InputDisposition, "member_input_operations.disposition", {
+    Submitted => "submitted", NotSubmitted => "not_submitted", AbandonedUncertain => "abandoned_uncertain"
+});
+stored_enum!(UncertainCause, "member_input_operations.uncertain_cause", {
+    ManualInput => "manual_input", ManualAccountingFailed => "manual_accounting_failed",
+    InteractionCandidate => "interaction_candidate", InteractionOpen => "interaction_open",
+    ObserverUnavailable => "observer_unavailable", ShortWrite => "short_write",
+    WriteFailed => "write_failed", RunnerStopped => "runner_stopped"
+});
+
+impl RunStatus {
+    pub(crate) fn terminal(self) -> bool {
+        matches!(self, Self::Exited | Self::Failed | Self::Lost)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EffectivePolicyObservation {
+    pub(crate) automatic_review: AutomaticReview,
+    pub(crate) observed_mode: Option<String>,
+    pub(crate) rule_id: String,
+    pub(crate) observed_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct NewRun {
+    pub(crate) member_id: i64,
+    pub(crate) fleet_id: i64,
+    pub(crate) director_member_id: i64,
+    pub(crate) backend: String,
+    pub(crate) database_identity_json: Value,
+    pub(crate) launch_nonce: String,
+    pub(crate) runtime_path: String,
+    pub(crate) requested_mode: Option<String>,
+    pub(crate) resolved_mode: String,
+    pub(crate) mode_source: ModeSource,
+    pub(crate) permission_argv_json: Value,
+    pub(crate) event_evidence: EventEvidence,
+    pub(crate) native_version: Option<String>,
+    pub(crate) coverage: Coverage,
+    pub(crate) owner_pid: i64,
+    pub(crate) owner_start_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RunRecord {
+    pub(crate) run_id: i64,
+    pub(crate) member_id: i64,
+    pub(crate) fleet_id: i64,
+    pub(crate) director_member_id: i64,
+    pub(crate) backend: String,
+    pub(crate) database_identity_json: Value,
+    pub(crate) launch_nonce: String,
+    pub(crate) runtime_path: String,
+    pub(crate) requested_mode: Option<String>,
+    pub(crate) resolved_mode: String,
+    pub(crate) mode_source: ModeSource,
+    pub(crate) permission_argv_json: Value,
+    pub(crate) event_evidence: EventEvidence,
+    pub(crate) coverage: Coverage,
+    pub(crate) status: RunStatus,
+    pub(crate) created_at: String,
+    pub(crate) native_version: Option<String>,
+    pub(crate) effective_policy_json: Option<Value>,
+    pub(crate) owner_epoch: i64,
+    pub(crate) owner_kind: OwnerKind,
+    pub(crate) owner_pid: i64,
+    pub(crate) owner_start_identity: String,
+    pub(crate) reachability: Reachability,
+    pub(crate) cleanup_state: CleanupState,
+    pub(crate) event_seq_reserved_through: i64,
+    pub(crate) observation_gap_count: i64,
+    pub(crate) runtime_dir_identity_json: Option<Value>,
+    pub(crate) run_lock_identity_json: Option<Value>,
+    pub(crate) runner_pid: Option<i64>,
+    pub(crate) runner_start_identity: Option<String>,
+    pub(crate) child_pid: Option<i64>,
+    pub(crate) child_start_identity: Option<String>,
+    pub(crate) started_at: Option<String>,
+    pub(crate) last_health_at: Option<String>,
+    pub(crate) ended_at: Option<String>,
+    pub(crate) exit_code: Option<i64>,
+    pub(crate) exit_signal: Option<i64>,
+    pub(crate) cleanup_diagnostics_json: Option<Value>,
+    pub(crate) recovery_origin_status: Option<RunStatus>,
+}
+
+impl RunRecord {
+    pub(crate) fn owner(&self) -> RunOwner {
+        RunOwner {
+            run_id: self.run_id,
+            database_identity_json: self.database_identity_json.clone(),
+            owner_epoch: self.owner_epoch,
+            owner_kind: self.owner_kind,
+            owner_pid: self.owner_pid,
+            owner_start_identity: self.owner_start_identity.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RunOwner {
+    pub(crate) run_id: i64,
+    pub(crate) database_identity_json: Value,
+    pub(crate) owner_epoch: i64,
+    pub(crate) owner_kind: OwnerKind,
+    pub(crate) owner_pid: i64,
+    pub(crate) owner_start_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RuntimeSnapshot {
+    pub(crate) run: RunRecord,
+    pub(crate) current_interaction_id: Option<i64>,
+    pub(crate) unresolved_input_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InteractionRecord {
+    pub(crate) interaction_id: i64,
+    pub(crate) run_id: i64,
+    pub(crate) episode_seq: i64,
+    pub(crate) classification: InteractionClass,
+    pub(crate) evidence_digest: String,
+    pub(crate) opened_at: String,
+    pub(crate) evidence_json: Value,
+    pub(crate) closed_at: Option<String>,
+    pub(crate) close_reason: Option<InteractionCloseReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ObservedTransition {
+    pub(crate) run_id: i64,
+    pub(crate) event_seq: i64,
+    pub(crate) episode_seq: Option<i64>,
+    pub(crate) kind: RuntimeEventKind,
+    pub(crate) classification: Option<InteractionClass>,
+    pub(crate) observed_at: String,
+    pub(crate) evidence_json: Value,
+    pub(crate) close_reason: Option<InteractionCloseReason>,
+    pub(crate) cause_json: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PersistenceMode {
+    Live,
+    Recovery,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RuntimeEventRecord {
+    pub(crate) event_id: i64,
+    pub(crate) run_id: i64,
+    pub(crate) event_seq: i64,
+    pub(crate) interaction_id: Option<i64>,
+    pub(crate) kind: RuntimeEventKind,
+    pub(crate) observed_at: String,
+    pub(crate) committed_at: String,
+    pub(crate) payload_json: Value,
+    pub(crate) notification_state: NotificationState,
+    pub(crate) message_id: Option<i64>,
+    pub(crate) archive_reason: Option<ArchiveReason>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RuntimeEventView {
+    pub(crate) event: RuntimeEventRecord,
+    pub(crate) run: RuntimeSnapshot,
+    pub(crate) interaction: Option<InteractionRecord>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct NewInput {
+    pub(crate) operation_key: String,
+    pub(crate) kind: InputKind,
+    pub(crate) payload_digest: String,
+    pub(crate) message_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InputOperation {
+    pub(crate) input_id: i64,
+    pub(crate) run_id: i64,
+    pub(crate) operation_key: String,
+    pub(crate) kind: InputKind,
+    pub(crate) payload_digest: String,
+    pub(crate) state: InputState,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) message_id: Option<i64>,
+    pub(crate) disposition: Option<InputDisposition>,
+    pub(crate) evidence_ref: Option<String>,
+    pub(crate) permission_response: Option<PermissionResponseRecord>,
+    pub(crate) delivery_method: Option<DeliveryMethod>,
+    pub(crate) delivery_reason: Option<String>,
+    pub(crate) deferred_at: Option<String>,
+    pub(crate) defer_reason: Option<String>,
+    pub(crate) uncertain_cause: Option<UncertainCause>,
+}
+
+stored_enum!(DeliveryStatus, "delivery.status", {
+    Submitted => "submitted", Queued => "queued", Held => "held", Uncertain => "uncertain",
+    NotSubmitted => "not_submitted", NotApplicable => "not_applicable"
+});
+stored_enum!(DeliveryMethod, "member_input_operations.delivery_method", {
+    Profile => "profile", Fallback => "fallback"
+});
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DeliveryProjection {
+    pub(crate) status: DeliveryStatus,
+    pub(crate) method: Option<DeliveryMethod>,
+    pub(crate) reason: Option<String>,
+}
+impl DeliveryProjection {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({"status":self.status.as_str(),
+            "method":self.method.map(DeliveryMethod::as_str),"reason":self.reason})
+    }
+}
+
+stored_enum!(values PermissionDecision, "member_permission_responses.decision", { Allow => "allow", Deny => "deny" });
+stored_enum!(values DirectorMode, "member_permission_responses.director_mode", { Auto => "auto", Manual => "manual", Unknown => "unknown" });
+stored_enum!(values DecisionSource,"member_permission_responses.decision_source", { DirectorAuto => "director-auto", User => "user" });
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PermissionResponseMetadata {
+    pub(crate) event_id: i64,
+    pub(crate) interaction_id: i64,
+    pub(crate) expected_owner_epoch: i64,
+    pub(crate) request_token: String,
+    pub(crate) decision: PermissionDecision,
+    pub(crate) director_member_id: i64,
+    pub(crate) director_mode: DirectorMode,
+    pub(crate) decision_source: DecisionSource,
+    pub(crate) mode_evidence_ref: String,
+    pub(crate) decision_evidence_ref: String,
+    pub(crate) answer_rule_id: String,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PermissionResponseRecord {
+    pub(crate) input_id: i64,
+    pub(crate) metadata: PermissionResponseMetadata,
+    pub(crate) decided_at: String,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PermissionResponseClaim {
+    pub(crate) interaction_id: i64,
+    pub(crate) input_id: i64,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PermissionReceipt {
+    pub(crate) input: InputOperation,
+    pub(crate) response: PermissionResponseRecord,
+    pub(crate) claim: Option<PermissionResponseClaim>,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PermissionReceiptIdentity {
+    pub(crate) database_identity_json: Value,
+    pub(crate) run_id: i64,
+}
+impl PermissionReceiptIdentity {
+    pub(crate) fn for_run(run: &RunRecord) -> Self {
+        Self {
+            database_identity_json: run.database_identity_json.clone(),
+            run_id: run.run_id,
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NewPermissionResponse {
+    pub(crate) operation_key: String,
+    pub(crate) metadata: PermissionResponseMetadata,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PermissionReservation {
+    Retained(PermissionReceipt),
+    Reserved(PermissionReceipt),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InteractionEvidenceUpdate {
+    pub(crate) run_id: i64,
+    pub(crate) episode_seq: i64,
+    pub(crate) output_seq: u64,
+    pub(crate) evidence_json: Value,
+}
+
+impl InputOperation {
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
+        self.input_id == other.input_id
+            && self.run_id == other.run_id
+            && self.operation_key == other.operation_key
+            && self.kind == other.kind
+            && self.payload_digest == other.payload_digest
+            && self.message_id == other.message_id
+            && self.created_at == other.created_at
+            && self.permission_response == other.permission_response
+    }
 }
 
 #[cfg(test)]

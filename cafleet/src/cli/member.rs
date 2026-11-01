@@ -278,13 +278,13 @@ pub(crate) fn run(
             json,
         } => {
             let attestation =
-                owner_terminated.then(|| crate::runtime::runner::OwnerTerminationAttestation {
+                owner_terminated.then(|| crate::runtime::OwnerTerminationAttestation {
                     expected_run_id: expected_run_id.expect("complete attestation options"),
                     expected_owner_epoch: expected_owner_epoch
                         .expect("complete attestation options"),
                     evidence_ref: evidence_ref.expect("complete attestation options"),
                 });
-            let report = crate::runtime::runner::recover_member(
+            let report = crate::runtime::recover_member(
                 conn,
                 settings,
                 member_id,
@@ -397,7 +397,7 @@ fn create(
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
-    use crate::runtime::runner;
+    use crate::runtime as runner;
     use std::io::IsTerminal;
     use std::time::Duration;
     use std::time::Instant;
@@ -665,9 +665,9 @@ pub(super) fn press(
 fn wrapped_delivery_refusal(
     label: &str,
     member_id: i64,
-    result: &crate::runtime::runner::SubmissionResult,
+    result: &crate::runtime::SubmissionResult,
 ) -> String {
-    use crate::runtime::runner::SubmissionStatus;
+    use crate::runtime::SubmissionStatus;
     let description = match result.status {
         SubmissionStatus::Held => "held",
         SubmissionStatus::Rejected => "rejected",
@@ -702,9 +702,9 @@ fn dispatch_input(
 ) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
     let id = member.member_id;
     let runtime = broker::members::require_runtime(member)?;
-    use crate::runtime::runner::InputFailure;
-    use crate::runtime::runner::SubmissionStatus;
-    use crate::runtime::runner::SubmitInput;
+    use crate::runtime::InputFailure;
+    use crate::runtime::SubmissionStatus;
+    use crate::runtime::SubmitInput;
 
     let run = &runtime.run;
     let placement = member.placement.as_ref().expect("placed input member");
@@ -717,10 +717,9 @@ fn dispatch_input(
         message_id: None,
         literal: text.into(),
     };
-    let result = crate::runtime::runner::submit_wrapped_input(
-        conn, settings, run, placement, &request, deadline,
-    )
-    .map_err(CafleetError::from)?;
+    let result =
+        crate::runtime::submit_wrapped_input(conn, settings, run, placement, &request, deadline)
+            .map_err(CafleetError::from)?;
     if !matches!(
         result.status,
         SubmissionStatus::Accepted | SubmissionStatus::Queued
@@ -986,10 +985,10 @@ mod tests {
         use crate::broker::runtime as storage;
         use crate::broker::runtime::*;
         use crate::cli::member::tests::*;
-        use crate::runtime::runner::ProcessIdentity;
-        use crate::runtime::runner::RunArtifacts;
-        use crate::runtime::runner::RunLock;
-        use crate::runtime::runner::RuntimePaths;
+        use crate::runtime::ProcessIdentity;
+        use crate::runtime::RunArtifacts;
+        use crate::runtime::RunLock;
+        use crate::runtime::RuntimePaths;
         use crate::runtime::system::test_support::TestChild;
         use std::process::Command;
         use std::process::Stdio;
@@ -1010,7 +1009,7 @@ mod tests {
         }
 
         fn run_case(scenario: &str) {
-            let dir = crate::runtime::runner::test_support::short_tempdir();
+            let dir = crate::runtime::test_support::short_tempdir();
             let log = dir.path().join("child.log");
             let file = std::fs::File::create(&log).unwrap();
             let started = Instant::now();
@@ -1053,7 +1052,7 @@ mod tests {
                 scenario.as_str(),
                 "terminal" | "epoch" | "placement"
             ));
-            let _dir = crate::runtime::runner::test_support::short_tempdir();
+            let _dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&_dir);
             let settings =
                 Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux"));
@@ -1393,7 +1392,7 @@ mod tests {
     }
 
     fn external_member_invoke(
-        fixture: &crate::runtime::runner::service::test_support::ServiceFixture,
+        fixture: &crate::runtime::service::test_support::ServiceFixture,
         action: &str,
         literal: &str,
         json: bool,
@@ -1525,9 +1524,9 @@ mod tests {
 
     #[test]
     fn wrapped_uncertain_prompt_and_exec_errors_name_the_recorded_cause_and_method() {
-        use crate::runtime::runner::SubmissionResult;
-        use crate::runtime::runner::SubmissionStage;
-        use crate::runtime::runner::SubmissionStatus;
+        use crate::runtime::SubmissionResult;
+        use crate::runtime::SubmissionStage;
+        use crate::runtime::SubmissionStatus;
         let uncertain = |cause: Option<&str>, method| SubmissionResult {
             status: SubmissionStatus::Uncertain,
             input_id: Some(9),
@@ -1570,7 +1569,7 @@ mod tests {
     #[test]
     fn external_input_member_prompt_exec_route_raw_commands_and_print_actual_durable_ids() {
         use crate::broker::runtime as storage;
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
@@ -1585,7 +1584,7 @@ mod tests {
                     ("exec", storage::InputKind::Exec),
                 ] {
                     for json in [true, false] {
-                        crate::runtime::runner::service::test_support::input_service::input_service_composer(fixture, outer);
+                        crate::runtime::service::test_support::input_service::input_service_composer(fixture, outer);
                         let before = external_member_input_ids(&fixture.fixture.conn, run.run_id);
                         let literal = format!("member {action} λ json={json}");
                         let (status, stdout, stderr) = external_member_invoke(
@@ -1670,10 +1669,12 @@ mod tests {
                         } else {
                             literal.clone()
                         };
-                        crate::runtime::runner::service::test_support::input_service::wait_input_service_record(fixture, &line, outer);
-                        crate::runtime::runner::service::test_support::input_service::input_service_barrier(fixture, outer);
+                        crate::runtime::service::test_support::input_service::wait_input_service_record(fixture, &line, outer);
+                        crate::runtime::service::test_support::input_service::input_service_barrier(
+                            fixture, outer,
+                        );
                         assert_eq!(
-                        crate::runtime::runner::service::test_support::input_service::input_service_records(fixture)
+                        crate::runtime::service::test_support::input_service::input_service_records(fixture)
                             .iter()
                             .filter(|record| record["line"] == line)
                             .count(),
@@ -1692,10 +1693,10 @@ mod tests {
     #[test]
     fn external_input_member_lost_stdout_keeps_discoverable_receipt_and_same_key_never_retypes() {
         use crate::broker::runtime as storage;
-        use crate::runtime::runner::SubmissionStatus;
-        use crate::runtime::runner::SubmitInput;
-        use crate::runtime::runner::submit_wrapped_input;
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        use crate::runtime::SubmissionStatus;
+        use crate::runtime::SubmitInput;
+        use crate::runtime::submit_wrapped_input;
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
@@ -1766,17 +1767,21 @@ mod tests {
                     storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
                     row
                 );
-                crate::runtime::runner::service::test_support::input_service::wait_input_service_record(fixture, literal, outer);
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::wait_input_service_record(
+                    fixture, literal, outer,
+                );
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
                 assert_eq!(
-                crate::runtime::runner::service::test_support::input_service::input_service_records(fixture)
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture
+                    )
                     .iter()
                     .filter(|record| record["line"] == literal)
                     .count(),
-                1
-            );
+                    1
+                );
             },
         );
     }
@@ -2003,7 +2008,7 @@ mod tests {
         use crate::db::test_support::table_snapshot;
 
         fn invalid_creation(backend: CodingAgent, extra: &[String]) -> CafleetError {
-            let dir = crate::runtime::runner::test_support::short_tempdir();
+            let dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&dir);
             let (fleet, _) = crate::broker::fleets::test_support::create_fleet_fixture(
                 &mut conn,
@@ -2023,7 +2028,7 @@ mod tests {
             };
             let before = table_snapshot(&conn, |_| true);
             let identity = crate::broker::runtime::database_identity(&conn).unwrap();
-            let paths = crate::runtime::runner::RuntimePaths::for_run(&identity, 1).unwrap();
+            let paths = crate::runtime::RuntimePaths::for_run(&identity, 1).unwrap();
             let settings = Settings::for_database(
                 std::path::Path::new(conn.path().unwrap()),
                 Some("unavailable-test-multiplexer"),
@@ -2475,7 +2480,7 @@ mod tests {
         }
 
         pub(super) fn run_less_registry() -> (TempDir, Settings, Connection, i64) {
-            let dir = crate::runtime::runner::test_support::short_tempdir();
+            let dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "recovery-entry");
             let member_id = crate::broker::members::test_support::register(

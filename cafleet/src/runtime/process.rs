@@ -1,12 +1,20 @@
-use super::*;
 use crate::broker::runtime::CleanupState;
+use crate::runtime::*;
 use filedescriptor::FileDescriptor;
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, SlavePty};
+use portable_pty::Child;
+use portable_pty::CommandBuilder;
+use portable_pty::MasterPty;
+use portable_pty::PtySize;
+use portable_pty::SlavePty;
 use std::collections::BTreeMap;
-use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, RawFd};
+use std::io;
+use std::io::Read;
+use std::io::Write;
+use std::os::fd::AsRawFd;
+use std::os::fd::RawFd;
 use std::os::unix::process::ExitStatusExt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ProcessIdentity {
@@ -668,10 +676,10 @@ impl Drop for PtySession {
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::runner::process::*;
+    use crate::runtime::process::*;
     #[cfg(all(test, target_os = "macos"))]
     mod setuid_member_tests {
-        use crate::runtime::runner::process::tests::*;
+        use crate::runtime::process::tests::*;
         use std::os::unix::fs::MetadataExt;
 
         const SETUID_HELPER: &str = "/usr/bin/su";
@@ -751,8 +759,8 @@ mod tests {
         use std::time::Duration;
         use std::time::Instant;
 
-        use crate::runtime::runner::process::tests::*;
-        use crate::runtime::runner::test_support::Fixture;
+        use crate::runtime::process::tests::*;
+        use crate::runtime::test_support::Fixture;
 
         struct OwnedPty {
             session: PtySession,
@@ -1050,7 +1058,7 @@ mod tests {
         }
     }
     mod ownership_refresh_tests {
-        use crate::runtime::runner::process::tests::*;
+        use crate::runtime::process::tests::*;
         use std::collections::VecDeque;
 
         const GROUP: i32 = 41001;
@@ -1385,7 +1393,7 @@ mod tests {
 
         #[cfg(target_os = "linux")]
         mod reaped_stat {
-            use crate::runtime::runner::process::tests::ownership_refresh_tests::*;
+            use crate::runtime::process::tests::ownership_refresh_tests::*;
 
             fn reaped_stat_read() -> io::Error {
                 let mut child = std::process::Command::new("true").spawn().unwrap();

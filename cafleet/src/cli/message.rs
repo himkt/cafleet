@@ -705,7 +705,7 @@ mod tests {
 
     #[test]
     fn send_delivery_reports_a_wrapped_self_send_and_the_queued_preview_receipt() {
-        let mut fixture = crate::runtime::runner::test_support::Fixture::new();
+        let mut fixture = crate::runtime::test_support::Fixture::new();
         let run = fixture.run.clone();
         let own =
             broker::send_message(&mut fixture.conn, run.member_id, run.member_id, "self").unwrap();

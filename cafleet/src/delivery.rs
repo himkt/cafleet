@@ -11,16 +11,16 @@ use crate::config::Settings;
 use crate::db::complete_database_budget;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
-use crate::runtime::runner::InputCommandHost;
-use crate::runtime::runner::InputFailure;
-use crate::runtime::runner::NativeInputHost;
-use crate::runtime::runner::PreparedSubmission;
-use crate::runtime::runner::RealInputDeadlineClock;
-use crate::runtime::runner::SubmissionStatus;
-use crate::runtime::runner::SubmitInput;
-use crate::runtime::runner::find_submission;
-use crate::runtime::runner::submit_wrapped_input_under_pane_lock_with_host;
-use crate::runtime::runner::validate_submission_target;
+use crate::runtime::InputCommandHost;
+use crate::runtime::InputFailure;
+use crate::runtime::NativeInputHost;
+use crate::runtime::PreparedSubmission;
+use crate::runtime::RealInputDeadlineClock;
+use crate::runtime::SubmissionStatus;
+use crate::runtime::SubmitInput;
+use crate::runtime::find_submission;
+use crate::runtime::submit_wrapped_input_under_pane_lock_with_host;
+use crate::runtime::validate_submission_target;
 use crate::time::Clock;
 use crate::time::Deadline;
 use rusqlite::Connection;
@@ -337,8 +337,8 @@ fn deliver_wrapped_pending(
                 || current
                     .runtime
                     .as_ref()
-                    .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run))
-                    != Some(crate::runtime::runner::stable_run_identity(&run))
+                    .map(|runtime| crate::runtime::stable_run_identity(&runtime.run))
+                    != Some(crate::runtime::stable_run_identity(&run))
             {
                 break AttemptEnd::Held;
             }
@@ -613,16 +613,16 @@ mod tests {
     use crate::delivery::AttemptEnd;
     use crate::delivery::*;
     use crate::pane_lock::PaneLock;
-    use crate::runtime::runner::ControlIdentity;
-    use crate::runtime::runner::HealthSnapshot;
-    use crate::runtime::runner::InputCommandHost;
-    use crate::runtime::runner::InputControlOperation;
-    use crate::runtime::runner::InputControlReply;
-    use crate::runtime::runner::InputControlRequest;
-    use crate::runtime::runner::InputFailure;
-    use crate::runtime::runner::NativeInputHost;
-    use crate::runtime::runner::ReceiptAction;
-    use crate::runtime::runner::ReceiptReply;
+    use crate::runtime::ControlIdentity;
+    use crate::runtime::HealthSnapshot;
+    use crate::runtime::InputCommandHost;
+    use crate::runtime::InputControlOperation;
+    use crate::runtime::InputControlReply;
+    use crate::runtime::InputControlRequest;
+    use crate::runtime::InputFailure;
+    use crate::runtime::NativeInputHost;
+    use crate::runtime::ReceiptAction;
+    use crate::runtime::ReceiptReply;
     use std::collections::BTreeSet;
     use std::time::Duration;
     use std::time::Instant;
@@ -647,7 +647,7 @@ mod tests {
     }
 
     fn wrapped_attempt(
-        fixture: &mut crate::runtime::runner::service::test_support::ServiceFixture,
+        fixture: &mut crate::runtime::service::test_support::ServiceFixture,
         deadline: Deadline,
     ) -> Result<AttemptOutcome, CafleetError> {
         let settings = settings_for(&fixture.fixture.conn);
@@ -851,7 +851,7 @@ mod tests {
             ));
             if let Some(reason) = self.runner_held {
                 return Ok(InputControlReply::Submission(
-                    crate::runtime::runner::SubmissionResult::held(reason),
+                    crate::runtime::SubmissionResult::held(reason),
                 ));
             }
             let reply = self.inner.exchange(run, request, deadline)?;
@@ -869,7 +869,7 @@ mod tests {
 
     #[test]
     fn wrapped_send_is_submitted_and_stamped_when_another_writer_takes_the_released_lock() {
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let settings = settings_for(&fixture.fixture.conn);
@@ -906,7 +906,7 @@ mod tests {
 
     #[test]
     fn wrapped_delivery_reports_the_runner_held_reason() {
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let settings = settings_for(&fixture.fixture.conn);
@@ -947,7 +947,7 @@ mod tests {
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::Ordering;
 
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let settings = settings_for(&fixture.fixture.conn);
@@ -1075,10 +1075,13 @@ mod tests {
                     "failure is the original SQL cause, before original expiry"
                 );
                 drop(observed);
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
-                let records = crate::runtime::runner::service::test_support::input_service::input_service_records(fixture);
+                let records =
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture,
+                    );
                 assert_eq!(
                     records
                         .iter()
@@ -1165,7 +1168,7 @@ mod tests {
         use crate::broker::runtime::InputDisposition;
         use crate::broker::runtime::InputKind;
         use crate::broker::runtime::InputState;
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
@@ -1262,14 +1265,19 @@ mod tests {
                 .unwrap_err();
                 assert!(!failure.to_string().contains("conflicting private preview"));
                 assert_eq!(fixture.fixture.conn.total_changes(), changes);
-                assert!(crate::runtime::runner::service::test_support::input_service::input_service_records(fixture).is_empty());
+                assert!(
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture
+                    )
+                    .is_empty()
+                );
             },
         );
     }
 
     #[test]
     fn wrapped_delivery_retirement_expiry_preserves_the_notified_prefix_without_retyping() {
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run =
                     broker::runtime::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
@@ -1322,16 +1330,18 @@ mod tests {
                         .end,
                     AttemptEnd::NoPending
                 );
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
                 assert_eq!(
-                crate::runtime::runner::service::test_support::input_service::input_service_records(fixture)
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture
+                    )
                     .iter()
                     .filter(|record| record["line"] == expected)
                     .count(),
-                1
-            );
+                    1
+                );
                 assert_eq!(
                     preview_row(&fixture.fixture.conn, run.run_id, message.message_id),
                     Some(row)
@@ -1361,7 +1371,7 @@ mod tests {
     fn preview_digest(run_id: i64, message_id: i64, literal: &str) -> String {
         storage::input_payload_digest(
             run_id,
-            &crate::runtime::runner::SubmitInput {
+            &crate::runtime::SubmitInput {
                 operation_key: format!("preview:{run_id}:{message_id}"),
                 input_kind: InputKind::Preview,
                 message_id: Some(message_id),
@@ -1378,7 +1388,7 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::Ordering;
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let message = broker::send_message(
@@ -1433,8 +1443,10 @@ mod tests {
                     "actual stamp uses the supplied connection while holding the borrowed lock"
                 );
                 assert_eq!(outcome.end, AttemptEnd::NoPending, "{outcome:?}");
-                crate::runtime::runner::service::test_support::input_service::wait_input_service_record(fixture, &expected, outer);
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::wait_input_service_record(
+                    fixture, &expected, outer,
+                );
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
                 let row =
@@ -1467,7 +1479,10 @@ mod tests {
                     )
                     .unwrap();
                 assert_eq!(status, "input_required");
-                let records = crate::runtime::runner::service::test_support::input_service::input_service_records(fixture);
+                let records =
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture,
+                    );
                 assert_eq!(
                     records
                         .iter()
@@ -1491,7 +1506,7 @@ mod tests {
 
     #[test]
     fn wrapped_delivery_failed_stamp_retries_the_same_receipt_without_retyping() {
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let message = broker::send_message(
@@ -1518,7 +1533,9 @@ mod tests {
                     "first={first:?}; trigger_cleanup={removed:?}"
                 );
                 removed.unwrap();
-                crate::runtime::runner::service::test_support::input_service::wait_input_service_record(fixture, &expected, outer);
+                crate::runtime::service::test_support::input_service::wait_input_service_record(
+                    fixture, &expected, outer,
+                );
                 let row =
                     preview_row(&fixture.fixture.conn, run.run_id, message.message_id).unwrap();
                 assert_eq!(row.state, broker::runtime::InputState::Accepted);
@@ -1551,16 +1568,18 @@ mod tests {
                     Some(broker::runtime::InputDisposition::Submitted)
                 );
                 assert!(preview_stamp(&independent, message.message_id).is_some());
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
                 assert_eq!(
-                crate::runtime::runner::service::test_support::input_service::input_service_records(fixture)
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture
+                    )
                     .iter()
                     .filter(|record| record["line"] == expected)
                     .count(),
-                1
-            );
+                    1
+                );
                 let count: i64 = independent.query_row("SELECT count(*) FROM member_input_operations WHERE run_id=?1 AND kind='preview'", [run.run_id], |row| row.get(0)).unwrap();
                 assert_eq!(count, 1);
             },
@@ -1761,14 +1780,14 @@ mod tests {
     mod deferred_preview {
         use crate::broker::runtime::RunRecord;
         use crate::delivery::tests::*;
-        use crate::runtime::runner::service::test_support::ServiceFixture;
-        use crate::runtime::runner::service::test_support::input_service::FORM_LINE;
-        use crate::runtime::runner::service::test_support::input_service::input_service_barrier;
-        use crate::runtime::runner::service::test_support::input_service::input_service_records;
-        use crate::runtime::runner::service::test_support::input_service::manual;
-        use crate::runtime::runner::service::test_support::input_service::wait_input_service_record;
-        use crate::runtime::runner::service::test_support::input_service::with_detecting_input_service;
-        use crate::runtime::runner::*;
+        use crate::runtime::service::test_support::ServiceFixture;
+        use crate::runtime::service::test_support::input_service::FORM_LINE;
+        use crate::runtime::service::test_support::input_service::input_service_barrier;
+        use crate::runtime::service::test_support::input_service::input_service_records;
+        use crate::runtime::service::test_support::input_service::manual;
+        use crate::runtime::service::test_support::input_service::wait_input_service_record;
+        use crate::runtime::service::test_support::input_service::with_detecting_input_service;
+        use crate::runtime::*;
 
         /// Consumes the runtime-event notifications the detected interaction sends the
         /// Director, so only the preview's own delivery is observed.

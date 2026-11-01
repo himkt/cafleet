@@ -15,36 +15,37 @@ use crate::db::bounded_by_inherited;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::pane_lock::PaneLock;
-use crate::runtime::runner::ControlIdentity;
-use crate::runtime::runner::DrainedInput;
-use crate::runtime::runner::InputControlOperation;
-use crate::runtime::runner::InputControlReply;
-use crate::runtime::runner::InputControlRequest;
-use crate::runtime::runner::InputEligibility;
-use crate::runtime::runner::InputFailure;
-use crate::runtime::runner::MissingEvidence;
-use crate::runtime::runner::ObservationController;
-use crate::runtime::runner::ObservedContinuation;
-use crate::runtime::runner::ObservedRequest;
-use crate::runtime::runner::PermissionInspectInput;
-use crate::runtime::runner::PermissionInspection;
-use crate::runtime::runner::PermissionResponseResult;
-use crate::runtime::runner::ProcessIdentity;
-use crate::runtime::runner::ProgrammaticWrite;
-use crate::runtime::runner::PtyIo;
-use crate::runtime::runner::Result;
-use crate::runtime::runner::RunLock;
-use crate::runtime::runner::SubmissionResult;
-use crate::runtime::runner::SubmissionStage;
-use crate::runtime::runner::SubmissionStatus;
-use crate::runtime::runner::Transport;
-use crate::runtime::runner::Visibility;
-use crate::runtime::runner::check_deadline;
-use crate::runtime::runner::ensure;
-use crate::runtime::runner::error;
-use crate::runtime::runner::stable_run_identity;
-use crate::runtime::runner::validate_operation_key;
-use crate::runtime::runner::with_database_deadline;
+use crate::runtime::ControlIdentity;
+use crate::runtime::DrainedInput;
+use crate::runtime::InputControlOperation;
+use crate::runtime::InputControlReply;
+use crate::runtime::InputControlRequest;
+use crate::runtime::InputEligibility;
+use crate::runtime::InputFailure;
+use crate::runtime::MissingEvidence;
+use crate::runtime::ObservationController;
+use crate::runtime::ObservedContinuation;
+use crate::runtime::ObservedRequest;
+use crate::runtime::PermissionInspectInput;
+use crate::runtime::PermissionInspection;
+use crate::runtime::PermissionResponseResult;
+use crate::runtime::ProcessIdentity;
+use crate::runtime::ProgrammaticWrite;
+use crate::runtime::PtyIo;
+use crate::runtime::Result;
+use crate::runtime::RunLock;
+use crate::runtime::SubmissionResult;
+use crate::runtime::SubmissionStage;
+use crate::runtime::SubmissionStatus;
+use crate::runtime::Transport;
+use crate::runtime::Visibility;
+use crate::runtime::check_deadline;
+use crate::runtime::ensure;
+use crate::runtime::error;
+use crate::runtime::stable_run_identity;
+use crate::runtime::validate_operation_key;
+use crate::runtime::with_database_deadline;
+use crate::runtime::*;
 use crate::time::Deadline;
 use rusqlite::Connection;
 use rusqlite::TransactionBehavior;
@@ -56,7 +57,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(test)]
-use crate::runtime::runner::InputDrain;
+use crate::runtime::InputDrain;
 
 pub(crate) trait RequestTokenSource: Send {
     fn fill(&mut self, bytes: &mut [u8; 32]) -> Result<()>;
@@ -71,6 +72,7 @@ const COMPOSER_BUSY_BOUND: Duration = Duration::from_secs(180);
 const FALLBACK_ESCAPE: u8 = 0x1b;
 const FALLBACK_ENTER: u8 = 0x0d;
 
+#[cfg(test)]
 pub(crate) enum InputBoundary {
     Reserved,
     BeforeWrite,
@@ -85,6 +87,7 @@ pub(crate) struct InputCheckpoint {
     pub(crate) output_seq: u64,
 }
 
+#[cfg(test)]
 pub(crate) trait InputHooks: Send + Sync {
     fn checkpoint(
         &self,
@@ -94,17 +97,10 @@ pub(crate) trait InputHooks: Send + Sync {
     ) -> Result<()>;
 }
 
-pub(crate) struct InertInputHooks;
-
-impl InputHooks for InertInputHooks {
-    fn checkpoint(&self, _: InputBoundary, _: &InputCheckpoint, _: Instant) -> Result<()> {
-        Ok(())
-    }
-}
-
 pub(crate) struct InputServices {
     pub(crate) catalog: ProfileCatalog,
     pub(crate) token_source: Box<dyn RequestTokenSource>,
+    #[cfg(test)]
     pub(crate) hooks: Arc<dyn InputHooks>,
 }
 
@@ -336,8 +332,8 @@ enum OrdinaryBlocker {
     ObserverUnavailable,
 }
 
-fn ordinary_blocker(status: &super::ObservationStatus) -> Option<OrdinaryBlocker> {
-    use crate::runtime::runner::GateReason;
+fn ordinary_blocker(status: &crate::runtime::ObservationStatus) -> Option<OrdinaryBlocker> {
+    use crate::runtime::GateReason;
     if matches!(
         status.visibility,
         Visibility::Visible | Visibility::Obscured
@@ -358,15 +354,15 @@ fn ordinary_blocker(status: &super::ObservationStatus) -> Option<OrdinaryBlocker
     None
 }
 
-fn interaction_cause(status: &super::ObservationStatus) -> storage::UncertainCause {
-    if status.eligibility == InputEligibility::Hold(super::GateReason::Candidate) {
+fn interaction_cause(status: &crate::runtime::ObservationStatus) -> storage::UncertainCause {
+    if status.eligibility == InputEligibility::Hold(crate::runtime::GateReason::Candidate) {
         storage::UncertainCause::InteractionCandidate
     } else {
         storage::UncertainCause::InteractionOpen
     }
 }
 
-fn blocker_cause(status: &super::ObservationStatus) -> Option<storage::UncertainCause> {
+fn blocker_cause(status: &crate::runtime::ObservationStatus) -> Option<storage::UncertainCause> {
     ordinary_blocker(status).map(|blocker| match blocker {
         OrdinaryBlocker::Interaction => interaction_cause(status),
         OrdinaryBlocker::ObserverUnavailable => storage::UncertainCause::ObserverUnavailable,
@@ -943,7 +939,9 @@ impl InputCoordinator {
             Some("observation update pending".into())
         } else if status.visibility != Visibility::Visible {
             Some("permission request is not visible".into())
-        } else if status.eligibility != InputEligibility::Hold(super::GateReason::Interaction) {
+        } else if status.eligibility
+            != InputEligibility::Hold(crate::runtime::GateReason::Interaction)
+        {
             Some("permission request is not the current interaction".into())
         } else {
             None
@@ -1190,12 +1188,12 @@ impl InputCoordinator {
         conn: &mut Connection,
         run: &RunRecord,
         request: &InputControlRequest,
-        input: &super::PermissionRespondInput,
+        input: &crate::runtime::PermissionRespondInput,
         deadline: Instant,
         known_id: &mut Option<i64>,
     ) -> Result<Option<storage::PermissionReceipt>> {
         check_deadline(Instant::now(), deadline)?;
-        super::input_client::validate_respond(input)?;
+        crate::runtime::input_client::validate_respond(input)?;
         let mut expected = ControlIdentity::from_run(&self.run);
         expected.owner_epoch = input.expected_owner_epoch;
         ensure(
@@ -1206,11 +1204,13 @@ impl InputCoordinator {
         )?;
         with_database_deadline(conn, deadline, |conn| {
             let tx = conn.transaction()?;
-            ensure(
-                storage::database_identity(&tx)? == self.run.database_identity_json,
-                "input database identity changed",
+            crate::runtime::artifacts::validate_database(
+                &storage::database_identity(&tx)?,
+                &self.run.database_identity_json,
+                || error("input database identity changed"),
             )?;
-            let retained = super::input_client::response_lookup(&tx, &self.run, input, known_id)?;
+            let retained =
+                crate::runtime::input_client::response_lookup(&tx, &self.run, input, known_id)?;
             if let Some(receipt) = &retained {
                 *known_id = Some(receipt.input.input_id);
             }
@@ -1226,7 +1226,7 @@ impl InputCoordinator {
     ) -> Result<Option<InputControlReply>> {
         match history {
             Some(receipt) if receipt.input.state != storage::InputState::Ready => {
-                super::input_client::projection(&self.run, receipt.clone())
+                crate::runtime::input_client::projection(&self.run, receipt.clone())
                     .map(|result| Some(InputControlReply::PermissionResponse(result)))
             }
             _ => Ok(None),
@@ -1411,7 +1411,7 @@ impl InputCoordinator {
     fn response_failure(
         &self,
         source: CafleetError,
-        input: &super::PermissionRespondInput,
+        input: &crate::runtime::PermissionRespondInput,
         input_id: Option<i64>,
     ) -> InputFailure {
         self.run_failure(
@@ -1463,24 +1463,15 @@ impl InputCoordinator {
             stable_run_identity(expected) == stable_run_identity(&self.run),
             "input coordinator run identity changed",
         )?;
-        let current = storage::validate_owner(conn, &self.run.owner())?;
-        ensure(
-            stable_run_identity(&current) == stable_run_identity(&self.run)
-                && current.status == RunStatus::Running
-                && current.owner_kind == OwnerKind::Runner
-                && current.native_version == self.run.native_version,
-            "input coordinator current run changed",
-        )?;
-        ensure(
-            crate::broker::active_member_fleet(conn, self.run.member_id)?
-                == Some(self.run.fleet_id),
-            "input member is inactive",
-        )?;
-        let member = crate::broker::get_member(conn, self.run.member_id, self.run.fleet_id)?
-            .ok_or_else(|| error("input member is absent"))?;
-        ensure(
-            member.kind == MemberKind::Member && member.placement.as_ref() == Some(&self.placement),
-            "input member placement changed",
+        let current = crate::runtime::input_client::revalidate_run_snapshot(
+            conn,
+            &self.run,
+            &self.placement,
+            crate::runtime::input_client::SnapshotPolicy::Live,
+            crate::runtime::input_client::SnapshotMessages {
+                run_changed: "input coordinator current run changed",
+                placement_changed: "input member placement changed",
+            },
         )?;
         self.lock.validate(conn, &current.owner())
     }
@@ -1600,12 +1591,7 @@ impl InputCoordinator {
         )?;
         if let Some(retained) = self.operations.get(&input.input_id) {
             ensure(
-                retained.operation.run_id == input.run_id
-                    && retained.operation.operation_key == input.operation_key
-                    && retained.operation.kind == input.kind
-                    && retained.operation.payload_digest == input.payload_digest
-                    && retained.operation.message_id == input.message_id
-                    && retained.operation.permission_response == input.permission_response,
+                retained.operation.same_identity(input),
                 "receipt cache identity changed",
             )?;
         }
@@ -1629,11 +1615,11 @@ impl InputCoordinator {
         &mut self,
         conn: &mut Connection,
         run: &RunRecord,
-        action: &super::ReceiptAction,
+        action: &crate::runtime::ReceiptAction,
         deadline: Instant,
     ) -> Result<InputControlReply> {
-        use crate::runtime::runner::ReceiptAction;
-        use crate::runtime::runner::ReceiptReply;
+        use crate::runtime::ReceiptAction;
+        use crate::runtime::ReceiptReply;
         if let ReceiptAction::Retire { input_id } = action {
             return self.retire_received(conn, run, *input_id, deadline);
         }
@@ -1804,9 +1790,9 @@ impl InputCoordinator {
             })?;
             check_deadline(Instant::now(), deadline)?;
             self.operations.remove(&input_id);
-            Ok(InputControlReply::Receipt(super::ReceiptReply::Retired {
-                input_id,
-            }))
+            Ok(InputControlReply::Receipt(
+                crate::runtime::ReceiptReply::Retired { input_id },
+            ))
         })();
         result.map_err(|source| {
             CafleetError::from(self.run_failure(source, None, Some(input_id), operation_key))
@@ -1825,7 +1811,7 @@ impl InputCoordinator {
 
     fn result(&self, operation: &storage::InputOperation) -> SubmissionResult {
         use storage::InputState;
-        let (status, mut stage, reason) = super::input_client::durable_outcome(operation)
+        let (status, mut stage, reason) = crate::runtime::input_client::durable_outcome(operation)
             .unwrap_or_else(|| {
                 (
                     SubmissionStatus::Held,
@@ -1888,11 +1874,11 @@ impl InputCoordinator {
             )?;
             if let InputControlOperation::Receipt(action) = &request.operation {
                 match action {
-                    super::ReceiptAction::Query { operation_key } => {
+                    crate::runtime::ReceiptAction::Query { operation_key } => {
                         known_key = Some(operation_key.clone())
                     }
-                    super::ReceiptAction::Retire { input_id }
-                    | super::ReceiptAction::Reconcile { input_id, .. } => {
+                    crate::runtime::ReceiptAction::Retire { input_id }
+                    | crate::runtime::ReceiptAction::Reconcile { input_id, .. } => {
                         known_input_id = Some(*input_id)
                     }
                 }
@@ -1948,9 +1934,10 @@ impl InputCoordinator {
                 )?;
             }
             let retained = with_database_deadline(conn, deadline, |conn| {
-                ensure(
-                    storage::database_identity(conn)? == self.run.database_identity_json,
-                    "input database identity changed",
+                crate::runtime::artifacts::validate_database(
+                    &storage::database_identity(conn)?,
+                    &self.run.database_identity_json,
+                    || error("input database identity changed"),
                 )?;
                 storage::find_input(conn, self.run.run_id, &input.operation_key)
             })?;
@@ -2477,7 +2464,12 @@ impl InputCoordinator {
             phase: InputPhase::AwaitBeforeWrite,
             input_id: Some(input_id),
         });
-        self.checkpoint(input_id, InputBoundary::Reserved, attempt_deadline)
+        self.checkpoint(
+            input_id,
+            #[cfg(test)]
+            InputBoundary::Reserved,
+            attempt_deadline,
+        )
     }
 
     /// Handles a deferred attempt's interaction, expiry and obstacles before any write; `true`
@@ -2719,15 +2711,22 @@ impl InputCoordinator {
     fn checkpoint(
         &mut self,
         input_id: i64,
-        boundary: InputBoundary,
+        #[cfg(test)] boundary: InputBoundary,
+
         deadline: Instant,
     ) -> Result<()> {
-        let checkpoint = self.retained_checkpoint(input_id)?;
-        let result = self
-            .services
-            .hooks
-            .checkpoint(boundary, &checkpoint, deadline)
-            .and_then(|()| check_deadline(Instant::now(), deadline));
+        let _checkpoint = self.retained_checkpoint(input_id)?;
+        #[cfg(test)]
+        let result = (|| -> Result<()> {
+            #[cfg(test)]
+            self.services
+                .hooks
+                .checkpoint(boundary, &_checkpoint, deadline)?;
+
+            check_deadline(Instant::now(), deadline)
+        })();
+        #[cfg(not(test))]
+        let result = check_deadline(Instant::now(), deadline);
         if result.is_err()
             && let Some(pending) = &mut self.pending
         {
@@ -3127,7 +3126,7 @@ impl InputCoordinator {
                             storage::PermissionReservation::Reserved(receipt) => receipt.input,
                             storage::PermissionReservation::Retained(receipt) => {
                                 let reply = InputControlReply::PermissionResponse(
-                                    super::input_client::projection(&self.run, receipt)?,
+                                    crate::runtime::input_client::projection(&self.run, receipt)?,
                                 );
                                 self.pending = None;
                                 return Ok(Some(reply));
@@ -3198,7 +3197,12 @@ impl InputCoordinator {
                 pending.input_id = Some(id);
                 pending.reservation = PendingReservation::Installed;
                 pending.phase = InputPhase::AwaitBeforeWrite;
-                self.checkpoint(id, InputBoundary::Reserved, effective)?;
+                self.checkpoint(
+                    id,
+                    #[cfg(test)]
+                    InputBoundary::Reserved,
+                    effective,
+                )?;
                 return Ok(None);
             }
             let id = self
@@ -3249,7 +3253,12 @@ impl InputCoordinator {
                 retained.output_seq = output_seq;
                 retained.attempt_available = true;
                 self.pending.as_mut().expect("pending input").phase = InputPhase::Armed;
-                self.checkpoint(id, InputBoundary::BeforeWrite, effective)?;
+                self.checkpoint(
+                    id,
+                    #[cfg(test)]
+                    InputBoundary::BeforeWrite,
+                    effective,
+                )?;
                 return Ok(None);
             }
             let status = observation.status();
@@ -3309,7 +3318,12 @@ impl InputCoordinator {
             );
             drop(guard);
             let after = if attempted {
-                self.checkpoint(id, InputBoundary::AfterWrite, effective)
+                self.checkpoint(
+                    id,
+                    #[cfg(test)]
+                    InputBoundary::AfterWrite,
+                    effective,
+                )
             } else {
                 Ok(())
             };
@@ -3430,7 +3444,12 @@ impl InputCoordinator {
             };
             self.pending.as_mut().expect("completed input").phase = InputPhase::Blocked;
             let operation = completed?;
-            self.checkpoint(id, InputBoundary::TerminalState, effective)?;
+            self.checkpoint(
+                id,
+                #[cfg(test)]
+                InputBoundary::TerminalState,
+                effective,
+            )?;
             let pending = self.pending.as_ref().expect("completed input retained");
             if pending
                 .composer
@@ -3570,7 +3589,12 @@ impl InputCoordinator {
         let retained = self.operations.get_mut(&id).expect("staged input retained");
         retained.operation = operation.clone();
         retained.attempt_available = false;
-        self.checkpoint(id, InputBoundary::TerminalState, effective)?;
+        self.checkpoint(
+            id,
+            #[cfg(test)]
+            InputBoundary::TerminalState,
+            effective,
+        )?;
         let reply = InputControlReply::Submission(self.result(&operation));
         self.pending = None;
         Ok(reply)
@@ -3790,22 +3814,126 @@ fn with_diagnostic(cause: CafleetError, diagnostic: &CafleetError) -> CafleetErr
     }
 }
 
+pub(crate) struct InputClockSample {
+    pub(crate) before: Instant,
+    pub(crate) monotonic_ns: u64,
+    pub(crate) after: Instant,
+}
+impl InputClockSample {
+    fn validate(&self) -> Result<()> {
+        ensure(self.before <= self.after, "input clock bracket is reversed")
+    }
+}
+
+pub(crate) trait InputDeadlineClock {
+    fn sample(&mut self) -> Result<InputClockSample>;
+}
+
+pub(crate) struct RealInputDeadlineClock;
+impl InputDeadlineClock for RealInputDeadlineClock {
+    fn sample(&mut self) -> Result<InputClockSample> {
+        let before = Instant::now();
+        let time = rustix::time::clock_gettime_dynamic(rustix::time::DynamicClockId::Known(
+            rustix::time::ClockId::Monotonic,
+        ))
+        .map_err(io_error)?;
+        let after = Instant::now();
+        let seconds = u64::try_from(time.tv_sec)
+            .map_err(|_| error("monotonic clock seconds must be nonnegative"))?;
+        let nanoseconds = u64::try_from(time.tv_nsec)
+            .map_err(|_| error("monotonic clock nanoseconds must be nonnegative"))?;
+        ensure(
+            nanoseconds < 1_000_000_000,
+            "monotonic clock nanoseconds exceed their range",
+        )?;
+        let monotonic_ns = seconds
+            .checked_mul(1_000_000_000)
+            .and_then(|value| value.checked_add(nanoseconds))
+            .ok_or_else(|| error("monotonic clock nanoseconds overflow"))?;
+        Ok(InputClockSample {
+            before,
+            monotonic_ns,
+            after,
+        })
+    }
+}
+
+pub(crate) struct InputExpiration(u64);
+impl InputExpiration {
+    pub(crate) fn capture(deadline: Instant, clock: &mut impl InputDeadlineClock) -> Result<Self> {
+        let sample = clock.sample()?;
+        sample.validate()?;
+        let remaining = deadline
+            .checked_duration_since(sample.after)
+            .filter(|duration| !duration.is_zero())
+            .ok_or(CafleetError::DeadlineExceeded)?;
+        let remaining_ns = u64::try_from(remaining.as_nanos())
+            .map_err(|_| error("input deadline duration exceeds monotonic nanoseconds"))?;
+        let expiration = sample
+            .monotonic_ns
+            .checked_add(remaining_ns)
+            .ok_or_else(|| error("input expiration overflows monotonic nanoseconds"))?;
+        Ok(Self(expiration))
+    }
+
+    pub(crate) fn receive(
+        &self,
+        admitted_at: Instant,
+        shutdown: Option<Instant>,
+        clock: &mut impl InputDeadlineClock,
+    ) -> Result<Instant> {
+        let sample = clock.sample()?;
+        sample.validate()?;
+        let remaining_ns = self
+            .0
+            .checked_sub(sample.monotonic_ns)
+            .filter(|remaining| *remaining > 0)
+            .ok_or(CafleetError::DeadlineExceeded)?;
+        let expiration = sample
+            .before
+            .checked_add(Duration::from_nanos(remaining_ns))
+            .ok_or_else(|| error("input expiration exceeds the local clock range"))?;
+        let admission = admitted_at
+            .checked_add(Duration::from_secs(5))
+            .ok_or_else(|| error("input admission exceeds the local clock range"))?;
+        let mut deadline = expiration.min(admission);
+        if let Some(shutdown) = shutdown {
+            deadline = deadline.min(shutdown);
+        }
+        check_deadline(sample.after, deadline)?;
+        Ok(deadline)
+    }
+
+    pub(crate) fn monotonic_ns(&self) -> u64 {
+        self.0
+    }
+}
+
+pub(super) fn receive_input_expiration(
+    expires_at_mono_ns: u64,
+    admitted_at: Instant,
+    shutdown: Option<Instant>,
+    clock: &mut impl InputDeadlineClock,
+) -> Result<Instant> {
+    ensure(expires_at_mono_ns > 0, "positive input expiration required")?;
+    InputExpiration(expires_at_mono_ns).receive(admitted_at, shutdown, clock)
+}
+
 #[cfg(test)]
 mod tests {
     mod manual_progress {
         use crate::broker::runtime as storage;
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::RunnerFixture;
-        use crate::runtime::runner::input::*;
-        use crate::runtime::runner::*;
+        use crate::runtime::input::tests::ordinary_prompt::support::RunnerFixture;
+        use crate::runtime::input::*;
+        use crate::runtime::*;
         use std::collections::VecDeque;
         use std::io;
         use std::io::ErrorKind;
         use std::panic::AssertUnwindSafe;
         use std::panic::catch_unwind;
         use std::panic::resume_unwind;
-        use std::sync::Arc;
         use std::time::Duration;
         use std::time::Instant;
 
@@ -3889,10 +4017,12 @@ mod tests {
                     self.lock.clone(),
                     InputServices {
                         catalog: ProfileCatalog::bundled().unwrap(),
-                        token_source: Box::new(crate::runtime::runner::input::tests::ordinary_prompt::support::PanicTokens(
-                            "manual progress",
-                        )),
-                        hooks: Arc::new(InertInputHooks),
+                        token_source: Box::new(
+                            crate::runtime::input::tests::ordinary_prompt::support::PanicTokens(
+                                "manual progress",
+                            ),
+                        ),
+                        hooks: crate::runtime::input::test_support::default_input_hooks(),
                     },
                     self.until,
                 )
@@ -4104,13 +4234,13 @@ mod tests {
         }
     }
 
-    pub(in crate::runtime::runner::input) mod ordinary_prompt {
+    pub(in crate::runtime::input) mod ordinary_prompt {
         use crate::broker::runtime as storage;
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
-        use crate::runtime::runner::input::*;
-        use crate::runtime::runner::test_support::Fixture;
-        use crate::runtime::runner::*;
+        use crate::runtime::input::*;
+        use crate::runtime::test_support::Fixture;
+        use crate::runtime::*;
         use std::collections::VecDeque;
         use std::io;
         use std::panic::AssertUnwindSafe;
@@ -4120,7 +4250,7 @@ mod tests {
         use std::time::Duration;
         use std::time::Instant;
 
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::*;
+        use crate::runtime::input::tests::ordinary_prompt::support::*;
 
         fn submitted(reply: InputControlReply) -> SubmissionResult {
             match reply {
@@ -4455,7 +4585,7 @@ mod tests {
         }
 
         mod guards {
-            use crate::runtime::runner::input::tests::ordinary_prompt::*;
+            use crate::runtime::input::tests::ordinary_prompt::*;
 
             fn rejected(result: Result<ProgrammaticWrite>) {
                 assert!(
@@ -4601,7 +4731,7 @@ mod tests {
 
         mod preview_exec {
             use crate::coding_agent::CodingAgent;
-            use crate::runtime::runner::input::tests::ordinary_prompt::*;
+            use crate::runtime::input::tests::ordinary_prompt::*;
 
             fn request(
                 host: &Host,
@@ -4788,7 +4918,7 @@ mod tests {
 
         mod staged_delivery {
             use crate::coding_agent::CodingAgent;
-            use crate::runtime::runner::input::tests::ordinary_prompt::*;
+            use crate::runtime::input::tests::ordinary_prompt::*;
 
             pub(super) const SETTLE: Duration = Duration::from_millis(500);
             const ESCAPE: &[u8] = b"\x1b";
@@ -4832,7 +4962,7 @@ mod tests {
 
             pub(super) fn permission_catalog() -> ProfileCatalog {
                 let mut definition =
-                    crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition();
+                    crate::coding_agent::catalog::test_support::inspection_fixture_definition();
                 let composer = catalog_definition();
                 definition["fixtures"]
                     .as_array_mut()
@@ -4940,7 +5070,9 @@ mod tests {
                     encoded(),
                     HostProfile::metadata(),
                     |host| {
-                        crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form(host);
+                        crate::runtime::input::tests::permission_inspection_contracts::stable_form(
+                            host,
+                        );
                         let reply = submitted(
                             host.handle(prompt_request(host, "prompt:blocked"))
                                 .unwrap()
@@ -5010,7 +5142,7 @@ mod tests {
                             host,
                             prompt_request(host, "prompt:interaction-race"),
                         );
-                        crate::runtime::runner::input::tests::permission_inspection_contracts::form(
+                        crate::runtime::input::tests::permission_inspection_contracts::form(
                             host,
                             "write raced.txt",
                             "synthetic-only",
@@ -5040,7 +5172,7 @@ mod tests {
                             std::thread::sleep(Duration::from_millis(1));
                         }
                         assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
-                        crate::runtime::runner::input::tests::permission_inspection_contracts::form(
+                        crate::runtime::input::tests::permission_inspection_contracts::form(
                             host,
                             "write raced.txt",
                             "synthetic-only",
@@ -5049,7 +5181,9 @@ mod tests {
                         assert_eq!(reply.status, SubmissionStatus::Uncertain);
                         assert_eq!(reply.stage, SubmissionStage::Partial);
                         host.show(SCREEN.to_vec());
-                        crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                        crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(
+                            host,
+                        );
                         assert_eq!(
                             host.pty.stage_bytes(),
                             vec![LITERAL.as_bytes().to_vec()],
@@ -5123,7 +5257,7 @@ mod tests {
             }
 
             mod uncertain_cause {
-                use crate::runtime::runner::input::tests::ordinary_prompt::staged_delivery::*;
+                use crate::runtime::input::tests::ordinary_prompt::staged_delivery::*;
 
                 const FOCUS_REPLY: &[u8] = b"\x1b[I";
                 const CURSOR_REPORT: &[u8] = b"\x1b[24;80R";
@@ -5184,7 +5318,7 @@ mod tests {
 
                 fn candidate_form(host: &mut Host) {
                     host.show(
-                        crate::coding_agent::profiles::catalog::test_support::inspection_fixture_form(
+                        crate::coding_agent::catalog::test_support::inspection_fixture_form(
                             "write candidate.txt",
                             "synthetic-only",
                         ),
@@ -5264,9 +5398,8 @@ mod tests {
                             Some("terminal reply pending")
                         );
                         assert_eq!(host.transport.human_generation(), generation);
-                        host.transport.backdate_reply_prefix(
-                            crate::runtime::runner::transport::REPLY_PREFIX_BOUND,
-                        );
+                        host.transport
+                            .backdate_reply_prefix(crate::runtime::transport::REPLY_PREFIX_BOUND);
                         host.drain();
                         assert_eq!(host.transport.human_generation(), generation + 1);
                         let reply = finish_after_interruption(host);
@@ -5329,7 +5462,9 @@ mod tests {
                 fn staged_open_interaction_during_the_settle_records_interaction_open() {
                     with_interaction_host(|host| {
                         until_literal_written(host, prompt_request(host, "prompt:open"));
-                        crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form(host);
+                        crate::runtime::input::tests::permission_inspection_contracts::stable_form(
+                            host,
+                        );
                         let reply = submitted(
                             host.advance()
                                 .expect("the settle check stops the remaining stages"),
@@ -5346,7 +5481,7 @@ mod tests {
                             assert!(Instant::now() < host.until, "the outage stops the stage");
                             host.controller
                                 .observer_failed(
-                                    crate::runtime::runner::observation::ObservationFailure::Detector,
+                                    crate::runtime::observation::ObservationFailure::Detector,
                                     &RealObservationClock,
                                 )
                                 .unwrap();
@@ -5368,7 +5503,9 @@ mod tests {
                     with_interaction_host(|host| {
                         until_literal_written(host, prompt_request(host, "prompt:armed-open"));
                         until_armed(host);
-                        crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form(host);
+                        crate::runtime::input::tests::permission_inspection_contracts::stable_form(
+                            host,
+                        );
                         let reply = submitted(
                             host.advance()
                                 .expect("the armed stage stops on the interaction"),
@@ -5402,13 +5539,11 @@ mod tests {
             use crate::broker::runtime::DeliveryProjection;
             use crate::broker::runtime::DeliveryStatus;
             use crate::pane_lock::PaneLock;
-            use crate::runtime::runner::input::tests::ordinary_prompt::staged_delivery::permission_catalog;
-            use crate::runtime::runner::input::tests::ordinary_prompt::*;
+            use crate::runtime::input::tests::ordinary_prompt::staged_delivery::permission_catalog;
+            use crate::runtime::input::tests::ordinary_prompt::*;
 
             pub(super) fn form(host: &mut Host) {
-                crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form(
-                    host,
-                );
+                crate::runtime::input::tests::permission_inspection_contracts::stable_form(host);
             }
 
             pub(super) fn close(host: &mut Host) {
@@ -5613,7 +5748,7 @@ mod tests {
             fn queue_drains_after_a_candidate_clears() {
                 with_permission_host(Duration::from_secs(8), |host| {
                     host.show(
-                        crate::coding_agent::profiles::catalog::test_support::inspection_fixture_form(
+                        crate::coding_agent::catalog::test_support::inspection_fixture_form(
                             "write candidate.txt",
                             "synthetic-only",
                         ),
@@ -5845,7 +5980,7 @@ mod tests {
                     turns_until(host, |host| {
                         row(host, first).state == storage::InputState::Uncertain
                     });
-                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(
                         host.pty.offers,
                         vec![LITERAL.as_bytes().to_vec(), b"h".to_vec()],
@@ -5924,7 +6059,7 @@ mod tests {
 
             fn reconcile(host: &mut Host, input_id: i64) {
                 let reply = host
-                    .receipt(crate::runtime::runner::ReceiptAction::Reconcile {
+                    .receipt(crate::runtime::ReceiptAction::Reconcile {
                         input_id,
                         expected: storage::InputState::Uncertain,
                         disposition: storage::InputDisposition::AbandonedUncertain,
@@ -5934,7 +6069,7 @@ mod tests {
                 assert!(
                     matches!(
                         reply,
-                        InputControlReply::Receipt(crate::runtime::runner::ReceiptReply::Settled {
+                        InputControlReply::Receipt(crate::runtime::ReceiptReply::Settled {
                             input_id: settled
                         }) if settled == input_id
                     ),
@@ -5957,7 +6092,7 @@ mod tests {
                             host.pty.failure = Some(io::ErrorKind::BrokenPipe);
                         } else {
                             std::thread::sleep(
-                                crate::runtime::runner::input::tests::ordinary_prompt::staged_delivery::SETTLE + Duration::from_millis(100),
+                                crate::runtime::input::tests::ordinary_prompt::staged_delivery::SETTLE + Duration::from_millis(100),
                             );
                             host.human.bytes.extend(b"h");
                         }
@@ -5988,7 +6123,9 @@ mod tests {
                         }
                         host.pty.failure = None;
                         turns_until(host, |host| result_events(host, first) > 0);
-                        crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                        crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(
+                            host,
+                        );
                         assert_eq!(result_events(host, first), 1, "{case}");
                         let recorded = row(host, first)
                             .uncertain_cause
@@ -6052,7 +6189,7 @@ mod tests {
                         preview_request(host, &message, &canonical),
                         "earlier_input",
                     );
-                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(
                         host.pty.offers.len(),
                         offers,
@@ -6154,7 +6291,7 @@ mod tests {
                         released,
                         "storage was busy for the accepted preview's stamp"
                     );
-                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(result_events(host, id), 1, "the result is published once");
                     assert_eq!(row(host, id).state, storage::InputState::Settled);
                     assert_eq!(
@@ -6188,7 +6325,7 @@ mod tests {
                     host.coordinator.pending.as_mut().unwrap().deadline =
                         Instant::now() - Duration::from_millis(1);
                     form(host);
-                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     let requeued = row(host, id);
                     assert_eq!(
                         requeued.state,
@@ -6240,7 +6377,7 @@ mod tests {
                     };
                     assert_eq!(reply.status, SubmissionStatus::Uncertain);
                     let offers = host.pty.offers.len();
-                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(
                         host.pty.offers.len(),
                         offers,
@@ -6400,7 +6537,7 @@ mod tests {
                     assert_eq!(input.delivery_reason.as_deref(), Some("target_changed"));
                     assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
                     turns_until(host, |host| result_events(host, id) > 0);
-                    crate::runtime::runner::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
+                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
                     assert_eq!(result_events(host, id), 1, "the result is published once");
                 });
             }
@@ -6551,7 +6688,7 @@ mod tests {
                         );
                         host.controller
                             .observer_failed(
-                                crate::runtime::runner::observation::ObservationFailure::Detector,
+                                crate::runtime::observation::ObservationFailure::Detector,
                                 &RealObservationClock,
                             )
                             .unwrap();
@@ -6575,10 +6712,10 @@ mod tests {
 
         mod method_rendering {
             use crate::broker::runtime::DeliveryMethod;
-            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::queued;
-            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::row;
-            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::turns_until;
-            use crate::runtime::runner::input::tests::ordinary_prompt::*;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::queued;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::row;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until;
+            use crate::runtime::input::tests::ordinary_prompt::*;
 
             const UNCLASSIFIED: &[u8] = b"\x1b[2J\x1b[1;1Hworking on something";
 
@@ -6720,10 +6857,10 @@ mod tests {
 
         mod composer_busy {
             use crate::broker::runtime::DeliveryMethod;
-            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::queued;
-            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::row;
-            use crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::turns_until;
-            use crate::runtime::runner::input::tests::ordinary_prompt::*;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::queued;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::row;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until;
+            use crate::runtime::input::tests::ordinary_prompt::*;
 
             const DRAFT: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic draft\r\nDraft end";
 
@@ -6739,7 +6876,7 @@ mod tests {
             /// The permission-form catalog whose composer also classifies a draft as busy.
             fn permission_busy_catalog() -> ProfileCatalog {
                 let mut definition =
-                    crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition();
+                    crate::coding_agent::catalog::test_support::inspection_fixture_definition();
                 let composer = catalog_definition();
                 definition["fixtures"]
                     .as_array_mut()
@@ -6837,8 +6974,8 @@ mod tests {
                 type Case = (fn() -> ProfileCatalog, fn(&mut Host), &'static str);
                 let cases: [Case; 2] = [
                     (
-                        crate::runtime::runner::input::tests::ordinary_prompt::staged_delivery::permission_catalog,
-                        crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::form,
+                        crate::runtime::input::tests::ordinary_prompt::staged_delivery::permission_catalog,
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::form,
                         "interaction_open",
                     ),
                     (
@@ -6945,9 +7082,7 @@ mod tests {
                     HostProfile::metadata(),
                     Instant::now() + Duration::from_secs(60),
                     |host| {
-                        crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::form(
-                            host,
-                        );
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::form(host);
                         let request = host.request("prompt:busy-after-start");
                         let id = queued(host, request, "interaction_open");
                         let behind =
@@ -7006,9 +7141,7 @@ mod tests {
                     HostProfile::metadata(),
                     Instant::now() + Duration::from_secs(60),
                     |host| {
-                        crate::runtime::runner::input::tests::ordinary_prompt::deferred_queue::form(
-                            host,
-                        );
+                        crate::runtime::input::tests::ordinary_prompt::deferred_queue::form(host);
                         let request = host.request("prompt:interaction-then-busy");
                         let id = queued(host, request, "interaction_open");
                         let long_queued = crate::time::format_utc(
@@ -7156,7 +7289,7 @@ mod tests {
 
         mod sql {
             use crate::db::with_database_budget;
-            use crate::runtime::runner::input::tests::ordinary_prompt::*;
+            use crate::runtime::input::tests::ordinary_prompt::*;
             use crate::time::Deadline;
             use rusqlite::Connection;
             use rusqlite::hooks::AuthAction;
@@ -7447,8 +7580,8 @@ mod tests {
             }
         }
 
-        pub(in crate::runtime::runner::input) mod support {
-            use crate::runtime::runner::input::tests::ordinary_prompt::*;
+        pub(in crate::runtime::input) mod support {
+            use crate::runtime::input::tests::ordinary_prompt::*;
             use crate::runtime::system::test_support::TestChild;
             use std::process::Command;
             use std::process::Stdio;
@@ -7458,9 +7591,8 @@ mod tests {
             pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
             pub(super) const VERSION: &str = "0.0.1-synthetic";
 
-            pub(in crate::runtime::runner::input) fn catalog_definition() -> serde_json::Value {
-                let mut value =
-                    crate::coding_agent::profiles::catalog::test_support::synthetic_definitions();
+            pub(in crate::runtime::input) fn catalog_definition() -> serde_json::Value {
+                let mut value = crate::coding_agent::catalog::test_support::synthetic_definitions();
                 let fixture = value["fixtures"][0].clone();
                 let mut executable = fixture.clone();
                 executable["id"] = serde_json::json!("synthetic-prompt-plan");
@@ -7494,7 +7626,7 @@ mod tests {
             }
 
             /// Submits `request`, then drives drained turns until its first reply.
-            pub(in crate::runtime::runner::input) fn settle(
+            pub(in crate::runtime::input) fn settle(
                 host: &mut Host,
                 request: InputControlRequest,
             ) -> SubmissionResult {
@@ -7514,13 +7646,13 @@ mod tests {
                 }
             }
 
-            pub(in crate::runtime::runner::input) fn canonical_preview(
+            pub(in crate::runtime::input) fn canonical_preview(
                 message: &crate::broker::MessageRecord,
             ) -> String {
                 crate::delivery::canonical_preview_line(message)
             }
 
-            pub(in crate::runtime::runner::input) fn preview_request(
+            pub(in crate::runtime::input) fn preview_request(
                 host: &Host,
                 message: &crate::broker::MessageRecord,
                 literal: &str,
@@ -7536,7 +7668,7 @@ mod tests {
                 request
             }
 
-            pub(in crate::runtime::runner::input) fn delivery_selection(
+            pub(in crate::runtime::input) fn delivery_selection(
                 host: &Host,
                 input_id: i64,
             ) -> (Option<String>, Option<String>) {
@@ -7550,7 +7682,7 @@ mod tests {
                     .unwrap()
             }
 
-            pub(in crate::runtime::runner::input) struct HostProfile {
+            pub(in crate::runtime::input) struct HostProfile {
                 pub(crate) policy: storage::evidence::EvidencePolicy,
                 pub(crate) event_evidence: &'static str,
                 pub(crate) backend: crate::coding_agent::CodingAgent,
@@ -7578,7 +7710,7 @@ mod tests {
                 }
             }
 
-            pub(in crate::runtime::runner::input) struct PanicTokens(pub(crate) &'static str);
+            pub(in crate::runtime::input) struct PanicTokens(pub(crate) &'static str);
             impl RequestTokenSource for PanicTokens {
                 fn fill(&mut self, _: &mut [u8; 32]) -> Result<()> {
                     panic!("{} creates no request token", self.0)
@@ -7586,14 +7718,14 @@ mod tests {
             }
 
             #[derive(Clone, Debug)]
-            pub(in crate::runtime::runner::input) struct Point {
+            pub(in crate::runtime::input) struct Point {
                 pub(crate) boundary: &'static str,
                 pub(crate) id: Option<i64>,
                 pub(crate) count: u64,
                 pub(crate) seq: u64,
             }
 
-            pub(in crate::runtime::runner::input) struct Hooks {
+            pub(in crate::runtime::input) struct Hooks {
                 pub(crate) points: Mutex<Vec<Point>>,
                 pub(crate) until: Instant,
             }
@@ -7651,7 +7783,7 @@ mod tests {
             }
 
             #[derive(Default)]
-            pub(in crate::runtime::runner::input) struct Reader {
+            pub(in crate::runtime::input) struct Reader {
                 pub(crate) bytes: VecDeque<u8>,
                 pub(crate) consumed: usize,
                 pub(crate) calls: usize,
@@ -7675,7 +7807,7 @@ mod tests {
             /// `program` holds each completed programmatic input; `stages` holds every
             /// separately offered programmatic stage with its offer time, so settle intervals
             /// between a literal and its submit key are observable.
-            pub(in crate::runtime::runner::input) struct Pty {
+            pub(in crate::runtime::input) struct Pty {
                 pub(crate) child: Reader,
                 pub(crate) offers: Vec<Vec<u8>>,
                 pub(crate) program: Vec<Vec<u8>>,
@@ -7746,7 +7878,7 @@ mod tests {
                 }
             }
             #[derive(Default)]
-            pub(in crate::runtime::runner::input) struct Output(pub(crate) Vec<u8>);
+            pub(in crate::runtime::input) struct Output(pub(crate) Vec<u8>);
             impl Display for Output {
                 fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
                     self.0.extend_from_slice(bytes);
@@ -7757,7 +7889,7 @@ mod tests {
                 }
             }
 
-            pub(in crate::runtime::runner::input) struct Child {
+            pub(in crate::runtime::input) struct Child {
                 native: TestChild,
                 until: Instant,
             }
@@ -7767,7 +7899,7 @@ mod tests {
                 }
             }
 
-            pub(in crate::runtime::runner::input) struct RunSelection {
+            pub(in crate::runtime::input) struct RunSelection {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'static str,
                 pub(crate) event_evidence: &'static str,
@@ -7775,7 +7907,7 @@ mod tests {
 
             /// A run owned by this process as its runner, with a started writer, observation
             /// controller and transport over a live `/bin/cat` native child.
-            pub(in crate::runtime::runner::input) struct RunnerFixture {
+            pub(in crate::runtime::input) struct RunnerFixture {
                 pub(crate) fixture: Fixture,
                 pub(crate) artifacts: RunArtifacts,
                 pub(crate) lock: Arc<RunLock>,
@@ -7787,7 +7919,7 @@ mod tests {
             }
 
             impl RunnerFixture {
-                pub(in crate::runtime::runner::input) fn new(
+                pub(in crate::runtime::input) fn new(
                     catalog: &ProfileCatalog,
                     policy: storage::evidence::EvidencePolicy,
                     selection: Option<RunSelection>,
@@ -7892,7 +8024,7 @@ mod tests {
                 assert!(reaped.unwrap().is_some(), "owned native child was reaped");
             }
 
-            pub(in crate::runtime::runner::input) struct Host {
+            pub(in crate::runtime::input) struct Host {
                 pub(crate) fixture: Fixture,
                 _artifacts: RunArtifacts,
                 pub(crate) coordinator: InputCoordinator,
@@ -7909,7 +8041,7 @@ mod tests {
             }
 
             impl Host {
-                pub(in crate::runtime::runner::input) fn pending_snapshot(
+                pub(in crate::runtime::input) fn pending_snapshot(
                     &self,
                 ) -> (String, String, Vec<u8>, Instant, InputPhase, Option<i64>) {
                     let pending = self
@@ -8140,11 +8272,11 @@ mod tests {
                 ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
                     let deadline = check_deadline(Instant::now(), deadline)
                         .and_then(|()| {
-                            crate::runtime::runner::receive_input_expiration(
+                            crate::runtime::receive_input_expiration(
                                 request.expires_at_mono_ns,
                                 Instant::now(),
                                 Some(deadline),
-                                &mut crate::runtime::runner::RealInputDeadlineClock,
+                                &mut crate::runtime::RealInputDeadlineClock,
                             )
                         })
                         .map_err(|source| {
@@ -8168,7 +8300,7 @@ mod tests {
                 }
                 pub(crate) fn receipt(
                     &mut self,
-                    action: crate::runtime::runner::ReceiptAction,
+                    action: crate::runtime::ReceiptAction,
                 ) -> std::result::Result<InputControlReply, InputFailure> {
                     let mut request = self.request("unused-receipt-key");
                     request.operation = InputControlOperation::Receipt(action);
@@ -8177,13 +8309,13 @@ mod tests {
                 }
                 pub(crate) fn respond(
                     &mut self,
-                    input: &crate::runtime::runner::PermissionRespondInput,
+                    input: &crate::runtime::PermissionRespondInput,
                 ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
                     self.respond_until(input, self.until)
                 }
                 pub(crate) fn respond_until(
                     &mut self,
-                    input: &crate::runtime::runner::PermissionRespondInput,
+                    input: &crate::runtime::PermissionRespondInput,
                     deadline: Instant,
                 ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
                     let mut request = self.request("unused-response-key");
@@ -8226,23 +8358,23 @@ mod tests {
                     finish_runner(&mut self.writer, &mut self.child, self.until);
                 }
             }
-            pub(in crate::runtime::runner::input) fn with_host(body: impl FnOnce(&mut Host)) {
+            pub(in crate::runtime::input) fn with_host(body: impl FnOnce(&mut Host)) {
                 with_owned_host(Host::new(), body);
             }
-            pub(in crate::runtime::runner::input) fn with_host_until(
+            pub(in crate::runtime::input) fn with_host_until(
                 until: Instant,
                 body: impl FnOnce(&mut Host),
             ) {
                 with_owned_host(Host::until(until), body);
             }
-            pub(in crate::runtime::runner::input) fn with_catalog_host(
+            pub(in crate::runtime::input) fn with_catalog_host(
                 catalog: ProfileCatalog,
                 expected_program: Vec<u8>,
                 body: impl FnOnce(&mut Host),
             ) {
                 with_profile_host(catalog, expected_program, HostProfile::metadata(), body);
             }
-            pub(in crate::runtime::runner::input) fn with_profile_host(
+            pub(in crate::runtime::input) fn with_profile_host(
                 catalog: ProfileCatalog,
                 expected_program: Vec<u8>,
                 profile: HostProfile,
@@ -8250,7 +8382,7 @@ mod tests {
             ) {
                 with_owned_host(Host::with_catalog(catalog, expected_program, profile), body);
             }
-            pub(in crate::runtime::runner::input) fn with_profile_host_until(
+            pub(in crate::runtime::input) fn with_profile_host_until(
                 catalog: ProfileCatalog,
                 expected_program: Vec<u8>,
                 profile: HostProfile,
@@ -8275,18 +8407,18 @@ mod tests {
         use crate::broker::runtime::Coverage;
         use crate::broker::runtime::InteractionClass;
         use crate::broker::runtime::PermissionDecision;
-        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
-        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_form;
-        pub(super) use crate::coding_agent::profiles::detector::test_support::native_fixture_bytes;
-        use crate::runtime::runner::MissingEvidence;
-        use crate::runtime::runner::PermissionInspectInput;
-        use crate::runtime::runner::PermissionInspection;
-        use crate::runtime::runner::RuntimePaths;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::Host;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::HostProfile;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::catalog_definition;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::with_profile_host;
-        use crate::runtime::runner::input::*;
+        use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
+        use crate::coding_agent::catalog::test_support::inspection_fixture_form;
+        pub(super) use crate::coding_agent::detector::test_support::native_fixture_bytes;
+        use crate::runtime::MissingEvidence;
+        use crate::runtime::PermissionInspectInput;
+        use crate::runtime::PermissionInspection;
+        use crate::runtime::RuntimePaths;
+        use crate::runtime::input::tests::ordinary_prompt::support::Host;
+        use crate::runtime::input::tests::ordinary_prompt::support::HostProfile;
+        use crate::runtime::input::tests::ordinary_prompt::support::catalog_definition;
+        use crate::runtime::input::tests::ordinary_prompt::support::with_profile_host;
+        use crate::runtime::input::*;
         use rusqlite::OptionalExtension;
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::AtomicUsize;
@@ -8361,14 +8493,12 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Claude,
                     native_version,
-                    size: crate::runtime::runner::TerminalSize {
+                    size: crate::runtime::TerminalSize {
                         rows: 36,
                         cols: 120,
                     },
                     screen: native_fixture_bytes(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
-                            idle_fixture,
-                        ),
+                        &crate::coding_agent::detector::test_support::bundled_screen(idle_fixture),
                     ),
                 },
                 |h| with_counted_tokens(h, body),
@@ -8386,12 +8516,12 @@ mod tests {
                     event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Opencode,
                     native_version: "2.1.4",
-                    size: crate::runtime::runner::TerminalSize {
+                    size: crate::runtime::TerminalSize {
                         rows: 36,
                         cols: 120,
                     },
                     screen: native_fixture_bytes(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-idle-composer-1",
                         ),
                     ),
@@ -8740,7 +8870,7 @@ mod tests {
                 h.transport
                     .resize(
                         &mut h.pty,
-                        crate::runtime::runner::TerminalSize { rows: 24, cols: 81 },
+                        crate::runtime::TerminalSize { rows: 24, cols: 81 },
                     )
                     .unwrap();
                 assert_eq!(token(&inspect(h, ids)), previous);
@@ -8887,8 +9017,8 @@ mod tests {
                 let generation = h.controller.request_generation();
                 h.controller
                     .observer_failed(
-                        crate::runtime::runner::ObservationFailure::Parser,
-                        &crate::runtime::runner::RealObservationClock,
+                        crate::runtime::ObservationFailure::Parser,
+                        &crate::runtime::RealObservationClock,
                     )
                     .unwrap();
                 assert!(h.controller.current_request().is_none());
@@ -8908,8 +9038,8 @@ mod tests {
         fn permission_inspection_missing_facts_use_validated_post_policy_evidence_only() {
             use crate::coding_agent::CodingAgent;
             use crate::coding_agent::Detector;
-            use crate::runtime::runner::TerminalSize;
-            use crate::runtime::runner::TerminalState;
+            use crate::runtime::TerminalSize;
+            use crate::runtime::TerminalState;
             let catalog =
                 ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.1-synthetic"));
@@ -8981,32 +9111,32 @@ mod tests {
         use crate::broker::runtime::DirectorMode;
         use crate::broker::runtime::PermissionDecision;
         use crate::coding_agent::CodingAgent;
-        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
-        use crate::runtime::runner::ByteInput;
-        use crate::runtime::runner::PermissionInspection;
-        use crate::runtime::runner::PermissionRespondInput;
-        use crate::runtime::runner::PermissionResponseResult;
-        use crate::runtime::runner::ReceiptAction;
-        use crate::runtime::runner::ReceiptReply;
-        use crate::runtime::runner::TerminalSize;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::Host;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::Pty;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::counts;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::detail_rewrite;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::form;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::inspect;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::inspect_request;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::native_fixture_bytes;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::request as inspection_target;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::settled_ids;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::stable_detailed_form;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::stable_form;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_claude_host;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_claude_inspection;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_definition;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_inspection;
-        use crate::runtime::runner::input::tests::permission_inspection_contracts::with_redacted_inspection;
-        use crate::runtime::runner::input::*;
+        use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
+        use crate::runtime::ByteInput;
+        use crate::runtime::PermissionInspection;
+        use crate::runtime::PermissionRespondInput;
+        use crate::runtime::PermissionResponseResult;
+        use crate::runtime::ReceiptAction;
+        use crate::runtime::ReceiptReply;
+        use crate::runtime::TerminalSize;
+        use crate::runtime::input::tests::ordinary_prompt::support::Host;
+        use crate::runtime::input::tests::ordinary_prompt::support::Pty;
+        use crate::runtime::input::tests::permission_inspection_contracts::counts;
+        use crate::runtime::input::tests::permission_inspection_contracts::detail_rewrite;
+        use crate::runtime::input::tests::permission_inspection_contracts::form;
+        use crate::runtime::input::tests::permission_inspection_contracts::inspect;
+        use crate::runtime::input::tests::permission_inspection_contracts::inspect_request;
+        use crate::runtime::input::tests::permission_inspection_contracts::native_fixture_bytes;
+        use crate::runtime::input::tests::permission_inspection_contracts::request as inspection_target;
+        use crate::runtime::input::tests::permission_inspection_contracts::settled_ids;
+        use crate::runtime::input::tests::permission_inspection_contracts::stable_detailed_form;
+        use crate::runtime::input::tests::permission_inspection_contracts::stable_form;
+        use crate::runtime::input::tests::permission_inspection_contracts::with_claude_host;
+        use crate::runtime::input::tests::permission_inspection_contracts::with_claude_inspection;
+        use crate::runtime::input::tests::permission_inspection_contracts::with_definition;
+        use crate::runtime::input::tests::permission_inspection_contracts::with_inspection;
+        use crate::runtime::input::tests::permission_inspection_contracts::with_redacted_inspection;
+        use crate::runtime::input::*;
         use std::sync::atomic::Ordering;
         use std::time::Duration;
 
@@ -9215,7 +9345,7 @@ mod tests {
                             &mut h.output,
                             &mut h
                                 .controller
-                                .observer(&h.writer, &crate::runtime::runner::RealObservationClock),
+                                .observer(&h.writer, &crate::runtime::RealObservationClock),
                             h.until,
                         )
                     })
@@ -9275,7 +9405,7 @@ mod tests {
                         &mut h.output,
                         &mut h
                             .controller
-                            .observer(&h.writer, &crate::runtime::runner::RealObservationClock),
+                            .observer(&h.writer, &crate::runtime::RealObservationClock),
                         h.until,
                     )
                 })
@@ -9307,7 +9437,7 @@ mod tests {
 
         fn claude_blocked_form(h: &mut Host) -> (i64, i64, i64, i64) {
             h.pty.child.bytes.extend(native_fixture_bytes(
-                &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                &crate::coding_agent::detector::test_support::bundled_screen(
                     "claude-2.1.302-default-permission-1",
                 ),
             ));
@@ -9316,7 +9446,7 @@ mod tests {
 
         fn claude_boxed_single_row_form(h: &mut Host) -> (i64, i64, i64, i64) {
             h.pty.child.bytes.extend(native_fixture_bytes(
-                &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                &crate::coding_agent::detector::test_support::bundled_screen(
                     "claude-2.1.302-boxed-single-row-permission-1",
                 ),
             ));
@@ -9360,7 +9490,7 @@ mod tests {
                     let key = format!("preview:{}:{}", run.run_id, message.message_id);
                     let mut request = h.request(&key);
                     request.operation =
-                        InputControlOperation::SubmitPrompt(crate::runtime::runner::SubmitInput {
+                        InputControlOperation::SubmitPrompt(crate::runtime::SubmitInput {
                             operation_key: key.clone(),
                             input_kind: storage::InputKind::Preview,
                             message_id: Some(message.message_id),
@@ -9436,17 +9566,17 @@ mod tests {
         #[test]
         fn a_preview_during_the_claude_read_outside_dialog_queues_with_zero_bytes_and_drains_once_on_the_idle_composer()
          {
-            use crate::runtime::runner::input::tests::ordinary_prompt::support::canonical_preview;
-            use crate::runtime::runner::input::tests::ordinary_prompt::support::preview_request;
+            use crate::runtime::input::tests::ordinary_prompt::support::canonical_preview;
+            use crate::runtime::input::tests::ordinary_prompt::support::preview_request;
             const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
             let idle = || {
                 native_fixture_bytes(
-                    &crate::coding_agent::profiles::detector::test_support::bundled_screen(IDLE),
+                    &crate::coding_agent::detector::test_support::bundled_screen(IDLE),
                 )
             };
             with_claude_host("2.1.309", IDLE, |h, _, _| {
                 h.pty.child.bytes.extend(native_fixture_bytes(
-                    &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                    &crate::coding_agent::detector::test_support::bundled_screen(
                         "claude-2.1.309-read-outside-permission-1",
                     ),
                 ));
@@ -9842,7 +9972,7 @@ mod tests {
                             &mut h.output,
                             &mut h
                                 .controller
-                                .observer(&h.writer, &crate::runtime::runner::RealObservationClock),
+                                .observer(&h.writer, &crate::runtime::RealObservationClock),
                             h.until,
                         )
                     })
@@ -9870,7 +10000,7 @@ mod tests {
                     .poll(
                         &h.transport.snapshot(),
                         &h.writer,
-                        &crate::runtime::runner::RealObservationClock,
+                        &crate::runtime::RealObservationClock,
                     )
                     .unwrap();
                 assert!(h.controller.status().gap_count > 0);
@@ -10851,9 +10981,11 @@ mod tests {
                     InputServices {
                         catalog: ProfileCatalog::from_definitions(&inspection_fixture_definition())
                             .unwrap(),
-                        token_source: Box::new(crate::runtime::runner::input::tests::ordinary_prompt::support::PanicTokens(
-                            "receipt-only proof",
-                        )),
+                        token_source: Box::new(
+                            crate::runtime::input::tests::ordinary_prompt::support::PanicTokens(
+                                "receipt-only proof",
+                            ),
+                        ),
                         hooks: h.hooks.clone(),
                     },
                     h.until,
@@ -11464,11 +11596,11 @@ mod tests {
         }
 
         mod gated {
-            use crate::coding_agent::profiles::catalog::test_support::gated_fixture_definition;
-            use crate::coding_agent::profiles::catalog::test_support::gated_fixture_form;
-            use crate::coding_agent::profiles::catalog::test_support::gated_reason_dialog;
-            use crate::runtime::runner::input::tests::permission_inspection_contracts::with_opencode_inspection;
-            use crate::runtime::runner::input::tests::permission_response_contracts::*;
+            use crate::coding_agent::catalog::test_support::gated_fixture_definition;
+            use crate::coding_agent::catalog::test_support::gated_fixture_form;
+            use crate::coding_agent::catalog::test_support::gated_reason_dialog;
+            use crate::runtime::input::tests::permission_inspection_contracts::with_opencode_inspection;
+            use crate::runtime::input::tests::permission_response_contracts::*;
             use std::sync::atomic::AtomicUsize;
             use std::sync::atomic::Ordering;
 
@@ -11810,8 +11942,8 @@ mod tests {
                     ("an observation gap", |h| {
                         h.controller
                             .observer_failed(
-                                crate::runtime::runner::ObservationFailure::Parser,
-                                &crate::runtime::runner::RealObservationClock,
+                                crate::runtime::ObservationFailure::Parser,
+                                &crate::runtime::RealObservationClock,
                             )
                             .unwrap();
                     }),
@@ -11910,7 +12042,7 @@ mod tests {
             fn opencode_allow_enters_on_the_focused_allow_once() {
                 with_opencode_inspection(|h, _, _| {
                     h.show(native_fixture_bytes(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-allow-pre-stage-1",
                         ),
                     ));
@@ -11940,7 +12072,7 @@ mod tests {
             fn opencode_deny_moves_the_focus_selects_reject_and_submits_the_empty_reason() {
                 with_opencode_inspection(|h, calls, _| {
                     h.show(native_fixture_bytes(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
@@ -11957,17 +12089,17 @@ mod tests {
                     write_stage(h, 1);
                     assert_eq!(h.pty.offers, offers(&[b"h"]));
                     h.show(opencode_screen(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-2",
                         ),
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
                     write_stage(h, 2);
                     assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
                     h.show(native_fixture_bytes(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-3",
                         ),
                     ));
@@ -11989,7 +12121,7 @@ mod tests {
             fn opencode_focus_on_always_allow_after_the_first_deny_stage_fails_uncertain() {
                 with_opencode_inspection(|h, _, _| {
                     h.show(native_fixture_bytes(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
@@ -12004,10 +12136,10 @@ mod tests {
                     );
                     let id = write_stage(h, 1);
                     h.show(opencode_screen(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-focus-always-1",
                         ),
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
@@ -12032,7 +12164,7 @@ mod tests {
                 trailer_col: usize,
             ) -> Vec<u8> {
                 let mut screen: serde_json::Value = serde_json::from_str(
-                    &crate::coding_agent::profiles::detector::test_support::bundled_screen(id),
+                    &crate::coding_agent::detector::test_support::bundled_screen(id),
                 )
                 .unwrap();
                 let cols = usize::try_from(screen["cols"].as_u64().unwrap()).unwrap();
@@ -12071,7 +12203,7 @@ mod tests {
                     h.transport
                         .resize(
                             &mut h.pty,
-                            crate::runtime::runner::TerminalSize { rows: 36, cols: 57 },
+                            crate::runtime::TerminalSize { rows: 36, cols: 57 },
                         )
                         .unwrap();
                     h.show(opencode_command(
@@ -12096,14 +12228,14 @@ mod tests {
             fn opencode_reject_dialog_reached_by_human_input_offers_no_token() {
                 with_opencode_inspection(|h, _, _| {
                     h.show(native_fixture_bytes(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-1",
                         ),
                     ));
                     let ids = settled_ids(h);
                     assert!(inspect(h, ids).request_token.is_some());
                     h.show(native_fixture_bytes(
-                        &crate::coding_agent::profiles::detector::test_support::bundled_screen(
+                        &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-3",
                         ),
                     ));
@@ -12117,12 +12249,12 @@ mod tests {
         }
     }
     mod retirement_contracts {
-        use crate::runtime::runner::ReceiptAction;
-        use crate::runtime::runner::ReceiptReply;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::Host;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::with_host;
-        use crate::runtime::runner::input::tests::ordinary_prompt::support::with_host_until;
-        use crate::runtime::runner::input::*;
+        use crate::runtime::ReceiptAction;
+        use crate::runtime::ReceiptReply;
+        use crate::runtime::input::tests::ordinary_prompt::support::Host;
+        use crate::runtime::input::tests::ordinary_prompt::support::with_host;
+        use crate::runtime::input::tests::ordinary_prompt::support::with_host_until;
+        use crate::runtime::input::*;
         use rusqlite::hooks::AuthAction;
         use rusqlite::hooks::AuthContext;
         use rusqlite::hooks::Authorization;
@@ -12172,7 +12304,7 @@ mod tests {
         fn complete(h: &mut Host, key: &str) -> i64 {
             let request = h.request(key);
             let accepted =
-                crate::runtime::runner::input::tests::ordinary_prompt::support::settle(h, request);
+                crate::runtime::input::tests::ordinary_prompt::support::settle(h, request);
             assert_eq!(accepted.status, SubmissionStatus::Accepted);
             assert_eq!(accepted.stage, SubmissionStage::Submitted);
             assert!(h.coordinator.pending.is_none());
@@ -12645,18 +12777,19 @@ mod tests {
                     "retirement preview",
                 )
                 .unwrap();
-                let canonical = crate::runtime::runner::input::tests::ordinary_prompt::support::canonical_preview(&message);
+                let canonical =
+                    crate::runtime::input::tests::ordinary_prompt::support::canonical_preview(
+                        &message,
+                    );
                 let mut program = canonical.as_bytes().to_vec();
                 program.push(b'~');
                 h.pty.expect_program(program.clone());
                 let request =
-                    crate::runtime::runner::input::tests::ordinary_prompt::support::preview_request(
+                    crate::runtime::input::tests::ordinary_prompt::support::preview_request(
                         h, &message, &canonical,
                     );
                 let accepted =
-                    crate::runtime::runner::input::tests::ordinary_prompt::support::settle(
-                        h, request,
-                    );
+                    crate::runtime::input::tests::ordinary_prompt::support::settle(h, request);
                 assert!(matches!(accepted.status, SubmissionStatus::Accepted));
                 let id = accepted.input_id.expect("durable Preview ID");
                 let before = cached(h, id);
@@ -12943,5 +13076,316 @@ mod tests {
                 assert!(h.pty.offers.is_empty());
             });
         }
+    }
+
+    use crate::runtime::InputExpiration;
+    use crate::runtime::input::test_support::*;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    const EXPIRATION: u64 = 10_000_000_000;
+
+    fn ns(origin: Instant, nanos: u64) -> Instant {
+        origin
+            .checked_add(Duration::from_nanos(nanos))
+            .expect("the platform represents the fixed nanosecond fixture offset")
+    }
+    fn captured(deadline: Instant, clock: &mut ScriptClock, expected: u64) -> InputExpiration {
+        let expiration = InputExpiration::capture(deadline, clock).unwrap();
+        assert_eq!(expiration.monotonic_ns(), expected);
+        clock.consumed(1, 0);
+        expiration
+    }
+    fn expiration(origin: Instant) -> InputExpiration {
+        captured(
+            ms(origin, 1000),
+            &mut ScriptClock::one(sample(origin, 9_000_000_000, origin)),
+            EXPIRATION,
+        )
+    }
+    fn received(
+        expiration: &InputExpiration,
+        admitted_at: Instant,
+        shutdown: Option<Instant>,
+        clock: &mut ScriptClock,
+        expected: Instant,
+    ) {
+        assert_eq!(
+            expiration.receive(admitted_at, shutdown, clock).unwrap(),
+            expected
+        );
+        clock.consumed(1, 0);
+    }
+
+    #[test]
+    fn clock_capture_uses_later_instant_remaining_without_bracket_extension() {
+        let t = anchor();
+        let mut clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 30)));
+        captured(ms(t, 100), &mut clock, 1_070_000_000);
+    }
+
+    #[test]
+    fn clock_capture_equal_bracket_preserves_one_nanosecond() {
+        let t = anchor();
+        let mut clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 10)));
+        captured(ns(ms(t, 10), 1), &mut clock, 1_000_000_001);
+    }
+
+    #[test]
+    fn clock_capture_monotonic_origin_yields_positive_expiration() {
+        let t = anchor();
+        let mut clock = ScriptClock::one(sample(t, 0, t));
+        captured(ns(t, 1), &mut clock, 1);
+    }
+
+    #[test]
+    fn clock_capture_accepts_exact_unsigned_expiration_upper_bound() {
+        let t = anchor();
+        let mut clock = ScriptClock::one(sample(t, u64::MAX - 5, t));
+        captured(ns(t, 5), &mut clock, u64::MAX);
+    }
+
+    #[test]
+    fn clock_capture_rejects_unsigned_expiration_overflow() {
+        let t = anchor();
+        let mut clock = ScriptClock::one(sample(t, u64::MAX - 5, t));
+        one_failure(InputExpiration::capture(ns(t, 6), &mut clock), &clock, 0);
+    }
+
+    #[test]
+    fn clock_capture_rejects_equal_or_expired_deadline_without_resampling() {
+        for after_ms in [100, 101] {
+            let t = anchor();
+            let mut clock = ScriptClock::new(vec![
+                Ok(sample(ms(t, 90), 1_000_000_000, ms(t, after_ms))),
+                Ok(sample(t, 1_000_000_000, t)),
+            ]);
+            one_failure(InputExpiration::capture(ms(t, 100), &mut clock), &clock, 1);
+        }
+    }
+
+    #[test]
+    fn clock_capture_rejects_reversed_instant_bracket() {
+        let t = anchor();
+        let mut clock = ScriptClock::one(sample(ms(t, 30), 1_000_000_000, ms(t, 10)));
+        one_failure(InputExpiration::capture(ms(t, 100), &mut clock), &clock, 0);
+    }
+
+    #[test]
+    fn clock_capture_source_failure_consumes_one_sample_without_fallback() {
+        let t = anchor();
+        let mut clock = ScriptClock::new(vec![Err(unavailable()), Ok(sample(t, 1_000_000_000, t))]);
+        one_failure(InputExpiration::capture(ms(t, 100), &mut clock), &clock, 1);
+    }
+
+    #[test]
+    fn clock_receive_uses_earlier_instant_for_conservative_deadline() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock =
+            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100)));
+        received(&expiration, t, None, &mut clock, ms(t, 3000));
+    }
+
+    #[test]
+    fn clock_receive_caps_expiration_at_original_five_second_admission() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock =
+            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 9_000_000_000, ms(t, 1100)));
+        received(&expiration, t, None, &mut clock, ms(t, 5000));
+    }
+
+    #[test]
+    fn clock_receive_earlier_shutdown_beats_admission_and_expiration() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock =
+            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 9_000_000_000, ms(t, 1100)));
+        received(&expiration, t, Some(ms(t, 4000)), &mut clock, ms(t, 4000));
+    }
+
+    #[test]
+    fn clock_receive_later_caps_preserve_shorter_expiration() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock =
+            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100)));
+        received(&expiration, t, Some(ms(t, 9000)), &mut clock, ms(t, 3000));
+    }
+
+    #[test]
+    fn clock_receive_rejects_equal_or_past_monotonic_expiration() {
+        for monotonic_ns in [EXPIRATION, EXPIRATION + 1] {
+            let t = anchor();
+            let expiration = expiration(t);
+            let mut clock = ScriptClock::one(sample(ms(t, 1000), monotonic_ns, ms(t, 1100)));
+            one_failure(expiration.receive(t, None, &mut clock), &clock, 0);
+        }
+    }
+
+    #[test]
+    fn clock_receive_rejects_bracket_delay_equal_to_or_past_projected_deadline() {
+        for after_ms in [3000, 4000] {
+            let t = anchor();
+            let expiration = expiration(t);
+            let mut clock = ScriptClock::one(sample(
+                ms(t, 1000),
+                EXPIRATION - 2_000_000_000,
+                ms(t, after_ms),
+            ));
+            one_failure(expiration.receive(t, None, &mut clock), &clock, 0);
+        }
+    }
+
+    #[test]
+    fn clock_receive_rejects_already_expired_original_admission_cap() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock =
+            ScriptClock::one(sample(ms(t, 6000), EXPIRATION - 2_000_000_000, ms(t, 6100)));
+        one_failure(expiration.receive(t, None, &mut clock), &clock, 0);
+    }
+
+    #[test]
+    fn clock_receive_rejects_expired_shutdown_despite_positive_expiration() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock =
+            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100)));
+        one_failure(
+            expiration.receive(t, Some(ms(t, 500)), &mut clock),
+            &clock,
+            0,
+        );
+    }
+
+    #[test]
+    fn clock_receive_rejects_reversed_instant_bracket() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock =
+            ScriptClock::one(sample(ms(t, 2000), EXPIRATION - 2_000_000_000, ms(t, 1000)));
+        one_failure(expiration.receive(t, None, &mut clock), &clock, 0);
+    }
+
+    #[test]
+    fn clock_receive_source_failure_consumes_one_sample_without_fallback() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock = ScriptClock::new(vec![
+            Err(unavailable()),
+            Ok(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100))),
+        ]);
+        one_failure(expiration.receive(t, None, &mut clock), &clock, 1);
+    }
+
+    #[test]
+    fn clock_receive_reuses_immutable_expiration_without_phase_extension() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock = ScriptClock::new(vec![
+            Ok(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100))),
+            Ok(sample(ms(t, 2000), EXPIRATION - 1_000_000_000, ms(t, 2100))),
+            Ok(sample(ms(t, 3000), EXPIRATION, ms(t, 3100))),
+        ]);
+        assert_eq!(
+            expiration.receive(t, None, &mut clock).unwrap(),
+            ms(t, 3000)
+        );
+        clock.consumed(1, 2);
+        assert_eq!(expiration.monotonic_ns(), EXPIRATION);
+        assert_eq!(
+            expiration.receive(t, None, &mut clock).unwrap(),
+            ms(t, 3000)
+        );
+        clock.consumed(2, 1);
+        assert_eq!(expiration.monotonic_ns(), EXPIRATION);
+        assert!(expiration.receive(t, None, &mut clock).is_err());
+        clock.consumed(3, 0);
+        assert_eq!(expiration.monotonic_ns(), EXPIRATION);
+    }
+
+    #[test]
+    fn clock_receive_preserves_positive_single_nanosecond() {
+        let t = anchor();
+        let expiration = expiration(t);
+        let mut clock = ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 1, ms(t, 1000)));
+        received(&expiration, t, None, &mut clock, ns(ms(t, 1000), 1));
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::error::Result;
+    use crate::runtime::input::{InputBoundary, InputCheckpoint, InputHooks};
+    use std::sync::Arc;
+    use std::time::Instant;
+    struct DefaultInputHooks;
+    impl InputHooks for DefaultInputHooks {
+        fn checkpoint(&self, _: InputBoundary, _: &InputCheckpoint, _: Instant) -> Result<()> {
+            Ok(())
+        }
+    }
+    pub(in crate::runtime) fn default_input_hooks() -> Arc<dyn InputHooks> {
+        Arc::new(DefaultInputHooks)
+    }
+
+    use crate::runtime::input::*;
+    use std::collections::VecDeque;
+
+    pub(crate) struct ScriptClock {
+        pub(crate) samples: VecDeque<Result<InputClockSample>>,
+        pub(crate) calls: usize,
+    }
+    impl ScriptClock {
+        pub(crate) fn new(samples: Vec<Result<InputClockSample>>) -> Self {
+            Self {
+                samples: samples.into(),
+                calls: 0,
+            }
+        }
+        pub(crate) fn one(sample: InputClockSample) -> Self {
+            Self::new(vec![Ok(sample)])
+        }
+        pub(crate) fn consumed(&self, calls: usize, remaining: usize) {
+            assert_eq!(self.calls, calls);
+            assert_eq!(self.samples.len(), remaining);
+        }
+    }
+    impl InputDeadlineClock for ScriptClock {
+        fn sample(&mut self) -> Result<InputClockSample> {
+            self.calls += 1;
+            self.samples
+                .pop_front()
+                .expect("the operation consumes only its specified paired clock samples")
+        }
+    }
+    pub(crate) fn anchor() -> Instant {
+        Instant::now()
+            .checked_add(Duration::from_secs(60))
+            .expect("the platform represents the fixed future clock anchor")
+    }
+    pub(crate) fn ms(origin: Instant, millis: u64) -> Instant {
+        origin
+            .checked_add(Duration::from_millis(millis))
+            .expect("the platform represents the fixed millisecond fixture offset")
+    }
+    pub(crate) fn sample(before: Instant, monotonic_ns: u64, after: Instant) -> InputClockSample {
+        InputClockSample {
+            before,
+            monotonic_ns,
+            after,
+        }
+    }
+    pub(crate) fn unavailable() -> CafleetError {
+        CafleetError::App("fixture clock unavailable".into())
+    }
+    pub(crate) fn one_failure<T>(result: Result<T>, clock: &ScriptClock, remaining: usize) {
+        assert!(
+            result.is_err(),
+            "the invalid clock operation returns an error"
+        );
+        clock.consumed(1, remaining);
     }
 }

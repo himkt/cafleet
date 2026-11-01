@@ -316,7 +316,8 @@ mod tests {
     }
     mod deadline_reservation {
         use crate::time::Deadline;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
         const TEST_WORK_RESERVE: Duration = Duration::from_millis(3500);
         #[test]
         fn reserving_moves_the_deadline_earlier_by_the_reserve() {

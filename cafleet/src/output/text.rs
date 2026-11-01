@@ -246,7 +246,7 @@ pub(crate) fn format_member_list(members: &[MemberActivity]) -> String {
     lines.join("\n")
 }
 
-pub(crate) fn format_runtime_recovery(report: &crate::runtime::runner::RecoveryReport) -> String {
+pub(crate) fn format_runtime_recovery(report: &crate::runtime::RecoveryReport) -> String {
     let mut text = format!(
         "Recovery: member={} run={} outcome={} status={} replayed={} inbox={} archived={}",
         report.member_id,
@@ -335,7 +335,7 @@ pub(crate) fn format_input_operation(input: &InputOperation) -> String {
 }
 
 pub(crate) fn format_permission_response_result(
-    row: &crate::runtime::runner::PermissionResponseResult,
+    row: &crate::runtime::PermissionResponseResult,
 ) -> String {
     let mut text = format!(
         "Permission response: interaction={} run={} decision={} source={} status={} input={} stage={} output_seq={}",
@@ -358,9 +358,7 @@ pub(crate) fn format_permission_response_result(
     text
 }
 
-pub(crate) fn format_permission_inspection(
-    row: &crate::runtime::runner::PermissionInspection,
-) -> String {
+pub(crate) fn format_permission_inspection(row: &crate::runtime::PermissionInspection) -> String {
     let decisions = row
         .supported_decisions
         .iter()
@@ -614,7 +612,7 @@ mod tests {
             "Deleted fleet 4. Deregistered 3 members."
         );
     }
-    use crate::runtime::runner::input_protocol_test_support::inspection;
+    use crate::runtime::control::test_support::inspection;
 
     #[test]
     fn permission_inspection_text_names_the_token_sequence_and_answer_rule() {

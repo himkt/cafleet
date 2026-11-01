@@ -6,7 +6,7 @@ pub(crate) fn member_press(value: &crate::runtime::KeyAcknowledgment) -> Value {
     json!({"member_id":value.member_id,"pane_id":value.pane_id,"keys":value.keys,"status":"acknowledged"})
 }
 
-pub(crate) fn runtime_recovery(report: &crate::runtime::runner::RecoveryReport) -> Value {
+pub(crate) fn runtime_recovery(report: &crate::runtime::RecoveryReport) -> Value {
     json!({"member_id":report.member_id,"run_id":report.run_id,"outcome":report.outcome.as_str(),
         "replayed_count":report.replayed_count,"inbox_count":report.inbox_count,
         "archived_count":report.archived_count,"status":report.status.as_str(),
@@ -163,16 +163,14 @@ fn permission_response(row: &crate::broker::runtime::PermissionResponseRecord) -
         "answer_rule_id":metadata.answer_rule_id,"decided_at":row.decided_at})
 }
 
-pub(crate) fn permission_response_result(
-    row: &crate::runtime::runner::PermissionResponseResult,
-) -> Value {
+pub(crate) fn permission_response_result(row: &crate::runtime::PermissionResponseResult) -> Value {
     json!({"response":{"status":row.submission.status.as_str(),"input_id":row.submission.input_id,"member_id":row.member_id,
         "run_id":row.run_id,"owner_epoch":row.owner_epoch,"interaction_id":row.interaction_id,"event_id":row.event_id,
         "decision":row.decision.as_str(),"decision_source":row.decision_source.as_str(),"stage":row.submission.stage.as_str(),
         "output_seq":row.submission.output_seq,"reason":row.submission.reason}})
 }
 
-pub(crate) fn permission_inspection(row: &crate::runtime::runner::PermissionInspection) -> Value {
+pub(crate) fn permission_inspection(row: &crate::runtime::PermissionInspection) -> Value {
     json!({"request":{"event_id":row.event_id,"message_id":row.message_id,"member_id":row.member_id,"fleet_id":row.fleet_id,
         "director_member_id":row.director_member_id,"run_id":row.run_id,"owner_epoch":row.owner_epoch,
         "interaction_id":row.interaction_id,"episode_seq":row.episode_seq,"classification":row.classification,
@@ -187,8 +185,8 @@ mod tests {
     use serde_json::json;
 
     use crate::broker::runtime::RunStatus;
-    use crate::runtime::runner::RecoveryOutcome;
-    use crate::runtime::runner::RecoveryReport;
+    use crate::runtime::RecoveryOutcome;
+    use crate::runtime::RecoveryReport;
     #[test]
     fn runner_recovery_presentation_pins_ordered_json_outcomes_and_exact_cleanup_text() {
         for (outcome, wire, status) in [
@@ -882,7 +880,7 @@ mod tests {
 
         #[test]
         fn permission_inspection_request_orders_its_identity_and_capability_keys() {
-            let inspection = crate::runtime::runner::input_protocol_test_support::inspection();
+            let inspection = crate::runtime::control::test_support::inspection();
             let output = crate::output::json::permission_inspection(&inspection);
             assert_key_order(&output, &["request"]);
             let request = &output["request"];
@@ -922,9 +920,9 @@ mod tests {
     mod runner_registry {
         use crate::broker::runtime as storage;
         use crate::broker::runtime::RunStatus;
-        use crate::runtime::runner::health::test_support::SilentServer;
-        use crate::runtime::runner::health::test_support::activate;
-        use crate::runtime::runner::test_support::Fixture;
+        use crate::runtime::control::test_support::SilentServer;
+        use crate::runtime::control::test_support::activate;
+        use crate::runtime::test_support::Fixture;
         use rusqlite::Connection;
         use std::time::Duration;
         use std::time::Instant;

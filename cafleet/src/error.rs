@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::fmt;
 
+pub(crate) type Result<T> = std::result::Result<T, CafleetError>;
+
 #[derive(Debug, Clone)]
 pub enum CafleetError {
     Usage(String),
@@ -34,9 +36,9 @@ impl CafleetError {
 
     /// Keep the primary failure and append the cleanup failure when both fail.
     pub(crate) fn merge_cleanup<T>(
-        result: Result<T, Self>,
-        cleanup: Result<(), Self>,
-    ) -> Result<T, Self> {
+        result: std::result::Result<T, Self>,
+        cleanup: std::result::Result<(), Self>,
+    ) -> std::result::Result<T, Self> {
         match (result, cleanup) {
             (Ok(value), Ok(())) => Ok(value),
             (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(cleanup.message())),

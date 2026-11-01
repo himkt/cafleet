@@ -154,7 +154,7 @@ pub(crate) fn deletion_placements(
         let path = lock_path(&settings.database_url, &placement)
             .map_err(crate::pane_lock::member_pane_input_error(member_id))?;
         let run_identity = crate::broker::runtime::member_runtime(conn, member_id)?
-            .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run));
+            .map(|runtime| crate::runtime::stable_run_identity(&runtime.run));
         placements.push(DeletionPlacement {
             member_id,
             placement,
@@ -184,8 +184,8 @@ pub(crate) trait DeletionHost {
         expected_placement: &Placement,
         held: &PaneLock,
         deadline: Deadline,
-    ) -> Result<crate::runtime::runner::RecoveryCompletion, CafleetError> {
-        crate::runtime::runner::recover_member_under_pane_lock(
+    ) -> Result<crate::runtime::RecoveryCompletion, CafleetError> {
+        crate::runtime::recover_member_under_pane_lock(
             conn,
             settings,
             member_id,
@@ -200,8 +200,8 @@ pub(crate) trait DeletionHost {
         conn: &mut Connection,
         run: &crate::broker::runtime::RunRecord,
         deadline: Deadline,
-    ) -> Result<crate::runtime::runner::ShutdownOutcome, CafleetError> {
-        crate::runtime::runner::request_shutdown(conn, run, deadline.instant())
+    ) -> Result<crate::runtime::ShutdownOutcome, CafleetError> {
+        crate::runtime::request_shutdown(conn, run, deadline.instant())
     }
     fn close_pane(
         &mut self,
@@ -283,11 +283,11 @@ pub(crate) fn member_deletion_matches(expected: &MemberRecord, current: &MemberR
         && expected
             .runtime
             .as_ref()
-            .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run))
+            .map(|runtime| crate::runtime::stable_run_identity(&runtime.run))
             == current
                 .runtime
                 .as_ref()
-                .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run))
+                .map(|runtime| crate::runtime::stable_run_identity(&runtime.run))
 }
 
 fn revalidate_member(
@@ -342,8 +342,8 @@ pub(crate) fn end_member(
         if let Some(expected) = snapshot.runtime.as_ref().map(|runtime| runtime.run.clone()) {
             scope(conn)?;
             let current = crate::broker::runtime::get_run(conn, expected.run_id)?;
-            if crate::runtime::runner::stable_run_identity(&current)
-                != crate::runtime::runner::stable_run_identity(&expected)
+            if crate::runtime::stable_run_identity(&current)
+                != crate::runtime::stable_run_identity(&expected)
             {
                 return Err(CafleetError::App(
                     "member runtime ownership changed during cleanup".into(),
@@ -353,10 +353,10 @@ pub(crate) fn end_member(
             let completion = host.recover(
                 conn, settings, member_id, &current, &placement, held, deadline,
             )?;
-            crate::runtime::runner::validate_recovery_completion(&expected, &completion)?;
+            crate::runtime::validate_recovery_completion(&expected, &completion)?;
             if !matches!(
                 completion.report.outcome,
-                crate::runtime::runner::RecoveryOutcome::Recovered
+                crate::runtime::RecoveryOutcome::Recovered
             ) {
                 return Err(CafleetError::App(
                     "member recovery remains incomplete; inspect with cafleet doctor".into(),
@@ -584,13 +584,13 @@ pub(crate) mod test_support {
     use crate::error::CafleetError;
     use crate::multiplexer::PostCloseLayout;
     use crate::pane_lock::PaneLock;
-    use crate::runtime::runner::ChildExit;
-    use crate::runtime::runner::RecoveryCompletion;
-    use crate::runtime::runner::ShutdownOutcome;
-    use crate::runtime::runner::recover_member_with_held_pane_lock;
-    use crate::runtime::runner::recovery::test_support::Case;
-    use crate::runtime::runner::recovery::test_support::Host as RecoveryHost;
-    use crate::runtime::runner::test_support::Fixture;
+    use crate::runtime::ChildExit;
+    use crate::runtime::RecoveryCompletion;
+    use crate::runtime::ShutdownOutcome;
+    use crate::runtime::recover_member_with_held_pane_lock;
+    use crate::runtime::recovery::test_support::Case;
+    use crate::runtime::recovery::test_support::Host as RecoveryHost;
+    use crate::runtime::test_support::Fixture;
 
     #[derive(Clone, Copy)]
     pub(crate) enum Mutation {
@@ -756,7 +756,7 @@ pub(crate) mod test_support {
             deadline: crate::cli::fleet::Deadline,
         ) -> Result<RecoveryCompletion, CafleetError> {
             if matches!(self.mode, Mode::Fleet) {
-                return crate::runtime::runner::recover_member_under_pane_lock(
+                return crate::runtime::recover_member_under_pane_lock(
                     conn,
                     settings,
                     member_id,
@@ -919,9 +919,9 @@ mod tests {
     use crate::broker::runtime::*;
     use crate::error::CafleetError;
     use crate::pane_lock::PaneLock;
-    use crate::runtime::runner::recovery::test_support::*;
-    use crate::runtime::runner::test_support::*;
-    use crate::runtime::runner::*;
+    use crate::runtime::recovery::test_support::*;
+    use crate::runtime::test_support::*;
+    use crate::runtime::*;
     use crate::time::Deadline;
 
     mod fleet {

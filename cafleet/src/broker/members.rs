@@ -343,11 +343,11 @@ mod tests {
     use crate::broker;
     use crate::broker::MemberStatus;
     use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::deregister_member;
     use crate::broker::members::test_support::placement;
     use crate::broker::members::test_support::register;
-    use crate::broker::members::test_support::{
-        deregister_member, register_member, update_placement_pane_id,
-    };
+    use crate::broker::members::test_support::register_member;
+    use crate::broker::members::test_support::update_placement_pane_id;
     use crate::broker::members::*;
     use crate::cli::guarded_delete_fleet;
     use crate::db::test_support::migrated_conn;

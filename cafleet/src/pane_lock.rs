@@ -393,7 +393,7 @@ pub(crate) mod test_support {
 mod tests {
     use rusqlite::Connection;
 
-    use crate::runtime::runner::test_support::*;
+    use crate::runtime::test_support::*;
 
     mod pane_guard {
         use crate::pane_lock::PaneLock;

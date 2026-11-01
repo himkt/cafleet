@@ -173,7 +173,7 @@ pub(crate) fn doctor(settings: &Settings, args: DoctorArgs) -> Result<(), Caflee
             let until =
                 deadline.min(std::time::Instant::now() + std::time::Duration::from_millis(100));
             checks.push(
-                match crate::runtime::runner::diagnose_runtime(conn, run_id, until) {
+                match crate::runtime::diagnose_runtime(conn, run_id, until) {
                     Ok(diagnosis) => Check::new(
                         format!("member_runtime.{run_id}"),
                         "info",

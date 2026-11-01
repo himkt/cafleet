@@ -1,14 +1,21 @@
-use super::CodingAgent;
-use super::catalog::{
-    Capture, CursorRule, MarginRows, MatcherScope, Profile, ProfileCatalog, Rule, ScreenSelector,
-};
 use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
+use crate::coding_agent::CodingAgent;
+use crate::coding_agent::catalog::Capture;
+use crate::coding_agent::catalog::CursorRule;
+use crate::coding_agent::catalog::MarginRows;
+use crate::coding_agent::catalog::MatcherScope;
+use crate::coding_agent::catalog::Profile;
+use crate::coding_agent::catalog::ProfileCatalog;
+use crate::coding_agent::catalog::Rule;
+use crate::coding_agent::catalog::ScreenSelector;
 use crate::error::CafleetError;
-use crate::runtime::runner::ScreenSnapshot;
-use serde_json::{Value, json};
+use crate::error::Result;
+use crate::runtime::ScreenSnapshot;
+use serde_json::Value;
+use serde_json::json;
 use std::collections::BTreeMap;
-type Result<T> = std::result::Result<T, CafleetError>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ObservationKind {
     Interaction(InteractionClass),
@@ -761,13 +768,13 @@ impl Detector {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use crate::coding_agent::profiles::catalog::test_support::VERSION;
-    use crate::coding_agent::profiles::catalog::test_support::bundled_fixture;
-    use crate::coding_agent::profiles::catalog::test_support::simple_definition;
-    use crate::coding_agent::profiles::catalog::test_support::synthetic_definitions;
-    use crate::coding_agent::profiles::detector::*;
-    use crate::runtime::runner::TerminalSize;
-    use crate::runtime::runner::TerminalState;
+    use crate::coding_agent::catalog::test_support::VERSION;
+    use crate::coding_agent::catalog::test_support::bundled_fixture;
+    use crate::coding_agent::catalog::test_support::simple_definition;
+    use crate::coding_agent::catalog::test_support::synthetic_definitions;
+    use crate::coding_agent::detector::*;
+    use crate::runtime::TerminalSize;
+    use crate::runtime::TerminalState;
 
     pub(crate) fn bundled_screen(id: &str) -> String {
         bundled_fixture(id)
@@ -935,12 +942,12 @@ pub(crate) mod test_support {
 mod tests {
     use crate::broker::runtime::InteractionClass;
     use crate::broker::runtime::PermissionDecision;
-    use crate::coding_agent::profiles::catalog::test_support::synthetic_definitions as definitions;
-    use crate::coding_agent::profiles::catalog::test_support::*;
-    use crate::coding_agent::profiles::detector::test_support::*;
-    use crate::coding_agent::profiles::detector::*;
-    use crate::coding_agent::profiles::*;
-    use crate::runtime::runner::*;
+    use crate::coding_agent::catalog::test_support::synthetic_definitions as definitions;
+    use crate::coding_agent::catalog::test_support::*;
+    use crate::coding_agent::catalog::*;
+    use crate::coding_agent::detector::test_support::*;
+    use crate::coding_agent::detector::*;
+    use crate::runtime::*;
     use serde_json::Value;
     use serde_json::json;
 
@@ -2325,7 +2332,7 @@ mod tests {
         assert_no_debug_or_serialize!(AnswerMatch);
     }
     mod focus_resolution {
-        use crate::coding_agent::profiles::detector::tests::*;
+        use crate::coding_agent::detector::tests::*;
 
         fn gated_catalog() -> ProfileCatalog {
             ProfileCatalog::from_definitions(&gated_fixture_definition()).unwrap()
@@ -3045,8 +3052,8 @@ mod tests {
     }
 
     mod annotation {
-        use crate::coding_agent::profiles::catalog::test_support::annotation::*;
-        use crate::coding_agent::profiles::detector::tests::*;
+        use crate::coding_agent::catalog::test_support::annotation::*;
+        use crate::coding_agent::detector::tests::*;
         fn observe_lines(definition: &Value, rows: &[&str]) -> ScreenObservation {
             let rows = rows.iter().map(|row| (*row).to_owned()).collect::<Vec<_>>();
             observation(definition, &terminal(&rows, 80, false).snapshot())
@@ -3229,7 +3236,7 @@ mod tests {
     }
 
     mod operation_rows {
-        use crate::coding_agent::profiles::detector::tests::*;
+        use crate::coding_agent::detector::tests::*;
 
         const MARGIN: &str = "    ";
 
@@ -3387,7 +3394,7 @@ mod tests {
     }
 
     mod opencode_layouts {
-        use crate::coding_agent::profiles::detector::tests::*;
+        use crate::coding_agent::detector::tests::*;
 
         const VERSION: &str = "2.1.4";
         const PERMISSION_RULE: &str = "opencode-shell-permission";

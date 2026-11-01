@@ -47,7 +47,7 @@ pub(crate) fn press_member(
     deadline
         .remaining()
         .map_err(|cause| effect_error(member_id, cause, false))?;
-    let mux = super::resolve_mux(settings)
+    let mux = crate::runtime::resolve_mux(settings)
         .map_err(|cause| effect_error(member_id, CafleetError::App(cause.to_string()), false))?;
     press_member_with_mux(conn, settings, member_id, keys, deadline, &mux)
 }
@@ -138,7 +138,7 @@ mod tests {
     use crate::multiplexer::TmuxMultiplexer;
     use crate::pane_lock::PaneLock;
     use crate::runtime::press::*;
-    use crate::runtime::runner::test_support::Fixture;
+    use crate::runtime::test_support::Fixture;
     use crate::time::Deadline;
     use nix::sys::signal::SigSet;
     use nix::sys::signal::Signal;
