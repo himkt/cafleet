@@ -17,7 +17,7 @@ sources, under explicit maintainer review. The repository file is the release
 source: a running Director reads only its deployed skill replica, so a refresh
 reaches Directors exclusively through the release/deployment transaction below.
 
-This skill maintains each backend's Model catalog, its provenance/context notes, its canonical Role defaults table, and the shared freshness metadata. Preserve Runtime bindings, bound runtime notes, Role eligibility, and worked resolutions as runtime documentation owned outside model refreshes. The common catalog preamble specifies maintainer-owned refresh at least every 30 days, a last-refreshed date for model data, standard provider USD per MTok as planning estimates, reviewed capability ordering, and Director ownership of selection policy.
+This skill maintains each backend's Model catalog, its provenance/context notes, its canonical Role defaults table, and the shared freshness metadata. Preserve Runtime bindings, bound runtime notes and Role eligibility as runtime documentation, and preserve the Director's worked model selections under its [model-selection policy](../../../skills/cafleet/roles/director.md#model-selection). The [Coding-agent overlay rule](../../rules/documentation-maintenance.md#coding-agent-overlay) owns maintenance responsibilities and backend scaffolding in its [Template](../../rules/documentation-maintenance.md#template). Keep the catalog preamble's last-refreshed date for model data, standard provider USD per MTok as planning estimates, and reviewed capability ordering.
 
 ## Approved sources (exhaustive allowlist)
 
@@ -131,10 +131,9 @@ unchanged:
    A deprecated display name mapping to more than one ID is a parse failure:
    stop the refresh under Refresh procedure step 1.
 4. **Apply the row rules and maintain their notes.** Keep one row per model
-   ID, using the base (shortest-prompt) tier for tiered prices and listing each
-   long-context rate beneath the table. Use the currently billed Console rate
-   for promotional discounts; note the list price and discount end date when
-   published. Record each published free rate as `0.00` in its own column,
+   ID, using the base (shortest-prompt) tier for tiered prices and the currently
+   billed Console rate for promotional discounts. Record each published free
+   rate as `0.00` in its own column,
    including models with only one free rate. A model free for a limited time
    has `0.00` in both columns; update its rates when the offer ends or remove
    it if delisted. Keep a model with a future deprecation date and record that
@@ -172,10 +171,8 @@ last-refreshed date covers both tables.
    Input and Output prices, is a parse failure: stop under Refresh procedure
    step 1.
 
-   Use the base (shortest-prompt) tier for long-context pricing, the currently
-   billed rate for promotional discounts, and the Peak rate when the page
-   publishes Off-Peak and Peak rates. Record a free-for-a-limited-time model
-   with `0.00` in both columns.
+   Use the currently billed base (shortest-prompt) rate for each row.
+   Record a free-for-a-limited-time model with `0.00` in both columns.
 
    The preamble states that this table lists every model on the Go page and
    that `opencode-go/` is part of the `--model` value. Explain that these tokens
@@ -183,30 +180,11 @@ last-refreshed date covers both tables.
    that the Director checks availability per spawn under
    [Director model selection](../../../skills/cafleet/roles/director.md#model-selection).
 
-   Place these notes beneath the table in this order:
+   Explain beneath the table that prices are USD per MTok counted against
+   subscription usage limits, and that Extra Usage bills usage beyond the
+   limits to the pay-as-you-go balance.
+   End with `Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).`
 
-   - Explain that prices are USD per MTok counted against subscription usage
-     limits, rather than pay-as-you-go billing. Record the published plan
-     prices and single-member-workspace restriction. Explain each model's
-     caps of 20% of its monthly limit per 5 hours, 50% per week and 100% per
-     month, and that Extra Usage bills usage beyond the limits to the
-     pay-as-you-go balance.
-   - List every Go model in a monthly-limit table with the header
-     `Model | Go monthly limit $ | Go Plus monthly limit $`. Record a plan's
-     absent limit (a `-` or an omitted value) as `—`; the Director never
-     budgets against it.
-   - List each affected model in the applicable long-context, discount and
-     Off-Peak tables. Use the headers
-     `Model | Prompt length | Input $/MTok | Output $/MTok`,
-     `Model | Discount | List input $/MTok | List output $/MTok | Discount end`,
-     and `Model | Off-Peak input $/MTok | Off-Peak output $/MTok | Off-Peak hours`.
-     Record every long-context rate, each discount's list prices and end date,
-     and each Off-Peak rate and its hours. Use `Not published` for an absent
-     discount end date or Off-Peak hours.
-   - Identify each restricted model by ID and the privacy setting it requires.
-   - End with `Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).`
-
-   Every note-table `Model` cell is a code-span `opencode-go/<model-id>` token.
 5. **Order and classify every row.** Keep one table ordered most → least
    capable, with a Class on every row. Reuse the Console Class for each shared
    ID, and preserve the relative order of IDs shared with the Console,

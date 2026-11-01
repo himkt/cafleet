@@ -75,9 +75,20 @@
 
 ## File Layout
 
-Normalize the design-doc argument to the task folder before invoking the generic [BASE resolver](../../cafleet/reference/base-dir.md#procedure): strip a trailing `/design-doc.md`; for a relative argument, strip a leading `design-docs/` if present and prepend `design-docs/` once. For an absolute argument, only strip the trailing filename and use that absolute folder directly. BASE owns containment and disabled-audit decisions; the invoking workflow owns document discovery and its explicit output target.
+Normalize the design-doc argument to the task folder before [task-scope resolution](#task-scope-resolution): strip a trailing `/design-doc.md`; for a relative argument, strip a leading `design-docs/` if present and prepend `design-docs/` once. For an absolute argument, only strip the trailing filename and use that absolute folder directly. Task-scope resolution owns containment; the [Director's BASE write protocol](../../cafleet/roles/director.md#base-directory-resolution) owns guarded writes and disabled-audit behavior. The invoking workflow owns document discovery and its explicit output target.
 
 Design documents use `design-docs/NNNNNNN-<slug>/design-doc.md` in every repository using CAFleet. Use a short kebab-case feature description for `<slug>`.
+
+### Task-scope resolution
+
+Use this resolver when a consumer operates on a task folder. The Director or consumer resolves BASE; members inherit the supplied absolute BASE or follow the [missing-line disabled-audit state](../../cafleet/roles/member.md#base).
+
+1. Run `git rev-parse --show-toplevel` from CWD. A non-zero exit or empty output means no Git ancestor: stop and tell the user to change to the repository root and retry.
+2. Normalize the consumer's argument to its actual task folder before containment resolution. The resolver receives a relative or absolute folder, not a child filename. Design-doc workflows use the normalization above; other consumers own their bucket conventions.
+3. Resolve the folder against the repository root when relative. Reject a relative path that equals the root (`the repo root is not a task folder`) or escapes it (`refusing to create a task folder outside the repo`). Resolve an absolute path directly: if it equals the root or is not strictly below it, return `<unset>` and create nothing.
+4. For a folder strictly below the repository root, return its absolute path as BASE. Create the selected folder lazily on the first consumer write, with audits under the task folder.
+
+The resolver applies containment to the normalized folder without writing files. Consumers own bucket prefixes, slug normalization and filename stripping; the Director's BASE write protocol owns the sentinel guard and explicit-output-target branch.
 
 ### Numbering
 

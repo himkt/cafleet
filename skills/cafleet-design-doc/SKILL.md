@@ -35,7 +35,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 | [reference/guidelines.md](reference/guidelines.md) | you are writing or checking a doc against the standard structure (the template opens the page), or need section guidelines, quality standards, or formatting rules |
 | [reference/coordination.md](reference/coordination.md) | you need the inter-member verb + pointer + `COMMENT(role)` schema |
 
-Each workflow body linked in Dispatch carries its own Required-reading block for the team it runs — base-dir, supervision, and coordination are gated there, not on this dispatch surface.
+Each workflow body linked in Dispatch carries its own Required-reading block for the team it runs — BASE resolution, supervision, and coordination are gated there, not on this dispatch surface.
 
 ## Dispatch
 
@@ -56,8 +56,8 @@ Every design-doc team member opens its authoritative role first. Use an availabl
 |---|---|---|
 | 1 | Your backend section in [coding-agents.md](../cafleet/reference/coding-agents.md) | Resolve your Runtime bindings, supported skill loader and bound notes. |
 | 2 | [CAFleet core](../cafleet/SKILL.md) and [member role](../cafleet/roles/member.md) | Startup identity, ready, broker commands, member authority and shutdown. |
-| 3 | [BASE](../cafleet/reference/base-dir.md) | Before task work: inherited BASE, guarded writes and missing-line status. |
+| 3 | [BASE](../cafleet/roles/member.md#base) | Before task work: inherited BASE, guarded writes and missing-line status. |
 | 4 | This core and [guidelines](reference/guidelines.md) | Load the assigned workflow's format and role references before document work; retain your role's scope. |
 | 5 | [Coordination](reference/coordination.md) | Before payloads, markers and work/status messages. |
 
-Load the listed skills through your executing backend's supported loader; Codex/OpenCode load the cores, own backend and required references by absolute path. Continue the existing assigned workflow without creating a second team. Read [command routing](../cafleet/reference/prompt-routing.md) before routing a command your harness denied. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.
+Load the listed skills through your executing backend's supported loader; Codex/OpenCode load the cores, own backend and required references by absolute path. Continue the existing assigned workflow without creating a second team. Read [command routing](../cafleet/roles/member.md#reconsider-then-route) before routing a command your harness denied. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.

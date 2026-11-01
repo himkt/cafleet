@@ -153,10 +153,38 @@ Write CAFleet base instructions so they read the same on every backend: family `
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
 5. **Role eligibility**: per-role `yes`/`no` verdicts for Director and Member, each with checked native version, source and date.
 
-Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying `## Template` and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections, including Role eligibility, and re-checks a backend's Role eligibility whenever its bundled profile boundary or `Evidence:` line changes.
+Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying the Template in this rule and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill exclusively maintains model catalogs, provenance/context notes, canonical Role defaults and shared freshness metadata from official sources, refreshing model data at least every 30 days. Runtime documentation maintenance owns Runtime bindings, bound runtime notes, Role eligibility and worked resolutions, and re-checks eligibility whenever a bundled profile boundary or `Evidence:` line changes; structural reorganization preserves the model freshness date.
 
 ### How the base and overlay connect
 
 Each reader entry point places its runtime overlay first in its Required-reading block — as the first table row or the first prose reference — gated before action. Link `coding-agents.md#<name>`, substituting the reader's concrete backend anchor when used. The reader resolves the overlay with the procedure in `skills/cafleet/SKILL.md` § Resolve your overlay, which owns the subject selection, materialization, note application, emission self-check and documented neutral defaults. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
 
 State shared operational facts in each home for its audience.
+
+### OpenCode Director verdict changes
+
+To change the Director verdict, a maintainer establishes, for an installed OpenCode version, native goal lifecycle controls, such as a goal command, from official documentation or installed help, and background execution while supervision continues from a CAFleet stream probe. Record the version, source and date in the backend's Role eligibility table, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
+
+### Template
+
+Add a `## <name>` backend with every subsection below. Fill every value, keep runtime bindings as short noun phrases, and bind each caveat to its token and consuming instruction. Shared selection and supervision policy stays at its linked owner.
+
+#### Runtime bindings
+
+Supply all five tokens: `{decision_surface}` (recorded user-reaction surface; members relay), `{permission_flags}` (omitted launch-policy flags and explicit-selection behavior), `{pane_title}` (title mechanism or no analog), `{skill_loader}` (supported loader or complete absolute-path reads), and `{effort_levels}` (accepted values/flag or unsupported).
+
+#### Role defaults
+
+Set `{reviewer_model}` and `{other_model}` to catalog tokens or aliases. Set their matching effort placeholders to a supported level or `—` when the backend does not support effort.
+
+#### Model catalog
+
+List exact spawn tokens, valid aliases, reviewed most-to-least capability ordering, classes, and standard provider USD/MTok input/output prices. Include relevant context windows and availability constraints, required prefixes and official pricing/availability/configuration sources. Follow the freshness contract and [Director policy](../../skills/cafleet/roles/director.md#model-selection).
+
+#### Note → applies at
+
+Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, member-routing, Director-dispatch and supervision instructions that point at it.
+
+#### Role eligibility
+
+Use a `Role | Eligible | Evidence` table with one Director row and one Member row. Mark `yes` only when every Eligible-tier requirement in § Role requirements is established; otherwise `no` with "not established" or the observed failure. Each Evidence cell names the source, native version and `checked YYYY-MM-DD` for each requirement group in at most two sentences, and a Member row names its bundled profile instead of listing its capabilities.

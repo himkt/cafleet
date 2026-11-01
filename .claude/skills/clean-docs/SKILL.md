@@ -142,7 +142,7 @@ extensions:
 2. **Bootstrap** — run `cafleet doctor`, then
    `cafleet fleet create --name <name> --coding-agent <backend> --json`; retain
    the returned literal IDs, then follow
-   [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake).
+   [Director wake](../../../skills/cafleet/roles/director.md#director-wake).
 3. **Spawn workers** — scanners for disjoint slices using the other-member
    defaults, plus a reviewer using `--model {reviewer_model}` and supported
    reviewer effort. Render prompts per [Spawn deltas](#spawn-deltas) at
@@ -194,7 +194,8 @@ is the deliverable; the run artifact is its audit record.
 
 ## BASE convention
 
-Resolve task-scoped BASE through the `cafleet` skill's `reference/base-dir.md`:
+Resolve task-scoped BASE through the shared
+[task-scope resolver](../../../skills/cafleet-design-doc/reference/guidelines.md#task-scope-resolution):
 `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder per run).
 Use dot-prefixed folders for agent-only scratch: `.prompts/` for spawn renders
 and `.apply/` for staged harness-denied writes.

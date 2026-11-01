@@ -14,12 +14,12 @@ Use CAFleet when independent investigation, implementation or review calls for s
 | Before | Read | Local responsibility |
 |---|---|---|
 | Designing the workflow | [Core](../../../skills/cafleet/SKILL.md) and [backend bindings](../../../skills/cafleet/reference/coding-agents.md) | Define outcome, role authority, file ownership, artifacts and user gates |
-| Resolving outputs | [BASE](../../../skills/cafleet/reference/base-dir.md) | Normalize the task folder and inherit supplied BASE in members |
-| Spawning | [Spawn Protocol](../../../skills/cafleet/reference/supervision.md#spawn-protocol) and [Director policy](../../../skills/cafleet/roles/director.md) | Diagnose environment, register the Director and select members/models |
+| Resolving outputs | [Task-scope resolution](../../../skills/cafleet-design-doc/reference/guidelines.md#task-scope-resolution), [Director write protocol](../../../skills/cafleet/roles/director.md#base-directory-resolution) and [member BASE](../../../skills/cafleet/roles/member.md#base) | Normalize the task folder and inherit supplied BASE in members |
+| Spawning | [Spawn Protocol](../../../skills/cafleet/roles/director.md#spawn-protocol) and [Director policy](../../../skills/cafleet/roles/director.md) | Diagnose environment, register the Director and select members/models |
 | Rendering prompts | [Canonical skeleton](../../../skills/cafleet/roles/director.md#canonical-spawn-prompt-skeleton) and [audit convention](../../../skills/cafleet/roles/director.md#member-create--scratch-and-audit-files) | Supply absolute role/core/backend paths, identity, BASE, host prerequisites and lossless role constraints |
 | Coordination | [Coordination](../../../skills/cafleet-design-doc/reference/coordination.md) | Use artifact pointers and paired issue markers |
-| Receiving | [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake) and [backend recipes](../../../skills/cafleet/reference/coding-agents.md) | Arm native reception before ready replies and retain one owned receiver until resolution or explicit handoff |
-| Recovery / finish | [Recovery](../../../skills/cafleet/reference/supervision.md#recovery) / [Shutdown](../../../skills/cafleet/reference/supervision.md#shutdown) | Preserve context and tear down owned members before the fleet |
+| Receiving | [Director wake](../../../skills/cafleet/roles/director.md#director-wake) and [backend recipes](../../../skills/cafleet/reference/coding-agents.md) | Arm native reception before ready replies and retain one owned receiver until resolution or explicit handoff |
+| Recovery / finish | [Recovery](../../../skills/cafleet/roles/director.md#recovery) / [Shutdown](../../../skills/cafleet/roles/director.md#shutdown) | Preserve context and tear down owned members before the fleet |
 
 Members open their authoritative role first, load their own backend and required skills through its supported loader, then use supplied host-rule equivalents for absent optional files. Ready is the first operational broker command; prerequisite shell reads may precede it only when shell is the available reader.
 
@@ -29,7 +29,7 @@ Normalize research/design inputs to their task folder before resolving BASE. Age
 
 Render a compact role-by-path prompt to a unique `.prompts/<member>-<UTC-compact>.md` and preserve that pre-spawn audit input. Leave only `{fleet_id}`, `{member_id}`, `{director_member_id}` and `{coding_agent}` for CLI identity substitution; double other literal braces. A missing BASE follows its guarded inline transport branch.
 
-Send individually to selected recipients. Members poll after ready, before reporting and on each wake. Ordinary members receive pane previews; the Director follows [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake). Native shell dispatch returns submission metadata; inspect output and explicitly continue after completion evidence if the host has not resumed the member.
+Send individually to selected recipients. Members poll after ready, before reporting and on each wake. Ordinary members receive pane previews; the Director follows [Director wake](../../../skills/cafleet/roles/director.md#director-wake). Native shell dispatch returns submission metadata; inspect output and explicitly continue after completion evidence if the host has not resumed the member.
 
 ## Worked example: summarize-pr
 
@@ -49,7 +49,7 @@ Suppose this returns fleet 7 and Director 8. Arm native reception through the sh
 
 ### Render and spawn
 
-The prompt references the authoritative role, installed CAFleet core/backend/BASE references, host-rule source, assignment, literal identity placeholders and startup ready command. Its output scope names the summary artifact; Git and user communication remain Director-owned.
+The prompt references the authoritative role, installed CAFleet core/backend references and the member role's BASE section, host-rule source, assignment, literal identity placeholders and startup ready command. Its output scope names the summary artifact; Git and user communication remain Director-owned.
 
 ```bash
 cafleet member create --fleet-id 7 --name summarizer --description "Summarizes a PR diff and three risks" --file /repo/researches/pr-1234/.prompts/summarizer-20260911T100100Z.md --json
@@ -59,7 +59,7 @@ Receive that member's ready and ACK it. Dispatch its scope when inputs exist.
 
 ### Review and revisions
 
-Receive the Summarizer's report under [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake).
+Receive the Summarizer's report under [Director wake](../../../skills/cafleet/roles/director.md#director-wake).
 
 Read and ACK the completed report, inspect the summary and present it. Record revisions as actionable markers at the artifact pointer and send `ready (doc)`. The member revises, removes the marker and sends `addressed (doc)`; keep the owned receiver through the review loop.
 

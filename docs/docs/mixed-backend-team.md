@@ -37,7 +37,7 @@ Save this prompt as `/home/cafleet-demo/work/demo/.prompts/member.md` with a fre
 ```text
 You are an ordinary CAFleet member.
 ROLE DEFINITION: Open /home/cafleet-demo/.claude/skills/cafleet/roles/member.md BEFORE any other action. Follow that role definition.
-Read /home/cafleet-demo/.claude/skills/cafleet/reference/coding-agents.md and resolve your backend, then load /home/cafleet-demo/.claude/skills/cafleet/SKILL.md as an assigned member. Read /home/cafleet-demo/.claude/skills/cafleet/reference/base-dir.md and the supplied host instructions before task work.
+Read /home/cafleet-demo/.claude/skills/cafleet/reference/coding-agents.md and resolve your backend, then load /home/cafleet-demo/.claude/skills/cafleet/SKILL.md as an assigned member. Follow the BASE section in /home/cafleet-demo/.claude/skills/cafleet/roles/member.md and the supplied host instructions before task work.
 FLEET ID: {fleet_id}
 DIRECTOR MEMBER ID: {director_member_id}
 YOUR MEMBER ID: {member_id}
