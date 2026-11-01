@@ -1175,13 +1175,31 @@ pub(crate) mod test_support {
                 "descriptor diagnostics preserve private environment names"
             );
         }
+        /// Recovers right after the case's owner lock is released. A child forked by a concurrent
+        /// test shares that flock until its exec closes it, which recovery reads as a live owner,
+        /// so retry that side-effect-free outcome briefly.
+        pub(crate) fn recover_released(case: &mut Case) -> TestResult<RecoveryReport> {
+            let until = Instant::now() + crate::input::RELEASED_LOCK_GRACE;
+            loop {
+                let result = case.recover(&mut new_host());
+                let contended = matches!(
+                    &result,
+                    Ok(report) if matches!(report.outcome, RecoveryOutcome::LiveOrUnreachable)
+                );
+                if !contended || Instant::now() >= until {
+                    return result;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
         pub(crate) fn incomplete(case: &Case, result: TestResult<RecoveryReport>) {
             match result {
                 Err(error) => secret_free(&error.message()),
                 Ok(report) => {
                     assert!(
                         matches!(report.outcome, RecoveryOutcome::Recovering),
-                        "descriptor failure remains an error or incomplete outcome"
+                        "descriptor failure remains an error or incomplete outcome, got {:?}",
+                        report.outcome
                     );
                     assert!(!report.cleanup_diagnostics.is_empty());
                     secret_free(&serde_json::to_string(&report.cleanup_diagnostics).unwrap());
