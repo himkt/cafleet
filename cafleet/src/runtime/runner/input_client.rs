@@ -5713,7 +5713,7 @@ mod tests {
                 vec![
                     CafleetError::Usage("fixture usage".into()),
                     CafleetError::App("fixture application".into()),
-                    CafleetError::Value("fixture value".into()),
+                    CafleetError::App("fixture value".into()),
                     CafleetError::DatabaseBusy("fixture contention".into()),
                     CafleetError::DeadlineExceeded,
                     CafleetError::InvalidStoredValue {

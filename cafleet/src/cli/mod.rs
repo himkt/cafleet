@@ -560,12 +560,12 @@ mod tests {
                 match (base[0], parse(&args)) {
                     (
                         "member",
-                        Command::Member(member::MemberCommand::Create {
+                        Command::Member(member::MemberCommand::Create(member::CreateArgs {
                             fleet_id,
                             name,
                             description,
                             ..
-                        }),
+                        })),
                     ) => assert_eq!(
                         (fleet_id, name.as_str(), description.as_str()),
                         (17, "worker", "work")

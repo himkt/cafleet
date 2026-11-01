@@ -455,7 +455,7 @@ mod tests {
         for (sender, recipient) in [(999, worker), (director, 999), (director, other)] {
             assert!(matches!(
                 send_message(&mut conn, sender, recipient, "invalid"),
-                Err(CafleetError::Value(_))
+                Err(CafleetError::App(_))
             ));
         }
         broker::deregister_member(&mut conn, worker).unwrap();

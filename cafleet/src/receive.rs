@@ -542,15 +542,13 @@ mod tests {
                     if during_attempt {
                         Ok(snapshot(&[(2, 20)]))
                     } else {
-                        Err(CafleetError::Value("corrupt subject".into()))
+                        Err(CafleetError::App("corrupt subject".into()))
                     }
                 },
-                attempt: |_, _, _: &BTreeSet<i64>| {
-                    Err(CafleetError::Value("corrupt subject".into()))
-                },
+                attempt: |_, _, _: &BTreeSet<i64>| Err(CafleetError::App("corrupt subject".into())),
             };
             assert!(
-                matches!(wait(&clock, &mut io, Duration::from_secs(1)), Err(CafleetError::Value(cause)) if cause == "corrupt subject")
+                matches!(wait(&clock, &mut io, Duration::from_secs(1)), Err(CafleetError::App(cause)) if cause == "corrupt subject")
             );
         }
     }

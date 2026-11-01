@@ -1372,7 +1372,7 @@ mod tests {
                     CallbackFault::Fail | CallbackFault::ExpireAndFail
                 )
             {
-                Err(CafleetError::Value("fixture observation stopped".into()))
+                Err(CafleetError::App("fixture observation stopped".into()))
             } else {
                 Ok(())
             }
@@ -1626,7 +1626,7 @@ mod tests {
             } else {
                 assert_eq!(
                     format!("{:?}", result.unwrap_err()),
-                    "Value(\"fixture observation stopped\")"
+                    "App(\"fixture observation stopped\")"
                 );
                 assert!(transport.take_input_drain().is_none());
             }
@@ -1735,7 +1735,7 @@ mod tests {
                 };
                 assert_eq!(
                     format!("{source:?}"),
-                    "Value(\"fixture observation stopped\")"
+                    "App(\"fixture observation stopped\")"
                 );
                 assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
                 assert_eq!(records.borrow().len(), 2);
@@ -1795,9 +1795,7 @@ mod tests {
             if matches!(operation, ObservationOperation::Parser)
                 && self.0.swap(false, std::sync::atomic::Ordering::AcqRel)
             {
-                Err(CafleetError::Value(
-                    "fixture parser boundary stopped".into(),
-                ))
+                Err(CafleetError::App("fixture parser boundary stopped".into()))
             } else {
                 Ok(())
             }

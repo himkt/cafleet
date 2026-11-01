@@ -151,7 +151,7 @@ impl CodingAgent {
         argv: &[String],
         policy: &LaunchPolicySelection,
     ) -> Result<(), CafleetError> {
-        let invalid = || CafleetError::Value("capture emitted permission argv mismatch".into());
+        let invalid = || CafleetError::App("capture emitted permission argv mismatch".into());
         let baseline = self.build_spawn_argv_with_policy("", "", None, None, policy)?;
         let name_index = (self == Self::Claude).then(|| {
             baseline

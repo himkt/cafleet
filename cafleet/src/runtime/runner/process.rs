@@ -1332,7 +1332,7 @@ mod tests {
 
         #[test]
         fn refresh_anchor_fold_still_reads_later_pins_after_a_match_and_propagates_error() {
-            let failure = CafleetError::Value("synthetic-later-anchor-read".into());
+            let failure = CafleetError::App("synthetic-later-anchor-read".into());
             let mut session = inert(&[identity(A), identity(C)]);
             let pinned = session.owned.clone();
             let clock = boundaries(&session);

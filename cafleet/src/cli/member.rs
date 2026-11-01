@@ -1979,12 +1979,12 @@ mod tests {
                 "high",
                 "literal '$x' `text` assignment",
             ]);
-            let Command::Member(member::MemberCommand::Create {
+            let Command::Member(member::MemberCommand::Create(member::CreateArgs {
                 coding_agent,
                 model,
                 effort,
                 ..
-            }) = CliArgs::try_parse_from(arguments).unwrap().command
+            })) = CliArgs::try_parse_from(arguments).unwrap().command
             else {
                 panic!("member create expected")
             };

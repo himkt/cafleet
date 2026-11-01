@@ -54,7 +54,7 @@ impl AnswerCapability {
             || fixture_ids.is_empty()
             || fixture_ids.iter().any(|value| value.trim().is_empty())
         {
-            return Err(CafleetError::Value(
+            return Err(CafleetError::App(
                 "answer capability requires complete profile provenance".into(),
             ));
         }
