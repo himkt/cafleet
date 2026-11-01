@@ -933,12 +933,11 @@ pub(crate) fn update_interaction_evidence(
             require(
                 value["screen_seq"].as_u64() == Some(update.output_seq)
                     && value["backend"] == run.backend
-                    && value["profile_version"] == json!(run.profile_version)
                     && value["native_version"] == json!(run.native_version)
                     && (run.event_evidence == EventEvidence::Redacted
                         || value["evidence_policy"] == "metadata"),
                 "evidence_json",
-                "refresh evidence does not match current run/profile/policy/sequence",
+                "refresh evidence does not match current run/version/policy/sequence",
             )?;
             let maximum = latest_event_seq(conn, run.run_id)?;
             require(
@@ -991,7 +990,7 @@ mod tests {
     use crate::broker::members::test_support::register;
     use crate::broker::runtime::test_support::*;
     use crate::broker::runtime::{self as storage, *};
-    use crate::db::test_support::{TableSnapshot, migrate_to_version, table_rows, table_snapshot};
+    use crate::db::test_support::{TableSnapshot, table_snapshot};
 
     const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
     const REFUSAL_INSTRUCTION: &str = "Verify this event. The member's automatic reviewer refused the operation and no native request is waiting. Dispatch evidence comes only from the member's routed request with its exact command, cwd, environment and refusal; this event and screen captures corroborate it. With no routed request, dispatch nothing and ask the member whether the refused operation is still needed when it next reports or goes idle. For a routed request, decide in the Director session's effective auto mode whether to authorize a separate execution through the routed-command path or to refuse; otherwise obtain the user's permission first. Inspect the actual result and the member's continuation afterward.";
@@ -1012,7 +1011,13 @@ mod tests {
         impl RefreshFixture {
             fn new() -> Self {
                 let mut fixture = Fixture::new();
-                fixture.conn.execute("UPDATE member_runs SET profile_version='fixture-v1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET coverage='tested' WHERE run_id=?1",
+                        [fixture.run.run_id],
+                    )
+                    .unwrap();
                 let owner = fixture.activate();
                 let event = fixture.open(&owner);
                 let update = InteractionEvidenceUpdate {
@@ -1227,7 +1232,6 @@ mod tests {
             );
             spec.runtime_path.push_str("-other");
             spec.launch_nonce = "b".repeat(64);
-            spec.profile_version = Some("fixture-v1".into());
             spec.coverage = Coverage::Tested;
             let other = storage::create_run(&mut fixture.fixture.conn, &spec).unwrap();
             fixture.fixture.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2 WHERE run_id=?1",[other.run_id]).unwrap();
@@ -1250,9 +1254,9 @@ mod tests {
         }
 
         #[test]
-        fn runtime_refresh_validates_evidence_sequence_digest_policy_backend_and_profile() {
+        fn runtime_refresh_validates_evidence_sequence_digest_policy_backend_and_native_version() {
             for field in [
-                "shape", "sequence", "digest", "policy", "backend", "profile", "native", "raw",
+                "shape", "sequence", "digest", "policy", "backend", "native", "raw",
             ] {
                 let mut fixture = RefreshFixture::new();
                 match field {
@@ -1278,7 +1282,6 @@ mod tests {
                         raw["screen_seq"] = json!(121);
                         let key = match other {
                             "backend" => "backend",
-                            "profile" => "profile_version",
                             _ => "native_version",
                         };
                         raw[key] = json!("other");
@@ -1474,37 +1477,11 @@ mod tests {
             })
         }
 
-        fn legacy_rows(conn: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
-            [
-                "member_runs",
-                "member_interactions",
-                "member_runtime_events",
-                "messages",
-            ]
-            .map(|table| {
-                let columns = conn
-                    .prepare(&format!(
-                        "SELECT name FROM pragma_table_info('{table}') ORDER BY cid"
-                    ))
-                    .unwrap()
-                    .query_map([], |row| row.get::<_, String>(0))
-                    .unwrap()
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap()
-                    .join(",");
-                table_rows(conn, &format!("SELECT {columns} FROM {table} ORDER BY 1"))
-            })
-            .into()
-        }
-
+        /// A schema-version-1 opening event and its inbox message, written directly into the
+        /// baseline as an earlier writer produced them.
         fn legacy_opening(archived: bool) -> (Fixture, RuntimeEventRecord) {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = crate::db::connect(&format!(
-                "sqlite:///{}",
-                dir.path().join("legacy.db").display()
-            ))
-            .unwrap();
-            migrate_to_version(&mut conn, 4);
+            let mut conn = crate::db::test_support::migrated_conn(&dir);
             let (fleet, director) = create_fleet_fixture(&mut conn, "legacy-events");
             let member = register(&mut conn, fleet, "legacy-worker", Some("%2"));
             let spec = Fixture::spec(&conn, fleet, director, member);
@@ -1564,13 +1541,6 @@ mod tests {
                 .unwrap();
             }
             tx.commit().unwrap();
-            let legacy = legacy_rows(&conn);
-            crate::db::migrate_to_head(&mut conn).unwrap();
-            assert_eq!(
-                legacy_rows(&conn),
-                legacy,
-                "the upgrade preserves every V4 runtime row"
-            );
             if archived {
                 crate::broker::deregister_member(&mut conn, member).unwrap();
             }
@@ -1584,7 +1554,7 @@ mod tests {
                 run,
             };
             let event = storage::get_event(&fixture.conn, event)
-                .expect("the independent V4 rows must be readable after upgrade")
+                .expect("a schema-version-1 event stays readable")
                 .event;
             assert_eq!(event.payload_json["schema_version"], 1);
             assert!(event.payload_json.get("director_action").is_none());

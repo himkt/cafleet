@@ -166,7 +166,6 @@ pub(crate) struct ObservedRequest {
     pub(super) episode_seq: i64,
     pub(super) classification: storage::InteractionClass,
     pub(super) native_version: String,
-    pub(super) detector_profile_version: String,
     pub(super) request_rule_id: String,
     pub(super) semantic: SemanticFingerprint,
     pub(super) choices: Vec<String>,
@@ -179,7 +178,6 @@ impl ObservedRequest {
         self.episode_seq == other.episode_seq
             && self.classification == other.classification
             && self.native_version == other.native_version
-            && self.detector_profile_version == other.detector_profile_version
             && self.request_rule_id == other.request_rule_id
             && self.semantic == other.semantic
             && self.choices == other.choices
@@ -247,9 +245,8 @@ impl ObservationController {
             .ok_or_else(|| error("unknown observer backend"))?;
         let capabilities = catalog.capabilities(backend, run.native_version.as_deref());
         ensure(
-            capabilities.profile_version == run.profile_version
-                && capabilities.detection == run.coverage,
-            "observer profile/coverage mismatch",
+            capabilities.detection == run.coverage,
+            "observer coverage mismatch",
         )?;
         let mut pool = EventSequencePool::default();
         pool.supply(initial)?;
@@ -365,9 +362,6 @@ impl ObservationController {
             let Some(version) = &self.run.native_version else {
                 return Ok(None);
             };
-            let Some(profile_version) = &observed.profile_version else {
-                return Ok(None);
-            };
             let backend = crate::coding_agent::coding_agent(&self.run.backend)
                 .expect("validated observer backend");
             let mut answer_matches = Vec::new();
@@ -391,7 +385,6 @@ impl ObservationController {
                 episode_seq,
                 classification,
                 native_version: version.clone(),
-                detector_profile_version: profile_version.clone(),
                 request_rule_id: observed.rule_id.clone(),
                 semantic: first.semantic().clone(),
                 choices: first.choices().to_vec(),
@@ -654,7 +647,6 @@ impl ObservationController {
                 && run.database_identity_json == self.run.database_identity_json
                 && run.backend == self.run.backend
                 && run.native_version == self.run.native_version
-                && run.profile_version == self.run.profile_version
                 && run.status == RunStatus::Running
                 && run.child_pid.is_some()
                 && run.child_start_identity.is_some()
@@ -721,18 +713,13 @@ impl ObservationController {
                 return Ok(None);
             }
         }
-        let value = match self.detector.observe(screen) {
-            Ok(value) => value,
+        match self.detector.observe(screen) {
+            Ok(value) => Ok(Some(value)),
             Err(_) => {
                 self.gap(ObservationFailure::Detector, now)?;
-                return Ok(None);
+                Ok(None)
             }
-        };
-        ensure(
-            value.profile_version == self.run.profile_version,
-            "observed profile changed within run",
-        )?;
-        Ok(Some(value))
+        }
     }
     fn observe_screen(
         &mut self,
@@ -1443,7 +1430,6 @@ pub(crate) mod native_capture {
             && left.director_member_id == right.director_member_id
             && left.backend == right.backend
             && left.native_version == right.native_version
-            && left.profile_version == right.profile_version
             && left.requested_mode == right.requested_mode
             && left.resolved_mode == right.resolved_mode
             && left.mode_source == right.mode_source
@@ -1665,7 +1651,7 @@ pub(crate) mod native_capture {
                 state.clock_kind = clock.kind();
             }
             self.source = Some(
-                json!({"database_identity_json":run.database_identity_json,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"runner":{"pid":run.owner_pid,"start_identity":run.owner_start_identity},"child":null,"backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,"requested_mode":run.requested_mode,"resolved_mode":run.resolved_mode,"mode_source":run.mode_source,"permission_argv":run.permission_argv_json,"executable":native,"cwd":spawn.cwd,"environment_evidence_ref":producer.value["environment_evidence_ref"],"placement":crate::presentation::placement(placement),"producer":producer.value,"clock":{"kind":if clock.kind()==ObservationClockKind::Real{"real"}else{"deterministic"},"monotonic_api":"std::time::Instant","utc_api":"chrono::Utc::now","origin":{"phase":"prepared","observed_at":origin.observed_at}}}),
+                json!({"database_identity_json":run.database_identity_json,"run_id":run.run_id,"owner_epoch":run.owner_epoch,"launch_nonce":run.launch_nonce,"member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,"runner":{"pid":run.owner_pid,"start_identity":run.owner_start_identity},"child":null,"backend":run.backend,"native_version":run.native_version,"requested_mode":run.requested_mode,"resolved_mode":run.resolved_mode,"mode_source":run.mode_source,"permission_argv":run.permission_argv_json,"executable":native,"cwd":spawn.cwd,"environment_evidence_ref":producer.value["environment_evidence_ref"],"placement":crate::presentation::placement(placement),"producer":producer.value,"clock":{"kind":if clock.kind()==ObservationClockKind::Real{"real"}else{"deterministic"},"monotonic_api":"std::time::Instant","utc_api":"chrono::Utc::now","origin":{"phase":"prepared","observed_at":origin.observed_at}}}),
             );
             self.producer_ref = Some(producer.reference.to_string_lossy().into_owned());
             self.origin = Some(origin);
@@ -2286,7 +2272,7 @@ pub(crate) mod native_capture {
                     ProcessIdentity::current().unwrap(),
                 )
                 .unwrap();
-                fixture.conn.execute("UPDATE member_runs SET runner_pid=owner_pid,runner_start_identity=owner_start_identity,native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='tested',event_evidence=?1 WHERE run_id=?2",rusqlite::params![policy["mode"].as_str().unwrap(),fixture.run.run_id]).unwrap();
+                fixture.conn.execute("UPDATE member_runs SET runner_pid=owner_pid,runner_start_identity=owner_start_identity,native_version='0.0.1-synthetic',coverage='tested',event_evidence=?1 WHERE run_id=?2",rusqlite::params![policy["mode"].as_str().unwrap(),fixture.run.run_id]).unwrap();
                 fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 let executable = fixture._dir.path().join("owned-synthetic-process");
                 private_write(&executable,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; *) printf '%s\\n' \"$line\" ;; esac; done\n");
@@ -2512,6 +2498,29 @@ pub(crate) mod native_capture {
         use crate::broker::runtime::{self as storage, *};
         use crate::digest::sha256_hex;
         use crate::runtime::runner::service::test_support::*;
+
+        #[test]
+        fn capture_run_identity_compares_backend_and_native_version_without_a_profile_label() {
+            let fixture = crate::runtime::runner::test_support::Fixture::new();
+            let mut seed = fixture.run.clone();
+            seed.native_version = Some("0.163.0".into());
+            assert!(same_capture_run(&seed, &seed.clone()));
+            let mut later = seed.clone();
+            later.native_version = Some("0.164.0".into());
+            assert!(!same_capture_run(&seed, &later));
+            let mut unprobed = seed.clone();
+            unprobed.native_version = None;
+            assert!(!same_capture_run(&seed, &unprobed));
+            let mut other = seed.clone();
+            other.backend = "claude".into();
+            assert!(!same_capture_run(&seed, &other));
+            let mut recovered = seed.clone();
+            recovered.coverage = Coverage::Tested;
+            assert!(
+                same_capture_run(&seed, &recovered),
+                "coverage follows the selection that backend and native version already determine"
+            );
+        }
 
         mod collection {
             use super::*;
@@ -3333,9 +3342,8 @@ pub(crate) mod native_capture {
                         .fixture
                         .conn
                         .execute(
-                            "UPDATE member_runs SET profile_version=?1,coverage=?2 WHERE run_id=?3",
+                            "UPDATE member_runs SET coverage=?1 WHERE run_id=?2",
                             rusqlite::params![
-                                selected.profile_version,
                                 selected.detection.as_str(),
                                 fixture.fixture.run.run_id
                             ],
@@ -3486,8 +3494,8 @@ pub(crate) mod native_capture {
                     let result = value(&lease);
                     assert_eq!(result["source"]["producer"]["catalog_origin"], origin);
                     assert_eq!(
-                        result["source"]["profile_version"],
-                        json!(fixture.fixture.run.profile_version)
+                        result["source"]["native_version"],
+                        json!(fixture.fixture.run.native_version)
                     );
                     assert_eq!(
                         result["source"]["permission_argv"],
@@ -5805,7 +5813,12 @@ pub(crate) mod native_capture {
         const DRIVER_NEUTRAL_ROOT: &str = "/tmp/cafleet-194";
         // The repository mount reports root-created files as owned by another user, which the private
         // ownership checks refuse, so case databases and sockets live on the local filesystem.
+        #[cfg(not(target_os = "macos"))]
         const DRIVER_PRIVATE_ROOT: &str = "/tmp/cafleet-194-p";
+        // macOS reaches /tmp through the /private/tmp symlink, and the runner launch passes the
+        // canonical database path, so the private root is named canonically there.
+        #[cfg(target_os = "macos")]
+        const DRIVER_PRIVATE_ROOT: &str = "/private/tmp/cafleet-194-p";
         const DRIVER_ANSWER_WINDOW_MS: u64 = 60_000;
         const DRIVER_TOOL_FREE_PROMPT: &str = "Reply with the single word ready and then wait.";
 
@@ -5882,6 +5895,21 @@ pub(crate) mod native_capture {
         };
         const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
         const DRIVER_BOXED_WRAP_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
+        const DRIVER_NARROW_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 57 };
+        const DRIVER_COMPACT_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 55 };
+        const DRIVER_MIN_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 36 };
+        // One space and 400 `x` characters, so the command outgrows the form's command box at 57 columns.
+        const DRIVER_LONG_COMMAND_ARGUMENT: &str = concat!(
+            "allow ",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        );
         const DRIVER_HERDR_ENV_SIZE: TerminalSize = TerminalSize {
             rows: 36,
             cols: 166,
@@ -5895,7 +5923,7 @@ pub(crate) mod native_capture {
             ("TERM_PROGRAM_VERSION", "0.9.5"),
             ("HERDR_ENV", "1"),
         ];
-        const APPROVED_CASES: [ApprovedCase; 31] = [
+        const APPROVED_CASES: [ApprovedCase; 69] = [
             ApprovedCase {
                 id: "cells-002",
                 backend: CodingAgent::Claude,
@@ -6218,6 +6246,152 @@ pub(crate) mod native_capture {
                 socket: "oh01",
                 size: DRIVER_HERDR_ENV_SIZE,
             },
+            ApprovedCase::opencode_survey("opencode-survey-096", "os096.db", "os096", 96),
+            ApprovedCase::opencode_survey("opencode-survey-080", "os080.db", "os080", 80),
+            ApprovedCase::opencode_survey("opencode-survey-064", "os064.db", "os064", 64),
+            ApprovedCase::opencode_survey("opencode-survey-048", "os048.db", "os048", 48),
+            ApprovedCase::opencode_survey("opencode-survey-040", "os040.db", "os040", 40),
+            ApprovedCase::opencode_survey("opencode-survey-076", "os076.db", "os076", 76),
+            ApprovedCase::opencode_survey("opencode-survey-072", "os072.db", "os072", 72),
+            ApprovedCase::opencode_survey("opencode-survey-068", "os068.db", "os068", 68),
+            ApprovedCase::opencode_survey("opencode-survey-060", "os060.db", "os060", 60),
+            ApprovedCase::opencode_survey("opencode-survey-056", "os056.db", "os056", 56),
+            ApprovedCase::opencode_survey("opencode-survey-052", "os052.db", "os052", 52),
+            ApprovedCase::opencode_survey("opencode-survey-032", "os032.db", "os032", 32),
+            ApprovedCase::opencode_survey("opencode-survey-024", "os024.db", "os024", 24),
+            ApprovedCase::opencode_survey("opencode-survey-079", "os079.db", "os079", 79),
+            ApprovedCase::opencode_survey("opencode-survey-078", "os078.db", "os078", 78),
+            ApprovedCase::opencode_survey("opencode-survey-077", "os077.db", "os077", 77),
+            ApprovedCase::opencode_survey("opencode-survey-055", "os055.db", "os055", 55),
+            ApprovedCase::opencode_survey("opencode-survey-054", "os054.db", "os054", 54),
+            ApprovedCase::opencode_survey("opencode-survey-053", "os053.db", "os053", 53),
+            ApprovedCase::opencode_survey("opencode-survey-039", "os039.db", "os039", 39),
+            ApprovedCase::opencode_survey("opencode-survey-038", "os038.db", "os038", 38),
+            ApprovedCase::opencode_survey("opencode-survey-037", "os037.db", "os037", 37),
+            ApprovedCase::opencode_survey("opencode-survey-036", "os036.db", "os036", 36),
+            ApprovedCase::opencode_survey("opencode-survey-035", "os035.db", "os035", 35),
+            ApprovedCase::opencode_survey("opencode-survey-034", "os034.db", "os034", 34),
+            ApprovedCase::opencode_survey("opencode-survey-033", "os033.db", "os033", 33),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-cells-057",
+                None,
+                &[],
+                &[],
+                Some("allow"),
+                "opencode-narrow-cells-057.db",
+                "opencode-narrow-cells-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-allow-057",
+                Some("allow"),
+                &[],
+                &["0d"],
+                Some("allow"),
+                "opencode-narrow-allow-057.db",
+                "opencode-narrow-allow-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-deny-002-057",
+                Some("deny"),
+                &["68"],
+                &["0d", "0d"],
+                Some("deny"),
+                "opencode-narrow-deny-002-057.db",
+                "opencode-narrow-deny-002-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-deny-003-057",
+                Some("deny"),
+                &["68", "0d"],
+                &["0d"],
+                Some("deny"),
+                "opencode-narrow-deny-003-057.db",
+                "opencode-narrow-deny-003-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-long-057",
+                None,
+                &[],
+                &[],
+                Some(DRIVER_LONG_COMMAND_ARGUMENT),
+                "opencode-narrow-long-057.db",
+                "opencode-narrow-long-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-idle-057",
+                None,
+                &[],
+                &[],
+                None,
+                "opencode-narrow-idle-057.db",
+                "opencode-narrow-idle-057",
+                DRIVER_NARROW_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-compact-cells-055",
+                None,
+                &[],
+                &[],
+                Some("allow"),
+                "opencode-compact-cells-055.db",
+                "opencode-compact-cells-055",
+                DRIVER_COMPACT_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-compact-deny-002-055",
+                Some("deny"),
+                &["68"],
+                &["0d", "0d"],
+                Some("deny"),
+                "opencode-compact-deny-002-055.db",
+                "opencode-compact-deny-002-055",
+                DRIVER_COMPACT_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-compact-deny-003-055",
+                Some("deny"),
+                &["68", "0d"],
+                &["0d"],
+                Some("deny"),
+                "opencode-compact-deny-003-055.db",
+                "opencode-compact-deny-003-055",
+                DRIVER_COMPACT_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-cells-min",
+                None,
+                &[],
+                &[],
+                Some("allow"),
+                "opencode-narrow-cells-min.db",
+                "opencode-narrow-cells-min",
+                DRIVER_MIN_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-deny-002-min",
+                Some("deny"),
+                &["68"],
+                &["0d", "0d"],
+                Some("deny"),
+                "opencode-narrow-deny-002-min.db",
+                "opencode-narrow-deny-002-min",
+                DRIVER_MIN_SIZE,
+            ),
+            ApprovedCase::opencode_narrow(
+                "opencode-narrow-deny-003-min",
+                Some("deny"),
+                &["68", "0d"],
+                &["0d"],
+                Some("deny"),
+                "opencode-narrow-deny-003-min.db",
+                "opencode-narrow-deny-003-min",
+                DRIVER_MIN_SIZE,
+            ),
             ApprovedCase::claude_file(
                 "claude-read-outside-cells-001",
                 None,
@@ -6287,6 +6461,53 @@ pub(crate) mod native_capture {
         ];
         const DRIVER_READ: FileProbe = FileProbe::Read { probe: "probe.txt" };
         impl ApprovedCase {
+            const fn opencode_survey(
+                id: &'static str,
+                database: &'static str,
+                socket: &'static str,
+                cols: u16,
+            ) -> Self {
+                Self::opencode_narrow(
+                    id,
+                    None,
+                    &[],
+                    &[],
+                    Some("allow"),
+                    database,
+                    socket,
+                    TerminalSize { rows: 36, cols },
+                )
+            }
+            #[allow(clippy::too_many_arguments)]
+            const fn opencode_narrow(
+                id: &'static str,
+                decision: Option<&'static str>,
+                prefix_hex: &'static [&'static str],
+                stage_hex: &'static [&'static str],
+                probe_argument: Option<&'static str>,
+                database: &'static str,
+                socket: &'static str,
+                size: TerminalSize,
+            ) -> Self {
+                Self {
+                    id,
+                    backend: CodingAgent::Opencode,
+                    permission_mode: "cafleet-ask",
+                    mode: if decision.is_some() {
+                        DriverMode::AnswerStage
+                    } else {
+                        DriverMode::NoAnswer
+                    },
+                    decision,
+                    prefix_hex,
+                    stage_hex,
+                    probe_argument,
+                    file_probe: None,
+                    database,
+                    socket,
+                    size,
+                }
+            }
             const fn claude_file(
                 id: &'static str,
                 decision: Option<&'static str>,
@@ -6394,7 +6615,8 @@ pub(crate) mod native_capture {
             }
             fn requested_marker(&self) -> Option<String> {
                 self.probe_argument
-                    .map(|argument| format!("{argument}.executed"))
+                    .and_then(|argument| argument.split(' ').next())
+                    .map(|label| format!("{label}.executed"))
             }
             fn prompt(&self, helper: Option<&Path>) -> String {
                 if let (Some(probe), Some(outside)) = (self.file_probe, self.outside_directory()) {
@@ -7655,7 +7877,6 @@ pub(crate) mod native_capture {
                     permission_argv_json: json!(policy.permission_argv),
                     event_evidence: storage::EventEvidence::Redacted,
                     native_version: Some(case.native_version.clone()),
-                    profile_version: capabilities.profile_version,
                     coverage: capabilities.detection,
                 };
                 let member = PendingMemberSpec {
@@ -8119,7 +8340,7 @@ pub(crate) mod test_support {
                 .unwrap()
                 .into(),
         ));
-        fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+        fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         let script = fixture._dir.path().join("owned-observation-process");
         private_write(&script,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\n/usr/bin/touch \"$CAFLEET_REVIEW_NATIVE_START\"\nprintf 'review-native-ready\\n'\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; form*) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write %s.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: ' \"$line\" ;; transient) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write transient.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: \\033[2J\\033[Hworking' ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done\n");
@@ -8226,15 +8447,20 @@ mod tests {
             let reused = crate::coding_agent::ProfileCatalog::bundled()
                 .unwrap()
                 .capabilities(crate::coding_agent::CodingAgent::Codex, Some("0.164.0"));
-            let reused_profile = reused.profile_version.unwrap();
-            for (profile, expected) in [(Some(reused_profile), 0), (None, 1)] {
-                let selected = profile.clone();
+            assert_eq!(reused.min_version.as_deref(), Some("0.163.0"));
+            assert_eq!(reused.detection, storage::Coverage::Tested);
+            for (native, coverage, expected) in [
+                (Some("0.164.0"), storage::Coverage::Tested, 0),
+                (None, storage::Coverage::Unknown, 1),
+            ] {
                 let mut fixture = ServiceFixture::configured(false, move |fixture, _| {
-                    if let Some(selected) = &selected {
-                        fixture.conn.execute("UPDATE member_runs SET native_version='0.164.0',profile_version=?1,coverage='tested' WHERE run_id=?2",rusqlite::params![selected,fixture.run.run_id]).unwrap();
-                    } else {
-                        fixture.conn.execute("UPDATE member_runs SET native_version=NULL,profile_version=NULL,coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
-                    }
+                    fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_runs SET native_version=?1,coverage=?2 WHERE run_id=?3",
+                            rusqlite::params![native, coverage.as_str(), fixture.run.run_id],
+                        )
+                        .unwrap();
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 });
                 fixture.start_running();
@@ -8244,11 +8470,12 @@ mod tests {
                 }
                 fixture.finish();
                 let count:i64=fixture.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='coverage_unknown'",[fixture.fixture.run.run_id],|row|row.get(0)).unwrap();
-                assert_eq!(count, expected, "{profile:?}");
+                assert_eq!(count, expected, "{native:?}");
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-                assert_eq!(run.profile_version, profile, "{profile:?}");
-                if profile.is_none() {
+                assert_eq!(run.native_version.as_deref(), native, "{native:?}");
+                assert_eq!(run.coverage, coverage, "{native:?}");
+                if native.is_none() {
                     assert_eq!(run.resolved_mode, "approve-for-me");
                     assert!(run.effective_policy_json.is_none());
                 }
@@ -8325,6 +8552,65 @@ mod tests {
             }
         }
     }
+    mod observer_initialization {
+        use super::super::*;
+        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
+        use crate::runtime::runner::test_support::Fixture;
+        use std::sync::Arc;
+
+        fn initialize(native_version: Option<&str>, coverage: storage::Coverage) -> Result<()> {
+            let mut fixture = Fixture::new();
+            let _artifacts = fixture.artifacts();
+            let lock = Arc::new(
+                RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                    .unwrap()
+                    .unwrap(),
+            );
+            lock.transfer_to_runner(
+                &mut fixture.conn,
+                &fixture.run.owner(),
+                ProcessIdentity::current().unwrap(),
+            )
+            .unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET native_version=?1,coverage=?2 WHERE run_id=?3",
+                    rusqlite::params![native_version, coverage.as_str(), fixture.run.run_id],
+                )
+                .unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let initial =
+                storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let catalog =
+                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+            ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata(), initial)
+                .map(|_| ())
+        }
+
+        #[test]
+        fn observer_initialization_requires_the_selected_detection_coverage() {
+            for (native_version, coverage, accepted) in [
+                (Some("0.0.1-synthetic"), storage::Coverage::Tested, true),
+                (Some("0.0.2-synthetic"), storage::Coverage::Tested, true),
+                (Some("0.0.1-synthetic"), storage::Coverage::Unknown, false),
+                (Some("0.0.0-below"), storage::Coverage::Tested, false),
+                (Some("0.0.0-below"), storage::Coverage::Unknown, true),
+                (None, storage::Coverage::Tested, false),
+                (None, storage::Coverage::Unknown, true),
+            ] {
+                let result = initialize(native_version, coverage);
+                assert_eq!(
+                    result.is_ok(),
+                    accepted,
+                    "{native_version:?} {coverage:?}: {:?}",
+                    result.err().map(|error| error.message().to_string())
+                );
+            }
+        }
+    }
+
     mod inspection_tests {
         use super::super::*;
         use crate::runtime::runner::test_support::Fixture;
@@ -8354,7 +8640,7 @@ mod tests {
             .unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',profile_version='synthetic-profile-1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog =
                 ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
@@ -8503,6 +8789,172 @@ mod tests {
             if let Err(primary) = primary {
                 if let Err(cleanup) = &cleanup {
                     eprintln!("inspection overflow cleanup also failed: {cleanup:?}");
+                }
+                resume_unwind(primary);
+            }
+            if let Err(cleanup) = cleanup {
+                resume_unwind(cleanup);
+            }
+        }
+
+        /// The bundled OpenCode fixture `id` with its command rows replaced by `command`, each
+        /// padded to the command box with the scrollbar column `trailer_col` cells in.
+        fn opencode_form(
+            id: &str,
+            first_row: usize,
+            command: [&str; 2],
+            trailer_col: usize,
+        ) -> Vec<u8> {
+            use crate::coding_agent::profiles::detector::test_support::{
+                bundled_screen, native_fixture_bytes,
+            };
+            let mut screen: serde_json::Value = serde_json::from_str(bundled_screen(id)).unwrap();
+            let cols = usize::try_from(screen["cols"].as_u64().unwrap()).unwrap();
+            for (offset, text) in command.iter().enumerate() {
+                let row = &mut screen["lines"][first_row + offset];
+                assert!(
+                    row.as_str().unwrap().chars().nth(trailer_col) == Some('█'),
+                    "{id} row {} carries the command box",
+                    first_row + offset
+                );
+                *row = serde_json::json!(format!(
+                    "{text:<trailer_col$}█{}",
+                    " ".repeat(cols - trailer_col - 1)
+                ));
+            }
+            native_fixture_bytes(&screen.to_string())
+        }
+
+        #[test]
+        fn opencode_resize_across_w_split_starts_a_new_generation_and_a_rewrap_a_new_episode() {
+            use crate::runtime::system::test_support::TestChild;
+            use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+            use std::sync::Arc;
+
+            let until = Instant::now() + Duration::from_secs(5);
+            let mut fixture = Fixture::new();
+            let artifacts = fixture.artifacts();
+            let lock = Arc::new(
+                RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                    .unwrap()
+                    .unwrap(),
+            );
+            lock.transfer_to_runner(
+                &mut fixture.conn,
+                &fixture.run.owner(),
+                ProcessIdentity::current().unwrap(),
+            )
+            .unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
+            fixture.conn.execute("UPDATE member_runs SET backend='opencode',native_version='2.1.4',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let catalog = ProfileCatalog::bundled().unwrap();
+            let mut controller = ObservationController::new(
+                &fixture.run,
+                &catalog,
+                EvidencePolicy::metadata(),
+                1..=256,
+            )
+            .unwrap();
+            let mut writer = EventWriter::start(
+                format!("sqlite:///{}", fixture.conn.path().unwrap()),
+                fixture.run.clone(),
+                lock,
+                artifacts.paths.outbox.clone(),
+            )
+            .unwrap();
+            writer.set_deadline(until);
+            let mut child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+            let identity = child.identity();
+            assert!(identity.matches().unwrap());
+            fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::now_stamp(),fixture.run.run_id]).unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let command = ["  $ /tmp/x/permission-probe allow", ""];
+            let wide = opencode_form("opencode-2.1.4-ask-permission-1", 14, command, 116);
+            let split = opencode_form("opencode-2.1.4-narrow-permission-057-1", 27, command, 53);
+            let rewrapped = opencode_form(
+                "opencode-2.1.4-narrow-permission-057-1",
+                27,
+                ["  $ /tmp/x/", "  permission-probe allow"],
+                53,
+            );
+            let mut terminal = TerminalState::new(TerminalSize {
+                rows: 36,
+                cols: 120,
+            })
+            .unwrap();
+            let primary = catch_unwind(AssertUnwindSafe(|| {
+                controller
+                    .started(
+                        &fixture.run,
+                        &terminal.snapshot(),
+                        &writer,
+                        &RealObservationClock,
+                    )
+                    .unwrap();
+                let mut show =
+                    |terminal: &mut TerminalState,
+                     bytes: &[u8],
+                     until_state: &dyn Fn(&ObservationController) -> bool| {
+                        terminal.feed(bytes).unwrap();
+                        controller
+                            .observer(&writer, &RealObservationClock)
+                            .observe(&terminal.snapshot())
+                            .unwrap();
+                        loop {
+                            controller
+                                .poll(&terminal.snapshot(), &writer, &RealObservationClock)
+                                .unwrap();
+                            if until_state(&controller) {
+                                break;
+                            }
+                            assert!(Instant::now() < until, "the observed state settles in time");
+                            std::thread::sleep(Duration::from_millis(2));
+                        }
+                        (
+                            controller.request_generation(),
+                            controller.tracker.active_episode().map(|(seq, _)| seq),
+                        )
+                    };
+                let (wide_generation, wide_episode) =
+                    show(&mut terminal, &wide, &|c| c.current_request().is_some());
+                assert!(wide_episode.is_some());
+                terminal
+                    .resize(TerminalSize { rows: 36, cols: 57 })
+                    .unwrap();
+                let (split_generation, split_episode) = show(&mut terminal, &split, &|c| {
+                    c.current_request().is_some() && c.request_generation() > wide_generation
+                });
+                assert!(
+                    split_generation > wide_generation,
+                    "the resize starts a new request generation"
+                );
+                assert_eq!(
+                    split_episode, wide_episode,
+                    "unchanged command rows keep the episode across the resize"
+                );
+                let (rewrap_generation, rewrap_episode) = show(&mut terminal, &rewrapped, &|c| {
+                    c.current_request().is_some()
+                        && c.tracker.active_episode().map(|(seq, _)| seq) > wide_episode
+                });
+                assert!(rewrap_generation > split_generation);
+                assert!(
+                    rewrap_episode > split_episode,
+                    "a moved row break opens a new episode"
+                );
+            }));
+            let cleanup = catch_unwind(AssertUnwindSafe(|| {
+                writer.finish(until);
+                child.terminate_until(until);
+                assert!(
+                    child.try_wait().unwrap().is_some(),
+                    "owned synthetic child reap confirmed"
+                );
+            }));
+            if let Err(primary) = primary {
+                if let Err(cleanup) = &cleanup {
+                    eprintln!("resize cleanup also failed: {cleanup:?}");
                 }
                 resume_unwind(primary);
             }

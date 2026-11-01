@@ -34,7 +34,6 @@ pub(super) struct ComposerSubmission {
 pub(crate) struct ComposerPlan {
     backend: CodingAgent,
     native_version: String,
-    profile_version: String,
     rule_ids: Vec<String>,
     fixture_ids: Vec<String>,
     operation: ComposerOperation,
@@ -49,10 +48,6 @@ impl ComposerPlan {
 
     pub(crate) fn native_version(&self) -> &str {
         &self.native_version
-    }
-
-    pub(crate) fn profile_version(&self) -> &str {
-        &self.profile_version
     }
 
     pub(crate) fn rule_ids(&self) -> &[String] {
@@ -107,7 +102,6 @@ impl ProfileCatalog {
         Some(ComposerPlan {
             backend,
             native_version: native_version.into(),
-            profile_version: profile.version.clone(),
             rule_ids: observation.rules.clone(),
             fixture_ids: submission.fixture_ids.clone(),
             operation,
@@ -122,7 +116,7 @@ pub(crate) mod test_support {
     use super::*;
     use crate::broker::runtime::Coverage;
     use crate::coding_agent::profiles::catalog::test_support::{
-        FIXTURE, PROFILE, VERSION, simple_definition,
+        FIXTURE, VERSION, simple_definition,
     };
     use serde_json::{Value, json};
     pub(crate) const EMPTY: &str = "synthetic-composer_empty";
@@ -192,7 +186,6 @@ pub(crate) mod test_support {
     pub(crate) fn metadata(plan: &ComposerPlan, fixtures: &[String]) {
         assert_eq!(plan.backend(), CodingAgent::Codex);
         assert_eq!(plan.native_version(), VERSION);
-        assert_eq!(plan.profile_version(), PROFILE);
         assert_eq!(plan.rule_ids(), &[DRAFT.to_owned(), EMPTY.to_owned()]);
         assert_eq!(plan.fixture_ids(), fixtures);
     }

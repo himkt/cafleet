@@ -88,6 +88,13 @@ pub(super) struct Capture {
     pub(crate) matcher: String,
     pub(crate) name: String,
     pub(crate) row_margin: Option<String>,
+    pub(crate) margin_rows: MarginRows,
+    pub(crate) row_trailer: Option<String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum MarginRows {
+    All,
+    Continuation,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChoiceScope {
@@ -241,7 +248,6 @@ pub(super) struct Profile {
     pub(crate) backend: CodingAgent,
     pub(crate) min_version: NativeVersion,
     pub(crate) min_version_text: String,
-    pub(crate) version: String,
     pub(crate) rules: Vec<Rule>,
     pub(crate) detection: Option<Capability>,
     pub(crate) composer: Option<Capability>,
@@ -276,7 +282,6 @@ impl Profile {
             capability: AnswerCapability {
                 backend: self.backend,
                 native_version: version.into(),
-                profile_version: self.version.clone(),
                 request_rule_id: request.into(),
                 answer_rule_id: answer.id.clone(),
                 decision,
@@ -299,7 +304,8 @@ pub(crate) struct NativeCapabilities {
     pub(crate) backend: CodingAgent,
     #[cfg(test)]
     pub(crate) native_version: Option<String>,
-    pub(crate) profile_version: Option<String>,
+    #[cfg(test)]
+    pub(crate) min_version: Option<String>,
     pub(crate) detection: Coverage,
     #[cfg(test)]
     pub(crate) composer: Coverage,
@@ -331,6 +337,8 @@ fn capture(value: &Value, matchers: &[Matcher]) -> Result<Capture> {
         matcher,
         name,
         row_margin: None,
+        margin_rows: MarginRows::All,
+        row_trailer: None,
     })
 }
 fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
@@ -341,18 +349,50 @@ fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Captur
     }
 }
 fn operation_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
-    let Some(row_margin) = value.get("row_margin") else {
-        return optional_capture(value, matchers);
+    if value.is_null() {
+        return Ok(None);
+    }
+    let mut plain = value
+        .as_object()
+        .ok_or_else(|| invalid("object required"))?
+        .clone();
+    let row_margin = plain
+        .remove("row_margin")
+        .map(|margin| {
+            margin
+                .as_str()
+                .filter(|margin| !margin.is_empty() && !margin.contains('\n'))
+                .map(str::to_owned)
+                .ok_or_else(|| invalid("nonempty single-row margin required"))
+        })
+        .transpose()?;
+    let margin_rows = match plain.remove("margin_rows") {
+        None => MarginRows::All,
+        Some(rows) => {
+            require(row_margin.is_some(), "margin_rows requires row_margin")?;
+            match rows.as_str() {
+                Some("all") => MarginRows::All,
+                Some("continuation") => MarginRows::Continuation,
+                _ => return Err(invalid("margin_rows must be all or continuation")),
+            }
+        }
     };
-    let row_margin = row_margin
-        .as_str()
-        .filter(|margin| !margin.is_empty() && !margin.contains('\n'))
-        .ok_or_else(|| invalid("nonempty single-row margin required"))?
-        .to_owned();
-    let mut plain = object(value, &["matcher_id", "capture", "row_margin"])?.clone();
-    plain.remove("row_margin");
+    let row_trailer = plain
+        .remove("row_trailer")
+        .map(|trailer| {
+            trailer
+                .as_str()
+                .filter(|trailer| {
+                    !trailer.is_empty() && !trailer.contains('\n') && trailer.trim() == *trailer
+                })
+                .map(str::to_owned)
+                .ok_or_else(|| invalid("trimmed nonempty single-row trailer required"))
+        })
+        .transpose()?;
     Ok(Some(Capture {
-        row_margin: Some(row_margin),
+        row_margin,
+        margin_rows,
+        row_trailer,
         ..capture(&Value::Object(plain), matchers)?
     }))
 }
@@ -952,6 +992,17 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = bundled![
     "claude-2.1.309-read-outside-allow-continuation-1",
     "claude-2.1.309-read-outside-deny-continuation-1",
     "claude-2.1.309-edit-outside-permission-1",
+    "opencode-2.1.4-narrow-permission-057-1",
+    "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
+    "opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
+    "opencode-2.1.4-narrow-long-command-057-1",
+    "opencode-2.1.4-narrow-idle-composer-057-1",
+    "opencode-2.1.4-compact-permission-055-1",
+    "opencode-2.1.4-compact-deny-pre-stage-2-055-1",
+    "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+    "opencode-2.1.4-narrow-permission-min-1",
+    "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
+    "opencode-2.1.4-narrow-deny-pre-stage-3-min-1",
 ];
 
 fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {
@@ -1163,16 +1214,7 @@ impl ProfileCatalog {
         }
         let mut headers = Vec::new();
         for v in array(&root["profiles"])? {
-            let m = object(
-                v,
-                &[
-                    "backend",
-                    "min_version",
-                    "profile_version",
-                    "rules",
-                    "capabilities",
-                ],
-            )?;
+            let m = object(v, &["backend", "min_version", "rules", "capabilities"])?;
             headers.push((m, backend(&m["backend"])?, semver(&m["min_version"])?));
         }
         for (index, (_, backend, min)) in headers.iter().enumerate() {
@@ -1196,7 +1238,6 @@ impl ProfileCatalog {
                     .map(|(_, _, threshold)| threshold)
                     .min_by(|a, b| a.precedence(b)),
             };
-            let version = text(&m["profile_version"])?;
             let rules = array(&m["rules"])?
                 .iter()
                 .map(compile_rule)
@@ -1342,7 +1383,6 @@ impl ProfileCatalog {
                 backend,
                 min_version: min_version.clone(),
                 min_version_text: text(&m["min_version"])?,
-                version,
                 rules,
                 detection,
                 composer,
@@ -1395,7 +1435,8 @@ impl ProfileCatalog {
             backend,
             #[cfg(test)]
             native_version: version.map(str::to_owned),
-            profile_version: profile.map(|p| p.version.clone()),
+            #[cfg(test)]
+            min_version: profile.map(|p| p.min_version_text.clone()),
             detection: if profile.is_some_and(|p| p.detection.is_some()) {
                 Coverage::Tested
             } else {
@@ -1463,7 +1504,6 @@ pub(crate) mod test_support {
     pub(crate) struct BundledBoundary {
         pub(crate) backend: CodingAgent,
         pub(crate) min_version: &'static str,
-        pub(crate) profile_version: &'static str,
         pub(crate) later: [&'static str; 2],
         pub(crate) below: &'static str,
     }
@@ -1474,21 +1514,18 @@ pub(crate) mod test_support {
         BundledBoundary {
             backend: CodingAgent::Claude,
             min_version: "2.1.302",
-            profile_version: "claude-2.1.302-auto-1",
             later: ["2.1.308", "3.0.0-beta.1"],
             below: "2.1.301",
         },
         BundledBoundary {
             backend: CodingAgent::Codex,
             min_version: "0.163.0",
-            profile_version: "codex-0.163.0-approve-for-me-1",
             later: ["0.164.0", "1.0.0+build.7"],
             below: "0.163.0-alpha.2",
         },
         BundledBoundary {
             backend: CodingAgent::Opencode,
             min_version: "2.1.4",
-            profile_version: "opencode-2.1.4-cafleet-ask-1",
             later: ["2.1.40", "2.10.0"],
             below: "2.1.3",
         },
@@ -1501,10 +1538,10 @@ pub(crate) mod test_support {
         fixture
     }
 
-    /// A Codex catalog whose profiles are `(profile_version, min_version)`
-    /// thresholds, each citing one fixture captured at its boundary for
-    /// detection, composer observation, both composer operations, annotations
-    /// and an allow answer.
+    /// A Codex catalog whose profiles are `(label, min_version)` thresholds,
+    /// each citing one fixture captured at its boundary for detection,
+    /// composer observation, both composer operations, annotations and an
+    /// allow answer; the label names that fixture and answer rule.
     pub(crate) fn thresholds(profiles: &[(&str, &str)]) -> Value {
         thresholds_for(CodingAgent::Codex, profiles)
     }
@@ -1523,7 +1560,6 @@ pub(crate) mod test_support {
             let mut profile = base["profiles"][0].clone();
             profile["backend"] = json!(backend.name());
             profile["min_version"] = json!(min);
-            profile["profile_version"] = json!(name);
             profile["rules"]
                 .as_array_mut()
                 .unwrap()
@@ -1620,7 +1656,7 @@ pub(crate) mod test_support {
         json!({
             "schema_version":1,
             "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"0.0.1-synthetic","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773"}],
-            "profiles":[{"backend":"codex","min_version":"0.0.1-synthetic","profile_version":"synthetic-profile-1",
+            "profiles":[{"backend":"codex","min_version":"0.0.1-synthetic",
                 "rules":[{"id":"synthetic-permission","priority":100,"observation":"permission_request",
                     "region":{"screen":"either","start_pattern":"^Synthetic permission request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"at_end"},
                     "matchers":[
@@ -1777,7 +1813,8 @@ pub(crate) mod test_support {
         } else {
             &["Allow once", "Deny once"]
         };
-        let mut row = format!("{row_sgr}  ");
+        // The erase paints the whole row in its background, as the native form does.
+        let mut row = format!("{row_sgr}\x1b[K  ");
         for (index, label) in labels.iter().enumerate() {
             if index > 0 {
                 row.push_str("   ");
@@ -1811,7 +1848,6 @@ pub(crate) mod test_support {
         .into_bytes()
     }
     pub(crate) const VERSION: &str = "0.0.1-synthetic";
-    pub(crate) const PROFILE: &str = "synthetic-profile-1";
     pub(crate) const RULE: &str = "synthetic-permission";
     pub(crate) const FIXTURE: &str = "synthetic-permission-1";
     pub(crate) fn simple_definition(kind: &str, verified: bool) -> Value {
@@ -2099,7 +2135,6 @@ mod tests {
             let capability = plan.capability();
             assert_eq!(capability.backend(), CodingAgent::Codex);
             assert_eq!(capability.native_version(), "0.0.1-synthetic");
-            assert_eq!(capability.profile_version(), "synthetic-profile-1");
             assert_eq!(capability.request_rule_id(), "synthetic-permission");
             assert_eq!(capability.answer_rule_id(), rule);
             assert_eq!(capability.decision(), decision);
@@ -2220,12 +2255,12 @@ mod tests {
         let supported = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
         assert_eq!(supported.backend, CodingAgent::Codex);
         assert_eq!(supported.native_version.as_deref(), Some(VERSION));
-        assert_eq!(supported.profile_version.as_deref(), Some(PROFILE));
+        assert_eq!(supported.min_version.as_deref(), Some(VERSION));
         assert_eq!(supported.detection, Coverage::Tested);
         assert_eq!(supported.composer, Coverage::Unknown);
         assert!(supported.answer_decisions.is_empty());
         let unknown = catalog.capabilities(CodingAgent::Codex, None);
-        assert_eq!(unknown.profile_version, None);
+        assert_eq!(unknown.min_version, None);
         assert_eq!(unknown.detection, Coverage::Unknown);
         assert_eq!(unknown.composer, Coverage::Unknown);
         assert!(unknown.answer_decisions.is_empty());
@@ -2403,7 +2438,7 @@ mod tests {
         });
         invalid(|value| {
             let mut copy = value["profiles"][0].clone();
-            copy["profile_version"] = json!("synthetic-profile-2");
+            copy["min_version"] = json!("0.0.1-synthetic+build.2");
             value["profiles"].as_array_mut().unwrap().push(copy);
         });
         for array in [
@@ -2464,6 +2499,96 @@ mod tests {
             operation["row_margin"] = json!(" ");
             operation["reassembly"] = json!("rows");
         });
+    }
+
+    #[test]
+    fn runtime_profile_operation_margin_rows_select_all_or_continuation_rows_of_a_margin() {
+        for margin_rows in ["all", "continuation"] {
+            let mut value = definitions();
+            let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+            operation["row_margin"] = json!(" ");
+            operation["margin_rows"] = json!(margin_rows);
+            assert!(
+                ProfileCatalog::from_definitions(&value).is_ok(),
+                "{margin_rows}"
+            );
+        }
+        for margin_rows in [
+            json!("first"),
+            json!("All"),
+            json!(""),
+            json!(null),
+            json!(1),
+            json!(["continuation"]),
+        ] {
+            invalid(|value| {
+                let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+                operation["row_margin"] = json!(" ");
+                operation["margin_rows"] = margin_rows;
+            });
+        }
+        for margin_rows in ["all", "continuation"] {
+            invalid(|value| {
+                value["profiles"][0]["rules"][0]["extract"]["operation"]["margin_rows"] =
+                    json!(margin_rows);
+            });
+        }
+    }
+
+    #[test]
+    fn runtime_profile_operation_row_trailer_is_a_trimmed_single_row_literal() {
+        for with_margin in [false, true] {
+            let mut value = definitions();
+            let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+            if with_margin {
+                operation["row_margin"] = json!(" ");
+                operation["margin_rows"] = json!("continuation");
+            }
+            operation["row_trailer"] = json!("█");
+            assert!(
+                ProfileCatalog::from_definitions(&value).is_ok(),
+                "with margin: {with_margin}"
+            );
+        }
+        for trailer in [
+            json!(""),
+            json!(" "),
+            json!(" █"),
+            json!("█ "),
+            json!("\t█"),
+            json!("█\n█"),
+            json!(null),
+            json!(1),
+            json!(["█"]),
+        ] {
+            invalid(|value| {
+                value["profiles"][0]["rules"][0]["extract"]["operation"]["row_trailer"] = trailer;
+            });
+        }
+    }
+
+    #[test]
+    fn bundled_claude_and_codex_operations_declare_neither_row_option() {
+        let definitions = bundled_definitions();
+        for profile in definitions["profiles"].as_array().unwrap() {
+            if profile["backend"] == "opencode" {
+                continue;
+            }
+            for rule in profile["rules"].as_array().unwrap() {
+                let operation = &rule["extract"]["operation"];
+                if operation.is_null() {
+                    continue;
+                }
+                for key in ["margin_rows", "row_trailer"] {
+                    assert!(
+                        operation.get(key).is_none(),
+                        "{} {} {key}",
+                        profile["backend"],
+                        rule["id"]
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -2586,10 +2711,36 @@ mod tests {
         let catalog = ProfileCatalog::bundled().unwrap();
         for &backend in CodingAgent::all() {
             let unprobed = catalog.capabilities(backend, None);
-            assert_eq!(unprobed.profile_version, None);
+            assert_eq!(unprobed.min_version, None);
             assert_eq!(unprobed.detection, Coverage::Unknown);
             assert_eq!(unprobed.composer, Coverage::Unknown);
             assert!(unprobed.answer_decisions.is_empty());
+        }
+    }
+
+    #[test]
+    fn runtime_profile_bundled_entries_are_identified_by_backend_and_min_version() {
+        let definitions = bundled_definitions();
+        let profiles = definitions["profiles"].as_array().unwrap();
+        assert!(!profiles.is_empty());
+        for profile in profiles {
+            let keys = profile
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(
+                keys,
+                std::collections::BTreeSet::from([
+                    "backend",
+                    "capabilities",
+                    "min_version",
+                    "rules"
+                ]),
+                "{}",
+                profile["backend"]
+            );
         }
     }
 
@@ -3219,7 +3370,6 @@ mod tests {
                     .composer_plan(CodingAgent::Codex, "7.0.0-beta.1", operation)
                     .expect("a later run reuses the profile's plan");
                 assert_eq!(selected.native_version(), "7.0.0-beta.1");
-                assert_eq!(selected.profile_version(), PROFILE);
                 assert_eq!(selected.fixture_ids(), &[fixture.to_owned()]);
             }
         }
@@ -3265,7 +3415,6 @@ mod tests {
 
         const CLAUDE_VERSION: &str = "2.1.302";
         const NATIVE_FIXTURE: &str = "claude-2.1.302-default-permission-1";
-        const PROFILE_VERSION: &str = "claude-2.1.302-auto-1";
         const ALLOW_FIXTURE: &str = "claude-2.1.302-allow-pre-stage-1";
         const DENY_FIXTURE: &str = "claude-2.1.302-deny-pre-stage-1";
         const IDLE_FIXTURE: &str = "claude-2.1.302-idle-composer-1";
@@ -3316,7 +3465,6 @@ mod tests {
                 .iter()
                 .find(|profile| profile["backend"] == "claude")
                 .expect("bundled Claude profile");
-            assert_eq!(profile["profile_version"], PROFILE_VERSION);
             assert_eq!(profile["min_version"], CLAUDE_VERSION);
             let cited_by = |group: &str| {
                 profile["capabilities"][group]["fixture_ids"]
@@ -3419,7 +3567,6 @@ mod tests {
         use std::collections::BTreeSet;
 
         const CLAUDE_VERSION: &str = "2.1.302";
-        const PROFILE_VERSION: &str = "claude-2.1.302-auto-1";
         const REFUSAL_RULE: &str = "claude-auto-refusal";
         const NOTICE_RULE: &str = "claude-auto-refusal-notice";
         const UNAVAILABLE_RULE: &str = "claude-auto-unavailable";
@@ -3686,7 +3833,7 @@ mod tests {
                 .as_array_mut()
                 .unwrap()
                 .iter_mut()
-                .find(|profile| profile["profile_version"] == PROFILE_VERSION)
+                .find(|profile| profile["backend"] == "claude")
                 .expect("bundled automatic-mode Claude profile");
             profile["rules"].as_array_mut().unwrap().retain(|rule| {
                 !rule["observation"]
@@ -3743,7 +3890,7 @@ mod tests {
             assert_eq!(event.observed_at, NOW);
             assert_eq!(event.evidence_json["rule_id"], rule);
             assert_eq!(event.evidence_json["backend"], "claude");
-            assert_eq!(event.evidence_json["profile_version"], PROFILE_VERSION);
+            assert_eq!(event.evidence_json["native_version"], CLAUDE_VERSION);
         }
 
         #[test]
@@ -3751,10 +3898,7 @@ mod tests {
             let capabilities = ProfileCatalog::bundled()
                 .unwrap()
                 .capabilities(CodingAgent::Claude, Some(CLAUDE_VERSION));
-            assert_eq!(
-                capabilities.profile_version.as_deref(),
-                Some(PROFILE_VERSION)
-            );
+            assert_eq!(capabilities.min_version.as_deref(), Some(CLAUDE_VERSION));
             assert_eq!(capabilities.detection, Coverage::Tested);
             let definitions: Value = serde_json::from_str(include_str!("bundled.json")).unwrap();
             let claude = definitions["profiles"]
@@ -3769,7 +3913,6 @@ mod tests {
                 "the automatic-mode profile replaces its predecessor"
             );
             let profile = claude[0];
-            assert_eq!(profile["profile_version"], PROFILE_VERSION);
             assert_eq!(profile["min_version"], CLAUDE_VERSION);
             let group = |name: &str| {
                 profile["capabilities"][name]["rule_ids"]
@@ -3829,8 +3972,7 @@ mod tests {
                 assert_eq!(observed.kind, kind, "{id}");
                 assert_eq!(observed.rule_id, rule, "{id}");
                 assert_eq!(
-                    observed.profile_version.as_deref(),
-                    Some(PROFILE_VERSION),
+                    observed.raw_evidence["native_version"], CLAUDE_VERSION,
                     "{id}"
                 );
                 assert_ne!(observed.kind, ObservationKind::PermissionDenied, "{id}");
@@ -3850,7 +3992,7 @@ mod tests {
                     };
                     assert_eq!(block.kind, kind, "{id} {}", block.rule_id);
                     assert_eq!(block.raw_evidence["rule_id"], block.rule_id.as_str());
-                    assert_eq!(block.raw_evidence["profile_version"], PROFILE_VERSION);
+                    assert_eq!(block.raw_evidence["native_version"], CLAUDE_VERSION);
                     let mode = if block.rule_id == INDICATOR_RULE {
                         json!("auto mode")
                     } else {
@@ -3908,7 +4050,7 @@ mod tests {
                 assert_eq!(stage.required_rule_id(), ASK_RULE);
                 assert_eq!(stage.required_choice_id(), choice);
                 assert!(stage.gate().is_none(), "{decision:?} is ungated");
-                assert_eq!(plan.capability().profile_version(), PROFILE_VERSION);
+                assert_eq!(plan.capability().native_version(), CLAUDE_VERSION);
                 let matched = detector(&catalog)
                     .match_answer(&screen(ASK_FORM), &plan)
                     .unwrap()
@@ -4002,7 +4144,7 @@ mod tests {
                 assert_eq!(stage.required_choice_id(), choice);
                 assert!(stage.gate().is_none(), "{decision:?} is ungated");
                 let capability = plan.capability();
-                assert_eq!(capability.profile_version(), PROFILE_VERSION);
+                assert_eq!(capability.native_version(), CLAUDE_VERSION);
                 assert_eq!(capability.request_rule_id(), TIP_RULE);
                 assert_eq!(capability.decision(), decision);
                 assert_eq!(
@@ -4047,7 +4189,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .find(|profile| profile["profile_version"] == PROFILE_VERSION)
+                .find(|profile| profile["backend"] == "claude")
                 .expect("bundled automatic-mode Claude profile")
                 .clone()
         }
@@ -4098,8 +4240,7 @@ mod tests {
                     assert_eq!(form.kind, FORM, "{id} {version}");
                     assert_eq!(form.rule_id, READ_RULE, "{id} {version}");
                     assert_eq!(
-                        form.profile_version.as_deref(),
-                        Some(PROFILE_VERSION),
+                        form.raw_evidence["native_version"], version,
                         "{id} {version}"
                     );
                     assert_eq!(form.match_evidence, MatchEvidence::Complete, "{id}");
@@ -4238,7 +4379,7 @@ mod tests {
                 assert_eq!(stage.required_choice_id(), choice);
                 assert!(stage.gate().is_none(), "{decision:?} is ungated");
                 let capability = plan.capability();
-                assert_eq!(capability.profile_version(), PROFILE_VERSION);
+                assert_eq!(capability.native_version(), CLAUDE_VERSION);
                 assert_eq!(capability.request_rule_id(), READ_RULE);
                 assert_eq!(capability.decision(), decision);
                 assert_eq!(
@@ -4734,7 +4875,6 @@ mod tests {
         use std::collections::BTreeSet;
 
         const CODEX_VERSION: &str = "0.163.0";
-        const PROFILE_VERSION: &str = "codex-0.163.0-approve-for-me-1";
         const REFUSAL_RULE: &str = "codex-auto-review-refusal";
         const INDICATOR_RULE: &str = "codex-auto-review-indicator";
         const IDLE_RULE: &str = "codex-idle-composer";
@@ -4933,10 +5073,7 @@ mod tests {
             let capabilities = ProfileCatalog::bundled()
                 .unwrap()
                 .capabilities(CodingAgent::Codex, Some(CODEX_VERSION));
-            assert_eq!(
-                capabilities.profile_version.as_deref(),
-                Some(PROFILE_VERSION)
-            );
+            assert_eq!(capabilities.min_version.as_deref(), Some(CODEX_VERSION));
             let definitions: Value = serde_json::from_str(include_str!("bundled.json")).unwrap();
             let codex = definitions["profiles"]
                 .as_array()
@@ -4997,8 +5134,7 @@ mod tests {
                 assert_eq!(observed.kind, kind, "{id}");
                 assert_eq!(observed.rule_id, rule, "{id}");
                 assert_eq!(
-                    observed.profile_version.as_deref(),
-                    Some(PROFILE_VERSION),
+                    observed.raw_evidence["native_version"], CODEX_VERSION,
                     "{id}"
                 );
                 assert_ne!(observed.kind, ObservationKind::PermissionDenied, "{id}");
@@ -5069,7 +5205,7 @@ mod tests {
             let event = &stable.events[0];
             assert_eq!((event.episode_seq, event.classification), (None, None));
             assert_eq!(event.evidence_json["rule_id"], REFUSAL_RULE);
-            assert_eq!(event.evidence_json["profile_version"], PROFILE_VERSION);
+            assert_eq!(event.evidence_json["native_version"], CODEX_VERSION);
             assert_eq!(event.evidence_json["operation"], Value::Null);
             assert!(run.hold(REFUSAL_IDLE, 150, 1000).events.is_empty());
             assert!(run.hold(REVIEWING, 1050, 1300).events.is_empty());
@@ -5199,23 +5335,19 @@ mod tests {
         struct BundledProfile {
             backend: CodingAgent,
             version: &'static str,
-            profile_version: &'static str,
         }
 
         const CLAUDE: BundledProfile = BundledProfile {
             backend: CodingAgent::Claude,
             version: "2.1.302",
-            profile_version: "claude-2.1.302-auto-1",
         };
         const CODEX: BundledProfile = BundledProfile {
             backend: CodingAgent::Codex,
             version: "0.163.0",
-            profile_version: "codex-0.163.0-approve-for-me-1",
         };
         const OPENCODE: BundledProfile = BundledProfile {
             backend: CodingAgent::Opencode,
             version: "2.1.4",
-            profile_version: "opencode-2.1.4-cafleet-ask-1",
         };
 
         struct MeasuredAnswer {
@@ -5290,10 +5422,7 @@ mod tests {
                 let declared = bundled.capabilities(backend, Some(profile.version));
                 assert_eq!(declared.backend, backend);
                 assert_eq!(declared.native_version.as_deref(), Some(profile.version));
-                assert_eq!(
-                    declared.profile_version.as_deref(),
-                    Some(profile.profile_version)
-                );
+                assert_eq!(declared.min_version.as_deref(), Some(profile.version));
                 assert_eq!(declared.detection, Coverage::Tested, "{backend:?}");
                 assert_eq!(declared.composer, Coverage::Tested, "{backend:?}");
                 assert_eq!(declared.prompt_submission, Coverage::Tested, "{backend:?}");
@@ -5313,14 +5442,14 @@ mod tests {
                 let unknown = bundled.capabilities(backend, None);
                 assert_eq!(unknown.detection, Coverage::Unknown, "{backend:?}");
                 assert_eq!(unknown.composer, Coverage::Unknown, "{backend:?}");
-                assert_eq!(unknown.profile_version, None, "{backend:?}");
+                assert_eq!(unknown.min_version, None, "{backend:?}");
                 assert!(unknown.answer_decisions.is_empty(), "{backend:?}");
                 assert!(unknown.capability_reason.is_some(), "{backend:?}");
                 for &other in CodingAgent::all().iter().filter(|&&other| other != backend) {
                     let foreign = bundled.capabilities(other, Some(profile.version));
                     assert_ne!(
-                        foreign.profile_version.as_deref(),
-                        Some(profile.profile_version),
+                        foreign.min_version.as_deref(),
+                        Some(profile.version),
                         "{other:?} at {backend:?} {}",
                         profile.version
                     );
@@ -5347,7 +5476,6 @@ mod tests {
                         .composer_plan(backend, run, operation)
                         .unwrap_or_else(|| panic!("{backend:?} {name} plan"));
                     assert_eq!(plan.native_version(), run);
-                    assert_eq!(plan.profile_version(), profile.profile_version);
                     for id in plan.fixture_ids() {
                         assert!(
                             submission_fixture_ids(backend).contains(id),
@@ -5412,7 +5540,6 @@ mod tests {
                     let capability = plan.capability();
                     assert_eq!(capability.backend(), backend);
                     assert_eq!(capability.native_version(), profile.version);
-                    assert_eq!(capability.profile_version(), profile.profile_version);
                     assert_eq!(capability.request_rule_id(), rule);
                     assert_eq!(capability.answer_rule_id(), answer.answer_rule);
                     assert_eq!(capability.decision(), decision);
@@ -5507,9 +5634,10 @@ mod tests {
         use std::collections::BTreeSet;
 
         const OPENCODE_VERSION: &str = "2.1.4";
-        const PROFILE_VERSION: &str = "opencode-2.1.4-cafleet-ask-1";
         const PERMISSION_RULE: &str = "opencode-shell-permission";
         const REASON_RULE: &str = "opencode-reject-reason";
+        const COMPACT_RULE: &str = "opencode-shell-permission-compact";
+        const COMPACT_REASON_RULE: &str = "opencode-reject-reason-compact";
         const IDLE_RULE: &str = "opencode-idle-composer";
         const PERMISSION_FIXTURE: &str = "opencode-2.1.4-ask-permission-1";
         const ALLOW_FIXTURE: &str = "opencode-2.1.4-allow-pre-stage-1";
@@ -5518,6 +5646,75 @@ mod tests {
         const DENY_3_FIXTURE: &str = "opencode-2.1.4-deny-pre-stage-3";
         const ALWAYS_FIXTURE: &str = "opencode-2.1.4-focus-always-1";
         const IDLE_FIXTURE: &str = "opencode-2.1.4-idle-composer-1";
+        const NARROW_FIXTURE: &str = "opencode-2.1.4-narrow-permission-057-1";
+        const NARROW_DENY_2_FIXTURE: &str = "opencode-2.1.4-narrow-deny-pre-stage-2-057-1";
+        const NARROW_DENY_3_FIXTURE: &str = "opencode-2.1.4-narrow-deny-pre-stage-3-057-1";
+        const NARROW_LONG_FIXTURE: &str = "opencode-2.1.4-narrow-long-command-057-1";
+        const NARROW_IDLE_FIXTURE: &str = "opencode-2.1.4-narrow-idle-composer-057-1";
+        const COMPACT_FIXTURE: &str = "opencode-2.1.4-compact-permission-055-1";
+        const COMPACT_DENY_2_FIXTURE: &str = "opencode-2.1.4-compact-deny-pre-stage-2-055-1";
+        const COMPACT_DENY_3_FIXTURE: &str = "opencode-2.1.4-compact-deny-pre-stage-3-055-1";
+        const MIN_FIXTURE: &str = "opencode-2.1.4-narrow-permission-min-1";
+        const MIN_DENY_2_FIXTURE: &str = "opencode-2.1.4-narrow-deny-pre-stage-2-min-1";
+        const MIN_DENY_3_FIXTURE: &str = "opencode-2.1.4-narrow-deny-pre-stage-3-min-1";
+        /// Each narrow form fixture, the request rule it matches, its displayed command rows and
+        /// the choice its captured backgrounds focus.
+        const NARROW_FORMS: [(&str, &str, [&str; 2], &str); 6] = [
+            (
+                NARROW_FIXTURE,
+                PERMISSION_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-narrow-cells-057/",
+                    "permission-probe allow",
+                ],
+                "allow-once",
+            ),
+            (
+                NARROW_DENY_2_FIXTURE,
+                PERMISSION_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-narrow-deny-002-057/",
+                    "permission-probe deny",
+                ],
+                "deny-once",
+            ),
+            (
+                COMPACT_FIXTURE,
+                COMPACT_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-compact-cells-055/",
+                    "permission-probe allow",
+                ],
+                "allow-once",
+            ),
+            (
+                COMPACT_DENY_2_FIXTURE,
+                COMPACT_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-compact-deny-002-055/",
+                    "permission-probe deny",
+                ],
+                "deny-once",
+            ),
+            (
+                MIN_FIXTURE,
+                COMPACT_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-narrow-",
+                    "cells-min/permission-probe allow",
+                ],
+                "allow-once",
+            ),
+            (
+                MIN_DENY_2_FIXTURE,
+                COMPACT_RULE,
+                [
+                    "/tmp/cafleet-194/opencode-narrow-",
+                    "deny-002-min/permission-probe deny",
+                ],
+                "deny-once",
+            ),
+        ];
         const FORM_FIXTURES: [(&str, &str, &str); 5] = [
             (PERMISSION_FIXTURE, "opencode-cells-001", "allow"),
             (ALLOW_FIXTURE, "opencode-ans-allow-001", "allow"),
@@ -5642,10 +5839,7 @@ mod tests {
                 MatchEvidence::Complete,
                 "{case}"
             );
-            assert_eq!(
-                observation.profile_version.as_deref(),
-                Some(PROFILE_VERSION)
-            );
+            assert_eq!(observation.raw_evidence["native_version"], OPENCODE_VERSION);
             assert!(!observation.verified_noninteraction);
             assert_eq!(
                 observation.raw_evidence["operation"],
@@ -5668,19 +5862,29 @@ mod tests {
             let definitions = definitions();
             let capabilities = &profile(&definitions)["capabilities"];
             assert_eq!(profile(&definitions)["min_version"], OPENCODE_VERSION);
-            assert_eq!(profile(&definitions)["profile_version"], PROFILE_VERSION);
             assert_eq!(
-                capabilities["detection"]["rule_ids"],
-                json!([PERMISSION_RULE])
+                capabilities["detection"]["rule_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|id| id.as_str().unwrap())
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from([PERMISSION_RULE, COMPACT_RULE]),
+                "detection lists both request rules"
             );
             assert_eq!(
-                capabilities["detection"]["fixture_ids"],
-                json!([PERMISSION_FIXTURE])
+                id_set(&capabilities["detection"]["fixture_ids"]),
+                BTreeSet::from([
+                    PERMISSION_FIXTURE,
+                    NARROW_FIXTURE,
+                    COMPACT_FIXTURE,
+                    MIN_FIXTURE
+                ])
             );
             assert_eq!(capabilities["composer"]["rule_ids"], json!([IDLE_RULE]));
             assert_eq!(
-                capabilities["composer"]["fixture_ids"],
-                json!([IDLE_FIXTURE])
+                id_set(&capabilities["composer"]["fixture_ids"]),
+                BTreeSet::from([IDLE_FIXTURE, NARROW_IDLE_FIXTURE])
             );
             assert_eq!(
                 capabilities["composer"]["submission"],
@@ -5701,7 +5905,14 @@ mod tests {
             assert_eq!(reason["observation"], "permission_continuation");
             assert_eq!(reason["continues_rule_id"], PERMISSION_RULE);
             assert_eq!(reason["continues_choice_id"], "deny-once");
-            assert_eq!(reason["fixture_ids"], json!([DENY_3_FIXTURE]));
+            assert_eq!(
+                id_set(&reason["fixture_ids"]),
+                BTreeSet::from([DENY_3_FIXTURE, NARROW_DENY_3_FIXTURE])
+            );
+            assert_eq!(
+                id_set(&rule(&definitions, COMPACT_REASON_RULE)["fixture_ids"]),
+                BTreeSet::from([COMPACT_DENY_3_FIXTURE, MIN_DENY_3_FIXTURE])
+            );
             assert_eq!(
                 reason["extract"],
                 json!({"operation":null,"choices":[],"native_request_id":null})
@@ -5711,7 +5922,7 @@ mod tests {
             assert_eq!(form["observation"], "permission_request");
             assert_eq!(form["region"]["screen"], "primary");
             assert_eq!(form["region"]["cursor"], "any");
-            assert_eq!(form["region"]["max_rows"], 24);
+            assert!(form["region"]["max_rows"].as_u64().unwrap() >= 24);
             assert_eq!(form["sensitive"], false);
             assert_eq!(form["extract"]["native_request_id"], Value::Null);
             assert_eq!(
@@ -5749,6 +5960,388 @@ mod tests {
             assert_eq!(idle["verified_noninteraction"], true);
         }
 
+        fn matcher<'a>(rule: &'a Value, id: &str) -> &'a Value {
+            rule["matchers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|matcher| matcher["id"] == id)
+                .unwrap_or_else(|| panic!("{} declares matcher {id}", rule["id"]))
+        }
+
+        #[test]
+        fn bundled_opencode_form_rule_matches_the_wide_and_split_layouts() {
+            let definitions = definitions();
+            let form = rule(&definitions, PERMISSION_RULE);
+            assert_eq!(
+                form["region"]["start_pattern"],
+                "^  △ Permission required\\s*$"
+            );
+            assert_eq!(
+                form["region"]["end_pattern"],
+                "  ⇆ select  enter confirm  esc reject\\s*$"
+            );
+            assert_eq!(
+                matcher(form, "focus")["pattern"],
+                "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$"
+            );
+            assert_eq!(
+                matcher(form, "allow")["pattern"],
+                "^   (?P<label>Allow once)   "
+            );
+            assert_eq!(
+                matcher(form, "deny")["pattern"],
+                "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+            );
+            for (id, scope) in [
+                ("focus", "line"),
+                ("allow", "line"),
+                ("deny", "line"),
+                ("controls", "region"),
+                ("operation", "region"),
+            ] {
+                assert_eq!(matcher(form, id)["scope"], scope, "{id}");
+            }
+            assert_eq!(matcher(form, "focus")["focus_style"], "background");
+            let operation = &form["extract"]["operation"];
+            assert_eq!(operation["matcher_id"], "operation");
+            assert_eq!(operation["margin_rows"], "continuation");
+            assert_eq!(operation["row_trailer"], "█");
+            assert!(
+                operation["row_margin"]
+                    .as_str()
+                    .is_some_and(|margin| !margin.is_empty()),
+                "the continuation margin is declared"
+            );
+        }
+
+        #[test]
+        fn bundled_opencode_reject_reason_reads_the_placeholder_through_one_region_matcher() {
+            let definitions = definitions();
+            let reason = rule(&definitions, REASON_RULE);
+            let ids = reason["matchers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|matcher| matcher["id"].as_str().unwrap())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(ids, BTreeSet::from(["empty_reason", "heading"]));
+            assert_eq!(matcher(reason, "empty_reason")["scope"], "region");
+        }
+
+        #[test]
+        fn bundled_opencode_compact_rules_mirror_the_wide_and_split_rules_without_a_margin() {
+            let definitions = definitions();
+            let form = rule(&definitions, PERMISSION_RULE);
+            let compact = rule(&definitions, COMPACT_RULE);
+            for key in ["observation", "sensitive", "verified_noninteraction"] {
+                assert_eq!(compact[key], form[key], "{key}");
+            }
+            assert_eq!(compact["region"]["screen"], form["region"]["screen"]);
+            assert_eq!(compact["region"]["cursor"], form["region"]["cursor"]);
+            assert!(compact["region"]["max_rows"].as_u64().unwrap() >= 24);
+            assert_eq!(compact["extract"]["choices"], form["extract"]["choices"]);
+            assert_eq!(compact["extract"]["native_request_id"], Value::Null);
+            for (id, scope) in [
+                ("focus", "line"),
+                ("allow", "line"),
+                ("deny", "line"),
+                ("operation", "region"),
+            ] {
+                assert_eq!(matcher(compact, id)["scope"], scope, "{id}");
+            }
+            assert_eq!(matcher(compact, "focus")["focus_style"], "background");
+            let operation = &compact["extract"]["operation"];
+            assert_eq!(operation["matcher_id"], "operation");
+            assert_eq!(operation["row_trailer"], "█");
+            assert!(operation.get("row_margin").is_none());
+            assert!(operation.get("margin_rows").is_none());
+            let reason = rule(&definitions, COMPACT_REASON_RULE);
+            assert_eq!(reason["observation"], "permission_continuation");
+            assert_eq!(reason["continues_rule_id"], COMPACT_RULE);
+            assert_eq!(reason["continues_choice_id"], "deny-once");
+            assert_eq!(
+                reason["extract"],
+                json!({"operation":null,"choices":[],"native_request_id":null})
+            );
+            assert_eq!(matcher(reason, "empty_reason")["scope"], "region");
+        }
+
+        #[test]
+        fn bundled_opencode_compact_answers_repeat_the_measured_stages_on_the_compact_rules() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for (decision, choice, stages) in [
+                (
+                    PermissionDecision::Allow,
+                    "allow-once",
+                    vec![(vec![0x0d], Some("allow-once"), None)],
+                ),
+                (
+                    PermissionDecision::Deny,
+                    "deny-once",
+                    vec![
+                        (vec![0x68], Some("allow-once"), None),
+                        (vec![0x0d], Some("deny-once"), None),
+                        (vec![0x0d], None, Some(COMPACT_REASON_RULE)),
+                    ],
+                ),
+            ] {
+                let plan = catalog
+                    .answer_plan(
+                        CodingAgent::Opencode,
+                        OPENCODE_VERSION,
+                        COMPACT_RULE,
+                        decision,
+                    )
+                    .unwrap_or_else(|| panic!("compact {decision:?} plan"));
+                assert_eq!(plan.choice_id(), choice);
+                assert_eq!(plan.focus_matcher_id(), "focus");
+                assert_eq!(
+                    plan.stages()
+                        .iter()
+                        .map(|stage| (
+                            stage.bytes().to_vec(),
+                            stage.required_focus_choice_id(),
+                            stage.required_screen_rule_id(),
+                        ))
+                        .collect::<Vec<_>>(),
+                    stages,
+                    "{decision:?}"
+                );
+                for stage in plan.stages() {
+                    assert_eq!(stage.required_rule_id(), COMPACT_RULE);
+                    assert_eq!(stage.required_choice_id(), choice);
+                }
+                let capability = plan.capability();
+                assert_eq!(capability.request_rule_id(), COMPACT_RULE);
+                assert_eq!(capability.decision(), decision);
+                let fixtures = if decision == PermissionDecision::Allow {
+                    BTreeSet::from([COMPACT_FIXTURE, MIN_FIXTURE])
+                } else {
+                    BTreeSet::from([
+                        COMPACT_FIXTURE,
+                        COMPACT_DENY_2_FIXTURE,
+                        COMPACT_DENY_3_FIXTURE,
+                        MIN_FIXTURE,
+                        MIN_DENY_2_FIXTURE,
+                        MIN_DENY_3_FIXTURE,
+                    ])
+                };
+                assert_eq!(
+                    capability
+                        .fixture_ids()
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<BTreeSet<_>>(),
+                    fixtures,
+                    "{decision:?}"
+                );
+                let wide = plan_for(PERMISSION_RULE, decision);
+                assert_ne!(
+                    capability.answer_rule_id(),
+                    wide.capability().answer_rule_id(),
+                    "each request rule has its own answer entry"
+                );
+            }
+        }
+
+        fn plan_for(request: &str, decision: PermissionDecision) -> AnswerPlan {
+            ProfileCatalog::bundled()
+                .unwrap()
+                .answer_plan(CodingAgent::Opencode, OPENCODE_VERSION, request, decision)
+                .unwrap()
+        }
+
+        fn id_set(ids: &Value) -> BTreeSet<&str> {
+            ids.as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap())
+                .collect()
+        }
+
+        fn focused_on(request: &str, screen: &ScreenSnapshot) -> Option<String> {
+            let detector = detector();
+            let mut resolved = BTreeSet::new();
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                let matched = detector
+                    .match_answer(screen, &plan_for(request, decision))
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("the {request} form matches the {decision:?} plan"));
+                resolved.insert(matched.focused_choice_id().map(str::to_owned));
+            }
+            assert_eq!(resolved.len(), 1, "both plans share the focus matcher");
+            resolved.pop_first().unwrap()
+        }
+
+        #[test]
+        fn bundled_opencode_detects_every_narrow_and_compact_form_fixture() {
+            for (id, request, rows, focus) in NARROW_FORMS {
+                let observed = observe(&replay(fixture(id)));
+                assert_eq!(
+                    observed.kind,
+                    ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                    "{id}"
+                );
+                assert_eq!(observed.rule_id, request, "{id}");
+                assert_eq!(observed.match_evidence, MatchEvidence::Complete, "{id}");
+                assert!(!observed.verified_noninteraction, "{id}");
+                assert_eq!(observed.raw_evidence["operation"], rows.join("\n"), "{id}");
+                assert_eq!(observed.raw_evidence["operation_rows"], 2, "{id}");
+                assert_eq!(
+                    observed.raw_evidence["choices"],
+                    json!(["Allow once", "Reject"]),
+                    "{id}"
+                );
+                assert_eq!(
+                    observed.raw_evidence["native_request_id"],
+                    Value::Null,
+                    "{id}"
+                );
+                assert!(observed.fingerprint.is_some(), "{id}");
+                assert_eq!(
+                    focused_on(request, &replay(fixture(id))).as_deref(),
+                    Some(focus),
+                    "{id}"
+                );
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_narrow_stage_gates_hold_on_their_pre_stage_fixtures() {
+            for (request, reason, cells, deny_2, deny_3) in [
+                (
+                    PERMISSION_RULE,
+                    REASON_RULE,
+                    NARROW_FIXTURE,
+                    NARROW_DENY_2_FIXTURE,
+                    NARROW_DENY_3_FIXTURE,
+                ),
+                (
+                    COMPACT_RULE,
+                    COMPACT_REASON_RULE,
+                    COMPACT_FIXTURE,
+                    COMPACT_DENY_2_FIXTURE,
+                    COMPACT_DENY_3_FIXTURE,
+                ),
+                (
+                    COMPACT_RULE,
+                    COMPACT_REASON_RULE,
+                    MIN_FIXTURE,
+                    MIN_DENY_2_FIXTURE,
+                    MIN_DENY_3_FIXTURE,
+                ),
+            ] {
+                let allow = plan_for(request, PermissionDecision::Allow);
+                let deny = plan_for(request, PermissionDecision::Deny);
+                let cells_focus = focused_on(request, &replay(fixture(cells)));
+                assert_eq!(
+                    cells_focus.as_deref(),
+                    allow.stages()[0].required_focus_choice_id(),
+                    "{cells} allow stage 1"
+                );
+                assert_eq!(
+                    cells_focus.as_deref(),
+                    deny.stages()[0].required_focus_choice_id(),
+                    "{cells} deny stage 1"
+                );
+                assert_eq!(
+                    focused_on(request, &replay(fixture(deny_2))).as_deref(),
+                    deny.stages()[1].required_focus_choice_id(),
+                    "{deny_2}"
+                );
+                let dialog = observe(&replay(fixture(deny_3)));
+                assert_eq!(
+                    dialog.kind,
+                    ObservationKind::PermissionContinuation,
+                    "{deny_3}"
+                );
+                assert_eq!(dialog.match_evidence, MatchEvidence::Complete, "{deny_3}");
+                assert_eq!(dialog.rule_id, reason, "{deny_3}");
+                assert_eq!(
+                    Some(dialog.rule_id.as_str()),
+                    deny.stages()[2].required_screen_rule_id(),
+                    "{deny_3}"
+                );
+                assert_eq!(
+                    dialog.continues_rule_id.as_deref(),
+                    Some(request),
+                    "{deny_3}"
+                );
+                for plan in [&allow, &deny] {
+                    assert!(
+                        detector()
+                            .match_answer(&replay(fixture(deny_3)), plan)
+                            .unwrap()
+                            .is_none(),
+                        "{deny_3}: the rejection-reason dialog is not an answerable form"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_narrow_reject_dialogs_require_the_empty_placeholder() {
+            for id in [
+                NARROW_DENY_3_FIXTURE,
+                COMPACT_DENY_3_FIXTURE,
+                MIN_DENY_3_FIXTURE,
+            ] {
+                let placeholder = lines(fixture(id))
+                    .iter()
+                    .rposition(|line| line.contains("Tell OpenCode what to do differently"))
+                    .expect("the dialog shows its placeholder");
+                let typed = observe(&replay_changed(
+                    fixture(id),
+                    |lines| {
+                        lines[placeholder] = lines[placeholder].replacen(
+                            "Tell OpenCode what to do differently",
+                            "run it in the sandbox instead       ",
+                            1,
+                        )
+                    },
+                    None,
+                ));
+                assert_ne!(typed.kind, ObservationKind::PermissionContinuation, "{id}");
+                assert_ne!(typed.rule_id, REASON_RULE, "{id}");
+                assert_ne!(typed.rule_id, COMPACT_REASON_RULE, "{id}");
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_clipped_long_command_yields_no_request() {
+            let observed = observe(&replay(fixture(NARROW_LONG_FIXTURE)));
+            assert_ne!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert_ne!(observed.rule_id, PERMISSION_RULE);
+            assert_ne!(observed.rule_id, COMPACT_RULE);
+            assert!(observed.fingerprint.is_none());
+            for request in [PERMISSION_RULE, COMPACT_RULE] {
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    assert!(
+                        detector()
+                            .match_answer(
+                                &replay(fixture(NARROW_LONG_FIXTURE)),
+                                &plan_for(request, decision)
+                            )
+                            .unwrap()
+                            .is_none(),
+                        "{request} {decision:?}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_narrow_idle_composer_is_a_verified_empty_composer() {
+            let observed = observe(&replay(fixture(NARROW_IDLE_FIXTURE)));
+            assert_eq!(observed.kind, ObservationKind::ComposerEmpty);
+            assert_eq!(observed.rule_id, IDLE_RULE);
+            assert!(observed.verified_noninteraction);
+        }
+
         #[test]
         fn bundled_opencode_answer_plans_are_the_measured_gated_stages() {
             let allow = plan(PermissionDecision::Allow);
@@ -5759,7 +6352,7 @@ mod tests {
                     PermissionDecision::Allow,
                     "allow-once",
                     "opencode-shell-allow-once",
-                    vec![ALLOW_FIXTURE.to_owned()],
+                    BTreeSet::from([ALLOW_FIXTURE, NARROW_FIXTURE]),
                     vec![(vec![0x0d], Some("allow-once"), None)],
                 ),
                 (
@@ -5767,11 +6360,14 @@ mod tests {
                     PermissionDecision::Deny,
                     "deny-once",
                     "opencode-shell-deny-once",
-                    vec![
-                        DENY_1_FIXTURE.to_owned(),
-                        DENY_2_FIXTURE.to_owned(),
-                        DENY_3_FIXTURE.to_owned(),
-                    ],
+                    BTreeSet::from([
+                        DENY_1_FIXTURE,
+                        DENY_2_FIXTURE,
+                        DENY_3_FIXTURE,
+                        NARROW_FIXTURE,
+                        NARROW_DENY_2_FIXTURE,
+                        NARROW_DENY_3_FIXTURE,
+                    ]),
                     vec![
                         (vec![0x68], Some("allow-once"), None),
                         (vec![0x0d], Some("deny-once"), None),
@@ -5799,11 +6395,18 @@ mod tests {
                 let capability = plan.capability();
                 assert_eq!(capability.backend(), CodingAgent::Opencode);
                 assert_eq!(capability.native_version(), OPENCODE_VERSION);
-                assert_eq!(capability.profile_version(), PROFILE_VERSION);
                 assert_eq!(capability.request_rule_id(), PERMISSION_RULE);
                 assert_eq!(capability.answer_rule_id(), answer_rule);
                 assert_eq!(capability.decision(), decision);
-                assert_eq!(capability.fixture_ids(), fixtures.as_slice());
+                assert_eq!(
+                    capability
+                        .fixture_ids()
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<BTreeSet<_>>(),
+                    fixtures,
+                    "{decision:?}"
+                );
                 let bundled = ProfileCatalog::bundled().unwrap();
                 for (backend, version, request) in [
                     (CodingAgent::Opencode, OPENCODE_VERSION, REASON_RULE),
@@ -6436,7 +7039,7 @@ mod tests {
                         .unwrap()
                         .contains_key("annotations"),
                     "{}",
-                    profile["profile_version"]
+                    profile["backend"]
                 );
                 if profile["backend"] == "opencode" {
                     assert_eq!(profile["capabilities"]["annotations"], Value::Null);
@@ -6453,10 +7056,20 @@ mod tests {
             ProfileCatalog::from_definitions(&thresholds(profiles)).unwrap()
         }
 
-        fn selected(catalog: &ProfileCatalog, probe: &str) -> Option<String> {
-            catalog
+        /// The label of the declaration whose `min_version` the selection reports.
+        fn selected<'a>(
+            catalog: &ProfileCatalog,
+            declarations: &[(&'a str, &str)],
+            probe: &str,
+        ) -> Option<&'a str> {
+            let min_version = catalog
                 .capabilities(CodingAgent::Codex, Some(probe))
-                .profile_version
+                .min_version?;
+            let (label, _) = declarations
+                .iter()
+                .find(|(_, declared)| *declared == min_version)
+                .expect("selection reports a declared min_version");
+            Some(label)
         }
 
         fn rejected(value: &Value, label: &str) {
@@ -6500,7 +7113,7 @@ mod tests {
                     ("2.1.301", None),
                 ] {
                     assert_eq!(
-                        selected(&catalog, probe).as_deref(),
+                        selected(&catalog, &declarations, probe),
                         expected,
                         "{declarations:?} {probe}"
                     );
@@ -6510,33 +7123,45 @@ mod tests {
                     assert_eq!(detection == Coverage::Tested, expected.is_some(), "{probe}");
                 }
             }
-            let before = catalog(&[("first", "2.1.302")]);
-            let after = catalog(&[("first", "2.1.302"), ("second", "2.1.310")]);
+            let first = [("first", "2.1.302")];
+            let both = [("first", "2.1.302"), ("second", "2.1.310")];
+            let before = catalog(&first);
+            let after = catalog(&both);
             for probe in ["2.1.302", "2.1.308", "2.1.310-beta.1"] {
-                assert_eq!(selected(&after, probe), selected(&before, probe), "{probe}");
+                assert_eq!(
+                    selected(&after, &both, probe),
+                    selected(&before, &first, probe),
+                    "{probe}"
+                );
             }
         }
 
         #[test]
         fn threshold_selection_compares_numeric_components_numerically() {
-            let catalog = catalog(&[("nine", "0.9.0"), ("ten", "0.10.0")]);
+            let declarations = [("nine", "0.9.0"), ("ten", "0.10.0")];
+            let catalog = catalog(&declarations);
             for (probe, expected) in [
                 ("0.9.99", Some("nine")),
                 ("0.10.0", Some("ten")),
                 ("0.8.9", None),
             ] {
-                assert_eq!(selected(&catalog, probe).as_deref(), expected, "{probe}");
+                assert_eq!(
+                    selected(&catalog, &declarations, probe),
+                    expected,
+                    "{probe}"
+                );
             }
         }
 
         #[test]
         fn threshold_selection_orders_prereleases_by_semver_precedence() {
-            let catalog = catalog(&[
+            let declarations = [
                 ("alpha-1", "1.0.0-alpha.1"),
                 ("beta-2", "1.0.0-beta.2"),
                 ("beta-11", "1.0.0-beta.11"),
                 ("release", "1.0.0"),
-            ]);
+            ];
+            let catalog = catalog(&declarations);
             for (probe, expected) in [
                 ("1.0.0-alpha", None),
                 ("1.0.0-alpha.beta", Some("alpha-1")),
@@ -6545,19 +7170,28 @@ mod tests {
                 ("1.0.0-rc.1", Some("beta-11")),
                 ("1.0.0", Some("release")),
             ] {
-                assert_eq!(selected(&catalog, probe).as_deref(), expected, "{probe}");
+                assert_eq!(
+                    selected(&catalog, &declarations, probe),
+                    expected,
+                    "{probe}"
+                );
             }
         }
 
         #[test]
         fn threshold_selection_gives_build_metadata_no_precedence() {
-            let catalog = catalog(&[("built", "1.2.0+build.1"), ("older", "1.0.0")]);
+            let declarations = [("built", "1.2.0+build.1"), ("older", "1.0.0")];
+            let catalog = catalog(&declarations);
             for (probe, expected) in [
                 ("1.2.0", Some("built")),
                 ("1.2.0+other.9", Some("built")),
                 ("1.2.0-rc.1+build.1", Some("older")),
             ] {
-                assert_eq!(selected(&catalog, probe).as_deref(), expected, "{probe}");
+                assert_eq!(
+                    selected(&catalog, &declarations, probe),
+                    expected,
+                    "{probe}"
+                );
             }
         }
 
@@ -6573,15 +7207,15 @@ mod tests {
             }
             let catalog = ProfileCatalog::from_definitions(&value).unwrap();
             for (backend, probe, expected) in [
-                (CodingAgent::Codex, "1.0.0", Some("codex-low")),
+                (CodingAgent::Codex, "1.0.0", Some("0.5.0")),
                 (CodingAgent::Claude, "1.0.0", None),
-                (CodingAgent::Claude, "2.0.0", Some("claude-only")),
+                (CodingAgent::Claude, "2.0.0", Some("2.0.0")),
                 (CodingAgent::Opencode, "2.0.0", None),
             ] {
                 assert_eq!(
                     catalog
                         .capabilities(backend, Some(probe))
-                        .profile_version
+                        .min_version
                         .as_deref(),
                     expected,
                     "{backend:?} {probe}"
@@ -6659,7 +7293,9 @@ mod tests {
             ];
             rows.extend(lines("write disposable.txt"));
             let screen = terminal(&rows, 80, false).snapshot();
-            for (run, name) in [("1.4.2", "first"), ("3.1.4", "second")] {
+            for (run, name, min_version) in
+                [("1.4.2", "first", "1.0.0"), ("3.1.4", "second", "2.0.0")]
+            {
                 let fixture = format!("{FIXTURE}-codex-{name}");
                 let observed = Detector::new(&catalog, CodingAgent::Codex, Some(run))
                     .observe(&screen)
@@ -6668,19 +7304,22 @@ mod tests {
                     observed.kind,
                     ObservationKind::Interaction(InteractionClass::PermissionRequest)
                 );
-                assert_eq!(observed.profile_version.as_deref(), Some(name), "{run}");
+                assert_eq!(
+                    catalog
+                        .capabilities(CodingAgent::Codex, Some(run))
+                        .min_version
+                        .as_deref(),
+                    Some(min_version),
+                    "{run}"
+                );
                 assert_eq!(observed.raw_evidence["native_version"], run);
                 assert_eq!(observed.annotations.len(), 1, "{run}");
-                assert_eq!(
-                    observed.annotations[0].raw_evidence["profile_version"],
-                    name
-                );
+                assert_eq!(observed.annotations[0].raw_evidence["native_version"], run);
                 for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
                     let plan = catalog
                         .composer_plan(CodingAgent::Codex, run, operation)
                         .unwrap_or_else(|| panic!("{run} {operation:?} plan"));
                     assert_eq!(plan.native_version(), run);
-                    assert_eq!(plan.profile_version(), name);
                     assert_eq!(plan.fixture_ids(), std::slice::from_ref(&fixture));
                 }
                 let capability = catalog
@@ -6689,7 +7328,6 @@ mod tests {
                     .capability()
                     .clone();
                 assert_eq!(capability.native_version(), run);
-                assert_eq!(capability.profile_version(), name);
                 assert_eq!(capability.answer_rule_id(), format!("{name}-allow-plan"));
                 assert_eq!(capability.fixture_ids(), &[fixture]);
             }
@@ -6706,7 +7344,6 @@ mod tests {
                     .filter(|profile| profile["backend"] == boundary.backend.name())
                     .collect::<Vec<_>>();
                 assert_eq!(profiles.len(), 1, "{:?}", boundary.backend);
-                assert_eq!(profiles[0]["profile_version"], boundary.profile_version);
                 assert_eq!(profiles[0]["min_version"], boundary.min_version);
                 let minimum = semver::Version::parse(boundary.min_version).unwrap();
                 for fixture in definitions["fixtures"]
@@ -6747,14 +7384,11 @@ mod tests {
             ]) {
                 let backend = boundary.backend;
                 let at = bundled.capabilities(backend, Some(boundary.min_version));
-                assert_eq!(
-                    at.profile_version.as_deref(),
-                    Some(boundary.profile_version)
-                );
+                assert_eq!(at.min_version.as_deref(), Some(boundary.min_version));
                 for later in boundary.later {
                     let context = format!("{backend:?} {later}");
                     let reused = bundled.capabilities(backend, Some(later));
-                    assert_eq!(reused.profile_version, at.profile_version, "{context}");
+                    assert_eq!(reused.min_version, at.min_version, "{context}");
                     assert_eq!(reused.detection, at.detection, "{context}");
                     assert_eq!(reused.composer, at.composer, "{context}");
                     assert_eq!(reused.prompt_submission, at.prompt_submission, "{context}");
@@ -6798,11 +7432,7 @@ mod tests {
                 let reused = bundled_observe(CodingAgent::Claude, "2.1.308", id);
                 assert_eq!(reused.kind, exact.kind, "{id}");
                 assert_eq!(reused.rule_id, exact.rule_id, "{id}");
-                assert_eq!(
-                    reused.profile_version.as_deref(),
-                    Some("claude-2.1.302-auto-1"),
-                    "{id}"
-                );
+                assert_eq!(reused.raw_evidence["native_version"], "2.1.308", "{id}");
                 let rules = |observed: &ScreenObservation| {
                     observed
                         .annotations

@@ -131,7 +131,12 @@ mod tests {
             classify_schema(&conn, head),
             SchemaState::Incompatible { .. }
         ));
-        conn.execute_batch("PRAGMA application_id=1128351288; ALTER TABLE refinery_schema_history RENAME COLUMN version TO missing_version").unwrap();
+        conn.pragma_update(None, "application_id", crate::db::APPLICATION_ID)
+            .unwrap();
+        conn.execute_batch(
+            "ALTER TABLE refinery_schema_history RENAME COLUMN version TO missing_version",
+        )
+        .unwrap();
         assert!(matches!(
             classify_schema(&conn, head),
             SchemaState::Unreachable { .. }

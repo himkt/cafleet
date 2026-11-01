@@ -365,8 +365,7 @@ pub(crate) fn validate_submission_target(
         stable_run_identity(&current) == stable_run_identity(expected)
             && current.status == RunStatus::Running
             && current.owner_kind == OwnerKind::Runner
-            && current.native_version == expected.native_version
-            && current.profile_version == expected.profile_version,
+            && current.native_version == expected.native_version,
         "submission run identity changed",
     )?;
     ensure(
@@ -958,7 +957,6 @@ fn metadata(
         decision_source: input.decision_source,
         mode_evidence_ref: input.mode_evidence_ref.clone(),
         decision_evidence_ref: input.decision_evidence_ref.clone(),
-        answer_profile_version: audit.metadata.answer_profile_version.clone(),
         answer_rule_id: audit.metadata.answer_rule_id.clone(),
     }
 }
@@ -1306,14 +1304,12 @@ fn inspect_permission_with_host(
             reply.message_id == original.event.message_id.expect("validated inbox message")
                 && reply.episode_seq == interaction.episode_seq
                 && reply.backend == run.backend
-                && reply.native_version == run.native_version
-                && reply.profile_version == run.profile_version,
+                && reply.native_version == run.native_version,
             "permission inspection reply identity mismatch",
         )?;
         ensure(
             reply.evidence["backend"].as_str() == Some(run.backend.as_str())
                 && reply.evidence["native_version"].as_str() == run.native_version.as_deref()
-                && reply.evidence["profile_version"].as_str() == run.profile_version.as_deref()
                 && reply.evidence["screen_seq"].as_u64() == Some(reply.output_seq),
             "permission inspection evidence identity mismatch",
         )?;
@@ -1328,9 +1324,9 @@ fn inspect_permission_with_host(
         )?;
         match reply.answer_capability {
             Coverage::Tested => ensure(
-                reply.request_token.is_some()
+                run.native_version.is_some()
+                    && reply.request_token.is_some()
                     && !reply.supported_decisions.is_empty()
-                    && reply.answer_profile_version == run.profile_version
                     && reply.classification == Some(InteractionClass::PermissionRequest)
                     && reply.visibility == Visibility::Visible
                     && reply.capability_reason.is_none(),
@@ -1346,13 +1342,10 @@ fn inspect_permission_with_host(
                 "permission inspection unavailable fields disagree",
             )?,
         }
-        for value in [&reply.answer_profile_version, &reply.answer_rule_id]
-            .into_iter()
-            .flatten()
-        {
+        if let Some(rule) = &reply.answer_rule_id {
             ensure(
-                !value.trim().is_empty() && value.len() <= 256,
-                "permission inspection profile identity is invalid",
+                !rule.trim().is_empty() && rule.len() <= 256,
+                "permission inspection answer rule is invalid",
             )?;
         }
         deadline.remaining()?;
@@ -1448,16 +1441,18 @@ pub(crate) mod test_support {
                 )
                 .unwrap();
             assert_eq!(fixture.conn.execute(
-                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',profile_version='fixture-detector-v1',started_at=?1 WHERE run_id=?2",
+                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',started_at=?1 WHERE run_id=?2",
                 rusqlite::params![NOW, fixture.run.run_id],
             ).unwrap(), 1);
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             storage::reserve_event_sequences(&mut fixture.conn, &owner).unwrap();
-            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&json!({
-                "backend":"codex","native_version":fixture.run.native_version,"profile_version":"fixture-detector-v1",
-                "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,
-                "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
-            })).unwrap();
+            let evidence = storage::evidence::EvidencePolicy::metadata()
+                .apply(&json!({
+                    "backend":"codex","native_version":fixture.run.native_version,
+                    "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,
+                    "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
+                }))
+                .unwrap();
             let transition = ObservedTransition {
                 run_id: owner.run_id,
                 event_seq: 1,
@@ -1483,7 +1478,6 @@ pub(crate) mod test_support {
             let capability = crate::coding_agent::AnswerCapability::fixture(
                 crate::coding_agent::CodingAgent::Codex,
                 fixture.run.native_version.as_deref().unwrap(),
-                "fixture-answer-v1",
                 "fixture-permission",
                 answer_rule,
                 decision,
@@ -1503,7 +1497,6 @@ pub(crate) mod test_support {
                     decision_source: source,
                     mode_evidence_ref: "fixture:host-mode".into(),
                     decision_evidence_ref: "fixture:attributed-decision".into(),
-                    answer_profile_version: "fixture-answer-v1".into(),
                     answer_rule_id: answer_rule.into(),
                 },
             };
@@ -1789,6 +1782,115 @@ mod tests {
         assert_eq!(permission_counts(&fixture.fixture.conn), before);
         assert!(notified_at(&fixture.fixture.conn, message_id).is_none());
         inspection_barrier(&mut fixture, output_start, "inspection-barrier");
+        fixture.finish();
+    }
+
+    #[test]
+    fn permission_inspection_reply_binds_backend_native_version_and_tested_capability_fields() {
+        use crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition;
+        use crate::runtime::runner::observation::test_support::synthetic;
+
+        let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
+            synthetic(fixture, spec);
+            overwrite_observation_catalog(fixture, inspection_fixture_definition());
+        });
+        fixture.start_running();
+        let outer = Instant::now() + Duration::from_secs(5);
+        fixture.master.write_all(b"form-reply-binding\r").unwrap();
+        fixture.read_until("Operation: write form-reply-binding.txt");
+        let output_start = fixture.output.len();
+        let (event_id, interaction_id, _) = opened_interaction(&mut fixture, outer);
+        let (settings, run, placement) = service_target(&fixture);
+        let request = PermissionInspectInput {
+            event_id,
+            interaction_id,
+            director_member_id: run.director_member_id,
+        };
+        let mut inspect = |tamper: Option<InspectionTamper>| {
+            let mut host = SocketHost::new(&settings, &placement, outer);
+            host.tamper_inspection = tamper;
+            let result = inspect_permission_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                &request,
+                Deadline::until(outer),
+                &mut host,
+            );
+            assert_eq!(host.calls, [1, 1, 1]);
+            result
+        };
+        let live = inspect(None).unwrap();
+        assert_eq!(live.answer_capability, Coverage::Tested);
+        assert_eq!(live.backend, run.backend);
+        assert_eq!(live.native_version, run.native_version);
+        assert_eq!(
+            live.evidence["native_version"],
+            serde_json::json!(run.native_version)
+        );
+        assert!(live.answer_rule_id.is_none());
+        let shared_rule = inspect(Some(Box::new(|reply| {
+            reply.answer_rule_id = Some("inspection-shared-plan".into());
+        })))
+        .unwrap();
+        assert_eq!(
+            shared_rule.answer_rule_id.as_deref(),
+            Some("inspection-shared-plan")
+        );
+        let tampers: Vec<(&str, InspectionTamper)> = vec![
+            ("backend", Box::new(|reply| reply.backend = "claude".into())),
+            (
+                "native version",
+                Box::new(|reply| reply.native_version = Some("0.0.2-synthetic".into())),
+            ),
+            (
+                "absent native version",
+                Box::new(|reply| reply.native_version = None),
+            ),
+            (
+                "evidence backend",
+                Box::new(|reply| reply.evidence["backend"] = serde_json::json!("claude")),
+            ),
+            (
+                "evidence native version",
+                Box::new(|reply| {
+                    reply.evidence["native_version"] = serde_json::json!("0.0.2-synthetic")
+                }),
+            ),
+            ("token", Box::new(|reply| reply.request_token = None)),
+            (
+                "decisions",
+                Box::new(|reply| reply.supported_decisions = Vec::new()),
+            ),
+            (
+                "classification",
+                Box::new(|reply| reply.classification = None),
+            ),
+            (
+                "visibility",
+                Box::new(|reply| reply.visibility = Visibility::Obscured),
+            ),
+            (
+                "reason",
+                Box::new(|reply| reply.capability_reason = Some("unavailable".into())),
+            ),
+            (
+                "blank rule",
+                Box::new(|reply| reply.answer_rule_id = Some(" ".into())),
+            ),
+            (
+                "oversized rule",
+                Box::new(|reply| reply.answer_rule_id = Some("r".repeat(257))),
+            ),
+        ];
+        for (label, tamper) in tampers {
+            assert!(inspect(Some(tamper)).is_err(), "{label}");
+        }
+        let bounded = inspect(Some(Box::new(|reply| {
+            reply.answer_rule_id = Some("r".repeat(256));
+        })))
+        .unwrap();
+        assert_eq!(bounded.answer_rule_id.map(|rule| rule.len()), Some(256));
+        inspection_barrier(&mut fixture, output_start, "reply-binding-barrier");
         fixture.finish();
     }
 
@@ -2179,10 +2281,7 @@ mod tests {
             (&m.mode_evidence_ref, &m.decision_evidence_ref),
             (&input.mode_evidence_ref, &input.decision_evidence_ref)
         );
-        assert_eq!(
-            (&*m.answer_profile_version, &*m.answer_rule_id),
-            ("synthetic-profile-1", "inspection-allow-plan")
-        );
+        assert_eq!(m.answer_rule_id, "inspection-allow-plan");
         assert_eq!(
             receipt
                 .claim
@@ -2303,12 +2402,7 @@ mod tests {
         );
         let result = result.unwrap();
         assert_eq!(host.requests[0]["kind"], "permission_respond");
-        for field in [
-            "answer_profile_version",
-            "answer_rule_id",
-            "bytes",
-            "stages",
-        ] {
+        for field in ["answer_rule_id", "bytes", "stages"] {
             assert!(host.requests[0].get(field).is_none());
         }
         let receipt = service_response_audit(&fixture, &input);
@@ -3084,6 +3178,8 @@ mod tests {
         Disconnected,
     }
 
+    type InspectionTamper = Box<dyn FnMut(&mut PermissionInspection)>;
+
     struct SocketHost {
         settings: Settings,
         placement: Placement,
@@ -3098,6 +3194,7 @@ mod tests {
         expire_retirement: bool,
         wrong_query_id: Option<i64>,
         skip_reconcile: bool,
+        tamper_inspection: Option<InspectionTamper>,
     }
 
     fn service_target(fixture: &ServiceFixture) -> (Settings, RunRecord, Placement) {
@@ -3131,6 +3228,7 @@ mod tests {
                 expire_retirement: false,
                 wrong_query_id: None,
                 skip_reconcile: false,
+                tamper_inspection: None,
             }
         }
     }
@@ -3321,6 +3419,12 @@ mod tests {
                 };
                 *input_id = wrong;
                 submission.input_id = Some(wrong);
+            }
+            if let Some(tamper) = &mut self.tamper_inspection {
+                let InputControlReply::Inspection(inspection) = &mut reply else {
+                    panic!("a tampered exchange is a permission inspection")
+                };
+                tamper(inspection);
             }
             Ok(reply)
         }
@@ -4572,7 +4676,7 @@ mod tests {
             let mut case = History::new(InputState::Ready, None);
             let run = case.fixture.run.clone();
             storage::reserve_event_sequences(&mut case.fixture.conn, &run.owner()).unwrap();
-            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","profile_version":null,"rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
+            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
             storage::persist_event(
                 &mut case.fixture.conn,
                 &run.owner(),
@@ -4923,7 +5027,7 @@ mod tests {
                     let (_, interaction_id) = opened(&case);
                     let evidence = storage::evidence::EvidencePolicy::metadata()
                     .apply(&json!({
-                        "backend":"codex","native_version":case.fixture.run.native_version,"profile_version":"fixture-detector-v1",
+                        "backend":"codex","native_version":case.fixture.run.native_version,
                         "rule_id":"fixture-auto-review","screen_seq":2,"operation":null,"choices":null,
                         "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
                     }))
@@ -5785,7 +5889,6 @@ mod tests {
                             permission_argv_json: original.permission_argv_json.clone(),
                             event_evidence: original.event_evidence,
                             native_version: original.native_version.clone(),
-                            profile_version: None,
                             coverage: Coverage::Unknown,
                             owner_pid: process.pid,
                             owner_start_identity: process.start_identity,

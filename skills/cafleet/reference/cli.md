@@ -40,7 +40,7 @@ Spawned members read literal `FLEET ID:`, `YOUR MEMBER ID:`, `DIRECTOR MEMBER ID
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CAFLEET_DATABASE_URL` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v8.db` | Selected SQLite file path |
+| `CAFLEET_DATABASE_URL` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v9.db` | Selected SQLite file path |
 | `CAFLEET_MULTIPLEXER` | Auto-detect | Explicit supported multiplexer override (`tmux` or `herdr`) |
 | `CAFLEET_MAX_TEXT_LEN` | `200` | CLI text-output body codepoint limit |
 
@@ -478,7 +478,7 @@ The effective policy record has keys `schema_version` (`1`), `automatic_review` 
 
 A runtime notification is an ordinary inbox record whose `text` is the complete versioned event JSON; the observed member is its sender and the Director its recipient. Verify the durable event/message association through `event show` before acting. Runtime event kinds are `coverage_unknown`, `interaction_opened`, `interaction_obscured`, `interaction_closed`, `permission_denied_observed`, `automatic_refusal_observed`, `automatic_review_unavailable`, `input_delivery_result`, `runner_degraded`, `runner_lost` and `runner_exited`.
 
-Version-2 event keys are ordered `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for lifecycle events, then, for `input_delivery_result` only, ordered `input_id,message_id,delivery,stage`, then required `director_action`. The action object has ordered `kind,instruction,inspect_argv`; its `kind` is `review_permission_request`, `review_automatic_refusal` or `review_automatic_review_unavailable`, and other events use a null action. The evidence object has ordered keys `backend,native_version,profile_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from, null exactly when `operation` is null; when it is greater than 1 the instruction asks the Director to confirm the command against the excerpt. Metadata evidence leaves every screen-derived operation, choice, excerpt and native identifier null. A UTF-8 excerpt is limited to 8 KiB and the payload to 16 KiB.
+Version-2 event keys are ordered `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for lifecycle events, then, for `input_delivery_result` only, ordered `input_id,message_id,delivery,stage`, then required `director_action`. The action object has ordered `kind,instruction,inspect_argv`; its `kind` is `review_permission_request`, `review_automatic_refusal` or `review_automatic_review_unavailable`, and other events use a null action. The evidence object has ordered keys `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from, null exactly when `operation` is null; when it is greater than 1 the instruction asks the Director to confirm the command against the excerpt. Metadata evidence leaves every screen-derived operation, choice, excerpt and native identifier null. A UTF-8 excerpt is limited to 8 KiB and the payload to 16 KiB.
 
 | Field | `automatic_refusal_observed` | `automatic_review_unavailable` |
 |---|---|---|
@@ -522,7 +522,7 @@ When a staged stage stops at its settle check, the first matching row among the 
 
 Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores. Require a nonempty evidence reference; the command synchronizes with the current owner before settlement and preserves uncertainty while an active writer cannot be ruled out. A settled ordinary receipt with the same disposition returns its original row and evidence reference; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One five-second budget covers the pane wait, current-owner synchronization, database work and socket exchange. If the writer is unreachable, settlement requires exclusive receipt-only ownership; unavailable proof retains uncertainty.
 
-`input show` and `input reconcile` append nullable `permission_response` after `evidence_ref`. For a response kind it contains ordered `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at`; other input kinds return null. Text appends `Permission decision: interaction=INTERACTION_ID event=EVENT_ID decision=DECISION source=SOURCE mode=MODE director=DIRECTOR_ID epoch=EPOCH` for a response audit. Settlement neither grants a native answer nor releases a possibly transmitted episode claim.
+`input show` and `input reconcile` append nullable `permission_response` after `evidence_ref`. For a response kind it contains ordered `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at`; other input kinds return null. Text appends `Permission decision: interaction=INTERACTION_ID event=EVENT_ID decision=DECISION source=SOURCE mode=MODE director=DIRECTOR_ID epoch=EPOCH` for a response audit. Settlement neither grants a native answer nor releases a possibly transmitted episode claim.
 
 All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows and invalid stored state fail explicitly.
 
@@ -533,7 +533,7 @@ All event/input IDs are positive database-assigned integers; malformed IDs/optio
 The inspection JSON is `{request}`. Its object has ordered keys:
 
 ```text
-event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,profile_version,answer_profile_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence
+event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence
 ```
 
 `visibility` is `visible`, `obscured`, `not_visible` or `unknown`. `answer_capability` is `tested` or `unknown`; `capability_reason` is null when the current request is answerable and otherwise a bounded explanation. `supported_decisions` contains the currently tested subset of `allow,deny`, in that order; a blocked or unsupported request returns an empty array and null token. `request_token` is a nullable random lowercase 64-hex value bound to the request. `missing_evidence` lists unavailable public facts in order from `operation,arguments,cwd,environment,targets,effects,choice_scope`; operation is available only when its post-policy value is nonblank, unredacted and untruncated. The Director obtains necessary missing facts through authorized current capture/routed evidence before deciding.
@@ -542,7 +542,7 @@ Inspection text is:
 
 ```text
 Permission: interaction=INTERACTION_ID event=EVENT_ID member=MEMBER_ID run=RUN_ID epoch=EPOCH visibility=VISIBILITY answers=DECISIONS
-Request: token=TOKEN output_seq=SEQUENCE profile=ANSWER_PROFILE rule=ANSWER_RULE
+Request: token=TOKEN output_seq=SEQUENCE rule=ANSWER_RULE
 ```
 
 Supported decisions are joined with commas, and unavailable values or an empty decision set render as `-`. `Capability: REASON` is appended when nonnull and `Missing evidence: FIELDS` when the array is nonempty.

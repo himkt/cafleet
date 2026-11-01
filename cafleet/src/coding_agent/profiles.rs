@@ -14,7 +14,6 @@ pub(crate) use detector::*;
 pub(crate) struct AnswerCapability {
     backend: CodingAgent,
     native_version: String,
-    profile_version: String,
     request_rule_id: String,
     answer_rule_id: String,
     decision: PermissionDecision,
@@ -26,9 +25,6 @@ impl AnswerCapability {
     }
     pub(crate) fn native_version(&self) -> &str {
         &self.native_version
-    }
-    pub(crate) fn profile_version(&self) -> &str {
-        &self.profile_version
     }
     pub(crate) fn request_rule_id(&self) -> &str {
         &self.request_rule_id
@@ -47,20 +43,14 @@ impl AnswerCapability {
     pub(crate) fn fixture(
         backend: CodingAgent,
         native_version: &str,
-        profile_version: &str,
         request_rule_id: &str,
         answer_rule_id: &str,
         decision: PermissionDecision,
         fixture_ids: &[String],
     ) -> Result<Self, CafleetError> {
-        if [
-            native_version,
-            profile_version,
-            request_rule_id,
-            answer_rule_id,
-        ]
-        .iter()
-        .any(|value| value.trim().is_empty())
+        if [native_version, request_rule_id, answer_rule_id]
+            .iter()
+            .any(|value| value.trim().is_empty())
             || fixture_ids.is_empty()
             || fixture_ids.iter().any(|value| value.trim().is_empty())
         {
@@ -71,7 +61,6 @@ impl AnswerCapability {
         Ok(Self {
             backend,
             native_version: native_version.into(),
-            profile_version: profile_version.into(),
             request_rule_id: request_rule_id.into(),
             answer_rule_id: answer_rule_id.into(),
             decision,

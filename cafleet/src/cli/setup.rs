@@ -180,6 +180,7 @@ mod tests {
     fn refused_wal_databases_and_sidecars_remain_byte_identical_with_a_held_reader() {
         for mutation in [
             "PRAGMA application_id=42",
+            "PRAGMA application_id=1128351288",
             "UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
             "ALTER TABLE messages RENAME COLUMN text TO wrong",
         ] {

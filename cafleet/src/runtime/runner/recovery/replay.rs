@@ -428,7 +428,7 @@ mod tests {
             case.fixture
         .conn
         .execute(
-            "UPDATE member_runs SET native_version='0.162.0',coverage='tested',profile_version='fixture-v1' WHERE run_id=?1",
+            "UPDATE member_runs SET native_version='0.162.0',coverage='tested' WHERE run_id=?1",
             [case.fixture.run.run_id],
         )
         .unwrap();
@@ -482,7 +482,6 @@ mod tests {
                     .native_version
                     .as_deref()
                     .expect("fixture run records its native version"),
-                "answer-fixture-v1",
                 "recovery-fixture",
                 "single-request-choice",
                 PermissionDecision::Allow,
@@ -502,7 +501,6 @@ mod tests {
                     decision_source: DecisionSource::DirectorAuto,
                     mode_evidence_ref: "fixture:mode".into(),
                     decision_evidence_ref: "fixture:decision".into(),
-                    answer_profile_version: "answer-fixture-v1".into(),
                     answer_rule_id: "single-request-choice".into(),
                 },
             };
@@ -1452,7 +1450,7 @@ mod tests {
                         .unwrap();
                 }
                 let before = identity(&case.artifacts.paths.descriptor);
-                let result = case.recover(&mut new_host());
+                let result = recover_released(&mut case);
                 incomplete(&case, result);
                 assert_eq!(identity(&case.artifacts.paths.descriptor), before);
             }

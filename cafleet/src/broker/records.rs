@@ -5,13 +5,6 @@ macro_rules! stored_enum {
             pub(crate) const VALUES: &'static [&'static str] = &[$($wire),+];
         }
     };
-    (test_values $name:ident, $field:literal, {$($variant:ident => $wire:literal),+ $(,)?}) => {
-        stored_enum!(@enum $name, $field, {$($variant => $wire),+});
-        #[cfg(test)]
-        impl $name {
-            pub(crate) const VALUES: &'static [&'static str] = &[$($wire),+];
-        }
-    };
     (@enum $name:ident, $field:literal, {$($variant:ident => $wire:literal),+}) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
         pub(crate) enum $name { $(#[serde(rename = $wire)] $variant),+ }

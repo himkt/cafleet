@@ -24,7 +24,6 @@ impl NativeVersion {
 
 pub(crate) struct NativeLaunchIdentity {
     pub(crate) native_version: Option<String>,
-    pub(crate) profile_version: Option<String>,
     pub(crate) coverage: Coverage,
     pub(crate) warning: Option<String>,
 }
@@ -45,14 +44,12 @@ pub(crate) fn native_launch_identity(
             let capabilities = catalog.capabilities(backend, Some(&version));
             Ok(NativeLaunchIdentity {
                 native_version: Some(version),
-                profile_version: capabilities.profile_version,
                 coverage: capabilities.detection,
                 warning: None,
             })
         }
         Err(cause) => Ok(NativeLaunchIdentity {
             native_version: None,
-            profile_version: None,
             coverage: Coverage::Unknown,
             warning: Some(format!(
                 "Warning: native version unavailable for {}: {}; coverage unknown.",
@@ -295,12 +292,14 @@ mod tests {
                     pid_file.display()
                 ),
             );
+            // A stub launch can take about half a second on a macOS host, so the bound leaves the
+            // stub time to record its pid and reach its sleep before the probe times out.
+            let bound = Duration::from_secs(2);
             let start = Instant::now();
-            let result =
-                CodingAgent::Claude.probe_native_version(&path, start + Duration::from_millis(300));
+            let result = CodingAgent::Claude.probe_native_version(&path, start + bound);
             assert!(result.is_err());
             assert!(
-                start.elapsed() < Duration::from_secs(2),
+                start.elapsed() < bound + Duration::from_secs(1),
                 "{:?}",
                 start.elapsed()
             );
@@ -334,8 +333,11 @@ mod tests {
                     let identity = launched(backend, version, &catalog);
                     assert_eq!(identity.native_version.as_deref(), Some(version));
                     assert_eq!(
-                        identity.profile_version.as_deref(),
-                        Some(boundary.profile_version),
+                        catalog
+                            .capabilities(backend, Some(version))
+                            .min_version
+                            .as_deref(),
+                        Some(boundary.min_version),
                         "{backend:?} {version}"
                     );
                     assert_eq!(identity.coverage, Coverage::Tested, "{backend:?} {version}");
@@ -393,7 +395,6 @@ mod tests {
             )
             .unwrap_or_else(|error| panic!("a failed probe still launches: {}", error.message()));
             assert_eq!(failed.native_version, None);
-            assert_eq!(failed.profile_version, None);
             assert_eq!(failed.coverage, Coverage::Unknown);
             assert_eq!(
                 failed.warning.as_deref(),
@@ -410,7 +411,6 @@ mod tests {
             for backend in [CodingAgent::Claude, CodingAgent::Opencode] {
                 let identity = launched(backend, "2.1.302", &catalog);
                 assert_eq!(identity.native_version.as_deref(), Some("2.1.302"));
-                assert_eq!(identity.profile_version, None);
                 assert_eq!(identity.coverage, Coverage::Unknown);
                 assert_eq!(identity.warning, None);
             }

@@ -159,7 +159,7 @@ fn permission_response(row: &crate::broker::runtime::PermissionResponseRecord) -
         "decision":metadata.decision.as_str(),"director_member_id":metadata.director_member_id,
         "director_mode":metadata.director_mode.as_str(),"decision_source":metadata.decision_source.as_str(),
         "mode_evidence_ref":metadata.mode_evidence_ref,"decision_evidence_ref":metadata.decision_evidence_ref,
-        "answer_profile_version":metadata.answer_profile_version,"answer_rule_id":metadata.answer_rule_id,"decided_at":row.decided_at})
+        "answer_rule_id":metadata.answer_rule_id,"decided_at":row.decided_at})
 }
 
 pub(crate) fn permission_response_result(
@@ -175,8 +175,8 @@ pub(crate) fn permission_inspection(row: &crate::runtime::runner::PermissionInsp
     json!({"request":{"event_id":row.event_id,"message_id":row.message_id,"member_id":row.member_id,"fleet_id":row.fleet_id,
         "director_member_id":row.director_member_id,"run_id":row.run_id,"owner_epoch":row.owner_epoch,
         "interaction_id":row.interaction_id,"episode_seq":row.episode_seq,"classification":row.classification,
-        "visibility":row.visibility,"backend":row.backend,"native_version":row.native_version,"profile_version":row.profile_version,
-        "answer_profile_version":row.answer_profile_version,"answer_rule_id":row.answer_rule_id,"answer_capability":row.answer_capability,
+        "visibility":row.visibility,"backend":row.backend,"native_version":row.native_version,
+        "answer_rule_id":row.answer_rule_id,"answer_capability":row.answer_capability,
         "capability_reason":row.capability_reason,"supported_decisions":row.supported_decisions,"request_token":row.request_token,
         "output_seq":row.output_seq,"evidence":row.evidence,"missing_evidence":row.missing_evidence}})
 }
@@ -426,7 +426,6 @@ mod tests {
                     "decision_source",
                     "mode_evidence_ref",
                     "decision_evidence_ref",
-                    "answer_profile_version",
                     "answer_rule_id",
                     "decided_at",
                 ],
@@ -574,7 +573,7 @@ mod tests {
             fixture
                 .conn
                 .execute(
-                    "UPDATE member_runs SET native_version='0.164.0',profile_version='codex-0.163.0-on-request-1',coverage='tested' WHERE run_id=?1",
+                    "UPDATE member_runs SET native_version='0.164.0',coverage='tested' WHERE run_id=?1",
                     params![owner.run_id],
                 )
                 .unwrap();
@@ -877,6 +876,44 @@ mod tests {
                 crate::presentation::input_operation(&plain)["input"]["uncertain_cause"],
                 Value::Null
             );
+        }
+
+        #[test]
+        fn permission_inspection_request_orders_its_identity_and_capability_keys() {
+            let inspection = crate::runtime::runner::input_protocol_test_support::inspection();
+            let output = crate::presentation::permission_inspection(&inspection);
+            assert_key_order(&output, &["request"]);
+            let request = &output["request"];
+            assert_key_order(
+                request,
+                &[
+                    "event_id",
+                    "message_id",
+                    "member_id",
+                    "fleet_id",
+                    "director_member_id",
+                    "run_id",
+                    "owner_epoch",
+                    "interaction_id",
+                    "episode_seq",
+                    "classification",
+                    "visibility",
+                    "backend",
+                    "native_version",
+                    "answer_rule_id",
+                    "answer_capability",
+                    "capability_reason",
+                    "supported_decisions",
+                    "request_token",
+                    "output_seq",
+                    "evidence",
+                    "missing_evidence",
+                ],
+            );
+            assert_eq!(request["backend"], "opencode");
+            assert_eq!(request["native_version"], "2.1.4");
+            assert_eq!(request["answer_rule_id"], "opencode-shell-allow-enter");
+            assert_eq!(request["answer_capability"], "tested");
         }
     }
 

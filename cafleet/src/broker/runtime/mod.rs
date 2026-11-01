@@ -155,7 +155,6 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         status: row.get("status")?,
         created_at: row.get("created_at")?,
         native_version: row.get("native_version")?,
-        profile_version: row.get("profile_version")?,
         effective_policy_json: optional_json(row, "effective_policy_json", false)?,
         owner_epoch: row.get("owner_epoch")?,
         owner_kind: row.get("owner_kind")?,
@@ -363,13 +362,13 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
     conn.execute(
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,database_identity_json,
              launch_nonce,runtime_path,requested_mode,resolved_mode,mode_source,permission_argv_json,
-             event_evidence,coverage,status,created_at,native_version,profile_version,owner_epoch,
+             event_evidence,coverage,status,created_at,native_version,owner_epoch,
              owner_kind,owner_pid,owner_start_identity,reachability,cleanup_state,event_seq_reserved_through,observation_gap_count)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'starting',?14,?15,?16,1,'creator',?17,?18,'reachable','incomplete',0,0)",
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'starting',?14,?15,1,'creator',?16,?17,'reachable','incomplete',0,0)",
             params![new.member_id,new.fleet_id,new.director_member_id,new.backend,new.database_identity_json.to_string(),
                 new.launch_nonce,new.runtime_path,new.requested_mode,new.resolved_mode,new.mode_source.as_str(),
                 new.permission_argv_json.to_string(),new.event_evidence.as_str(),new.coverage.as_str(),now,
-                new.native_version,new.profile_version,new.owner_pid,new.owner_start_identity],
+                new.native_version,new.owner_pid,new.owner_start_identity],
         )?;
     let run = get_run(conn, conn.last_insert_rowid())?;
     Ok(run)
@@ -510,7 +509,6 @@ pub(crate) mod test_support {
                 ]),
                 event_evidence: EventEvidence::Metadata,
                 native_version: Some("0.163.0".into()),
-                profile_version: None,
                 coverage: Coverage::Unknown,
                 owner_pid: i64::from(std::process::id()),
                 owner_start_identity: "fixture-start-identity".into(),
@@ -578,7 +576,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn raw_evidence(text: &str) -> Value {
         json!({
-            "backend":"codex","native_version":"0.163.0","profile_version":"fixture-v1",
+            "backend":"codex","native_version":"0.163.0",
             "rule_id":"native-tool-permission","screen_seq":120,
             "operation":format!("run {text}"),"operation_rows":1,"choices":[format!("allow {text}"),"deny"],
             "native_request_id":format!("native-{text}"),"excerpt":format!("request {text}"),
@@ -701,7 +699,6 @@ pub(crate) mod test_support {
         AnswerCapability::fixture(
             CodingAgent::Codex,
             "0.163.0",
-            "answer-fixture-v1",
             "native-tool-permission",
             "single-request-choice",
             decision,
@@ -713,7 +710,12 @@ pub(crate) mod test_support {
     impl ResponseFixture {
         pub(crate) fn new() -> Self {
             let mut base = Fixture::new();
-            base.conn.execute("UPDATE member_runs SET coverage='tested',profile_version='fixture-v1' WHERE run_id=?1",[base.run.run_id]).unwrap();
+            base.conn
+                .execute(
+                    "UPDATE member_runs SET coverage='tested' WHERE run_id=?1",
+                    [base.run.run_id],
+                )
+                .unwrap();
             let owner = base.activate();
             let event = base.open(&owner);
             let request = NewPermissionResponse {
@@ -729,7 +731,6 @@ pub(crate) mod test_support {
                     decision_source: DecisionSource::DirectorAuto,
                     mode_evidence_ref: "fixture:host-mode".into(),
                     decision_evidence_ref: "fixture:decision".into(),
-                    answer_profile_version: "answer-fixture-v1".into(),
                     answer_rule_id: "single-request-choice".into(),
                 },
             };
@@ -812,7 +813,7 @@ pub(crate) mod test_support {
         use super::*;
         pub(crate) fn annotation_raw(rule: &str, operation: Option<&str>) -> Value {
             json!({
-                "backend":"codex","native_version":"0.163.0","profile_version":"fixture-v1",
+                "backend":"codex","native_version":"0.163.0",
                 "rule_id":rule,"screen_seq":140,
                 "operation":operation,"operation_rows":operation.map(|text| text.split('\n').count()),
                 "choices":null,"native_request_id":null,

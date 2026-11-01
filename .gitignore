@@ -6,6 +6,7 @@
 !.bumpversion.toml
 
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
 /cafleet/target/
 /docs/doc_build/
 /docs/node_modules/
