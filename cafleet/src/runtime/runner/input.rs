@@ -125,7 +125,6 @@ struct QueuedInput {
     request: storage::NewInput,
     literal: String,
     operation: ComposerOperation,
-    payload_digest_version: i64,
     /// When the head first waited only on a composer that is not verified empty; the
     /// `idle_timeout` bound runs from here and resets whenever an interaction blocks the head.
     composer_busy_since: Option<Instant>,
@@ -288,7 +287,6 @@ struct ComposerDelivery {
     settle_until: Option<Instant>,
     manual_generation: Option<u64>,
     pane: Option<PaneLock>,
-    payload_digest_version: i64,
     literal: String,
     operation: ComposerOperation,
     deferred: Option<DeferredAttempt>,
@@ -1924,11 +1922,7 @@ impl InputCoordinator {
             })?;
             if let Some(retained) = retained {
                 known_input_id = Some(retained.input_id);
-                let digest = storage::versioned_payload_digest(
-                    retained.payload_digest_version,
-                    self.run.run_id,
-                    &input,
-                )?;
+                let digest = storage::input_payload_digest(self.run.run_id, &input);
                 ensure(
                     retained.kind == input.input_kind
                         && retained.payload_digest == digest
@@ -1937,13 +1931,7 @@ impl InputCoordinator {
                 )?;
                 return Ok(Some(InputControlReply::Submission(self.result(&retained))));
             }
-            let payload_digest_version = if input.input_kind == storage::InputKind::Preview {
-                2
-            } else {
-                1
-            };
-            let digest =
-                storage::versioned_payload_digest(payload_digest_version, self.run.run_id, &input)?;
+            let digest = storage::input_payload_digest(self.run.run_id, &input);
             request.identity.validate(&self.run)?;
             let unresolved_deferred = with_database_deadline(conn, deadline, |conn| {
                 storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
@@ -1991,7 +1979,6 @@ impl InputCoordinator {
                         storage::NewReservation {
                             selection: None,
                             defer_reason: Some(defer_reason),
-                            payload_digest_version,
                         },
                     )
                 })?;
@@ -2002,7 +1989,6 @@ impl InputCoordinator {
                             request: new_input,
                             literal: input.literal,
                             operation: composer_operation,
-                            payload_digest_version,
                             composer_busy_since: None,
                             attempt_deadline: None,
                             obstacle: "delivery_budget_exhausted",
@@ -2041,7 +2027,6 @@ impl InputCoordinator {
                     settle_until: None,
                     manual_generation: None,
                     pane: None,
-                    payload_digest_version,
                     literal: input.literal,
                     operation: composer_operation,
                     deferred: None,
@@ -2446,7 +2431,6 @@ impl InputCoordinator {
                 settle_until: None,
                 manual_generation: None,
                 pane: Some(pane),
-                payload_digest_version: head.payload_digest_version,
                 literal: head.literal.clone(),
                 operation: head.operation,
                 deferred: Some(DeferredAttempt {
@@ -2605,7 +2589,6 @@ impl InputCoordinator {
                         storage::NewReservation {
                             selection: None,
                             defer_reason: Some(defer_reason),
-                            payload_digest_version: composer.payload_digest_version,
                         },
                     )
                 })?;
@@ -2622,7 +2605,6 @@ impl InputCoordinator {
             request: pending.request,
             literal: composer.literal,
             operation: composer.operation,
-            payload_digest_version: composer.payload_digest_version,
             composer_busy_since: None,
             attempt_deadline: None,
             obstacle: "delivery_budget_exhausted",
@@ -3125,7 +3107,6 @@ impl InputCoordinator {
                         let reservation = storage::NewReservation {
                             selection: Some((composer.method, composer.reason)),
                             defer_reason: None,
-                            payload_digest_version: composer.payload_digest_version,
                         };
                         let reservation = with_database_deadline(conn, effective, |conn| {
                             self.validate_live(conn, run)?;

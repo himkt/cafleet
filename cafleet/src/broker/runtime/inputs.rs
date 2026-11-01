@@ -21,7 +21,6 @@ fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
         delivery_reason: row.get("delivery_reason")?,
         deferred_at: row.get("deferred_at")?,
         defer_reason: row.get("defer_reason")?,
-        payload_digest_version: row.get("payload_digest_version")?,
         uncertain_cause: row.get("uncertain_cause")?,
     })
 }
@@ -45,19 +44,12 @@ fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjecti
         require(
             input.delivery_method.is_none()
                 && input.delivery_reason.is_none()
-                && input.deferred_at.is_none()
-                && input.payload_digest_version == 1,
+                && input.deferred_at.is_none(),
             "member_input_operations.delivery_method",
             "permission responses carry no ordinary delivery metadata",
         )?;
         return Ok(None);
     }
-    require(
-        input.payload_digest_version == 1
-            || (input.payload_digest_version == 2 && input.kind == InputKind::Preview),
-        "member_input_operations.payload_digest_version",
-        "unsupported digest version for this input kind",
-    )?;
     let method = input.delivery_method;
     let recorded = || match method {
         Some(DeliveryMethod::Profile) if input.delivery_reason.is_none() => Ok(None),
@@ -177,38 +169,12 @@ pub(crate) fn input_payload_digest(
     crate::digest::sha256_hex(crate::digest::canonical_json(&payload).as_bytes())
 }
 
-pub(crate) fn preview_payload_digest_v2(
-    run_id: i64,
-    input: &crate::runtime::runner::SubmitInput,
-) -> String {
-    let payload = json!({"payload_digest_version":2,"run_id":run_id,"kind":input.input_kind.as_str(),
-        "message_id":input.message_id,"literal":input.literal});
-    crate::digest::sha256_hex(crate::digest::canonical_json(&payload).as_bytes())
-}
-
-/// The digest a stored receipt of `version` records for `input`.
-pub(crate) fn versioned_payload_digest(
-    version: i64,
-    run_id: i64,
-    input: &crate::runtime::runner::SubmitInput,
-) -> Result<String, CafleetError> {
-    match (version, input.input_kind) {
-        (1, _) => Ok(input_payload_digest(run_id, input)),
-        (2, InputKind::Preview) => Ok(preview_payload_digest_v2(run_id, input)),
-        _ => Err(invalid(
-            "member_input_operations.payload_digest_version",
-            "unsupported digest version for this input kind",
-        )),
-    }
-}
-
 /// How a new ordinary receipt is reserved: the delivery selected before its first byte, or a
-/// zero-byte queue admission with its defer reason, and its digest version.
+/// zero-byte queue admission with its defer reason.
 #[derive(Clone, Copy)]
 pub(crate) struct NewReservation<'a> {
     pub(crate) selection: Option<(DeliveryMethod, Option<&'a str>)>,
     pub(crate) defer_reason: Option<&'a str>,
-    pub(crate) payload_digest_version: i64,
 }
 
 #[cfg(test)]
@@ -494,12 +460,12 @@ pub(crate) fn reserve_input_with_provenance(
             "a queued input selects its method when its attempt starts",
         )?;
         conn.execute(
-            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,delivery_method,delivery_reason,deferred_at,defer_reason,payload_digest_version)
-             VALUES(?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11,?12)",
+            "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,delivery_method,delivery_reason,deferred_at,defer_reason)
+             VALUES(?1,?2,?3,?4,?5,?6,?6,?7,?8,?9,?10,?11)",
             params![run.run_id,new.operation_key,new.kind.as_str(),new.payload_digest,
                 if deferred.is_some() { "ready" } else { "in_progress" },now,new.message_id,
                 selection.map(|(method, _)| method.as_str()),selection.and_then(|(_, reason)| reason),
-                deferred.map(|(at, _)| at),deferred.map(|(_, reason)| reason),reservation.payload_digest_version],
+                deferred.map(|(at, _)| at),deferred.map(|(_, reason)| reason)],
         )?;
         get_input(conn, conn.last_insert_rowid()).map(InputReservation::Inserted)
     })

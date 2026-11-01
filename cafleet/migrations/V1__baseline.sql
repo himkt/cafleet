@@ -150,8 +150,6 @@ CREATE TABLE member_input_operations (
     defer_reason TEXT CHECK((deferred_at IS NULL AND defer_reason IS NULL)
         OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
             AND kind IN ('preview','prompt','exec'))),
-    payload_digest_version INTEGER NOT NULL DEFAULT 1
-        CHECK(payload_digest_version IN (1,2) AND (payload_digest_version = 1 OR kind = 'preview')),
     uncertain_cause TEXT CHECK(uncertain_cause IS NULL
         OR (uncertain_cause IN ('manual_input','manual_accounting_failed','interaction_candidate',
                                 'interaction_open','observer_unavailable','short_write','write_failed',

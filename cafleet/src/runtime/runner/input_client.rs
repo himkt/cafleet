@@ -210,11 +210,7 @@ pub(crate) fn find_submission(
             let retained = storage::find_input(&tx, identity.run_id, &request.operation_key)?;
             if let Some(input) = &retained {
                 context.input_id = Some(input.input_id);
-                let digest = storage::versioned_payload_digest(
-                    input.payload_digest_version,
-                    identity.run_id,
-                    request,
-                )?;
+                let digest = storage::input_payload_digest(identity.run_id, request);
                 ensure(
                     input.kind == request.input_kind
                         && input.payload_digest == digest

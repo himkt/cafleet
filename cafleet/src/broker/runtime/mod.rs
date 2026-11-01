@@ -22,9 +22,9 @@ pub(crate) use events::{
 };
 pub(crate) use inputs::{
     InputReservation, NewReservation, UNRESOLVED_INPUT, begin_deferred_attempt,
-    has_unresolved_ordinary_attempt, requeue_zero_byte_immediate, reserve_input_with_provenance,
-    settle_lost_deferred, settle_lost_deferred_in_transaction, settle_zero_byte_deferred,
-    unpublished_delivery_results, versioned_payload_digest,
+    has_unresolved_ordinary_attempt, input_payload_digest, requeue_zero_byte_immediate,
+    reserve_input_with_provenance, settle_lost_deferred, settle_lost_deferred_in_transaction,
+    settle_zero_byte_deferred, unpublished_delivery_results,
 };
 pub(crate) use inputs::{
     find_input, get_input, record_input_state, record_input_uncertain, settle_preview,

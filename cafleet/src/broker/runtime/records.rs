@@ -245,7 +245,6 @@ pub(crate) struct InputOperation {
     pub(crate) delivery_reason: Option<String>,
     pub(crate) deferred_at: Option<String>,
     pub(crate) defer_reason: Option<String>,
-    pub(crate) payload_digest_version: i64,
     pub(crate) uncertain_cause: Option<UncertainCause>,
 }
 

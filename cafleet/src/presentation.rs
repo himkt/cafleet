@@ -57,7 +57,7 @@ pub(crate) fn input_operation(row: &crate::broker::runtime::InputOperation) -> V
         "created_at":row.created_at,"updated_at":row.updated_at,"message_id":row.message_id,
         "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response),
         "delivery":row.delivery().as_ref().map(crate::broker::runtime::DeliveryProjection::to_json),"deferred_at":row.deferred_at,"defer_reason":row.defer_reason,
-        "payload_digest_version":row.payload_digest_version,"uncertain_cause":row.uncertain_cause.map(|cause| cause.as_str())}})
+        "uncertain_cause":row.uncertain_cause.map(|cause| cause.as_str())}})
 }
 
 pub(crate) fn member_activity(row: &MemberActivity) -> Value {
