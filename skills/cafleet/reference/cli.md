@@ -148,7 +148,7 @@ Wrapped fallback and explicitly unwrapped input lead with Escape and use:
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
 ```
 
-Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C0/DEL controls to `\\xNN`. At most 4000 Unicode scalars appear inline; longer text becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.` independently of `CAFLEET_MAX_TEXT_LEN`. Delivery method selects the clause before writing. Preview leaves consumption `input_required`.
+Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C0/DEL controls to `\xNN`. At most 4000 Unicode scalars appear inline; longer text becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.` independently of `CAFLEET_MAX_TEXT_LEN`. Delivery method selects the clause before writing. Preview leaves consumption `input_required`.
 
 ### Wrapped delivery methods
 
