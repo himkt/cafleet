@@ -880,164 +880,101 @@ fn composer_submissions(
 }
 
 const BUNDLED_DEFINITIONS: &str = include_str!("bundled.json");
-macro_rules! bundled {
-    ($($id:literal),* $(,)?) => {
-        &[$((
-            concat!("native/", $id, ".json"),
-            include_bytes!(concat!("native/", $id, ".json")),
-        )),*]
-    };
-}
-const BUNDLED_FIXTURES: &[(&str, &[u8])] = bundled![
-    "claude-2.1.302-default-permission-1",
-    "claude-2.1.302-allow-pre-stage-1",
-    "claude-2.1.302-deny-pre-stage-1",
-    "claude-2.1.302-idle-composer-1",
-    "claude-2.1.302-wrapped-permission-1",
-    "claude-2.1.302-wrapped-allow-pre-stage-1",
-    "claude-2.1.302-wrapped-deny-pre-stage-1",
-    "claude-2.1.302-boxed-permission-1",
-    "claude-2.1.302-boxed-single-row-permission-1",
-    "claude-2.1.302-auto-approved-done-1",
-    "claude-2.1.302-auto-approved-running-1",
-    "claude-2.1.302-auto-ask-allow-continuation-1",
-    "claude-2.1.302-auto-ask-deny-continuation-1",
-    "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
-    "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1",
-    "claude-2.1.302-auto-ask-permission-1",
-    "claude-2.1.302-auto-fresh-first-launch-notice-1",
-    "claude-2.1.302-auto-fresh-onboarding-theme-1",
-    "claude-2.1.302-auto-idle-composer-1",
-    "claude-2.1.302-auto-model-switch-question-1",
-    "claude-2.1.302-auto-quote-false-positive-1",
-    "claude-2.1.302-auto-refusal-notice-expired-1",
-    "claude-2.1.302-auto-refusal-notice-idle-1",
-    "claude-2.1.302-auto-refusal-notice-working-1",
-    "claude-2.1.302-auto-transcript-viewer-1",
-    "claude-2.1.302-auto-two-refusals-notice-1",
-    "claude-2.1.302-auto-unavailable-manual-footer-1",
-    "claude-2.1.302-auto-unavailable-notice-1",
-    "claude-2.1.302-auto-verbose-quote-false-positive-1",
-    "claude-2.1.302-auto-verbose-refusal-above-form-1",
-    "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1",
-    "claude-2.1.302-auto-verbose-refusal-restored-idle-1",
-    "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1",
-    "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1",
-    "claude-2.1.302-auto-verbose-transcript-viewer-1",
-    "claude-2.1.302-auto-verbose-two-refusals-1",
-    "claude-2.1.302-trust-dialog-1",
-    "claude-2.1.302-access-allow-continuation-1",
-    "claude-2.1.302-access-allow-pre-stage-1",
-    "claude-2.1.302-access-allow-running-1",
-    "claude-2.1.302-access-deny-continuation-1",
-    "claude-2.1.302-access-deny-pre-stage-1",
-    "claude-2.1.302-access-permission-1",
-    "claude-2.1.302-auto-env-setup-cancelled-idle-1",
-    "claude-2.1.302-auto-env-setup-offer-1",
-    "claude-2.1.302-auto-env-setup-wizard-1",
-    "claude-2.1.302-default-manual-idle-1",
-    "codex-0.163.0-on-request-permission-1",
-    "codex-0.163.0-allow-pre-stage-1",
-    "codex-0.163.0-deny-pre-stage-1",
-    "codex-0.163.0-idle-composer-1",
-    "codex-0.163.0-auto-approved-escalated-1",
-    "codex-0.163.0-auto-denial-limit-interrupted-1",
-    "codex-0.163.0-auto-denial-limit-warning-1",
-    "codex-0.163.0-auto-expanded-detail-1",
-    "codex-0.163.0-auto-fresh-idle-1",
-    "codex-0.163.0-auto-idle-composer-1",
-    "codex-0.163.0-auto-quote-false-positive-1",
-    "codex-0.163.0-auto-refusal-after-overlay-1",
-    "codex-0.163.0-auto-refusal-idle-1",
-    "codex-0.163.0-auto-refusal-warning-overlay-1",
-    "codex-0.163.0-auto-refusal-working-1",
-    "codex-0.163.0-auto-reviewing-1",
-    "codex-0.163.0-auto-sandbox-failure-1",
-    "codex-0.163.0-auto-second-launch-idle-1",
-    "codex-0.163.0-auto-status-indicator-1",
-    "codex-0.163.0-auto-two-refusals-1",
-    "codex-0.163.0-auto-two-refusals-resized-1",
-    "codex-0.163.0-auto-two-refusals-restored-1",
-    "codex-0.163.0-auto-warning-overlay-1",
-    "opencode-2.1.4-ask-permission-1",
-    "opencode-2.1.4-allow-pre-stage-1",
-    "opencode-2.1.4-deny-pre-stage-1",
-    "opencode-2.1.4-deny-pre-stage-2",
-    "opencode-2.1.4-deny-pre-stage-3",
-    "opencode-2.1.4-focus-always-1",
-    "opencode-2.1.4-idle-composer-1",
-    "claude-2.1.308-prompt-empty-composer-1",
-    "claude-2.1.308-prompt-typed-literal-1",
-    "claude-2.1.308-prompt-post-submit-1",
-    "claude-2.1.308-exec-empty-composer-1",
-    "claude-2.1.308-exec-typed-literal-1",
-    "claude-2.1.308-exec-post-submit-1",
-    "codex-0.163.0-prompt-empty-composer-1",
-    "codex-0.163.0-prompt-typed-literal-1",
-    "codex-0.163.0-prompt-post-submit-1",
-    "codex-0.163.0-exec-empty-composer-1",
-    "codex-0.163.0-exec-typed-literal-1",
-    "codex-0.163.0-exec-post-submit-1",
-    "opencode-2.1.4-prompt-empty-composer-1",
-    "opencode-2.1.4-prompt-typed-literal-1",
-    "opencode-2.1.4-prompt-post-submit-1",
-    "opencode-2.1.4-exec-empty-composer-1",
-    "opencode-2.1.4-exec-typed-literal-1",
-    "opencode-2.1.4-exec-post-submit-1",
-    "claude-2.1.308-auto-tip-padded-question-1",
-    "claude-2.1.309-read-outside-permission-1",
-    "claude-2.1.309-read-outside-long-path-1",
-    "claude-2.1.309-read-outside-allow-pre-stage-1",
-    "claude-2.1.309-read-outside-deny-pre-stage-1",
-    "claude-2.1.309-read-outside-allow-continuation-1",
-    "claude-2.1.309-read-outside-deny-continuation-1",
-    "claude-2.1.309-edit-outside-permission-1",
-    "opencode-2.1.4-narrow-permission-057-1",
-    "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
-    "opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
-    "opencode-2.1.4-narrow-long-command-057-1",
-    "opencode-2.1.4-narrow-idle-composer-057-1",
-    "opencode-2.1.4-compact-permission-055-1",
-    "opencode-2.1.4-compact-deny-pre-stage-2-055-1",
-    "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
-    "opencode-2.1.4-narrow-permission-min-1",
-    "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
-    "opencode-2.1.4-narrow-deny-pre-stage-3-min-1",
+const CLAUDE_FIXTURES: &[u8] = include_bytes!("native/claude.json");
+const CODEX_FIXTURES: &[u8] = include_bytes!("native/codex.json");
+const OPENCODE_FIXTURES: &[u8] = include_bytes!("native/opencode.json");
+const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
+    ("native/claude.json", CLAUDE_FIXTURES),
+    ("native/codex.json", CODEX_FIXTURES),
+    ("native/opencode.json", OPENCODE_FIXTURES),
 ];
 
-fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {
+fn verify_bundled_fixtures(entries: &[Value], embedded: &[(&str, &[u8])]) -> Result<()> {
+    let mut sources = BTreeMap::<String, Vec<&Value>>::new();
+    for entry in entries {
+        require(
+            entry["kind"] == "native",
+            "bundled fixtures require native provenance",
+        )?;
+        let source = text(&entry["source_ref"])?;
+        require(
+            embedded.iter().any(|(reference, _)| *reference == source),
+            "bundled fixture bytes are not embedded",
+        )?;
+        sources.entry(source).or_default().push(entry);
+    }
+    for (source, bytes) in embedded {
+        let file: Value = serde_json::from_slice(bytes)
+            .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
+        let entries = sources.get(*source).map(Vec::as_slice).unwrap_or(&[]);
+        let screens = verify_native_fixture_file(&file, entries)?;
+        for entry in entries {
+            let id = text(&entry["id"])?;
+            let screen = screens
+                .get(&id)
+                .expect("the file guard verified every catalogued screen");
+            verify_native_screen(entry, screen)?;
+        }
+    }
+    Ok(())
+}
+
+fn verify_native_fixture_file<'a>(
+    file: &'a Value,
+    entries: &[&Value],
+) -> Result<&'a Map<String, Value>> {
+    let file = object(
+        file,
+        &["schema_version", "backend", "provenance", "screens"],
+    )?;
+    require(
+        file["schema_version"].as_u64() == Some(1)
+            && file["provenance"] == "native"
+            && entries
+                .iter()
+                .all(|entry| file["backend"] == entry["backend"]),
+        "bundled fixture file identity differs from its catalog entry",
+    )?;
+    backend(&file["backend"])?;
+    let screens = file["screens"]
+        .as_object()
+        .ok_or_else(|| invalid("object required"))?;
+    for entry in entries {
+        require(
+            screens.contains_key(&text(&entry["id"])?),
+            "bundled fixture screen is missing",
+        )?;
+    }
+    require(
+        screens.keys().all(|id| {
+            entries
+                .iter()
+                .any(|entry| entry["id"].as_str() == Some(id.as_str()))
+        }),
+        "bundled fixture file holds an uncited screen",
+    )?;
+    Ok(screens)
+}
+
+fn verify_native_screen(entry: &Value, screen: &Value) -> Result<()> {
     let id = text(&entry["id"])?;
+    let recorded = text(&entry["sha256"])?;
+    let computed = crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes());
     require(
-        entry["kind"] == "native",
-        "bundled fixtures require native provenance",
+        recorded == computed,
+        &format!(
+            "bundled fixture digest mismatch for {id}: catalog {recorded}, computed {computed}"
+        ),
     )?;
-    let source = text(&entry["source_ref"])?;
-    let bytes = embedded
-        .iter()
-        .find(|(reference, _)| *reference == source)
-        .map(|(_, bytes)| *bytes)
-        .ok_or_else(|| invalid("bundled fixture bytes are not embedded"))?;
-    require(
-        crate::digest::sha256_hex(bytes) == text(&entry["sha256"])?,
-        "bundled fixture digest mismatch",
-    )?;
-    let screen: Value = serde_json::from_slice(bytes)
-        .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
     let backgrounds = screen.get("cell_backgrounds").is_some();
     let fields = SCREEN_FIELDS
         .iter()
         .copied()
         .chain(backgrounds.then_some("cell_backgrounds"))
         .collect::<Vec<_>>();
-    let m = object(&screen, &fields)?;
+    let m = object(screen, &fields)?;
     require(
-        m["schema_version"].as_u64() == Some(1)
-            && text(&m["fixture_id"])? == id
-            && m["provenance"] == "native"
-            && m["backend"] == entry["backend"]
-            && m["native_version"] == entry["native_version"]
-            && m["rows"] == entry["rows"]
-            && m["cols"] == entry["cols"],
+        m["rows"] == entry["rows"] && m["cols"] == entry["cols"],
         "bundled fixture identity differs from its catalog entry",
     )?;
     let rows = positive(&m["rows"])?;
@@ -1083,12 +1020,7 @@ fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()>
     }
     Ok(())
 }
-const SCREEN_FIELDS: [&str; 13] = [
-    "schema_version",
-    "fixture_id",
-    "provenance",
-    "backend",
-    "native_version",
+const SCREEN_FIELDS: [&str; 8] = [
     "rows",
     "cols",
     "alternate_screen",
@@ -1158,9 +1090,7 @@ impl ProfileCatalog {
         embedded: &[(&str, &[u8])],
     ) -> Result<Self> {
         let catalog = Self::from_definitions(definitions)?;
-        for entry in array(&definitions["fixtures"])? {
-            verify_native_screen(entry, embedded)?;
-        }
+        verify_bundled_fixtures(array(&definitions["fixtures"])?, embedded)?;
         #[cfg(test)]
         let catalog = Self {
             capture_origin: "bundled_unknown",

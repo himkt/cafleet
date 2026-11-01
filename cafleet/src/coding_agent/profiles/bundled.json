@@ -8,8 +8,8 @@
       "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.302-default-permission-1.json",
-      "sha256": "be7c9c5c62f7fd73939d7838c7b6457c1db47d238956bc25e48da58cb7e95c8f"
+      "source_ref": "native/claude.json",
+      "sha256": "d5112771ae6402b817219410802d6997e3eac5522a5c3597fe8d2dcaf5c2da11"
     },
     {
       "id": "claude-2.1.302-allow-pre-stage-1",
@@ -18,8 +18,8 @@
       "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.302-allow-pre-stage-1.json",
-      "sha256": "96ef6ca358b364ea097d9cc28d5fb25eee03ac0bb4d2d079659aed0a1bba098c"
+      "source_ref": "native/claude.json",
+      "sha256": "1ba4998e14104889df5b9ccbcf99ec2be4c5351333b0100297d0feaaf013814a"
     },
     {
       "id": "claude-2.1.302-deny-pre-stage-1",
@@ -28,8 +28,8 @@
       "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.302-deny-pre-stage-1.json",
-      "sha256": "012ffa7d2bef37d65538e104e6b43452e9c4be86ce7c9c1e58aaf66dd987a060"
+      "source_ref": "native/claude.json",
+      "sha256": "b130bfb88df5d046e8220d55c36d32e35900219eabf38c855f5d4505e3c8f7d8"
     },
     {
       "id": "claude-2.1.302-idle-composer-1",
@@ -38,8 +38,8 @@
       "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.302-idle-composer-1.json",
-      "sha256": "e606b8080d5fcd53505c0722c8922bb7943e3b39dd0b8a841f892c1505726bd4"
+      "source_ref": "native/claude.json",
+      "sha256": "51032849fa9d5a2c97a30e9ed445d5e182814898a19c6882b82051d3d5a4fd0c"
     },
     {
       "id": "claude-2.1.302-wrapped-permission-1",
@@ -48,8 +48,8 @@
       "native_version": "2.1.302",
       "rows": 36,
       "cols": 52,
-      "source_ref": "native/claude-2.1.302-wrapped-permission-1.json",
-      "sha256": "4d8f8f75fd1b318b3d4054eacaada7983e3413380d294646e1c6f0a74d9c76fd"
+      "source_ref": "native/claude.json",
+      "sha256": "b14c136a03de2cbae048ce2b72a6cae8fbbbf06c39ee035e15b9289a77c24414"
     },
     {
       "id": "claude-2.1.302-wrapped-allow-pre-stage-1",
@@ -58,8 +58,8 @@
       "native_version": "2.1.302",
       "rows": 36,
       "cols": 52,
-      "source_ref": "native/claude-2.1.302-wrapped-allow-pre-stage-1.json",
-      "sha256": "dca8b4f19c4ce51a218f61aa4ab9a712962de9768b62cbce63c2c5e65818d5a8"
+      "source_ref": "native/claude.json",
+      "sha256": "beff9a72618d5e68d79bf04bf24f38e992f6868022ce8ec412f4918c4a6e013b"
     },
     {
       "id": "claude-2.1.302-wrapped-deny-pre-stage-1",
@@ -68,8 +68,8 @@
       "native_version": "2.1.302",
       "rows": 36,
       "cols": 52,
-      "source_ref": "native/claude-2.1.302-wrapped-deny-pre-stage-1.json",
-      "sha256": "3a671776c75c8f13cff4941954658d0b67d9978b13732e0c4f6a71b0b1f9c960"
+      "source_ref": "native/claude.json",
+      "sha256": "ca5b3ff87cb45c362ec11cea805f6be39c4646a1933431c550ce5a2bcbd7c144"
     },
     {
       "id": "claude-2.1.302-boxed-permission-1",
@@ -78,8 +78,8 @@
       "native_version": "2.1.302",
       "rows": 36,
       "cols": 89,
-      "source_ref": "native/claude-2.1.302-boxed-permission-1.json",
-      "sha256": "c9d97c8b92b38546a7aee55db404af97e4872fdcbbf84b1ea7b992694dd5f2cf"
+      "source_ref": "native/claude.json",
+      "sha256": "14595daf18c6547fa0c9cebaa0046dfaf2b59b539b38d1ec107e52be960d2234"
     },
     {
       "id": "claude-2.1.302-boxed-single-row-permission-1",
@@ -88,47 +88,389 @@
       "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.302-boxed-single-row-permission-1.json",
-      "sha256": "0a701f94912057b13c5775c74e2574683dd861787a205424dc5a991e9699b062"
+      "source_ref": "native/claude.json",
+      "sha256": "63bbb13f9f1533df38efc10620b272b25dcacc29b1937470fe92635d4b87851f"
     },
-    {"id": "claude-2.1.302-auto-approved-done-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-approved-done-1.json", "sha256": "3f36a2628161ab1be31dca74ea74b9a41162467890f7d2a417c3bb8578ad0639"},
-    {"id": "claude-2.1.302-auto-approved-running-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-approved-running-1.json", "sha256": "2f625757c65769bb32959b771014233f74bd028b4f6e7ef58278637e0224a077"},
-    {"id": "claude-2.1.302-auto-ask-allow-continuation-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-ask-allow-continuation-1.json", "sha256": "6d9db0d918bd949a03b47cb210c1a21845ad7a4a4733fd355dded11bd7de5fb6"},
-    {"id": "claude-2.1.302-auto-ask-deny-continuation-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 90, "source_ref": "native/claude-2.1.302-auto-ask-deny-continuation-1.json", "sha256": "1f6526db0c890387ad40c517b7ccd6a9b7085deda7cab79eeb8124f63cfec778"},
-    {"id": "claude-2.1.302-auto-ask-hiding-refusal-notice-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-ask-hiding-refusal-notice-1.json", "sha256": "e425f0b00785334fc9a4e384156f63f149e32a4a64bd6045eee1013d66364bb7"},
-    {"id": "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 90, "source_ref": "native/claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1.json", "sha256": "f32289352a2f2e603e83f18ea6099d2dcabf497a3550817925107d3d4cbfb9a2"},
-    {"id": "claude-2.1.302-auto-ask-permission-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-ask-permission-1.json", "sha256": "3e61ca7c6bb35c8f1bd207438eb057a0785bcc832c788eaf2d902d031a646b52"},
-    {"id": "claude-2.1.302-auto-fresh-first-launch-notice-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-fresh-first-launch-notice-1.json", "sha256": "7296ba376d12cbf1eaf129ad3cb6d5808ae68f828fd0ce1c564f6fa4f2f82133"},
-    {"id": "claude-2.1.302-auto-fresh-onboarding-theme-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-fresh-onboarding-theme-1.json", "sha256": "940090a2d312f9e82953d0347a83b0d352edef04f8f99a98aa915ab9bc979acf"},
-    {"id": "claude-2.1.302-auto-idle-composer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-idle-composer-1.json", "sha256": "2948f4572dace3790ea9357064aa77f14dfb3461548c0c411c6ca3ad65fb544d"},
-    {"id": "claude-2.1.302-auto-model-switch-question-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-model-switch-question-1.json", "sha256": "cbf826cd8cc66e1d186a80ab75c3540d5985113239298a4c36787102d6c2f794"},
-    {"id": "claude-2.1.302-auto-quote-false-positive-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-quote-false-positive-1.json", "sha256": "9406cdc9afa94f7249b1c40022207bd7b7b9124d4dba0d97636809f75fa88760"},
-    {"id": "claude-2.1.302-auto-refusal-notice-expired-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-refusal-notice-expired-1.json", "sha256": "ef0715abbf6d25e6c477a01cee4c805fde1bab253dc4b3c658ff300784d8f4e8"},
-    {"id": "claude-2.1.302-auto-refusal-notice-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-refusal-notice-idle-1.json", "sha256": "ca2696175065ff2af54e68e66d5604db1e8b6a01f554f8267c36dcf259b31285"},
-    {"id": "claude-2.1.302-auto-refusal-notice-working-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-refusal-notice-working-1.json", "sha256": "a75ec80332e05d97f3be731c38145428971d2cee3d20fabd3c140d3d2ebe823a"},
-    {"id": "claude-2.1.302-auto-transcript-viewer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-transcript-viewer-1.json", "sha256": "de0a6ff5832aa1fe2f3b0e1499bff5b581868673dfe33b6b549e7e346fe3c979"},
-    {"id": "claude-2.1.302-auto-two-refusals-notice-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-two-refusals-notice-1.json", "sha256": "fea2e41ed5c40dd6542712d01b9c20967b8718e0cfa0548c19ff2b5e77af0d74"},
-    {"id": "claude-2.1.302-auto-unavailable-manual-footer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-unavailable-manual-footer-1.json", "sha256": "ca30abdf34480860037a74c744644f12d4c9f8ea3a9e1c277cc909a679d4e97c"},
-    {"id": "claude-2.1.302-auto-unavailable-notice-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-unavailable-notice-1.json", "sha256": "d81e777289e61e2936f281f33036a22c95e52020e4c09f575531244e368c0c0d"},
-    {"id": "claude-2.1.302-auto-verbose-quote-false-positive-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-quote-false-positive-1.json", "sha256": "1f909b30fe8dc6c2d28db7a92e37edd93a8867e3181234b94f0c489932251ef5"},
-    {"id": "claude-2.1.302-auto-verbose-refusal-above-form-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-above-form-1.json", "sha256": "26c4ee40201df1db1656ba8325996ce5cd8d70f1a4f1ad257fa07be8256ae619"},
-    {"id": "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 20, "cols": 60, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-hidden-by-form-1.json", "sha256": "67bef1c0ca6d031e4b4c16553352eb6e39fc96a5c88eb24a6bd3b9db118f223b"},
-    {"id": "claude-2.1.302-auto-verbose-refusal-restored-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-restored-idle-1.json", "sha256": "3429b0d562641b8bcc6f8acafcf6e9b8c337e9311db9846ee6859754f00ae4ce"},
-    {"id": "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 60, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-rewrapped-form-1.json", "sha256": "1dfe7aab1eeda9d6d80720cbec40338858a47c678d04333a6df230c70ef68e7f"},
-    {"id": "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 20, "cols": 60, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1.json", "sha256": "7462056e4913ac25a0278d5e00316b4f7b795dcf0635a6ab911e4c77a6c37289"},
-    {"id": "claude-2.1.302-auto-verbose-transcript-viewer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-transcript-viewer-1.json", "sha256": "75f31665ed8ae6dac1e9066fdb0b0102af09475d6967a62b0ffeb2a1945dda73"},
-    {"id": "claude-2.1.302-auto-verbose-two-refusals-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-two-refusals-1.json", "sha256": "02139c84601cdd081a6b28e2174373a5a0d65e59108a5e4b22fd15f27c939488"},
-    {"id": "claude-2.1.302-trust-dialog-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-trust-dialog-1.json", "sha256": "c5c0c29606bbffd419a038aac11f9f20561779298b3a70d1a5b4c224a20a2ed6"},
-    {"id": "claude-2.1.302-access-allow-continuation-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-allow-continuation-1.json", "sha256": "439c0dc8b297291f4e2a2ddbee94429a100f0a0a9c38a125605edde95764e23b"},
-    {"id": "claude-2.1.302-access-allow-pre-stage-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-allow-pre-stage-1.json", "sha256": "725750e4f7d293c8821830134990f7e77cc49cc22fa5bd4c5ce1dc070bb2a815"},
-    {"id": "claude-2.1.302-access-allow-running-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-allow-running-1.json", "sha256": "ca16dd8cf9e7b7fe5537acf5424722b50843bc5a2c7e45ace287fb68194bba94"},
-    {"id": "claude-2.1.302-access-deny-continuation-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-deny-continuation-1.json", "sha256": "eee767ecea57307a6c77b36364e9068b8ca213b2f62cec266ba643f7ed82a82d"},
-    {"id": "claude-2.1.302-access-deny-pre-stage-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-deny-pre-stage-1.json", "sha256": "2887367274c6ed001722e1e8ff8eb7fd83157b9739f7424619ff20ad97fefa91"},
-    {"id": "claude-2.1.302-access-permission-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-permission-1.json", "sha256": "34c18fa8683209dc8030c51a331286c53519ef548d3c105766656671dfd6de49"},
-    {"id": "claude-2.1.302-auto-env-setup-cancelled-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-env-setup-cancelled-idle-1.json", "sha256": "88ec8648d616e76cc4fbe73a2978625bc7e0770380ef5b2712fc894a17e9db9f"},
-    {"id": "claude-2.1.302-auto-env-setup-offer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-env-setup-offer-1.json", "sha256": "68970ee9c53ecccbf6547c1ce551a272678c86916b61f366093ff39bf89dc23d"},
-    {"id": "claude-2.1.302-auto-env-setup-wizard-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-env-setup-wizard-1.json", "sha256": "104b58d5890d85cbf0102e28c54f5a816126e859ea4bd10469c66e4f2dfa98b3"},
-    {"id": "claude-2.1.302-default-manual-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-default-manual-idle-1.json", "sha256": "f6543513a5f48add713e7d9560e7edb96f746026ec3c1e13e9e55d0db276596c"},
+    {
+      "id": "claude-2.1.302-auto-approved-done-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "41a7ed53c592bb7c31f9b793f8a3cb68b228b9ca3f0ba846f8aa5062b8c80d72"
+    },
+    {
+      "id": "claude-2.1.302-auto-approved-running-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "e00ff052dc7331da018ad9e77a9cec07d0b9fdaebb0450420610e69ed076d2b4"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-allow-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "68d140204ac589eb6f10ceae321b9b61dbdbf8207dbff10a6533def6b43790ab"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-deny-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 90,
+      "source_ref": "native/claude.json",
+      "sha256": "eebc0c516f37180c922aef29c228f0f20426d89e986bd47d25183b1805177fae"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "a7e44009b268e10f6dc71ea6f64ee1910f1d841e28ef8266951978cb57c40fa9"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 90,
+      "source_ref": "native/claude.json",
+      "sha256": "2372829b652700d1d7e58b611411b210a8c7c29d350c0dea9a4e7c8a8ece43fb"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8e2d82837ca578bcd3259d475a04adad418781e3f9b1c284e5c9ed7b474de4d1"
+    },
+    {
+      "id": "claude-2.1.302-auto-fresh-first-launch-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8f31374068199b8c1bc4782e4bf683706651d5d51333c43f830f8a3328159d23"
+    },
+    {
+      "id": "claude-2.1.302-auto-fresh-onboarding-theme-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "13f7813fbaffe6fdad4849e4f0a78a43756fb80f542d11826af6f4f8f5c94259"
+    },
+    {
+      "id": "claude-2.1.302-auto-idle-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "857dac6224ed46bc0b02e22855eaa0bbdfc1bccc225cfc1723e0bf71d58570ad"
+    },
+    {
+      "id": "claude-2.1.302-auto-model-switch-question-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8d872b4f087ce188d44fb05bbc0a5dc495f19b8ab9db51982cd6f434a74c9adc"
+    },
+    {
+      "id": "claude-2.1.302-auto-quote-false-positive-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "f633c7aeb16dc850818010ee4bd92905423190cfbcbdd0c891c6bf4df1d20fdb"
+    },
+    {
+      "id": "claude-2.1.302-auto-refusal-notice-expired-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "71dd040421a438b50b6c666e96914ebca17cfd2b617dc792b97c8382f6401fa1"
+    },
+    {
+      "id": "claude-2.1.302-auto-refusal-notice-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "ad45d832bd03ff02225b86ff3969d63fab90238da76cf751138069e943786e10"
+    },
+    {
+      "id": "claude-2.1.302-auto-refusal-notice-working-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "0b9e4ffd9928a4c02335a06c79530b2aa1d87d5836cb6780274658fc2178c225"
+    },
+    {
+      "id": "claude-2.1.302-auto-transcript-viewer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "899a010e792c7f7c098809a2b658c88de9fb94bb3b945cc014bbc9b168532f98"
+    },
+    {
+      "id": "claude-2.1.302-auto-two-refusals-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "1ce8c0dead80a9641ea851932bad75309091da0cbf135a62945bc12ab0729061"
+    },
+    {
+      "id": "claude-2.1.302-auto-unavailable-manual-footer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8a0a9e57d349ba70fe3eb71f5d18a9d37a3eeb7d648f55479e42a5813028c01e"
+    },
+    {
+      "id": "claude-2.1.302-auto-unavailable-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "882199da44084b9e2437ad938ae2cf45ec376a329c35af5b2dbdb87a323f738a"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-quote-false-positive-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "57bbf63cca57c5d12b3955f676308e70e6ae902a5d97767259b0c57a7306a5fd"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-above-form-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "39b3c6fb92f63e3d2dc76bb1637d6362b4fc69acb41e48b13d34d37b11c76111"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 20,
+      "cols": 60,
+      "source_ref": "native/claude.json",
+      "sha256": "31b79d652bde0269fab5618154c4e5b51b124d5edf9fb6a004385ce90892653f"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-restored-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "cbb4a4dd411846a39ec6c2e5b200f653dab8390de5eb70b3a87c9100bd3c8743"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 60,
+      "source_ref": "native/claude.json",
+      "sha256": "9bf076e942dfdc73713b3e3be3d7a65669ab20835ac101701f880faebf6ca0fe"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 20,
+      "cols": 60,
+      "source_ref": "native/claude.json",
+      "sha256": "aea2a20586624fd4621ee78522db26db169f2cd3852a0d9ad0290d87eebaa514"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-transcript-viewer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "3e5272c9225497d3bbb19abda7cf40463c68689a5acf15b0e6a9ec220b024388"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-two-refusals-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "4054e7934a6b17bcc4f11c94b6d4d77305d36deb32625316d024ff79aadeed43"
+    },
+    {
+      "id": "claude-2.1.302-trust-dialog-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "9b398951d4f9494b9b09f2761eb59cafaeb97bb775eb42758842b14f4d48935f"
+    },
+    {
+      "id": "claude-2.1.302-access-allow-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c5242d8a4803a0e23fbf3b62c86533721b3b9226d7e3115162a34112400d54ce"
+    },
+    {
+      "id": "claude-2.1.302-access-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "4be2914ab73e416eb7091cba67aa2d73796526f6a0dd269931758f80b27d44fe"
+    },
+    {
+      "id": "claude-2.1.302-access-allow-running-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "bbc1aa9382417944984f00efee5651ad0a5633179c3b5d658145373346f4f95f"
+    },
+    {
+      "id": "claude-2.1.302-access-deny-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8d97781c681c136c7ad198796f6b1325b2ebe65525c60fb6af29a0ec42f16189"
+    },
+    {
+      "id": "claude-2.1.302-access-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "13cebd2b777866d575198119d4ba117e17eb4679e1c5893e6144f5a2bd243ed0"
+    },
+    {
+      "id": "claude-2.1.302-access-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "da7d5fb8dfdf726280291a1709f8763384ff1b8972dd519f2e0d4592b59c8455"
+    },
+    {
+      "id": "claude-2.1.302-auto-env-setup-cancelled-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "80e5e74735d408d3a902919cd71c7dc486c2d3b415f00fe2bbf183f5b10f8fc5"
+    },
+    {
+      "id": "claude-2.1.302-auto-env-setup-offer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "9153fd8eb4910a8c587824de0090987ef7f92ac91e6317540898d25d73158516"
+    },
+    {
+      "id": "claude-2.1.302-auto-env-setup-wizard-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "99af6d382c63aaa630b6d1abcd07757899ffa24299b3c4112dca4a59f4fb0e4e"
+    },
+    {
+      "id": "claude-2.1.302-default-manual-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "9eb822d50dad92fefec6c7c35fee34d9f6f53d99f6b7009500f53f4c3d62f96d"
+    },
     {
       "id": "codex-0.163.0-on-request-permission-1",
       "kind": "native",
@@ -136,8 +478,8 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-on-request-permission-1.json",
-      "sha256": "e30e9533cb23f2adc95a3913467b79a8a286ad4a4b21d86ac447419818223dcd"
+      "source_ref": "native/codex.json",
+      "sha256": "d1c1211619921055a8611ecb717f2979acfc3194000d5a3f8d2c65d2f6d84c6c"
     },
     {
       "id": "codex-0.163.0-allow-pre-stage-1",
@@ -146,8 +488,8 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-allow-pre-stage-1.json",
-      "sha256": "d263d9bdb4328dc292c615603c38924fae86a263ccab76fe2b579d3eed4b6419"
+      "source_ref": "native/codex.json",
+      "sha256": "f580b511048d83568b7c140c7a7b3c2f68209a16272efe2789666ad111a0abb5"
     },
     {
       "id": "codex-0.163.0-deny-pre-stage-1",
@@ -156,8 +498,8 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-deny-pre-stage-1.json",
-      "sha256": "5e7fddce15a225b72a3eb0b705601c1d11e83f2eae687b9f8c6feee70f928a20"
+      "source_ref": "native/codex.json",
+      "sha256": "9fa04ec011d2ca937c455ec164756f0bf3e0144e6bf4fdbdcba1993ea25d8a2a"
     },
     {
       "id": "codex-0.163.0-idle-composer-1",
@@ -166,28 +508,199 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-idle-composer-1.json",
-      "sha256": "f7337eae171edcce09eafad4750e7b2fa6354b680adff0c3089ec435be5c5a2b"
+      "source_ref": "native/codex.json",
+      "sha256": "1588266671b1635803517f638c4bc78cbd1ef7a67c27206ef6e745cb06deda21"
     },
-    {"id": "codex-0.163.0-auto-approved-escalated-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-approved-escalated-1.json", "sha256": "4e112683d83c6b6703bc06633657e1ca74b003fc39b52f0ea032f0c6ff5ccb69"},
-    {"id": "codex-0.163.0-auto-denial-limit-interrupted-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-denial-limit-interrupted-1.json", "sha256": "96a389b38ac91b883f686f81289cc164a9c4dcc0aa3d75b6892f8b2819f79090"},
-    {"id": "codex-0.163.0-auto-denial-limit-warning-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-denial-limit-warning-1.json", "sha256": "aefe65069b821baa8b0559113b10cedfc0632f5467180107b5da2df07b0fc403"},
-    {"id": "codex-0.163.0-auto-expanded-detail-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-expanded-detail-1.json", "sha256": "4ffbd27f550f8f4bb12bbca97942813b59e2ccc0835a6086b5781d6784a3fe84"},
-    {"id": "codex-0.163.0-auto-fresh-idle-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-fresh-idle-1.json", "sha256": "13660dfb09c4343b1ab4e7c5a3a81c4f107486a4ced31e84555a213a6d917283"},
-    {"id": "codex-0.163.0-auto-idle-composer-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-idle-composer-1.json", "sha256": "e002eff0228570e55b9508e7bd3a26d8780669189c2f842e6c93d44372fd9279"},
-    {"id": "codex-0.163.0-auto-quote-false-positive-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-quote-false-positive-1.json", "sha256": "dd603ee6f1753f409e77ba95a509314077ed1874f9f01eee6bc911f143e0d56c"},
-    {"id": "codex-0.163.0-auto-refusal-after-overlay-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-refusal-after-overlay-1.json", "sha256": "691099cff6faf5bbe7c5199e2680eba020025a82421bf165682b7d5220e87117"},
-    {"id": "codex-0.163.0-auto-refusal-idle-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-refusal-idle-1.json", "sha256": "09e62fb15ff4aabedb7897098c56349bce20b79deef8a7f186ca21f5b1b31ab0"},
-    {"id": "codex-0.163.0-auto-refusal-warning-overlay-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-refusal-warning-overlay-1.json", "sha256": "2e84665d62b5702b396774933f8889927c97aa151e4deffab8cbf9cee0698846"},
-    {"id": "codex-0.163.0-auto-refusal-working-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-refusal-working-1.json", "sha256": "7e0bacb73a0ab7e20bddda950ff52b4d2ea72fd98696a30bc3c747132251831c"},
-    {"id": "codex-0.163.0-auto-reviewing-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-reviewing-1.json", "sha256": "4dda3f7a84c40f78d4b16a84695f4fd45a63f6d49f09bf7e93dbb97772a3cd6a"},
-    {"id": "codex-0.163.0-auto-sandbox-failure-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-sandbox-failure-1.json", "sha256": "512225e5b5ba3ef8854da2964fa0bdd648d9b2261047a732fcd63cf0403e7586"},
-    {"id": "codex-0.163.0-auto-second-launch-idle-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-second-launch-idle-1.json", "sha256": "8404ae4fce35e28d90759b3e0346595c502d732a65ab584a9d8025e4b326f4e6"},
-    {"id": "codex-0.163.0-auto-status-indicator-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-status-indicator-1.json", "sha256": "1069e654110b4a2e15672b88ae913e09e5794bcdd07ee502495e2819700fa9e3"},
-    {"id": "codex-0.163.0-auto-two-refusals-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-two-refusals-1.json", "sha256": "0ea187dcb053ff37df1c8e8bfb76c0733a0b9a04ddf29ca250f1235a5705863f"},
-    {"id": "codex-0.163.0-auto-two-refusals-resized-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 80, "source_ref": "native/codex-0.163.0-auto-two-refusals-resized-1.json", "sha256": "81e4bb5555d27d05ed647403aaa11cf91d383157b55dfc11cbbed1360d9215e2"},
-    {"id": "codex-0.163.0-auto-two-refusals-restored-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-two-refusals-restored-1.json", "sha256": "4b96b136c631e7e1ef610301750b74e27e3a18a5af56e149ee1d0b77ff2a9108"},
-    {"id": "codex-0.163.0-auto-warning-overlay-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-warning-overlay-1.json", "sha256": "a10041fbeb395ec4f0233ada28693c7d20e030a57b4f7d7a25fd73b36256c320"},
+    {
+      "id": "codex-0.163.0-auto-approved-escalated-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d7a6de648664fa74babcc47534b8e0e2fb01fa0a84de129b42ffd98acccde4d2"
+    },
+    {
+      "id": "codex-0.163.0-auto-denial-limit-interrupted-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "ae6f41bde2f3624ed6ec3dd51cef7c8da425cf326bfa4b91492a1a9705232234"
+    },
+    {
+      "id": "codex-0.163.0-auto-denial-limit-warning-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "a052f4252c9ac539ee92bf4c86a79d81315db0ad6d4c4b0187188436c66b4e54"
+    },
+    {
+      "id": "codex-0.163.0-auto-expanded-detail-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d2a07375cf04ce9f4d751f78fe4e545aef2e77feee9d6f926b24b88263e3b467"
+    },
+    {
+      "id": "codex-0.163.0-auto-fresh-idle-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "3697226b5f2845404301b08f96afac5b63b56fb663a0b2c3b6a6b822b0b35294"
+    },
+    {
+      "id": "codex-0.163.0-auto-idle-composer-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "13fd467582a640b5fe00a885d1d70f696018a2835a612cf24de0fff1878ea736"
+    },
+    {
+      "id": "codex-0.163.0-auto-quote-false-positive-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "36a438d184345e31328e417349a42c970d579802c107b7b4b5d557b69558495e"
+    },
+    {
+      "id": "codex-0.163.0-auto-refusal-after-overlay-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "22ec0df0211f0be6b2bfaaa012c2fdb1bf6e66e1261e65eba5cc825bddb29b1a"
+    },
+    {
+      "id": "codex-0.163.0-auto-refusal-idle-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "1103b4a1a783a6bdd051a3289c713d39fe32fd3c8e9f2268ae15f3929fa3c9e8"
+    },
+    {
+      "id": "codex-0.163.0-auto-refusal-warning-overlay-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "45d1bdbd44b4c37e69d6255af772c0774ad769d439a3bf9292243bbc92959d65"
+    },
+    {
+      "id": "codex-0.163.0-auto-refusal-working-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "2faea60f305a69d6726612069eb9223b7376528fd5bb190eb2b5b11131606166"
+    },
+    {
+      "id": "codex-0.163.0-auto-reviewing-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "bf035e8535ce9fb630cad8260b641e0eb4fc886acba404f0010d8edb80ecdb54"
+    },
+    {
+      "id": "codex-0.163.0-auto-sandbox-failure-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d37d479f2dac772906e6e14267cdfec5a4fcc42ad7a0d163292ab74ffd9a0d2d"
+    },
+    {
+      "id": "codex-0.163.0-auto-second-launch-idle-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d2f9d91e01d9819e9b3b0c010a7c69ffab8c3ecfeae18451926e618b136b9963"
+    },
+    {
+      "id": "codex-0.163.0-auto-status-indicator-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "753ada8bac6654a05f99d702cc3fd5a9d53d52c6fbd35dd5bd6e2e56593962cc"
+    },
+    {
+      "id": "codex-0.163.0-auto-two-refusals-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "8c40ec579d9f5e0706e3a5234cb853ada8c3e84a24dda5dc50669ed3d7dbe617"
+    },
+    {
+      "id": "codex-0.163.0-auto-two-refusals-resized-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 80,
+      "source_ref": "native/codex.json",
+      "sha256": "0b32ea70606ab32afb31e745f2417fc449317e8c76f5fed6fb90c6b89e566a7f"
+    },
+    {
+      "id": "codex-0.163.0-auto-two-refusals-restored-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "9133089826a49e7dd96d6797cd921156a9f381da57e8fb358fdda6f5d00c1114"
+    },
+    {
+      "id": "codex-0.163.0-auto-warning-overlay-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "f33b7a4d9be23da2209b88e682bccdf0299b8fae51049d60e4027b01c3b04655"
+    },
     {
       "id": "opencode-2.1.4-ask-permission-1",
       "kind": "native",
@@ -195,8 +708,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-ask-permission-1.json",
-      "sha256": "f8606322a6faf5df5e6ffdb25f21d690df3a0ec5e91a5aa4c63e3f52d2bbe128"
+      "source_ref": "native/opencode.json",
+      "sha256": "31624353766ee2b1ac59cf6aa65ecbc7be37f68bf623534fcc5e88e549e3afdc"
     },
     {
       "id": "opencode-2.1.4-allow-pre-stage-1",
@@ -205,8 +718,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-allow-pre-stage-1.json",
-      "sha256": "6cd2660312def5f7b98ca721b21b496363a8e144626232da7501d934c3c3a48c"
+      "source_ref": "native/opencode.json",
+      "sha256": "1bb21c1ee4dad8b775475c880c1806efad11f58e0671ba93dab9dd08902c01f2"
     },
     {
       "id": "opencode-2.1.4-deny-pre-stage-1",
@@ -215,8 +728,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-deny-pre-stage-1.json",
-      "sha256": "9fedaa45eea2926a64f670f8a3b4dddca1f7e0bbe016945f9b3db126f7a101a6"
+      "source_ref": "native/opencode.json",
+      "sha256": "509b3aa2363c28aa5b17d3596f04071da7add1535efa2ba511ae991f7a5f360a"
     },
     {
       "id": "opencode-2.1.4-deny-pre-stage-2",
@@ -225,8 +738,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-deny-pre-stage-2.json",
-      "sha256": "ccd905bf5281e118a63d91113bf1ad3b52af467f0628fec37cf9523e249b5453"
+      "source_ref": "native/opencode.json",
+      "sha256": "3cc29217195df5ccf0b1c6b7cf3e4a9550d879c9a390d512aca1eb1390fb3ab9"
     },
     {
       "id": "opencode-2.1.4-deny-pre-stage-3",
@@ -235,8 +748,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-deny-pre-stage-3.json",
-      "sha256": "3798bcc074effaac341626c326ee75b5af94615a41e6a9891118332d13910369"
+      "source_ref": "native/opencode.json",
+      "sha256": "db4af848b437a24440741def76a73f3e6e4e0fb4560fb36f8f80edb934c7d975"
     },
     {
       "id": "opencode-2.1.4-focus-always-1",
@@ -245,8 +758,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-focus-always-1.json",
-      "sha256": "db4f7af2265b56b88f0a334a9ea9e911a81a718ba04546224e752dc1866c691b"
+      "source_ref": "native/opencode.json",
+      "sha256": "f42122ea6de285169cce554ec73e3227155b18b54357f8d565bada247ebd1e77"
     },
     {
       "id": "opencode-2.1.4-idle-composer-1",
@@ -255,8 +768,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-idle-composer-1.json",
-      "sha256": "452104eb3591416d73d5cdab317c78df7de3980c062be2695c52be5ebe2b9be5"
+      "source_ref": "native/opencode.json",
+      "sha256": "c48a4a45d85f7eff591d494588753bc57609c6a46f9734f243308775961abc88"
     },
     {
       "id": "claude-2.1.308-prompt-empty-composer-1",
@@ -265,8 +778,8 @@
       "native_version": "2.1.308",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.308-prompt-empty-composer-1.json",
-      "sha256": "3a5c747a982623279c3b60464b7354a83d01a8daeba373c0f0ae3cc887f2f954"
+      "source_ref": "native/claude.json",
+      "sha256": "e3e43e0ccf0f3f9c7adb2fbdf8bb1aca6e8d59cafaff7ee8dee66de009c30555"
     },
     {
       "id": "claude-2.1.308-prompt-typed-literal-1",
@@ -275,8 +788,8 @@
       "native_version": "2.1.308",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.308-prompt-typed-literal-1.json",
-      "sha256": "1c255fdd9d2a1a5276d5f53ffd7776473b3e0335a97fb4ecc1d61357bb0890dd"
+      "source_ref": "native/claude.json",
+      "sha256": "409494565f1eade8f6f83346f686973c4f50ec6734ae302477f476ed58eeacf6"
     },
     {
       "id": "claude-2.1.308-prompt-post-submit-1",
@@ -285,8 +798,8 @@
       "native_version": "2.1.308",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.308-prompt-post-submit-1.json",
-      "sha256": "abc4e973dfcaaee80bd124d3b423dfa5c702c3e845fe0cc6b09feacc4c186bf1"
+      "source_ref": "native/claude.json",
+      "sha256": "7bc70ba419a1ab0388ebf521d37db6039e944ecc90ecdc6bf0044aee7f6da868"
     },
     {
       "id": "claude-2.1.308-exec-empty-composer-1",
@@ -295,8 +808,8 @@
       "native_version": "2.1.308",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.308-exec-empty-composer-1.json",
-      "sha256": "10e07c1b5b24cb7225197957e2d06ff25959e146f4ed55676d2199aca3add856"
+      "source_ref": "native/claude.json",
+      "sha256": "997b6e573b858d1cbf5aa0079a26d069b534023e00b865ea85c3e43951679a6f"
     },
     {
       "id": "claude-2.1.308-exec-typed-literal-1",
@@ -305,8 +818,8 @@
       "native_version": "2.1.308",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.308-exec-typed-literal-1.json",
-      "sha256": "ecdb3a8d09c2e0f04958e9e3969fdb9d9aec1f523639fe1ea8711cfa7a067973"
+      "source_ref": "native/claude.json",
+      "sha256": "a2de8c903cd78a78d7802e131187bfdcf5cada9f1b0dc0a8e1b13f1be455907b"
     },
     {
       "id": "claude-2.1.308-exec-post-submit-1",
@@ -315,8 +828,8 @@
       "native_version": "2.1.308",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.308-exec-post-submit-1.json",
-      "sha256": "4fdcf7d7dd0b436280ff56f06c51bb6a1100d77be1d53d4f9896a549c45159da"
+      "source_ref": "native/claude.json",
+      "sha256": "dffe51b01a51953149baf19e2c422995a74f61f8cc4b63260d8d082f1d75d46c"
     },
     {
       "id": "codex-0.163.0-prompt-empty-composer-1",
@@ -325,8 +838,8 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-prompt-empty-composer-1.json",
-      "sha256": "e580661c0993024ee5cdbb95541479ccc6e5121402c3bc8e9b2876da453bfb3d"
+      "source_ref": "native/codex.json",
+      "sha256": "938532f90b62d607941ae3a1cf656ea18e3a8b16d2f01ff46e30e5f091bf99e5"
     },
     {
       "id": "codex-0.163.0-prompt-typed-literal-1",
@@ -335,8 +848,8 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-prompt-typed-literal-1.json",
-      "sha256": "162a68edb3f7fca6b0544b348263323476efafb0d059268610b4cdfafad6b63a"
+      "source_ref": "native/codex.json",
+      "sha256": "15888148ca28061693743c4c821283cb713e3e4c7a9f0fea17d50eb3842c6bb6"
     },
     {
       "id": "codex-0.163.0-prompt-post-submit-1",
@@ -345,8 +858,8 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-prompt-post-submit-1.json",
-      "sha256": "d69bbac86d1785b442ecb54047bbb8b502c9603f82871204d6aebef3d8a65f28"
+      "source_ref": "native/codex.json",
+      "sha256": "6668020160ee84c4b8c1f510f938fde9f267ab2e516454fec11c8395733efa22"
     },
     {
       "id": "codex-0.163.0-exec-empty-composer-1",
@@ -355,8 +868,8 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-exec-empty-composer-1.json",
-      "sha256": "87bbd41dfac0b7e01fb7cbed5b5512dde461c3ce9f924264f84dd67b95f907bf"
+      "source_ref": "native/codex.json",
+      "sha256": "938532f90b62d607941ae3a1cf656ea18e3a8b16d2f01ff46e30e5f091bf99e5"
     },
     {
       "id": "codex-0.163.0-exec-typed-literal-1",
@@ -365,8 +878,8 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-exec-typed-literal-1.json",
-      "sha256": "0750e18169afc24d66b3f5757d451f20ffaad9ca78f9559d10cc205f9ed29ced"
+      "source_ref": "native/codex.json",
+      "sha256": "e5603c641c4bb073abfaf0587f4019689a97eae08e389bbdab151ea53ceaab79"
     },
     {
       "id": "codex-0.163.0-exec-post-submit-1",
@@ -375,8 +888,8 @@
       "native_version": "0.163.0",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/codex-0.163.0-exec-post-submit-1.json",
-      "sha256": "6b9ae5b682e1edab7b9df295186200e5edeea2682734c073c0a904f8c39e2872"
+      "source_ref": "native/codex.json",
+      "sha256": "a5b27f5bbd2fc4c5ceec610519cfd5b212e608f5b7b61518d07f7f479a242431"
     },
     {
       "id": "opencode-2.1.4-prompt-empty-composer-1",
@@ -385,8 +898,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-prompt-empty-composer-1.json",
-      "sha256": "241a6a08ad40e247cb1202137cbb9da1535e2c7e449e9e5e6bfb24be497517d3"
+      "source_ref": "native/opencode.json",
+      "sha256": "46246b89227ecddb3a88a02ebb6db055f51a270046a3b3f750486d5015e3920e"
     },
     {
       "id": "opencode-2.1.4-prompt-typed-literal-1",
@@ -395,8 +908,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-prompt-typed-literal-1.json",
-      "sha256": "9f1dccef0b4eb57c9d1b259c77028d47a41a448f47ad1147765d378a08984e04"
+      "source_ref": "native/opencode.json",
+      "sha256": "65e19f3b7c7ae439a83f29117cd3dc6644e8febe618610d84be6b8d2ac3eeec4"
     },
     {
       "id": "opencode-2.1.4-prompt-post-submit-1",
@@ -405,8 +918,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-prompt-post-submit-1.json",
-      "sha256": "789261b779295c17373d6f259c44d1f0c8ca874c30c69bde3896b5b334f1dcd4"
+      "source_ref": "native/opencode.json",
+      "sha256": "c2bf6f4c234166be49e31e453ba1593d975dbcdbde8d883f800f8dab8b70780c"
     },
     {
       "id": "opencode-2.1.4-exec-empty-composer-1",
@@ -415,8 +928,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-exec-empty-composer-1.json",
-      "sha256": "c6c743a4b7ffe92ada7dcccdd1163d664dcebdc6abb8d3a70c01fb84c9ea4b34"
+      "source_ref": "native/opencode.json",
+      "sha256": "46246b89227ecddb3a88a02ebb6db055f51a270046a3b3f750486d5015e3920e"
     },
     {
       "id": "opencode-2.1.4-exec-typed-literal-1",
@@ -425,8 +938,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-exec-typed-literal-1.json",
-      "sha256": "cb2f7eaa5a5a10144fde46ca9005f514f14abf096c04c1f972a8aa67674a5e66"
+      "source_ref": "native/opencode.json",
+      "sha256": "3202e1b8610b65bbc2308faf29df70d8f3d7a6e804d58617b2950c228e6c3a50"
     },
     {
       "id": "opencode-2.1.4-exec-post-submit-1",
@@ -435,8 +948,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/opencode-2.1.4-exec-post-submit-1.json",
-      "sha256": "6c9d577c6faa488da3ba88f94c0c6690154dcc549d3563e4abffa161ffeaefec"
+      "source_ref": "native/opencode.json",
+      "sha256": "62e032a459bce32eee67f2d623ae049a6cb92093a5a6f5e6269fc96412b98365"
     },
     {
       "id": "opencode-2.1.4-narrow-permission-057-1",
@@ -445,8 +958,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
-      "source_ref": "native/opencode-2.1.4-narrow-permission-057-1.json",
-      "sha256": "a7085d984d8fca560c0996996de144b654c3766a06bbb84e387b3effe6a34df9"
+      "source_ref": "native/opencode.json",
+      "sha256": "a1afbe5562d782ea1db3944bebb97f4179f7c5162713525764b82589e478821c"
     },
     {
       "id": "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
@@ -455,8 +968,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
-      "source_ref": "native/opencode-2.1.4-narrow-deny-pre-stage-2-057-1.json",
-      "sha256": "fb731b1eebaaab736018be64b5bc1099f1803db87876697473933cf16b0487a2"
+      "source_ref": "native/opencode.json",
+      "sha256": "7496aa6a0bbc25ec208b3ee714e2d4475d71d6356950a65b67445d53b50d9b45"
     },
     {
       "id": "opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
@@ -465,8 +978,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
-      "source_ref": "native/opencode-2.1.4-narrow-deny-pre-stage-3-057-1.json",
-      "sha256": "bd3c00ec1cdd930d960b28bfd85d3ab53826bf861a8a831ecbe051f7618f08f6"
+      "source_ref": "native/opencode.json",
+      "sha256": "bf41c244c6c91f743168a423aab538de8556afde985f745148f5869737e24bc5"
     },
     {
       "id": "opencode-2.1.4-narrow-long-command-057-1",
@@ -475,8 +988,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
-      "source_ref": "native/opencode-2.1.4-narrow-long-command-057-1.json",
-      "sha256": "1ba505df087beffb1c6351a86401d7ef467c8fe963a232478d0782448c973cab"
+      "source_ref": "native/opencode.json",
+      "sha256": "5ff6950a7446cc39b7911747f4f9e24c64554182a14e9eddf1c56aa9a82a4a8e"
     },
     {
       "id": "opencode-2.1.4-narrow-idle-composer-057-1",
@@ -485,8 +998,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
-      "source_ref": "native/opencode-2.1.4-narrow-idle-composer-057-1.json",
-      "sha256": "20735e881d0befc46ffffa66429f2ac7e5dd6263845c1117b6aed9dde2978e1f"
+      "source_ref": "native/opencode.json",
+      "sha256": "2bdbc6814ef7b0b1c51fd478c1305ab7d1de6a59dfc02f367152434947ff2aa5"
     },
     {
       "id": "opencode-2.1.4-compact-permission-055-1",
@@ -495,8 +1008,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 55,
-      "source_ref": "native/opencode-2.1.4-compact-permission-055-1.json",
-      "sha256": "9150de0d5fee4b94824ba6cb45dd14b7fdb3bf48fdb07306781d2a98b2662fc6"
+      "source_ref": "native/opencode.json",
+      "sha256": "5f6a260dfb315fd4a945869574c8f2c0eb16f0c4455f16e3425d10bb89d968a1"
     },
     {
       "id": "opencode-2.1.4-compact-deny-pre-stage-2-055-1",
@@ -505,8 +1018,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 55,
-      "source_ref": "native/opencode-2.1.4-compact-deny-pre-stage-2-055-1.json",
-      "sha256": "323483fa5f965c096d50f03fcfef0115bfd3b292b99637d06353a33378dd1a01"
+      "source_ref": "native/opencode.json",
+      "sha256": "643b03f0731765a27a3ffa9cd59ae181ebf1fb4a9f72cd804e31fd10d409e9a1"
     },
     {
       "id": "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
@@ -515,8 +1028,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 55,
-      "source_ref": "native/opencode-2.1.4-compact-deny-pre-stage-3-055-1.json",
-      "sha256": "27a41af0b1b6eee76cc987e65175388164e5e81f97fbbaa53031ef29b845ca8d"
+      "source_ref": "native/opencode.json",
+      "sha256": "68acd10220de9fc9c26e64b8e605914c71b3547f6c68e7115ff14b2bc73be284"
     },
     {
       "id": "opencode-2.1.4-narrow-permission-min-1",
@@ -525,8 +1038,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 36,
-      "source_ref": "native/opencode-2.1.4-narrow-permission-min-1.json",
-      "sha256": "41c5d247d69ffd2d37779563941bf1b3f0b405cd193a331921fada45dd21d551"
+      "source_ref": "native/opencode.json",
+      "sha256": "6696328020ad1e17cbad8db07bcc62fc7481a13c7286f359e987d2d72f4ef9b2"
     },
     {
       "id": "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
@@ -535,8 +1048,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 36,
-      "source_ref": "native/opencode-2.1.4-narrow-deny-pre-stage-2-min-1.json",
-      "sha256": "cc366ac7736137e623e5e629ec9a8acdac0b680da0c69eb7e230cbefd6fb82ce"
+      "source_ref": "native/opencode.json",
+      "sha256": "901fd37776f2ed9c8f2b442a69cea0d4f632ee32ea1a65e15de100bef99a9f57"
     },
     {
       "id": "opencode-2.1.4-narrow-deny-pre-stage-3-min-1",
@@ -545,8 +1058,8 @@
       "native_version": "2.1.4",
       "rows": 36,
       "cols": 36,
-      "source_ref": "native/opencode-2.1.4-narrow-deny-pre-stage-3-min-1.json",
-      "sha256": "9717287c8a06acfdb0455c6ee3899e679731af28fd5928798271e4c25463b85b"
+      "source_ref": "native/opencode.json",
+      "sha256": "4fd67984fbf6ba83054300d57514f77b64bf61ee1249bf8f2d944775a419b925"
     },
     {
       "id": "claude-2.1.308-auto-tip-padded-question-1",
@@ -555,8 +1068,8 @@
       "native_version": "2.1.308",
       "rows": 35,
       "cols": 200,
-      "source_ref": "native/claude-2.1.308-auto-tip-padded-question-1.json",
-      "sha256": "e6b51216c0268f087f1e5e099b3e3a79db81c60b608af2a1397f3ff6afafd6b3"
+      "source_ref": "native/claude.json",
+      "sha256": "06ea00f0dab9ff2544c07efe761abcb0b5a85afda2fdae3e098dcdcf2d907b50"
     },
     {
       "id": "claude-2.1.309-read-outside-permission-1",
@@ -565,8 +1078,8 @@
       "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.309-read-outside-permission-1.json",
-      "sha256": "57140e177adee172772af135f17d0f8d140fc9e39d01a22050cb7f1b19b1a1d0"
+      "source_ref": "native/claude.json",
+      "sha256": "3c0dafed86e2a2c11eaebd61f53d233eafeeb57bc625c332015cb06bc06f8fd2"
     },
     {
       "id": "claude-2.1.309-read-outside-long-path-1",
@@ -575,8 +1088,8 @@
       "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.309-read-outside-long-path-1.json",
-      "sha256": "c4a0b8274155486efb55b22bf477e9ca8c7d91ca6ac26dbba166358b3e195a0d"
+      "source_ref": "native/claude.json",
+      "sha256": "c13a42bd54489d9818368ec009e184503db2d445191360626a6f24329bfaa12e"
     },
     {
       "id": "claude-2.1.309-read-outside-allow-pre-stage-1",
@@ -585,8 +1098,8 @@
       "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.309-read-outside-allow-pre-stage-1.json",
-      "sha256": "fc09e94381e9800c976d71cf4b89d2b063610ba85d1bbc38999e02451e548a8f"
+      "source_ref": "native/claude.json",
+      "sha256": "2207c4a42715a110b738278fb5e5ac89ea1ef41295e1ca63cc78448883febe49"
     },
     {
       "id": "claude-2.1.309-read-outside-deny-pre-stage-1",
@@ -595,8 +1108,8 @@
       "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.309-read-outside-deny-pre-stage-1.json",
-      "sha256": "4448a5d1892e5b1aebe26b5857d30ffd3b20aa3e807c797744dd467d77113766"
+      "source_ref": "native/claude.json",
+      "sha256": "536f4469a4e51a69036e50eecbe09cf94c639ac8b09bd28ac15c277afa12babd"
     },
     {
       "id": "claude-2.1.309-read-outside-allow-continuation-1",
@@ -605,8 +1118,8 @@
       "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.309-read-outside-allow-continuation-1.json",
-      "sha256": "438876805e07fb5f850093e1cb7d7f21409aaa8629e7b3d1ca8cca300cd9e3da"
+      "source_ref": "native/claude.json",
+      "sha256": "bfc3254b0a006dc90d10b16b169192eb2ce78f37be77758b32061fc653354fc2"
     },
     {
       "id": "claude-2.1.309-read-outside-deny-continuation-1",
@@ -615,8 +1128,8 @@
       "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.309-read-outside-deny-continuation-1.json",
-      "sha256": "b5f5526aa001aa77a1c2cbfc89015b70d8707f252a0bb391469841b94eefea52"
+      "source_ref": "native/claude.json",
+      "sha256": "a3c61d7bfed936f50f90f4ef011d47ab5e09e790cfc9870b46463ff7d74a53f6"
     },
     {
       "id": "claude-2.1.309-edit-outside-permission-1",
@@ -625,8 +1138,8 @@
       "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
-      "source_ref": "native/claude-2.1.309-edit-outside-permission-1.json",
-      "sha256": "4cfaa138afcbf83b9ea77a6a2746548e0b5e812a01bc84ad93a6939021603932"
+      "source_ref": "native/claude.json",
+      "sha256": "7612b2b6764ce45bd6aad104bae3af08644a3c7b1a044a01207a386cfe6b89fc"
     }
   ],
   "profiles": [
@@ -646,19 +1159,65 @@
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^ Bash command\\s*$"},
-            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
-            {"id": "approval", "scope": "line", "pattern": "^ This command requires approval\\s*$"},
-            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?\\s*$"},
-            {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
-            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"},
-            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "approval",
+              "scope": "line",
+              "pattern": "^ This command requires approval\\s*$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
             "choices": [
-              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
-              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
             ],
             "native_request_id": null
           },
@@ -677,7 +1236,11 @@
             "cursor": "at_end"
           },
           "matchers": [
-            {"id": "prompt", "scope": "line", "pattern": "^❯\\u{a0}"}
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^❯\\u{a0}"
+            }
           ],
           "extract": {
             "operation": null,
@@ -699,20 +1262,70 @@
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^ Bash command\\s*$"},
-            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
-            {"id": "ask_rule", "scope": "line", "pattern": "^ │ Ask rule \\S"},
-            {"id": "auto_hint", "scope": "line", "pattern": "^ /permissions to let auto mode decide\\s*$"},
-            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?\\s*$"},
-            {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
-            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"},
-            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 2\\. (?P<label>No)\\s*$"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "ask_rule",
+              "scope": "line",
+              "pattern": "^ │ Ask rule \\S"
+            },
+            {
+              "id": "auto_hint",
+              "scope": "line",
+              "pattern": "^ /permissions to let auto mode decide\\s*$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. (?P<label>No)\\s*$"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
             "choices": [
-              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
-              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
             ],
             "native_request_id": null
           },
@@ -731,20 +1344,70 @@
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^ Bash command\\s*$"},
-            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
-            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?\\s*$"},
-            {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
-            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"},
-            {"id": "access", "scope": "line", "pattern": "^ [❯ ] 2\\. Yes, and always allow access to \\S.* from this project\\s*$"},
-            {"id": "switch", "scope": "line", "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you\\s*$"},
-            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "access",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, and always allow access to \\S.* from this project\\s*$"
+            },
+            {
+              "id": "switch",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
             "choices": [
-              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
-              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
             ],
             "native_request_id": null
           },
@@ -763,20 +1426,70 @@
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^ Read outside the working directories\\s*$"},
-            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
-            {"id": "question", "scope": "line", "pattern": "^ Allow this read outside the working directories\\?\\s*$"},
-            {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
-            {"id": "keep_allowing", "scope": "line", "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories\\s*$"},
-            {"id": "block_from_now", "scope": "line", "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on\\s*$"},
-            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)\\s*$"},
-            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)\\s*$"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Read outside the working directories\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Allow this read outside the working directories\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "keep_allowing",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories\\s*$"
+            },
+            {
+              "id": "block_from_now",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)\\s*$"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)\\s*$"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
             "choices": [
-              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
-              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
             ],
             "native_request_id": null
           },
@@ -795,11 +1508,27 @@
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^ {2,3}Teach auto mode about your environment\\?\\s*$"},
-            {"id": "focus", "scope": "line", "pattern": "^ {2,3}❯ \\S"},
-            {"id": "footer", "scope": "line", "pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel\\s*$"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ {2,3}Teach auto mode about your environment\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ {2,3}❯ \\S"
+            },
+            {
+              "id": "footer",
+              "scope": "line",
+              "pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel\\s*$"
+            }
           ],
-          "extract": {"operation": null, "choices": [], "native_request_id": null},
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
           "verified_noninteraction": false,
           "sensitive": false
         },
@@ -815,16 +1544,27 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "operation", "scope": "region", "pattern": "\\A● (?P<tool>[A-Z][A-Za-z]*)\\((?P<operation>[^\\n]*(?:\\n  [^⎿\\n][^\\n]*)*?)\\)\\s*\\n  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[(?P<category>[^\\]\\n]+)\\] ∙(?: see(?: https://code\\.claude\\.com/docs/s/claude-code-auto-mode)?)?\\s*\\z"}
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "\\A● (?P<tool>[A-Z][A-Za-z]*)\\((?P<operation>[^\\n]*(?:\\n  [^⎿\\n][^\\n]*)*?)\\)\\s*\\n  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[(?P<category>[^\\]\\n]+)\\] ∙(?: see(?: https://code\\.claude\\.com/docs/s/claude-code-auto-mode)?)?\\s*\\z"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
             "choices": [],
             "native_request_id": null
           },
           "frame": {
-            "require_patterns": ["^❯\\u{a0}"],
-            "reject_patterns": ["^  Showing detailed transcript · ctrl\\+o to toggle"]
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
           },
           "verified_noninteraction": false,
           "sensitive": false
@@ -841,16 +1581,27 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "operation", "scope": "line", "pattern": "^ +(?P<operation>[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\]) · /permissions"}
+            {
+              "id": "operation",
+              "scope": "line",
+              "pattern": "^ +(?P<operation>[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\]) · /permissions"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
             "choices": [],
             "native_request_id": null
           },
           "frame": {
-            "require_patterns": ["^❯\\u{a0}"],
-            "reject_patterns": ["^  Showing detailed transcript · ctrl\\+o to toggle"]
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
           },
           "verified_noninteraction": false,
           "sensitive": false
@@ -867,12 +1618,24 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "notice", "scope": "line", "pattern": "^ +(?P<notice>auto mode disabled by settings)"}
+            {
+              "id": "notice",
+              "scope": "line",
+              "pattern": "^ +(?P<notice>auto mode disabled by settings)"
+            }
           ],
-          "extract": {"operation": null, "choices": [], "native_request_id": null},
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
           "frame": {
-            "require_patterns": ["^❯\\u{a0}"],
-            "reject_patterns": ["^  Showing detailed transcript · ctrl\\+o to toggle"]
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
           },
           "verified_noninteraction": false,
           "sensitive": false
@@ -889,12 +1652,24 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "mode", "scope": "line", "pattern": "^  ⏵⏵ (?P<mode>auto mode) on \\(shift\\+tab to cycle\\)"}
+            {
+              "id": "mode",
+              "scope": "line",
+              "pattern": "^  ⏵⏵ (?P<mode>auto mode) on \\(shift\\+tab to cycle\\)"
+            }
           ],
-          "extract": {"operation": null, "choices": [], "native_request_id": null},
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
           "frame": {
-            "require_patterns": ["^❯\\u{a0}"],
-            "reject_patterns": ["^  Showing detailed transcript · ctrl\\+o to toggle"]
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
           },
           "verified_noninteraction": false,
           "sensitive": false
@@ -955,7 +1730,9 @@
           ]
         },
         "composer": {
-          "rule_ids": ["claude-idle-composer"],
+          "rule_ids": [
+            "claude-idle-composer"
+          ],
           "fixture_ids": [
             "claude-2.1.302-idle-composer-1",
             "claude-2.1.302-auto-idle-composer-1",
@@ -990,9 +1767,16 @@
             "choice_id": "allow-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "31", "required_rule_id": "claude-bash-permission", "required_choice_id": "allow-once"}
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-bash-permission",
+                "required_choice_id": "allow-once"
+              }
             ],
-            "fixture_ids": ["claude-2.1.302-allow-pre-stage-1", "claude-2.1.302-wrapped-allow-pre-stage-1"]
+            "fixture_ids": [
+              "claude-2.1.302-allow-pre-stage-1",
+              "claude-2.1.302-wrapped-allow-pre-stage-1"
+            ]
           },
           {
             "decision": "deny",
@@ -1001,9 +1785,16 @@
             "choice_id": "deny-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "34", "required_rule_id": "claude-bash-permission", "required_choice_id": "deny-once"}
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "claude-bash-permission",
+                "required_choice_id": "deny-once"
+              }
             ],
-            "fixture_ids": ["claude-2.1.302-deny-pre-stage-1", "claude-2.1.302-wrapped-deny-pre-stage-1"]
+            "fixture_ids": [
+              "claude-2.1.302-deny-pre-stage-1",
+              "claude-2.1.302-wrapped-deny-pre-stage-1"
+            ]
           },
           {
             "decision": "allow",
@@ -1012,9 +1803,15 @@
             "choice_id": "allow-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "31", "required_rule_id": "claude-auto-ask-permission", "required_choice_id": "allow-once"}
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-auto-ask-permission",
+                "required_choice_id": "allow-once"
+              }
             ],
-            "fixture_ids": ["claude-2.1.302-auto-ask-permission-1"]
+            "fixture_ids": [
+              "claude-2.1.302-auto-ask-permission-1"
+            ]
           },
           {
             "decision": "deny",
@@ -1023,9 +1820,16 @@
             "choice_id": "deny-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "32", "required_rule_id": "claude-auto-ask-permission", "required_choice_id": "deny-once"}
+              {
+                "bytes_hex": "32",
+                "required_rule_id": "claude-auto-ask-permission",
+                "required_choice_id": "deny-once"
+              }
             ],
-            "fixture_ids": ["claude-2.1.302-auto-ask-hiding-refusal-notice-1", "claude-2.1.302-auto-verbose-refusal-above-form-1"]
+            "fixture_ids": [
+              "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
+              "claude-2.1.302-auto-verbose-refusal-above-form-1"
+            ]
           },
           {
             "decision": "allow",
@@ -1034,9 +1838,15 @@
             "choice_id": "allow-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "31", "required_rule_id": "claude-bash-permission-auto-tip", "required_choice_id": "allow-once"}
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-bash-permission-auto-tip",
+                "required_choice_id": "allow-once"
+              }
             ],
-            "fixture_ids": ["claude-2.1.302-access-allow-pre-stage-1"]
+            "fixture_ids": [
+              "claude-2.1.302-access-allow-pre-stage-1"
+            ]
           },
           {
             "decision": "deny",
@@ -1045,9 +1855,15 @@
             "choice_id": "deny-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "34", "required_rule_id": "claude-bash-permission-auto-tip", "required_choice_id": "deny-once"}
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "claude-bash-permission-auto-tip",
+                "required_choice_id": "deny-once"
+              }
             ],
-            "fixture_ids": ["claude-2.1.302-access-deny-pre-stage-1"]
+            "fixture_ids": [
+              "claude-2.1.302-access-deny-pre-stage-1"
+            ]
           },
           {
             "decision": "allow",
@@ -1056,9 +1872,15 @@
             "choice_id": "allow-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "34", "required_rule_id": "claude-read-outside-permission", "required_choice_id": "allow-once"}
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "claude-read-outside-permission",
+                "required_choice_id": "allow-once"
+              }
             ],
-            "fixture_ids": ["claude-2.1.309-read-outside-allow-pre-stage-1"]
+            "fixture_ids": [
+              "claude-2.1.309-read-outside-allow-pre-stage-1"
+            ]
           },
           {
             "decision": "deny",
@@ -1067,9 +1889,15 @@
             "choice_id": "deny-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "33", "required_rule_id": "claude-read-outside-permission", "required_choice_id": "deny-once"}
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-read-outside-permission",
+                "required_choice_id": "deny-once"
+              }
             ],
-            "fixture_ids": ["claude-2.1.309-read-outside-deny-pre-stage-1"]
+            "fixture_ids": [
+              "claude-2.1.309-read-outside-deny-pre-stage-1"
+            ]
           }
         ]
       }
@@ -1090,19 +1918,64 @@
             "cursor": "inside"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^  Would you like to run the following command\\?\\s*$"},
-            {"id": "environment", "scope": "line", "pattern": "^  Environment: \\S+\\s*$"},
-            {"id": "reason", "scope": "line", "pattern": "^  Reason: \\S"},
-            {"id": "operation", "scope": "line", "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*$"},
-            {"id": "focus", "scope": "line", "pattern": "^› [1-9]\\. "},
-            {"id": "allow", "scope": "line", "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)\\s*$"},
-            {"id": "deny", "scope": "line", "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)\\s*$"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  Would you like to run the following command\\?\\s*$"
+            },
+            {
+              "id": "environment",
+              "scope": "line",
+              "pattern": "^  Environment: \\S+\\s*$"
+            },
+            {
+              "id": "reason",
+              "scope": "line",
+              "pattern": "^  Reason: \\S"
+            },
+            {
+              "id": "operation",
+              "scope": "line",
+              "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^› [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)\\s*$"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
             "choices": [
-              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
-              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
             ],
             "native_request_id": null
           },
@@ -1121,7 +1994,11 @@
             "cursor": "at_end"
           },
           "matchers": [
-            {"id": "prompt", "scope": "line", "pattern": "^› "}
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^› "
+            }
           ],
           "extract": {
             "operation": null,
@@ -1143,16 +2020,28 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "operation", "scope": "region", "pattern": "\\A✗ Request denied for codex to run (?P<operation>[^\\n]*\\S(?:\\n  [^\\n]*\\S)*)\\s*\\n\\s*\\z"}
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "\\A✗ Request denied for codex to run (?P<operation>[^\\n]*\\S(?:\\n  [^\\n]*\\S)*)\\s*\\n\\s*\\z"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": "  "},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": "  "
+            },
             "choices": [],
             "native_request_id": null
           },
           "frame": {
-            "require_patterns": ["^(?:› Ask Codex to do anything|  \\? for shortcuts)"],
-            "reject_patterns": ["^  k keep & next · esc dismiss & close"]
+            "require_patterns": [
+              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
+            ],
+            "reject_patterns": [
+              "^  k keep & next · esc dismiss & close"
+            ]
           },
           "verified_noninteraction": false,
           "sensitive": false
@@ -1169,12 +2058,24 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "mode", "scope": "line", "pattern": "^  Permissions: +(?P<mode>Workspace \\(Approve for me\\))\\s*$"}
+            {
+              "id": "mode",
+              "scope": "line",
+              "pattern": "^  Permissions: +(?P<mode>Workspace \\(Approve for me\\))\\s*$"
+            }
           ],
-          "extract": {"operation": null, "choices": [], "native_request_id": null},
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
           "frame": {
-            "require_patterns": ["^(?:› Ask Codex to do anything|  \\? for shortcuts)"],
-            "reject_patterns": ["^  k keep & next · esc dismiss & close"]
+            "require_patterns": [
+              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
+            ],
+            "reject_patterns": [
+              "^  k keep & next · esc dismiss & close"
+            ]
           },
           "verified_noninteraction": false,
           "sensitive": false
@@ -1182,7 +2083,10 @@
       ],
       "capabilities": {
         "annotations": {
-          "rule_ids": ["codex-auto-review-refusal", "codex-auto-review-indicator"],
+          "rule_ids": [
+            "codex-auto-review-refusal",
+            "codex-auto-review-indicator"
+          ],
           "fixture_ids": [
             "codex-0.163.0-auto-refusal-working-1",
             "codex-0.163.0-auto-refusal-idle-1",
@@ -1199,11 +2103,17 @@
           ]
         },
         "detection": {
-          "rule_ids": ["codex-exec-approval"],
-          "fixture_ids": ["codex-0.163.0-on-request-permission-1"]
+          "rule_ids": [
+            "codex-exec-approval"
+          ],
+          "fixture_ids": [
+            "codex-0.163.0-on-request-permission-1"
+          ]
         },
         "composer": {
-          "rule_ids": ["codex-idle-composer"],
+          "rule_ids": [
+            "codex-idle-composer"
+          ],
           "fixture_ids": [
             "codex-0.163.0-idle-composer-1",
             "codex-0.163.0-auto-idle-composer-1",
@@ -1238,9 +2148,15 @@
             "choice_id": "allow-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "79", "required_rule_id": "codex-exec-approval", "required_choice_id": "allow-once"}
+              {
+                "bytes_hex": "79",
+                "required_rule_id": "codex-exec-approval",
+                "required_choice_id": "allow-once"
+              }
             ],
-            "fixture_ids": ["codex-0.163.0-allow-pre-stage-1"]
+            "fixture_ids": [
+              "codex-0.163.0-allow-pre-stage-1"
+            ]
           },
           {
             "decision": "deny",
@@ -1249,9 +2165,15 @@
             "choice_id": "deny-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "33", "required_rule_id": "codex-exec-approval", "required_choice_id": "deny-once"}
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "codex-exec-approval",
+                "required_choice_id": "deny-once"
+              }
             ],
-            "fixture_ids": ["codex-0.163.0-deny-pre-stage-1"]
+            "fixture_ids": [
+              "codex-0.163.0-deny-pre-stage-1"
+            ]
           }
         ]
       }
@@ -1272,20 +2194,73 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^  △ Permission required\\s*$"},
-            {"id": "shell", "scope": "line", "pattern": "^   # Shell command(?:\\s|$)"},
-            {"id": "operation", "scope": "region", "pattern": "(?m)^  \\$ (?P<operation>\\S[^\\n]*(?:\\n  \\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "},
-            {"id": "unclipped", "scope": "region", "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  \\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "},
-            {"id": "controls", "scope": "region", "pattern": "(?m)^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject *| *(?:\\n *)*\\n  ⇆ select  enter confirm  esc reject *)\\z"},
-            {"id": "focus", "scope": "line", "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$", "focus_style": "background"},
-            {"id": "allow", "scope": "line", "pattern": "^   (?P<label>Allow once)   "},
-            {"id": "deny", "scope": "line", "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  △ Permission required\\s*$"
+            },
+            {
+              "id": "shell",
+              "scope": "line",
+              "pattern": "^   # Shell command(?:\\s|$)"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^  \\$ (?P<operation>\\S[^\\n]*(?:\\n  \\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "
+            },
+            {
+              "id": "unclipped",
+              "scope": "region",
+              "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  \\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "
+            },
+            {
+              "id": "controls",
+              "scope": "region",
+              "pattern": "(?m)^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject *| *(?:\\n *)*\\n  ⇆ select  enter confirm  esc reject *)\\z"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$",
+              "focus_style": "background"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^   (?P<label>Allow once)   "
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": "  ", "margin_rows": "continuation", "row_trailer": "█"},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": "  ",
+              "margin_rows": "continuation",
+              "row_trailer": "█"
+            },
             "choices": [
-              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
-              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
             ],
             "native_request_id": null
           },
@@ -1304,8 +2279,16 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^  △ Reject permission\\s*$"},
-            {"id": "empty_reason", "scope": "region", "pattern": "(?m)^  △ Reject permission *(?:\\n *)*\\n  Tell OpenCode what to do differently *(?:\\n *)*\\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *| *(?:\\n *)*\\n  enter confirm  esc cancel *)\\z"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  △ Reject permission\\s*$"
+            },
+            {
+              "id": "empty_reason",
+              "scope": "region",
+              "pattern": "(?m)^  △ Reject permission *(?:\\n *)*\\n  Tell OpenCode what to do differently *(?:\\n *)*\\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *| *(?:\\n *)*\\n  enter confirm  esc cancel *)\\z"
+            }
           ],
           "extract": {
             "operation": null,
@@ -1316,7 +2299,10 @@
           "sensitive": false,
           "continues_rule_id": "opencode-shell-permission",
           "continues_choice_id": "deny-once",
-          "fixture_ids": ["opencode-2.1.4-deny-pre-stage-3", "opencode-2.1.4-narrow-deny-pre-stage-3-057-1"]
+          "fixture_ids": [
+            "opencode-2.1.4-deny-pre-stage-3",
+            "opencode-2.1.4-narrow-deny-pre-stage-3-057-1"
+          ]
         },
         {
           "id": "opencode-shell-permission-compact",
@@ -1330,20 +2316,71 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^△ Permission required\\s*$"},
-            {"id": "shell", "scope": "line", "pattern": "^# Shell command(?:\\s|$)"},
-            {"id": "operation", "scope": "region", "pattern": "(?m)^\\$ (?P<operation>\\S[^\\n]*(?:\\n\\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "},
-            {"id": "unclipped", "scope": "region", "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n\\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "},
-            {"id": "controls", "scope": "region", "pattern": "(?m)^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll *| *(?:\\n *)*\\npgup/pgdn scroll *)\\z"},
-            {"id": "focus", "scope": "line", "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\\s*$", "focus_style": "background"},
-            {"id": "allow", "scope": "line", "pattern": "^ (?P<label>Allow once)   "},
-            {"id": "deny", "scope": "line", "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^△ Permission required\\s*$"
+            },
+            {
+              "id": "shell",
+              "scope": "line",
+              "pattern": "^# Shell command(?:\\s|$)"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^\\$ (?P<operation>\\S[^\\n]*(?:\\n\\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "
+            },
+            {
+              "id": "unclipped",
+              "scope": "region",
+              "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n\\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "
+            },
+            {
+              "id": "controls",
+              "scope": "region",
+              "pattern": "(?m)^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll *| *(?:\\n *)*\\npgup/pgdn scroll *)\\z"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\\s*$",
+              "focus_style": "background"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ (?P<label>Allow once)   "
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+            }
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation", "row_trailer": "█"},
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_trailer": "█"
+            },
             "choices": [
-              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
-              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
             ],
             "native_request_id": null
           },
@@ -1362,8 +2399,16 @@
             "cursor": "any"
           },
           "matchers": [
-            {"id": "heading", "scope": "line", "pattern": "^△ Reject permission\\s*$"},
-            {"id": "empty_reason", "scope": "region", "pattern": "(?m)^△ Reject permission *(?:\\n *)*\\nTell OpenCode what to do differently *(?:\\n *)*\\nenter reject esc back *\\z"}
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^△ Reject permission\\s*$"
+            },
+            {
+              "id": "empty_reason",
+              "scope": "region",
+              "pattern": "(?m)^△ Reject permission *(?:\\n *)*\\nTell OpenCode what to do differently *(?:\\n *)*\\nenter reject esc back *\\z"
+            }
           ],
           "extract": {
             "operation": null,
@@ -1374,7 +2419,10 @@
           "sensitive": false,
           "continues_rule_id": "opencode-shell-permission-compact",
           "continues_choice_id": "deny-once",
-          "fixture_ids": ["opencode-2.1.4-compact-deny-pre-stage-3-055-1", "opencode-2.1.4-narrow-deny-pre-stage-3-min-1"]
+          "fixture_ids": [
+            "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+            "opencode-2.1.4-narrow-deny-pre-stage-3-min-1"
+          ]
         },
         {
           "id": "opencode-idle-composer",
@@ -1388,7 +2436,11 @@
             "cursor": "at_end"
           },
           "matchers": [
-            {"id": "prompt", "scope": "line", "pattern": "^┃ "}
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^┃ "
+            }
           ],
           "extract": {
             "operation": null,
@@ -1402,7 +2454,10 @@
       "capabilities": {
         "annotations": null,
         "detection": {
-          "rule_ids": ["opencode-shell-permission", "opencode-shell-permission-compact"],
+          "rule_ids": [
+            "opencode-shell-permission",
+            "opencode-shell-permission-compact"
+          ],
           "fixture_ids": [
             "opencode-2.1.4-ask-permission-1",
             "opencode-2.1.4-narrow-permission-057-1",
@@ -1411,8 +2466,13 @@
           ]
         },
         "composer": {
-          "rule_ids": ["opencode-idle-composer"],
-          "fixture_ids": ["opencode-2.1.4-idle-composer-1", "opencode-2.1.4-narrow-idle-composer-057-1"],
+          "rule_ids": [
+            "opencode-idle-composer"
+          ],
+          "fixture_ids": [
+            "opencode-2.1.4-idle-composer-1",
+            "opencode-2.1.4-narrow-idle-composer-057-1"
+          ],
           "submission": {
             "prompt": {
               "prefix_hex": "",
@@ -1442,9 +2502,17 @@
             "choice_id": "allow-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission", "required_choice_id": "allow-once", "required_focus_choice_id": "allow-once"}
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "allow-once",
+                "required_focus_choice_id": "allow-once"
+              }
             ],
-            "fixture_ids": ["opencode-2.1.4-allow-pre-stage-1", "opencode-2.1.4-narrow-permission-057-1"]
+            "fixture_ids": [
+              "opencode-2.1.4-allow-pre-stage-1",
+              "opencode-2.1.4-narrow-permission-057-1"
+            ]
           },
           {
             "decision": "deny",
@@ -1453,9 +2521,24 @@
             "choice_id": "deny-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "68", "required_rule_id": "opencode-shell-permission", "required_choice_id": "deny-once", "required_focus_choice_id": "allow-once"},
-              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission", "required_choice_id": "deny-once", "required_focus_choice_id": "deny-once"},
-              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission", "required_choice_id": "deny-once", "required_screen_rule_id": "opencode-reject-reason"}
+              {
+                "bytes_hex": "68",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "allow-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "deny-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "deny-once",
+                "required_screen_rule_id": "opencode-reject-reason"
+              }
             ],
             "fixture_ids": [
               "opencode-2.1.4-deny-pre-stage-1",
@@ -1473,9 +2556,17 @@
             "choice_id": "allow-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission-compact", "required_choice_id": "allow-once", "required_focus_choice_id": "allow-once"}
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "allow-once",
+                "required_focus_choice_id": "allow-once"
+              }
             ],
-            "fixture_ids": ["opencode-2.1.4-compact-permission-055-1", "opencode-2.1.4-narrow-permission-min-1"]
+            "fixture_ids": [
+              "opencode-2.1.4-compact-permission-055-1",
+              "opencode-2.1.4-narrow-permission-min-1"
+            ]
           },
           {
             "decision": "deny",
@@ -1484,9 +2575,24 @@
             "choice_id": "deny-once",
             "focus_matcher_id": "focus",
             "stages": [
-              {"bytes_hex": "68", "required_rule_id": "opencode-shell-permission-compact", "required_choice_id": "deny-once", "required_focus_choice_id": "allow-once"},
-              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission-compact", "required_choice_id": "deny-once", "required_focus_choice_id": "deny-once"},
-              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission-compact", "required_choice_id": "deny-once", "required_screen_rule_id": "opencode-reject-reason-compact"}
+              {
+                "bytes_hex": "68",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "allow-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "deny-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "deny-once",
+                "required_screen_rule_id": "opencode-reject-reason-compact"
+              }
             ],
             "fixture_ids": [
               "opencode-2.1.4-compact-permission-055-1",
