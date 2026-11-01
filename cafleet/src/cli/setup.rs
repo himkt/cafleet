@@ -39,10 +39,7 @@ fn prepare_database(settings: &Settings) -> Result<Connection, CafleetError> {
             CafleetError::App(format!("cannot create {}: {error}", parent.display()))
         })?;
     }
-    if db_file.try_exists().map_err(|cause| {
-        CafleetError::App(format!("cannot inspect database at '{path}': {cause}"))
-    })? {
-        let conn = crate::db::connect_read_only(&settings.database_url)?;
+    if let Some(conn) = crate::db::open_existing(&settings.database_url, true)? {
         let schema = crate::diagnosis::classify_selected_schema(
             &conn,
             crate::db::head_version(),

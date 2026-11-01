@@ -128,17 +128,7 @@ pub(crate) fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetEr
 }
 
 fn database(settings: &Settings) -> (Option<Connection>, SchemaState) {
-    let opened = (|| {
-        let path = crate::db::database_path(&settings.database_url)?;
-        if !Path::new(path).try_exists().map_err(|cause| {
-            CafleetError::App(format!("cannot inspect database at '{path}': {cause}"))
-        })? {
-            return Ok(None);
-        }
-        let conn = crate::db::connect_read_only(&settings.database_url)?;
-        Ok(Some(conn))
-    })();
-    match opened {
+    match crate::db::open_existing(&settings.database_url, true) {
         Ok(Some(conn)) => {
             let schema = diagnosis::classify_selected_schema(
                 &conn,

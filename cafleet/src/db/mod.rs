@@ -37,6 +37,27 @@ pub(crate) fn connect_read_only(database_url: &str) -> Result<Connection, Caflee
     connect_with_flags(database_url, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
 }
 
+pub(crate) fn open_existing(
+    database_url: &str,
+    read_only: bool,
+) -> Result<Option<Connection>, CafleetError> {
+    let path = database_path(database_url)?;
+    if !std::path::Path::new(path).try_exists().map_err(|cause| {
+        CafleetError::App(format!("cannot inspect database at '{path}': {cause}"))
+    })? {
+        return Ok(None);
+    }
+    let conn = if read_only {
+        connect_read_only(database_url)?
+    } else {
+        connect_with_flags(
+            database_url,
+            rusqlite::OpenFlags::default() & !rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
+        )?
+    };
+    Ok(Some(conn))
+}
+
 fn connect_with_flags(
     database_url: &str,
     flags: rusqlite::OpenFlags,

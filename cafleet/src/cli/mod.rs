@@ -65,14 +65,7 @@ fn invocation_connection(
     database_url: &str,
     deadline: crate::input::Deadline,
 ) -> Result<rusqlite::Connection, CafleetError> {
-    let path = crate::db::database_path(database_url)?;
-    if !std::path::Path::new(path).try_exists().map_err(|cause| {
-        CafleetError::App(format!("cannot inspect database at '{path}': {cause}"))
-    })? {
-        return Err(CafleetError::App(
-            "no cafleet database; run 'cafleet setup'".into(),
-        ));
-    }
+    let missing_database = || CafleetError::App("no cafleet database; run 'cafleet setup'".into());
     let validate = |conn: &mut rusqlite::Connection| {
         crate::input::with_database_budget(conn, deadline, |conn| {
             crate::diagnosis::classify_selected_schema(
@@ -83,10 +76,11 @@ fn invocation_connection(
             .require_current()
         })
     };
-    let mut preflight = crate::db::connect_read_only(database_url)?;
+    let mut preflight =
+        crate::db::open_existing(database_url, true)?.ok_or_else(missing_database)?;
     validate(&mut preflight)?;
     drop(preflight);
-    let mut conn = crate::db::connect(database_url)?;
+    let mut conn = crate::db::open_existing(database_url, false)?.ok_or_else(missing_database)?;
     validate(&mut conn)?;
     Ok(conn)
 }
