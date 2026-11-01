@@ -254,7 +254,7 @@ stored_enum!(DeliveryStatus, "delivery.status", {
     NotSubmitted => "not_submitted", NotApplicable => "not_applicable"
 });
 stored_enum!(DeliveryMethod, "member_input_operations.delivery_method", {
-    Profile => "profile", Fallback => "fallback", Unwrapped => "unwrapped"
+    Profile => "profile", Fallback => "fallback"
 });
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

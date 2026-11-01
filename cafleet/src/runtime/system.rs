@@ -75,10 +75,6 @@ impl CommandRunner for SystemRunner {
     fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
         run_process_until(argv, deadline)
     }
-
-    fn sleep(&self, seconds: f64) {
-        std::thread::sleep(Duration::from_secs_f64(seconds));
-    }
 }
 
 fn spawn_piped(argv: &[String]) -> Result<Child, RunError> {

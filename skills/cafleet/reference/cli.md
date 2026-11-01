@@ -100,7 +100,7 @@ Failure preserves successful stdout and prints `Message NEW_ID was persisted. ` 
 message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; the next send to member MEMBER_ID or the next message wait retries it.
 ```
 
-A busy lock reports `message MESSAGE_ID was not notified to member MEMBER_ID: pane input remained busy; the next send to member MEMBER_ID or the next message wait retries it.` Other causes are runner lock/transport/submission or storage errors, with known run/input context. Storage failures identify the current candidate or selected wait-rotation entry. Budget expiry after earlier deliveries leaves pending work without a diagnostic.
+A busy lock reports `message MESSAGE_ID was not notified to member MEMBER_ID: pane input remained busy; the next send to member MEMBER_ID or the next message wait retries it.` Other causes are runner lock/transport/submission or storage errors, with known run/input context. Storage failures identify the current candidate or selected wait-rotation entry. An exhausted attempt retains its sent prefix and reports failure with current receipt context.
 
 Receipt retirement failure reports `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining `notification_sent=true`. Pre-commit storage failure exits 1. Consume each committed ID once.
 
@@ -299,7 +299,7 @@ Uncertain errors preserve exit category and known receipt/context, including `ex
 
 `delivery` contains `status,method,reason`. Method is `profile`, `fallback` or null before selection. Submission/queue exit 0; queued send has `notification_sent=false`, queued exec `dispatched=false`; submitted send/exec set these flags true. Held prompt/exec exits 1; held send retains commit. `uncertain` requires reconciliation; `not_submitted` certifies zero-byte cancellation; `not_applicable` is broker-only.
 
-Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input`; fallback reasons `submission_plan_unavailable,idle_timeout`. Held send reasons: `observer_unavailable` (no observation), `notification_held` (placement/run/receipt hold), `notification_failed` (lock/transport/storage/submission failure), `delivery_budget_exhausted` (older previews consumed the budget). Queued previews stay unnotified until submission or ACK settlement; later results appear in receipts/events without changing original command output.
+Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input`; fallback reasons `submission_plan_unavailable,idle_timeout`. Held send reasons: `observer_unavailable` (no observation), `notification_held` (placement/run/receipt hold), `notification_failed` (lock/transport/storage/submission failure). Queued previews stay unnotified until submission or ACK settlement; later results appear in receipts/events without changing original command output.
 
 ### Runtime events
 

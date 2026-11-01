@@ -5,8 +5,20 @@ use rusqlite::{Connection, OptionalExtension, params};
 use super::records::{
     MemberActivity, MemberKind, MemberRecord, MemberStatus, Placement, RegisteredMember,
 };
+use crate::broker::runtime::RuntimeSnapshot;
 use crate::error::CafleetError;
 use crate::time::{now_stamp, parse_lenient};
+
+pub(crate) fn missing_run(member_id: i64) -> CafleetError {
+    CafleetError::App(format!("member {member_id} has no recorded run"))
+}
+
+pub(crate) fn require_runtime(member: &MemberRecord) -> Result<&RuntimeSnapshot, CafleetError> {
+    member
+        .runtime
+        .as_ref()
+        .ok_or_else(|| missing_run(member.member_id))
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct NewPlacement {

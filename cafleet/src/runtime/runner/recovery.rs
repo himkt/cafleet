@@ -170,7 +170,7 @@ fn snapshot(
 ) -> Result<(RunRecord, Option<Placement>)> {
     with_database_deadline(conn, until, |conn| {
         let run = storage::member_runtime(conn, member_id)?
-            .ok_or_else(|| error(format!("member {member_id} has no recorded run")))?
+            .ok_or_else(|| crate::broker::members::missing_run(member_id))?
             .run;
         validate_database(conn, &run.database_identity_json)?;
         Ok((run, placement(conn, member_id)?))

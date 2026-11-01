@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::helpers::{available_mux, emit, nonblank, resolve_body, resolve_command_body};
 use crate::broker::records::MemberRecord;
-use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
+use crate::broker::runtime::DeliveryProjection;
 use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::{CodingAgent, ProfileCatalog, SpawnProbe, coding_agent};
@@ -13,7 +13,7 @@ use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::runtime::resolve_mux;
 
-use crate::multiplexer::{AnyMultiplexer, Lead};
+use crate::multiplexer::AnyMultiplexer;
 use crate::output::{
     format_member, format_member_delete, format_member_detail, format_member_exec,
     format_member_list, format_member_prompt,
@@ -140,8 +140,8 @@ pub(crate) enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Submit a native shell command to a member's pane: a wrapped member's runner submits,
-    /// falls back to Escape-first delivery or queues it; unwrapped members keep Escape-first input.
+    /// Submit a native shell command through the member's runner, which uses its measured
+    /// submission plan, delivery fallback or queue.
     #[command(override_usage = "cafleet member exec [OPTIONS] <MEMBER_ID> <COMMAND|--file <PATH>>")]
     Exec {
         /// The target member.
@@ -709,87 +709,41 @@ fn dispatch_input(
     deadline: crate::input::Deadline,
 ) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
     let id = member.member_id;
-    if let Some(runtime) = &member.runtime {
-        use crate::runtime::runner::{InputFailure, SubmissionStatus, SubmitInput};
+    let runtime = broker::members::require_runtime(member)?;
+    use crate::runtime::runner::{InputFailure, SubmissionStatus, SubmitInput};
 
-        let run = &runtime.run;
-        let placement = member.placement.as_ref().expect("placed input member");
-        let random = crate::runtime::system::random_hex32().map_err(|cause| {
-            CafleetError::App(format!("cannot generate input operation key: {cause}"))
-        })?;
-        let request = SubmitInput {
-            operation_key: format!("{}:{}:{random}", kind.as_str(), run.run_id),
-            input_kind: kind,
-            message_id: None,
-            literal: text.into(),
-        };
-        let result = crate::runtime::runner::submit_wrapped_input(
-            conn, settings, run, placement, &request, deadline,
-        )
-        .map_err(CafleetError::from)?;
-        if !matches!(
-            result.status,
-            SubmissionStatus::Accepted | SubmissionStatus::Queued
-        ) {
-            return Err(InputFailure {
-                source: CafleetError::App(wrapped_delivery_refusal(label, id, &result)),
-                run_id: Some(run.run_id),
-                interaction_id: runtime.current_interaction_id,
-                input_id: result.input_id,
-                operation_key: Some(request.operation_key),
-            }
-            .into());
+    let run = &runtime.run;
+    let placement = member.placement.as_ref().expect("placed input member");
+    let random = crate::runtime::system::random_hex32().map_err(|cause| {
+        CafleetError::App(format!("cannot generate input operation key: {cause}"))
+    })?;
+    let request = SubmitInput {
+        operation_key: format!("{}:{}:{random}", kind.as_str(), run.run_id),
+        input_kind: kind,
+        message_id: None,
+        literal: text.into(),
+    };
+    let result = crate::runtime::runner::submit_wrapped_input(
+        conn, settings, run, placement, &request, deadline,
+    )
+    .map_err(CafleetError::from)?;
+    if !matches!(
+        result.status,
+        SubmissionStatus::Accepted | SubmissionStatus::Queued
+    ) {
+        return Err(InputFailure {
+            source: CafleetError::App(wrapped_delivery_refusal(label, id, &result)),
+            run_id: Some(run.run_id),
+            interaction_id: runtime.current_interaction_id,
+            input_id: result.input_id,
+            operation_key: Some(request.operation_key),
         }
-        let delivery = result
-            .delivery
-            .expect("validated submission replies carry their delivery");
-        return Ok((result.input_id, delivery));
+        .into());
     }
-    let Some(locked) = crate::input::lock_member(conn, settings, member, deadline)? else {
-        return Err(CafleetError::App(format!(
-            "member {id}'s pane input remained busy; {label} was not dispatched."
-        )));
-    };
-    if locked.member.runtime.is_some() {
-        return Err(CafleetError::App(
-            "member runtime changed while acquiring pane input".into(),
-        ));
-    }
-    let _span = crate::signals::DeferTermination::begin()?;
-    let placement = locked.member.placement.as_ref().expect("locked placement");
-    let pane = placement
-        .mux_pane_id
-        .as_deref()
-        .expect("locked concrete pane");
-    let prewrite = |cause| {
-        CafleetError::App(format!(
-            "{label} was not dispatched to member {id}: {cause}"
-        ))
-    };
-    let mux = resolve_mux(settings)
-        .map_err(|e| prewrite(e.to_string()))?
-        .bounded(deadline);
-    mux.ensure_available()
-        .map_err(|e| prewrite(e.to_string()))?;
-    let literal = match kind {
-        crate::broker::runtime::InputKind::Prompt => text.to_owned(),
-        crate::broker::runtime::InputKind::Exec => format!("! {text}"),
-        _ => unreachable!("member dispatch selects prompt or exec"),
-    };
-    mux.send_prompt(pane, &literal, Lead::Escape).map_err(|error| {
-        if error.submission_started() { CafleetError::App(format!(
-            "{label} delivery to member {id} is uncertain: {error}. Inspect the pane before retrying."
-        )) } else { prewrite(error.to_string()) }
-    }).map(|()| {
-        (
-            None,
-            DeliveryProjection {
-                status: DeliveryStatus::Submitted,
-                method: Some(DeliveryMethod::Unwrapped),
-                reason: None,
-            },
-        )
-    })
+    let delivery = result
+        .delivery
+        .expect("validated submission replies carry their delivery");
+    Ok((result.input_id, delivery))
 }
 
 struct Dispatch {

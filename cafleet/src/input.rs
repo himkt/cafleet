@@ -244,10 +244,10 @@ pub(crate) fn with_database_budget<T>(
 pub(crate) fn finalize_deletion<T>(
     conn: &mut Connection,
     deadline: Deadline,
-    wrapped: bool,
+    has_run: bool,
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
-    if wrapped {
+    if has_run {
         with_database_budget(conn, deadline, operation)
     } else {
         complete_database_budget(conn, deadline, operation)
@@ -551,21 +551,6 @@ pub(crate) fn lock_deletion<S, T>(
         drop(guards);
         deadline.remaining()?;
     }
-}
-
-pub(crate) fn lock_member(
-    conn: &mut Connection,
-    settings: &Settings,
-    member: &MemberRecord,
-    deadline: Deadline,
-) -> Result<Option<LockedMember>, CafleetError> {
-    lock_member_with_reservation(
-        conn,
-        settings,
-        member,
-        deadline,
-        crate::multiplexer::INPUT_RESERVATION,
-    )
 }
 
 pub(crate) fn lock_member_with_reservation(

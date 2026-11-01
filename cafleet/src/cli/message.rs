@@ -4,7 +4,7 @@ use clap::{Args, Subcommand};
 
 use super::helpers::{emit, resolve_body};
 use crate::broker;
-use crate::broker::runtime::{DeliveryMethod, DeliveryProjection, DeliveryStatus};
+use crate::broker::runtime::{DeliveryProjection, DeliveryStatus};
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::{
@@ -135,8 +135,7 @@ pub(crate) fn run(
             let notification_sent = outcome
                 .as_ref()
                 .is_some_and(|outcome| outcome.sent.contains(&message_id));
-            let (input_id, delivery) =
-                send_delivery(conn, &message, notification_sent, outcome.as_ref())?;
+            let (input_id, delivery) = send_delivery(conn, &message, outcome.as_ref())?;
             emit(
                 json,
                 &presentation::send_outcome(&message, notification_sent, input_id, &delivery),
@@ -194,12 +193,9 @@ pub(crate) fn run(
     }
 }
 
-/// The newly sent message's delivery: broker-only for self-sends and the root Director, its
-/// preview receipt for a wrapped recipient, and the multiplexer path otherwise.
 fn send_delivery(
     conn: &Connection,
     message: &crate::broker::records::MessageRecord,
-    notification_sent: bool,
     outcome: Option<&AttemptOutcome>,
 ) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
     let projection = |status, method, reason: Option<&str>| DeliveryProjection {
@@ -236,25 +232,12 @@ fn send_delivery(
         {
             return Ok((Some(input.input_id), delivery));
         }
-    } else if notification_sent {
-        return Ok((
-            None,
-            projection(
-                DeliveryStatus::Submitted,
-                Some(DeliveryMethod::Unwrapped),
-                None,
-            ),
-        ));
     }
     let reason = match outcome {
         Some(AttemptOutcome {
             held_reason: Some(reason),
             ..
         }) => reason.as_str(),
-        Some(AttemptOutcome {
-            end: AttemptEnd::BudgetExhausted,
-            ..
-        }) => "delivery_budget_exhausted",
         Some(AttemptOutcome {
             end: AttemptEnd::Failed(_),
             ..

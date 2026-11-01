@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::{
-    BackendCore, CommandRunner, Lead, MultiplexerContext, MultiplexerError, PLACEMENT_MISMATCH,
-    PaneInput,
-};
+use super::{BackendCore, CommandRunner, MultiplexerContext, MultiplexerError, PLACEMENT_MISMATCH};
 
 const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
 
@@ -189,23 +186,6 @@ impl TmuxMultiplexer {
             None,
         );
         Ok(pane_id)
-    }
-
-    pub(crate) fn send_prompt(
-        &self,
-        target_pane_id: &str,
-        text: &str,
-        lead: Lead,
-    ) -> Result<(), MultiplexerError> {
-        self.core.send_prompt(
-            text,
-            &PaneInput {
-                escape: tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Escape"]),
-                literal: tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", "--", text]),
-                enter: tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Enter"]),
-            },
-            lead,
-        )
     }
 
     /// Capture the last `lines` drawn lines of the pane buffer via the shared

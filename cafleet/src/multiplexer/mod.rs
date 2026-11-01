@@ -10,37 +10,6 @@ use std::time::{Duration, Instant};
 pub(crate) use herdr::HerdrMultiplexer;
 pub(crate) use tmux::TmuxMultiplexer;
 
-pub(crate) const SUBMIT_DELAY: f64 = 1.0;
-pub(crate) const ESCAPE_SETTLE_DELAY: f64 = 0.5;
-pub(crate) const ESCAPE_TIMEOUT: Duration = Duration::from_secs(1);
-pub(crate) const MIN_LITERAL_BUDGET: Duration = Duration::from_millis(500);
-pub(crate) const REVALIDATION_MARGIN: Duration = Duration::from_millis(500);
-const DIRECT_RESERVATION: Duration =
-    Duration::from_millis((SUBMIT_DELAY * 1000.0) as u64).saturating_add(Duration::from_secs(1));
-const ESCAPE_RESERVATION: Duration =
-    DIRECT_RESERVATION.saturating_add(Duration::from_millis((ESCAPE_SETTLE_DELAY * 1000.0) as u64));
-pub(crate) const INPUT_RESERVATION: Duration = REVALIDATION_MARGIN
-    .saturating_add(MIN_LITERAL_BUDGET)
-    .saturating_add(ESCAPE_RESERVATION);
-pub(crate) const INSUFFICIENT_INPUT_BUDGET: &str =
-    "insufficient pane input budget for literal input, settle and Enter";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Lead {
-    Escape,
-    Direct,
-}
-
-impl Lead {
-    /// The settle and Enter time a submission keeps back from its literal input.
-    pub(crate) fn reserved(self) -> Duration {
-        match self {
-            Lead::Escape => ESCAPE_RESERVATION,
-            Lead::Direct => DIRECT_RESERVATION,
-        }
-    }
-}
-
 /// The concrete session, window and pane returned by context discovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MultiplexerContext {
@@ -195,16 +164,9 @@ pub(crate) trait CommandRunner {
                 cleanup_diagnostics: Vec::new(),
             })
     }
-    fn sleep(&self, seconds: f64);
     fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
         Ok(None)
     }
-}
-
-pub(crate) struct PaneInput {
-    pub(crate) escape: Vec<String>,
-    pub(crate) literal: Vec<String>,
-    pub(crate) enter: Vec<String>,
 }
 
 fn whole_seconds(duration: Duration) -> u64 {
@@ -212,8 +174,6 @@ fn whole_seconds(duration: Duration) -> u64 {
 }
 
 const PLACEMENT_MISMATCH: &str = "press target context does not match the recorded placement";
-
-type RunErrorMapper<'a> = dyn Fn(&[String], Option<u64>, RunError) -> MultiplexerError + 'a;
 
 fn map_run_error(
     name: &str,
@@ -374,73 +334,6 @@ impl BackendCore {
         }
         Ok(())
     }
-
-    fn send_prompt(
-        &self,
-        text: &str,
-        input: &PaneInput,
-        lead: Lead,
-    ) -> Result<(), MultiplexerError> {
-        if !crate::input::valid_input(text) {
-            return Err(MultiplexerError::new(
-                "send_prompt: text must be one non-empty line without control characters",
-            ));
-        }
-        let bounded = self.bounded(crate::input::Deadline::new());
-        submit_prompt(
-            bounded.runner.as_ref(),
-            input,
-            lead,
-            &|argv, timeout_secs, error| bounded.map_error(argv, timeout_secs, error),
-            self.pane_gone,
-        )
-    }
-}
-
-fn submit_prompt(
-    runner: &dyn CommandRunner,
-    input: &PaneInput,
-    lead: Lead,
-    map_error: &RunErrorMapper<'_>,
-    pane_gone: fn(&str) -> bool,
-) -> Result<(), MultiplexerError> {
-    let PaneInput {
-        escape,
-        literal,
-        enter,
-    } = input;
-    let unreserved = |reserved: Duration| {
-        runner
-            .remaining_budget()
-            .map_err(|error| map_error(literal, None, error))?
-            .expect("submission uses a deadline-bounded runner")
-            .checked_sub(reserved)
-            .filter(|budget| !budget.is_zero())
-            .ok_or_else(|| MultiplexerError::new(INSUFFICIENT_INPUT_BUDGET))
-    };
-    let slack = unreserved(lead.reserved())?;
-    if lead == Lead::Escape {
-        let timeout = slack.min(ESCAPE_TIMEOUT);
-        runner
-            .run_for(escape, timeout)
-            .map_err(|error| map_error(escape, Some(whole_seconds(timeout)), error))?;
-        runner.sleep(ESCAPE_SETTLE_DELAY);
-    }
-    let literal_budget = unreserved(Lead::Direct.reserved())?;
-    runner.run_for(literal, literal_budget).map_err(|error| {
-        let not_sent = match &error {
-            RunError::BinaryNotFound(_) | RunError::NotStarted(_) => true,
-            RunError::Failed { stderr } => pane_gone(stderr),
-            RunError::Timeout => false,
-        };
-        let error = map_error(literal, Some(whole_seconds(literal_budget)), error);
-        if not_sent { error } else { error.after_write() }
-    })?;
-    runner.sleep(SUBMIT_DELAY);
-    runner
-        .run(enter, Some(5))
-        .map_err(|error| map_error(enter, Some(5), error).after_write())?;
-    Ok(())
 }
 
 pub(crate) struct DeadlineRunner {
@@ -487,16 +380,6 @@ impl CommandRunner for DeadlineRunner {
             return Err(TimedRunError::before_launch());
         }
         self.runner.run_until(argv, deadline)
-    }
-
-    fn sleep(&self, seconds: f64) {
-        if let Ok(remaining) = self.deadline.remaining() {
-            self.runner.sleep(
-                Duration::from_secs_f64(seconds)
-                    .min(remaining)
-                    .as_secs_f64(),
-            );
-        }
     }
 
     fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
@@ -640,18 +523,6 @@ impl AnyMultiplexer {
         match self {
             Self::Tmux(mux) => mux.split_window(reference, env, command),
             Self::Herdr(mux) => mux.split_window(reference, env, command),
-        }
-    }
-
-    pub(crate) fn send_prompt(
-        &self,
-        target_pane_id: &str,
-        text: &str,
-        lead: Lead,
-    ) -> Result<(), MultiplexerError> {
-        match self {
-            Self::Tmux(mux) => mux.send_prompt(target_pane_id, text, lead),
-            Self::Herdr(mux) => mux.send_prompt(target_pane_id, text, lead),
         }
     }
 

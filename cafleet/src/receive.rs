@@ -57,8 +57,6 @@ pub(crate) struct AttemptOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AttemptEnd {
     NoPending,
-    Drained,
-    BudgetExhausted,
     Held,
     Failed(NotificationError),
 }

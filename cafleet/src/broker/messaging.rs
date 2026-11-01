@@ -122,18 +122,6 @@ pub(crate) fn oldest_pending_preview(
     Ok(None)
 }
 
-pub(crate) fn stamp_notified_validated(
-    conn: &Connection,
-    message_id: i64,
-    when: &str,
-) -> Result<bool, CafleetError> {
-    let changed = conn.execute(
-        &format!("UPDATE messages SET notified_at=?1 WHERE message_id=?2 AND {PENDING_PREVIEW}"),
-        params![when, message_id],
-    )?;
-    Ok(changed == 1)
-}
-
 pub(crate) fn poll_messages(
     conn: &Connection,
     member_id: i64,

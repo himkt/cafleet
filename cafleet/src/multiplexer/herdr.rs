@@ -4,8 +4,8 @@ use std::rc::Rc;
 use serde_json::Value;
 
 use super::{
-    BackendCore, CommandRunner, Lead, MultiplexerContext, MultiplexerError, PLACEMENT_MISMATCH,
-    PaneCleanup, PaneInput, PaneOwnership,
+    BackendCore, CommandRunner, MultiplexerContext, MultiplexerError, PLACEMENT_MISMATCH,
+    PaneCleanup, PaneOwnership,
 };
 
 const PANE_NOT_FOUND: &str = "pane_not_found";
@@ -368,23 +368,6 @@ impl HerdrMultiplexer {
             )?;
         }
         Ok(())
-    }
-
-    pub(crate) fn send_prompt(
-        &self,
-        target_pane_id: &str,
-        text: &str,
-        lead: Lead,
-    ) -> Result<(), MultiplexerError> {
-        self.core.send_prompt(
-            text,
-            &PaneInput {
-                escape: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "escape"]),
-                literal: herdr_argv(&["herdr", "pane", "send-text", target_pane_id, text]),
-                enter: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
-            },
-            lead,
-        )
     }
 
     /// `herdr pane read` prints the raw terminal buffer (no envelope); the
