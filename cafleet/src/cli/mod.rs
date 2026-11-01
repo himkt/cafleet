@@ -172,6 +172,75 @@ pub(crate) mod test_support {
         assert_eq!(error.kind(), kind, "{args:?}: {error}");
         assert!(error.to_string().contains(input), "{args:?}: {error}");
     }
+
+    pub(super) fn isolated_cli(
+        settings: &crate::config::Settings,
+        args: &[&str],
+    ) -> (std::process::Output, String) {
+        use crate::runtime::system::test_support::TestChild;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mux = dir.path().join("tmux");
+        let pane_log = dir.path().join("pane.log");
+        std::fs::write(
+            &mux,
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&mux, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let stdout_path = dir.path().join("stdout");
+        let stderr_path = dir.path().join("stderr");
+        let started = Instant::now();
+        let mut child = TestChild::new(
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    super::tests::isolated_cli_child_path(),
+                    "--ignored",
+                    "--nocapture",
+                    "--test-threads=1",
+                    "--quiet",
+                ])
+                .env(
+                    "CAFLEET_TEST_ISOLATED_CLI",
+                    serde_json::json!({"database_url":settings.database_url,"args":args})
+                        .to_string(),
+                )
+                .env("CAFLEET_TEST_PANE_LOG", &pane_log)
+                .env("PATH", dir.path())
+                .env("TMUX", "cafleet-test,1,0")
+                .env_remove("HERDR_ENV")
+                .env("RUST_BACKTRACE", "0")
+                .stdin(Stdio::null())
+                .stdout(Stdio::from(std::fs::File::create(&stdout_path).unwrap()))
+                .stderr(Stdio::from(std::fs::File::create(&stderr_path).unwrap()))
+                .spawn()
+                .unwrap(),
+        );
+        let status = child.poll_until(started + Duration::from_secs(10)).unwrap();
+        if status.is_none() {
+            child.terminate_until(started + Duration::from_secs(12));
+        }
+        let output = std::process::Output {
+            status: status.unwrap_or_else(|| {
+                panic!(
+                    "isolated CLI exceeded its deadline: {:?}",
+                    std::fs::read_to_string(&stderr_path).unwrap()
+                )
+            }),
+            stdout: std::fs::read(stdout_path).unwrap(),
+            stderr: std::fs::read(stderr_path).unwrap(),
+        };
+        let pane_calls = if pane_log.exists() {
+            std::fs::read_to_string(pane_log).unwrap()
+        } else {
+            String::new()
+        };
+        (output, pane_calls)
+    }
 }
 
 #[cfg(test)]
@@ -179,6 +248,37 @@ mod tests {
     use super::test_support::*;
     use super::*;
     use clap::error::ErrorKind;
+
+    pub(super) fn isolated_cli_child_path() -> &'static str {
+        test_path!(isolated_cli_child)
+    }
+
+    #[test]
+    #[ignore = "owned CLI subprocess entry"]
+    fn isolated_cli_child() {
+        let config: serde_json::Value = serde_json::from_str(
+            &std::env::var("CAFLEET_TEST_ISOLATED_CLI")
+                .expect("explicit isolated CLI configuration"),
+        )
+        .unwrap();
+        let database = crate::db::database_path(config["database_url"].as_str().unwrap()).unwrap();
+        let settings =
+            crate::config::Settings::for_database(std::path::Path::new(database), Some("tmux"));
+        let args = config["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect::<Vec<_>>();
+        let command = parse_cli(&args).unwrap();
+        match dispatch(&settings, command) {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("Error: {error}");
+                std::process::exit(error.exit_code());
+            }
+        }
+    }
 
     #[test]
     fn ordinary_commands_preserve_refused_wal_database_and_sidecar_bytes() {
@@ -626,22 +726,17 @@ mod tests {
     }
 
     #[test]
-    fn member_exec_help_describes_wrapped_and_unwrapped_input_and_orders_member_before_command() {
+    fn member_exec_help_describes_runner_delivery_and_orders_member_before_command() {
         use clap::CommandFactory;
         let help = subcommand_help(&["member", "exec"]);
         let lower = help.to_lowercase();
-        for term in ["unwrapped", "escape"] {
-            assert!(
-                lower.contains(term),
-                "member exec help mentions {term}: {help}"
-            );
-        }
         assert!(
-            lower
-                .split("unwrapped")
-                .next()
-                .is_some_and(|before| before.contains("wrapped")),
-            "member exec help describes wrapped members before the unwrapped exception: {help}"
+            lower.contains("runner"),
+            "member exec help describes runner delivery: {help}"
+        );
+        assert!(
+            lower.contains("fallback") || lower.contains("falls back"),
+            "member exec help describes delivery fallback: {help}"
         );
         let mut command = CliArgs::command();
         let usage = flattened(

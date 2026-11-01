@@ -285,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn send_delivery_reports_self_sends_the_root_director_and_unwrapped_notifications() {
+    fn send_delivery_reports_self_sends_the_root_director_and_run_less_recipients() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "branches");
@@ -303,16 +303,6 @@ mod tests {
                 false,
                 projection(DeliveryStatus::NotApplicable, None, Some("director_stdout")),
             ),
-            (
-                director,
-                worker,
-                true,
-                projection(
-                    DeliveryStatus::Submitted,
-                    Some(DeliveryMethod::Unwrapped),
-                    None,
-                ),
-            ),
         ] {
             let message = broker::send_message(&mut conn, from, to, "branch").unwrap();
             assert_eq!(
@@ -320,6 +310,110 @@ mod tests {
                 (None, expected),
                 "{from} -> {to}"
             );
+        }
+        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+        let (output, pane_calls) = crate::cli::test_support::isolated_cli(
+            &settings,
+            &[
+                "message",
+                "send",
+                "--from-member-id",
+                &director.to_string(),
+                "--to-member-id",
+                &worker.to_string(),
+                "committed run-less assignment",
+                "--json",
+            ],
+        );
+        assert_eq!(output.status.code(), Some(0));
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(
+            stdout
+                .lines()
+                .find(|line| line.starts_with('{'))
+                .expect("successful send JSON"),
+        )
+        .unwrap();
+        let message_id = payload["message"]["message_id"].as_i64().unwrap();
+        let message = broker::get_message(&conn, message_id).unwrap();
+        assert_eq!(message.from_member_id, director);
+        assert_eq!(message.to_member_id, worker);
+        assert_eq!(message.text, "committed run-less assignment");
+        assert_eq!(payload["message"], presentation::message(&message));
+        assert_eq!(
+            payload["delivery"],
+            serde_json::json!({
+                "status":"held", "method":null, "reason":"notification_failed",
+            })
+        );
+        assert_eq!(payload["notification_sent"], false);
+        assert_eq!(payload["input_id"], serde_json::Value::Null);
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            format!(
+                "Message {message_id} was persisted. message {message_id} was not notified to member {worker}: member {worker} has no recorded run; the next send to member {worker} or the next message wait retries it.\n"
+            ),
+        );
+        assert!(pane_calls.is_empty(), "{pane_calls}");
+        assert_eq!(broker::poll_messages(&conn, worker).unwrap(), [message]);
+        assert_eq!(
+            conn.query_row(
+                "SELECT notified_at FROM messages WHERE message_id=?1",
+                [message_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn message_wait_repeats_missing_run_causes_for_each_pending_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "run-less wait");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let messages = ["first", "second"]
+            .map(|body| broker::send_message(&mut conn, director, worker, body).unwrap());
+        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+        let expected = messages.iter().map(|message| format!(
+            "message {} was not notified to member {worker}: member {worker} has no recorded run; the next send to member {worker} or the next message wait retries it.\n",
+            message.message_id,
+        )).collect::<String>();
+        for _ in 0..2 {
+            let (output, pane_calls) = crate::cli::test_support::isolated_cli(
+                &settings,
+                &[
+                    "message",
+                    "wait",
+                    &director.to_string(),
+                    "--timeout",
+                    "2",
+                    "--json",
+                ],
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert_eq!(String::from_utf8(output.stderr).unwrap(), expected);
+            assert!(pane_calls.is_empty(), "{pane_calls}");
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let payload: serde_json::Value = serde_json::from_str(
+                stdout
+                    .lines()
+                    .find(|line| line.starts_with('{'))
+                    .expect("wait JSON"),
+            )
+            .unwrap();
+            assert_eq!(payload["member_id"], director);
+            assert_eq!(payload["outcome"], "timeout");
+            assert_eq!(payload["messages"], serde_json::json!([]));
+            assert_eq!(
+                broker::poll_messages(&conn, worker).unwrap(),
+                messages.iter().rev().cloned().collect::<Vec<_>>()
+            );
+            assert_eq!(conn.query_row(
+                "SELECT COUNT(*) FROM messages WHERE to_member_id=?1 AND notified_at IS NOT NULL",
+                [worker], |row| row.get::<_, i64>(0),
+            ).unwrap(), 0);
         }
     }
 

@@ -1122,6 +1122,43 @@ mod tests {
     use std::rc::Rc;
     use std::time::{Duration, Instant};
 
+    fn assert_run_less_input_failure(action: &str) {
+        let (_dir, settings, conn, member_id) = recovery_entry::run_less_registry();
+        let id = member_id.to_string();
+        let (output, pane_calls) = crate::cli::test_support::isolated_cli(
+            &settings,
+            &["member", action, &id, "literal input", "--json"],
+        );
+        assert!(pane_calls.is_empty(), "{action}: {pane_calls}");
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            format!("Error: member {member_id} has no recorded run\n")
+        );
+        assert!(
+            broker::active_member_fleet(&conn, member_id)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn member_prompt_run_less_member_fails_before_pane_io() {
+        assert_run_less_input_failure("prompt");
+    }
+
+    #[test]
+    fn member_exec_run_less_member_fails_before_pane_io() {
+        assert_run_less_input_failure("exec");
+    }
+
     const EXTERNAL_MEMBER_ENV: &str = "CAFLEET_TEST_EXTERNAL_MEMBER_CONFIG";
 
     fn external_member_monotonic_ns() -> u64 {
@@ -2352,27 +2389,23 @@ mod tests {
             }
         }
 
-        fn unwrapped_registry() -> (TempDir, Settings, Connection, i64) {
+        pub(super) fn run_less_registry() -> (TempDir, Settings, Connection, i64) {
             let dir = crate::runtime::runner::test_support::short_tempdir();
             let mut conn = migrated_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "recovery-entry");
-            let member_id = crate::broker::register_member(
+            let member_id = crate::broker::members::test_support::register(
                 &mut conn,
                 fleet,
-                "unwrapped",
-                "recovery lookup fixture",
-                None,
-            )
-            .unwrap()
-            .member_id;
+                "run-less",
+                Some("%2"),
+            );
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
             (dir, settings, conn, member_id)
         }
 
         #[test]
-        fn runner_recovery_entry_unwrapped_member_fails_explicitly_before_registry_or_artifact_mutation()
-         {
-            let (dir, settings, conn, member_id) = unwrapped_registry();
+        fn member_recover_run_less_member_fails_explicitly_before_registry_or_artifact_mutation() {
+            let (dir, settings, conn, member_id) = run_less_registry();
             let path = std::path::PathBuf::from(conn.path().unwrap());
             drop(conn);
             let before = std::fs::read(&path).unwrap();
@@ -2386,12 +2419,12 @@ mod tests {
                 CliArgs::try_parse_from(["cafleet", "member", "recover", &id, "--json"]).unwrap();
             let result = dispatch(&settings, args.command);
             let error = match result {
-                Ok(()) => panic!("an unwrapped member has no recorded run to recover"),
+                Ok(()) => panic!("a run-less member has no recorded run to recover"),
                 Err(error) => error,
             };
             let message = error.message();
-            assert!(message.contains("run"), "{message}");
-            assert!(message.contains(&id), "{message}");
+            assert_eq!(message, format!("member {member_id} has no recorded run"));
+            assert_eq!(error.exit_code(), 1);
             assert_eq!(std::fs::read(&path).unwrap(), before);
             let mut after_names = std::fs::read_dir(dir.path())
                 .unwrap()

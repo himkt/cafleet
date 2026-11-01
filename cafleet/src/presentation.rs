@@ -528,12 +528,12 @@ mod tests {
             assert_eq!(runtime["owner_start_identity"], "fixture-start-identity");
             assert_eq!(runtime["child_pid"], Value::Null);
             assert_eq!(runtime["child_start_identity"], Value::Null);
-            let unwrapped =
+            let director =
                 crate::broker::get_member(&fixture.conn, fixture.director, fixture.fleet)
                     .unwrap()
                     .unwrap();
             assert_eq!(
-                crate::presentation::member(&unwrapped).get("runtime"),
+                crate::presentation::member(&director).get("runtime"),
                 Some(&Value::Null)
             );
             let text = crate::output::format_member_detail(&member);

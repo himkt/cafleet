@@ -249,8 +249,8 @@ impl TmuxMultiplexer {
 #[cfg(test)]
 mod tests {
 
-    use crate::multiplexer::test_support::{FakeRunner, argv, env, run_event, sleep_event};
-    use crate::multiplexer::{Lead, MultiplexerContext, RunError, TmuxMultiplexer};
+    use crate::multiplexer::test_support::{FakeRunner, argv, env, run_event};
+    use crate::multiplexer::{MultiplexerContext, RunError, TmuxMultiplexer};
 
     fn tmux_env() -> std::collections::HashMap<String, String> {
         env(&[
@@ -397,43 +397,6 @@ mod tests {
                 argv(&["tmux", "select-layout", "-t", "@1", "main-vertical"]),
             ]
         );
-    }
-
-    #[test]
-    fn escape_lead_sends_the_escape_key_and_settles_before_the_literal() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.succeed(3);
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let text = "[cafleet msg 5 from 2 timestamp] hello";
-        mux.send_prompt("%5", text, Lead::Escape).unwrap();
-        assert_eq!(
-            runner.run_argvs(),
-            vec![
-                argv(&["tmux", "send-keys", "-t", "%5", "Escape"]),
-                argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", text]),
-                argv(&["tmux", "send-keys", "-t", "%5", "Enter"])
-            ]
-        );
-        let events = runner.events();
-        assert_eq!(events.len(), 5, "{events:?}");
-        assert_eq!(
-            events[0],
-            run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], Some(1))
-        );
-        assert_eq!(events[1], sleep_event(0.5));
-        assert_eq!(events[3], sleep_event(1.0));
-    }
-
-    #[test]
-    fn prompt_line_validation_precedes_transport() {
-        let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        for lead in [Lead::Escape, Lead::Direct] {
-            for text in ["", "  ", "a\nb", "a\rb", "a\tb", "a\0b", "a\x1bb", "a\x7fb"] {
-                assert!(mux.send_prompt("%5", text, lead).is_err(), "{text:?}");
-            }
-        }
-        assert!(runner.events().is_empty());
     }
 
     #[test]

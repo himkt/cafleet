@@ -537,9 +537,9 @@ mod tests {
     use serde_json::json;
 
     use crate::multiplexer::test_support::{
-        FakeRunner, argv, env, herdr_envelope, herdr_error_stderr, run_event, sleep_event,
+        FakeRunner, argv, env, herdr_envelope, herdr_error_stderr, run_event,
     };
-    use crate::multiplexer::{HerdrMultiplexer, Lead, MultiplexerContext, RunError};
+    use crate::multiplexer::{HerdrMultiplexer, MultiplexerContext, RunError};
 
     fn herdr_env() -> std::collections::HashMap<String, String> {
         env(&[("HERDR_ENV", "1")])
@@ -773,31 +773,6 @@ mod tests {
             .split_window(&reference(), &[], &argv(&["claude"]))
             .unwrap();
         assert_eq!(pane, "w1:p3", "a rebalance failure never fails the spawn");
-    }
-
-    #[test]
-    fn escape_lead_sends_the_escape_key_and_settles_before_the_literal() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.succeed(3);
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let text = "[cafleet msg 5 from 2 timestamp] hello";
-        mux.send_prompt("w1:p2", text, Lead::Escape).unwrap();
-        assert_eq!(
-            runner.run_argvs(),
-            vec![
-                argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]),
-                argv(&["herdr", "pane", "send-text", "w1:p2", text]),
-                argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
-            ]
-        );
-        let events = runner.events();
-        assert_eq!(events.len(), 5, "{events:?}");
-        assert_eq!(
-            events[0],
-            run_event(&["herdr", "pane", "send-keys", "w1:p2", "escape"], Some(1))
-        );
-        assert_eq!(events[1], sleep_event(0.5));
-        assert_eq!(events[3], sleep_event(1.0));
     }
 
     #[test]

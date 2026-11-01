@@ -1028,7 +1028,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_fleet_mutable_shutdown_evidence_keeps_one_deadline_and_unwrapped_behavior()
+        fn runner_review_fleet_mutable_shutdown_evidence_keeps_one_deadline_and_run_less_teardown()
         {
             for already_complete in [false, true] {
                 let mut fixture = Fixture::new();
@@ -1111,7 +1111,7 @@ mod tests {
         fn fleet_deletion_ends_every_ordinary_member_and_keeps_the_director_pane() {
             let mut fixture = Fixture::new();
             let fleet = fixture.run.fleet_id;
-            let unwrapped = register(&mut fixture.conn, fleet, "unwrapped", Some("%5"));
+            let run_less = register(&mut fixture.conn, fleet, "run-less", Some("%5"));
             let pending = register(&mut fixture.conn, fleet, "pending", None);
             let placementless = crate::broker::register_member(
                 &mut fixture.conn,
@@ -1132,7 +1132,7 @@ mod tests {
             assert_eq!(deleted.deregistered_count, 5);
             let mut expected = vec![
                 (fixture.run.member_id, "%2 (killed)".to_owned()),
-                (unwrapped, "%5 (killed)".to_owned()),
+                (run_less, "%5 (killed)".to_owned()),
                 (pending, "(pending — no pane)".to_owned()),
                 (placementless, "(no placement)".to_owned()),
             ];
