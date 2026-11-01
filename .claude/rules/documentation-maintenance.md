@@ -187,4 +187,4 @@ Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names
 
 #### Role eligibility
 
-Use a `Role | Eligible | Evidence` table with one Director row and one Member row. Mark `yes` only when every Eligible-tier requirement in § Role requirements is established; otherwise `no` with "not established" or the observed failure. Each Evidence cell names the source, native version and `checked YYYY-MM-DD` for each requirement group in at most two sentences, and a Member row names its bundled profile instead of listing its capabilities.
+Use a `Role | Eligible | Evidence` table with one Director row and one Member row. Mark `yes` only when every Eligible-tier requirement in [Role requirements](../../skills/cafleet/reference/coding-agents.md#role-requirements) is established; otherwise `no` with "not established" or the observed failure. Each Evidence cell names the source, native version and `checked YYYY-MM-DD` for each requirement group in at most two sentences, and a Member row names its bundled profile instead of listing its capabilities.
