@@ -4,7 +4,7 @@ Create independent coding-agent sessions in tmux or herdr, assign work and recei
 
 ## Prerequisites
 
-Follow Quickstart to [install](../quickstart.md#install), [configure](../quickstart.md#configure) and [trust the workspace](../quickstart.md#trust-the-working-directory). Put each selected backend on PATH. Use literal returned IDs and one CAFleet command per shell-tool invocation.
+Follow Quickstart to [install](quickstart.md#install), [configure](quickstart.md#configure) and [trust the workspace](quickstart.md#trust-the-working-directory). Put each selected backend on PATH. Use literal returned IDs and one CAFleet command per shell-tool invocation.
 
 ## Prompt
 
@@ -16,7 +16,7 @@ Your agent loads the Director instructions, arms native reception, creates membe
 
 ## Manual lifecycle
 
-This example uses HOME `/home/cafleet-demo` and workspace `/home/cafleet-demo/work/demo`. Substitute actual absolute paths and the installed skill root, including any [relocated config directory](../quickstart.md#configure).
+This example uses HOME `/home/cafleet-demo` and workspace `/home/cafleet-demo/work/demo`. Substitute actual absolute paths and the installed skill root, including any [relocated config directory](quickstart.md#configure).
 
 ```bash
 cafleet doctor --json
@@ -85,14 +85,14 @@ cafleet message wait 2 --timeout 300 --json
 
 ### Handle an observed permission request
 
-Use [Member permission events](../concepts/member-permission-events.md#consume-a-runtime-event) to verify the durable event/message link, record the unfinished action and ACK consumption. For a current permission request, evaluate its risk and use the Director session’s verified auto mode to decide allow/deny; otherwise obtain user permission. Submit the complete bound response command, give it to the user to execute, or use manual native input when answer coverage is unavailable. Inspect actual output and resumed work, then consume/ACK available records. Input the runner queued during the request is delivered after the interaction closes, and its result arrives as an `input_delivery_result` event. A native command dispatched separately does not answer the original request.
+Use [Member permission events](concepts/members.md#consume-a-runtime-event) to verify the durable event/message link, record the unfinished action and ACK consumption. For a current permission request, evaluate its risk and use the Director session’s verified auto mode to decide allow/deny; otherwise obtain user permission. Submit the complete bound response command, give it to the user to execute, or use manual native input when answer coverage is unavailable. Inspect actual output and resumed work, then consume/ACK available records. Input the runner queued during the request is delivered after the interaction closes, and its result arrives as an `input_delivery_result` event. A native command dispatched separately does not answer the original request.
 
 ### Run a command for a member
 
-A member can ask `Need to run: mise //cafleet:test. My harness denied it.` Authorize and dispatch the exact command:
+A member can ask `Need to run: mise cafleet-test. My harness denied it.` Authorize and dispatch the exact command:
 
 ```bash
-cafleet member exec 3 "mise //cafleet:test"
+cafleet member exec 3 "mise cafleet-test"
 ```
 
 The CLI returns submission metadata. Inspect the native command and result:
@@ -107,7 +107,7 @@ Once the command has finished, explicitly continue a member that has not resumed
 cafleet member prompt 3 "Use the native command output and continue your assignment."
 ```
 
-Inspect failed or uncertain input before authorizing any retry. [Command routing](../concepts/member-lifecycle.md#command-routing) explains the evidence boundary.
+Inspect failed or uncertain input before authorizing any retry. [Command routing](concepts/members.md#command-routing) explains the evidence boundary.
 
 ### Close the fleet
 
@@ -127,4 +127,4 @@ Fleet deletion retains history and leaves the Director's own pane open. When it 
 
 ## Backend variations
 
-Use explicit member backend/model flags to create a mixed team. Resolve role defaults and models through [model choice](../concepts/coding-agents.md#model-choice). OpenCode members perform assignments through their selected provider/model, workspace tools, broker and native shell path. Each member receives its own installed role/core paths, shared BASE and host prerequisites.
+Use explicit member backend/model flags to create a mixed team. Resolve role defaults and models through [model choice](concepts/coding-agents.md#model-choice). OpenCode members perform assignments through their selected provider/model, workspace tools, broker and native shell path. Each member receives its own installed role/core paths, shared BASE and host prerequisites.

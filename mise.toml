@@ -1,16 +1,53 @@
-monorepo_root = true
-
-[monorepo]
-config_roots = [
-  "cafleet",
-  "docs",
-]
-
 [tools]
 "aqua:pnpm/pnpm" = "12.15.0"
 "core:node" = "26.12.1"
 "core:rust" = { version = "1.99.1", components = ["clippy", "rustfmt"] }
 "core:zig" = "0.15.2"
+
+[tasks.cafleet-test]
+dir = "{{config_root}}/cafleet"
+run = "cargo test --lib"
+description = "Run inline unit tests (positional args forward to the cargo test harness)"
+
+[tasks.cafleet-lint]
+dir = "{{config_root}}/cafleet"
+run = ["cargo clippy --all-targets -- -D warnings", "cargo fmt --check"]
+description = "Run clippy (deny warnings) and the rustfmt check"
+
+[tasks.cafleet-format]
+dir = "{{config_root}}/cafleet"
+run = "cargo fmt"
+description = "Format the Rust sources with rustfmt"
+
+[tasks.cafleet-typecheck]
+dir = "{{config_root}}/cafleet"
+run = "cargo check"
+description = "Type-check the package without producing a binary"
+
+[tasks.cafleet-install]
+dir = "{{config_root}}/cafleet"
+run = "cargo install --path ."
+description = "Install the cafleet CLI from the working tree (re-run after source edits to refresh the installed binary)"
+
+[tasks.cafleet-build]
+dir = "{{config_root}}/cafleet"
+run = "cargo build --release"
+description = "Build the release binary into cafleet/target/release/cafleet"
+
+[tasks.docs-dev]
+dir = "{{config_root}}/docs"
+run = "pnpm dev"
+description = "Serve the documentation site locally"
+
+[tasks.docs-install]
+dir = "{{config_root}}/docs"
+run = "pnpm install --frozen-lockfile"
+description = "Install the documentation site dependencies"
+
+[tasks.docs-build]
+dir = "{{config_root}}/docs"
+run = "pnpm build"
+description = "Build the documentation site and check its links"
 
 [tasks.skill-install]
 run = [
@@ -21,7 +58,5 @@ run = [
 description = "Install skills"
 
 [tasks.all-install]
-run = [
-  {"task" = "//cafleet:install"},
-  {"task" = "//:skill-install"},
-]
+run = [{ task = "cafleet-install" }, { task = "skill-install" }]
+description = "Install the CLI and the working-tree skills"

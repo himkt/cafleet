@@ -11,17 +11,12 @@
   },
   {
     "type": "file",
-    "name": "member-lifecycle",
-    "label": "Member lifecycle"
+    "name": "members",
+    "label": "Members"
   },
   {
     "type": "file",
     "name": "storage",
     "label": "Storage"
-  },
-  {
-    "type": "file",
-    "name": "member-permission-events",
-    "label": "Member permission events"
   }
 ]

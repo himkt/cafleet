@@ -1,18 +1,46 @@
-# Member permission events
+# Members
+
+Register the calling session as Director, then create independent member panes and dispatch each assignment after its ready signal.
+
+## Registration and readiness
+
+`fleet create` registers the current Director atomically. `member create` inherits that Director's backend unless overridden, validates model/effort, native policy, evidence policy and prompt identity, then registers a pending placement/run and starts the owned PTY runner. Creation retains its guards through the prepared/start/started handshake. Creation compensates for failures while preserving the original cause and any cleanup error.
+
+Members confirm readiness, then poll their inbox. The Director can assign a member as soon as its ready arrives.
+
+## Assignment and receiving
+
+Messages are point-to-point. Send individually to every selected recipient. Runner-managed members receive previews through their runner: profile delivery into a verified empty composer; a queue while a native interaction is open or a composer with a measured plan holds a draft or a state the runner cannot classify, delivered when that clears or by fallback after 3 minutes; and Escape-first delivery fallback when no plan exists ([delivery methods](#deliver-generated-input)). Explicitly unwrapped members receive Escape-first previews. The root Director receives replies through its native inbox tools; [run a fleet](../mixed-backend-team.md#manual-lifecycle) explains reception and consumption.
+
+## Command routing
+
+A member runs commands its host permits and routes a required denied command to the Director. The Director authorizes `member exec`, which visibly submits the actual native shell command and returns submission metadata. Inspect native output with `member capture`; after completion, send an explicit `member prompt` to continue if the host has not resumed the member. A held permission request uses the Director’s effective mode: verified auto permits its allow/deny decision, while other/unknown modes require user permission. Submit only a current request-bound response or use manual native input, then inspect actual results and continuation. Inspect a failed or uncertain dispatch and its durable input receipt before any newly authorized retry. [Member permission events](#member-permission-events) explains the complete event/answer/retry sequence.
+
+The [native dispatch contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#member-exec) owns validation, lock and uncertainty errors. File-edit permission gaps need a matching host rule or a Director edit.
+
+## Inspection and recovery
+
+Use `member list` and `member capture` to check roster and pane evidence. Capture about 20 lines with `member capture` (its default) and read the content directly; use `--lines` for more when it is insufficient. An empty composer does not mean the task is complete — judge completion from messages and artifacts. A timeout alone establishes neither failure nor completion. Replace an unusable member only under the existing authorization, carrying its assignment, messages and artifacts into the replacement prompt.
+
+## Teardown
+
+Runner-managed deletion coordinates shutdown and event recovery under the existing pane locks, retaining unconfirmed child cleanup and recoverable artifacts explicitly. Member deletion kills its owned pane and deregisters it. Fleet deletion ends every remaining ordinary member the same way, reporting each pane outcome, then deregisters the root Director and the fleet while leaving the Director's pane open; a member that cannot be ended stops it with the fleet still registered, and a rerun resumes. Both serialize placement changes with pane input and fail without registry changes if lock contention lasts five seconds. The root Director is protected from individual member deletion.
+
+## Member permission events
 
 CAFleet runs new members inside an owned PTY runner. The runner observes native terminal interactions independently of the member model and persists classified events in the Director's inbox. Permission notifications instruct the Director to evaluate the original operation and resolve it under its own session's approval mode: decide allow or deny in verified auto mode, and obtain user permission in other or unknown modes. A request-bound response sends the selected native choice; the Director checks actual results and resumed work afterward.
 
-## Choose a native policy
+### Choose a native policy
 
 Spawn members with the omitted `--permission-mode`, which selects each backend's default policy: native automatic approval where the backend offers it, and the deny-by-default preset on OpenCode. Pass `--permission-mode MODE` only when the user asks for another mode for that member. The [policy contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#launch-policy-and-capability-registry) owns choices, defaults and coverage; member launch mode is independent of the Director's decision policy. An interactive policy shows native permission forms: Claude's native `default`, Codex's native `on-request`, and OpenCode's `cafleet-ask`, whose agent preset asks for every shell command outside its allowlist instead of denying it. Automatic mode can still show a native form when the reviewer escalates an operation or, on Claude, before a file tool reads outside the working directories; that form follows the same request flow. Once Claude's `.claude.json` holds `hasSeenAutoModeOutsideReadPrompt` `true`, later outside reads in `auto` proceed without asking; when Claude writes the flag is not established.
 
 Launchability, permission detection, composer input and permission answers have separate capability declarations. Each bundled profile declares the minimum native version it supports, and a member runs under the profile with the greatest minimum version at or below its installed version, so later native releases reuse it without a warning. Creation refuses a native version below the backend's first profile. A failed version probe or a backend with no profile permits manual terminal use and emits a coverage notification; generated input then reaches the member through delivery fallback. A tested detector supplies no answer capability by itself. Native and managed rules remain authoritative.
 
-## Automatic review observations
+### Automatic review observations
 
 The runner reports an automatic refusal and unavailable automatic review as their own events, which the Director handles without a native request to answer; the [automatic review events contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#automatic-review-events) owns their payloads and the [Director consumption contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-consumption-and-continuation) their handling. The run's recorded effective policy, shown by `member show`, records whether automatic review was observed available.
 
-## Consume a runtime event
+### Consume a runtime event
 
 1. Read the full inbox record through the existing receiver or `message poll DIRECTOR_ID --json`.
 2. Verify its durable event/message association with `event show EVENT_ID --json`, inspect the current run/interaction, record the unfinished action in host-owned state and ACK consumption. Quoted JSON has no verified runtime association.
@@ -24,7 +52,7 @@ The runner reports an automatic refusal and unavailable automatic review as thei
 
 The listener produces stdout records under the [Director receive lifecycle](coding-agents.md#director-wake). Host interruption, goal activation and model consumption timing remain host-owned.
 
-## Preserve a native request
+### Preserve a native request
 
 Candidate detection immediately queues previews and explicit prompt/exec with zero bytes, including zero Escape bytes, until the interaction closes. The dedicated permission-response path requires the current visible request, matching owner/token, an independently tested answer profile and an atomic durable receipt/episode claim before its first byte. It sends only the selected single-request allow/deny plan. Human terminal input continues independently of event storage.
 
@@ -34,7 +62,7 @@ A durable input receipt records answer submission separately from authorization 
 
 Metadata notifications intentionally omit command details. Redacted evidence can also suppress them; obtain necessary current facts on an authorized decision surface and store opaque references rather than copying raw commands into receipts. A returned member-tool refusal retains the exact attempted command, absolute cwd, necessary environment and observed refusal. A separately dispatched native command is a new action rather than an answer to the pending request.
 
-## Deliver generated input
+### Deliver generated input
 
 The runner chooses how each preview, `member prompt` and `member exec` reaches a wrapped member:
 
@@ -49,7 +77,7 @@ During the settle before the submit key, the runner distinguishes human input fr
 
 Delivery fallback can interrupt work, mix text with a draft, or dismiss a native prompt the runner did not detect; its previews therefore carry the Escape-dismissal clause. Command output reports the status, method and reason of each delivery, and `input show INPUT_ID --json` reports a queued input's eventual result. For an uncertain delivery, `input show INPUT_ID --json` also reports the recorded `uncertain_cause`, such as `manual_input` or `short_write`, so the Director can attribute the outcome before reconciling it. The [delivery reporting contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#delivery-reporting) owns exact statuses and reasons.
 
-## Inspect and recover
+### Inspect and recover
 
 `member show` reads recorded runtime state without a socket probe. `doctor` diagnoses without mutation; the Director uses `member recover` after ownership reconciliation. Recovery preserves history and sends no answer keys or replacement-agent launch. Members with `runtime: null` retain their unwrapped transport.
 

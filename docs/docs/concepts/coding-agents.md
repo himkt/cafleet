@@ -25,7 +25,7 @@ The flag means slightly different things per command:
 
 Run the root Director on a backend whose Director verdict is `yes`, and spawn members on backends whose Member verdict is `yes`. [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records each backend's verdicts with their evidence; a backend whose Director verdict is `no` runs only as a member.
 
-New members run through the CAFleet PTY runner with a declared detection-coverage state. Omitting `--permission-mode` selects the backend's default policy, its native automatic review where the backend has one; pass the flag only for another native mode the user asks for. Interactive native policies are available as explicit choices on every backend — OpenCode's through its `cafleet-ask` agent preset — with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Each bundled runner profile covers its backend from a minimum native version onward. Detector, composer and answer coverage are independent; without a measured submission plan, generated input uses Escape-first delivery fallback. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](member-permission-events.md) explains the workflow, and the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
+New members run through the CAFleet PTY runner with a declared detection-coverage state. Omitting `--permission-mode` selects the backend's default policy, its native automatic review where the backend has one; pass the flag only for another native mode the user asks for. Interactive native policies are available as explicit choices on every backend — OpenCode's through its `cafleet-ask` agent preset — with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Each bundled runner profile covers its backend from a minimum native version onward. Detector, composer and answer coverage are independent; without a measured submission plan, generated input uses Escape-first delivery fallback. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](members.md#member-permission-events) explains the workflow, and the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
 
 ## cafleet usage from a member pane
 
@@ -42,7 +42,7 @@ including opencode `mini`; [backend capabilities](https://github.com/himkt/cafle
 compares their sandbox and shell-command posture.
 `cafleet member exec` submits a visible native command through the runner, using the profile's measured native-exec plan or delivery fallback and queueing it while a detected native interaction is open; explicitly unwrapped members retain Escape-first input. A member routes a
 command its harness does not run through the Director — see
-[Command routing](member-lifecycle.md#command-routing). The
+[Command routing](members.md#command-routing). The
 [CLI specification](https://github.com/himkt/cafleet/blob/main/SPEC.md#63-cli)
 is the full command reference.
 
@@ -125,8 +125,8 @@ compares them. Because only claude panes display the member name, use the
 
 ## Complete member prompts
 
-Use the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) for a complete role-by-path member prompt. Preserve supplied identities, BASE and host prerequisites.
+Use the [manual lifecycle](../mixed-backend-team.md#manual-lifecycle) for a complete role-by-path member prompt. Preserve supplied identities, BASE and host prerequisites.
 
 ## Director wake
 
-The Director receives replies through its backend's native inbox tools; [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) explains reception, consumption and the manual fallback.
+The Director receives replies through its backend's native inbox tools; [the manual lifecycle](../mixed-backend-team.md#manual-lifecycle) explains reception, consumption and the manual fallback.

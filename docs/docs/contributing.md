@@ -1,6 +1,6 @@
 # Contributing
 
-Develop changes through reviewed designs and the bundled CAFleet workflows. Run repository tasks from the root using mise full-path notation. [SPEC.md](https://github.com/himkt/cafleet/blob/main/SPEC.md) is the specification for the CLI, runtime and storage contracts.
+Develop changes through reviewed designs and the bundled CAFleet workflows. Run repository tasks from the root through mise tasks. [SPEC.md](https://github.com/himkt/cafleet/blob/main/SPEC.md) is the specification for the CLI, runtime and storage contracts.
 
 ## Project structure
 
@@ -27,26 +27,26 @@ git clone https://github.com/himkt/cafleet.git
 Enter the checkout, then run repository-root tasks:
 
 ```bash
-mise //cafleet:install
+mise cafleet-install
 ```
 
 ```bash
 cafleet setup
 ```
 
-Use `mise tasks` and package task definitions as the task registry. Run Rust validation with `mise //cafleet:test` and `mise //cafleet:lint`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use the new implementation.
+Use `mise tasks` and the root `mise.toml` as the task registry. Run Rust validation with `mise cafleet-test` and `mise cafleet-lint`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use the new implementation.
 
 ### Installing the skills from your checkout
 
-Setup installs assets embedded at binary build time. Contributors can install working-tree skills with `mise //:skill-install`; run it after setup when you want those local files. Preserve an active executing team's installed assets until its workflow finishes.
+Setup installs assets embedded at binary build time. Contributors can install working-tree skills with `mise skill-install`; run it after setup when you want those local files. Preserve an active executing team's installed assets until its workflow finishes.
 
 ## Building docs locally
 
-The documentation site retains its Node/pnpm toolchain and lockfile. Run `mise //docs:install`, then `mise //docs:build`; the build checks links. Use the docs task registry for preview and other available operations. Update dependencies through the manifest and regenerate its pnpm lockfile deliberately.
+The documentation site retains its Node/pnpm toolchain and lockfile. Run `mise docs-install`, then `mise docs-build`; the build checks links. Use the root task registry for preview and other available documentation operations. Update dependencies through the manifest and regenerate its pnpm lockfile deliberately.
 
 ## Contributing changes
 
-Follow the [design document workflow](how-to/design-doc-development.md#prompts). Preserve role boundaries, clarification, review and user approval. The active session's host rules determine Git and artifact handling.
+Follow the [design document workflow](concepts/overview.md#prompts). Preserve role boundaries, clarification, review and user approval. The active session's host rules determine Git and artifact handling.
 
 ## Documentation style
 

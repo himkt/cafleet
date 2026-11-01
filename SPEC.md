@@ -1839,7 +1839,7 @@ choosing tools and authorizing commands:
 |---|---|---|
 | MCP-contributed tools | — | Their participation in preset permission evaluation is unverified on opencode 2.1.4. Keep loaded configurations free of MCP servers. |
 | Compound shell commands | <code>git log --stat; curl … &#124; sh</code> | Permission matching for compound lines is unverified on opencode 2.1.4. Submit one command per invocation and authorize each actual command. |
-| Interpreter or hook execution via allowed tooling | `mise //cafleet:test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | Authorize the code and hooks that an allowed command can execute. |
+| Interpreter or hook execution via allowed tooling | `mise cafleet-test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | Authorize the code and hooks that an allowed command can execute. |
 
 cafleet ships no MCP stanzas. Operators MUST keep every loaded opencode
 configuration free of MCP servers. Use the `codex` backend for kernel-enforced

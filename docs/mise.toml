@@ -1,8 +1,0 @@
-[tasks.dev]
-run = "pnpm dev"
-
-[tasks.install]
-run = "pnpm install --frozen-lockfile"
-
-[tasks.build]
-run = "pnpm build"

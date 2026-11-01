@@ -26,9 +26,9 @@ Full guide: <https://himkt.github.io/cafleet/quickstart>
 ## Documentation
 
 - [Quickstart](https://himkt.github.io/cafleet/quickstart) — install, configure, and run your first fleet.
-- [How-to guides](https://himkt.github.io/cafleet/how-to/mixed-backend-team) — prompt-first task guides.
+- [Run a fleet](https://himkt.github.io/cafleet/mixed-backend-team) — prompt-first fleet guide.
 - [Concepts](https://himkt.github.io/cafleet/concepts/overview) — architecture and the ideas behind it.
-- [Member permission events](https://himkt.github.io/cafleet/concepts/member-permission-events) — Director/user decisions, request-bound native responses and continuation.
+- [Members](https://himkt.github.io/cafleet/concepts/members) — member lifecycle, Director/user decisions, request-bound native responses and continuation.
 - [Specification](SPEC.md) — runtime, broker and CLI contracts.
 - [Contributing](https://himkt.github.io/cafleet/contributing) — project layout, local development loop, and the contribution flow.
 

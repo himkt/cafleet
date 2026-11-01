@@ -8,9 +8,9 @@ numbering/format rules live in the shared [design-document guidelines](../../ski
 
 | Audience | Home | Content |
 |---|---|---|
-| Everything (contract) | `SPEC.md` | Every contract: CLI, output, errors, environment, schema, runtime, multiplexer, backends, presets, wire |
-| Users | `docs/` site | Concepts, usage, setup and configuration steps a user performs; exact contract detail is a link to `SPEC.md` |
-| Agents | `skills/` | Necessary-and-sufficient instructions to drive cafleet, with command facts in `skills/cafleet/reference/cli.md` |
+| Everything (contract) | `SPEC.md` | Every contract: CLI, output, errors, environment, schema, runtime, multiplexer, backends, presets, wire. §6.7 Coding-agent backends covers role requirements, per-backend role eligibility, backend argv, model/effort validation, permission posture, presets and host evidence. |
+| Users | `docs/` site | Concepts, usage, setup and configuration steps a user performs; exact contract detail is a link to `SPEC.md`. `docs/docs/concepts/coding-agents.md` explains backend differences, selection and configuration. |
+| Agents | `skills/` | Necessary-and-sufficient instructions to drive cafleet, with command facts in `skills/cafleet/reference/cli.md`. `skills/cafleet/reference/coding-agents.md` owns the runtime overlay. |
 
 Skills never link `docs/` or `SPEC.md`; they carry the facts they need. `SPEC.md` never links `docs/`.
 
@@ -138,3 +138,25 @@ Two rules keep the non-owning mentions honest:
 | A literal `\|` inside a cell | A raw `<code>` element using `&#124;` (plus `&lt;` / `&gt;` when the string also carries angle brackets) |
 
 Use the raw `<code>` entity form above for literal pipes, as established by rendered site evidence. When changing a piped cell, inspect its rendered HTML: a successful build alone does not establish an intact cell.
+
+## Coding-agent overlay
+
+Write CAFleet base instructions so they read the same on every backend: family `SKILL.md` files, workflow bodies, roles, and shared reference pages prescribe neutral behavior and point to the relevant runtime overlay.
+
+### Where backend specifics live
+
+`skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained backend section contains these five subsections in order:
+
+1. **Runtime bindings**: the five runtime placeholders for decision surface, permission flags, pane title, skill loader, and effort levels.
+2. **Role defaults**: the concrete model and effort assignments for reviewers and other members; models come from the backend catalog and effort matches its runtime capability.
+3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
+4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
+5. **Role eligibility**: per-role `yes`/`no` verdicts for Director and Member, each with checked native version, source and date.
+
+Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying `## Template` and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections, including Role eligibility, and re-checks a backend's Role eligibility whenever its bundled profile boundary or `Evidence:` line changes.
+
+### How the base and overlay connect
+
+Each reader entry point places its runtime overlay first in its Required-reading block — as the first table row or the first prose reference — gated before action. Link `coding-agents.md#<name>`, substituting the reader's concrete backend anchor when used. The reader resolves the overlay with the procedure in `skills/cafleet/SKILL.md` § Resolve your overlay, which owns the subject selection, materialization, note application, emission self-check and documented neutral defaults. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
+
+State shared operational facts in each home for its audience.

@@ -12,7 +12,7 @@ CAFleet multiplexes coding-agent sessions and coordinates them through durable p
 
 ## Commands
 
-Use repository-root mise full-path tasks. See `.claude/rules/commands.md` and the task registry for available operations.
+Use repository-root mise tasks. See `.claude/rules/commands.md` and the task registry for available operations.
 
 ## Tests
 
