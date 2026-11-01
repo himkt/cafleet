@@ -4,19 +4,16 @@ Mechanics for inter-member coordination. The design document is the substantive 
 
 ## Payload exemptions
 
-Create and execute iterative coordination uses the verb/pointer schema. Exactly three exchanges use free-form complete payloads:
+Create and execute iterative coordination uses the verb/pointer schema. These exchanges use free-form complete payloads:
 
 | Exchange | Producer and receiver | Boundary |
 |---|---|---|
 | Create pre-draft clarification | Drafter questions and Director user-answer relay | Before design-document content exists; normal coordination resumes with the first draft. |
-| Interview Director/Analyzer exchange | Assignment, numbered question list and corrective replies | Analyzer remains read-only; Director persists questions and answers. |
 | Execute Verifier tool discovery | Verifier's initial tool-and-MCP inventory to Director | First substantive payload after ready; Phase 2 findings use ordinary paired markers. |
 
 Retrieve and send these payloads complete under the cafleet skill's [Send and Poll rules](../../cafleet/SKILL.md#send-unicast) (`--json` reads, `--file` for long bodies), then ACK the consumed delivery.
 
 Fresh-Drafter clarification permits hidden BASE-rooted broker-payload artifacts before drafting; these contain questions, not design-document content. The substantive clarification gate remains: receive answers before creating or writing the design document. Apply the BASE write guards and explicit-output-path rules to payload files.
-
-The Analyzer's no-file-edit boundary remains intact. Send long Analyzer payloads with `message send --file -`, supplying stdin through the backend's supported execution tool to one isolated CAFleet invocation. This uses file input without a filesystem artifact. If that input mechanism is unavailable, route the concrete transport limitation to the Director through the existing permitted path, preserve the complete payload, and report delivery only from observed results. This is not permission to create a payload file or persist Analyzer state. Other read-only producers use this same transport branch when filesystem writes are outside their scope.
 
 ## Verb Vocabulary
 

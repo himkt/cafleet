@@ -48,7 +48,7 @@ Two further rules: if the user's initial request already answers some questions,
 
 ## Resume Mode
 
-When spawned with a resume mode prompt (the document already exists and contains COMMENT markers from a previous interview), follow this behavior instead of the normal clarification-first workflow:
+When spawned with a resume mode prompt (the existing document carries role-tagged `COMMENT(...)` markers, such as user-written or Director-recorded user-relay feedback), follow this behavior instead of the normal clarification-first workflow:
 
 1. **Full scan first**: Read the entire document and identify all `COMMENT(...)` markers before making any edits. Understand the full scope of changes needed.
 2. **Batch application**: Apply all fixes at once for internal consistency. Do not fix markers one at a time in isolation — consider how they interact before editing.
