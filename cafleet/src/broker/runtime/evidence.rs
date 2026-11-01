@@ -1,10 +1,12 @@
-use std::collections::BTreeSet;
-
-use regex::Regex;
-use serde_json::{Map, Value, json};
-
-use super::{EventEvidence, invalid, require};
+use crate::broker::runtime::EventEvidence;
+use crate::broker::runtime::invalid;
+use crate::broker::runtime::require;
 use crate::error::CafleetError;
+use regex::Regex;
+use serde_json::Map;
+use serde_json::Value;
+use serde_json::json;
+use std::collections::BTreeSet;
 
 const SCREEN_FIELDS: [&str; 4] = ["operation", "choices", "native_request_id", "excerpt"];
 const EVIDENCE_LIMIT: usize = 12 * 1024;
@@ -259,7 +261,7 @@ fn validate_operation_rows(object: &Map<String, Value>) -> Result<(), CafleetErr
 
 /// The metadata evidence of a run-scoped event that no screen form produced.
 pub(crate) fn run_metadata(
-    run: &super::RunRecord,
+    run: &crate::broker::runtime::RunRecord,
     rule_id: &str,
     screen_seq: u64,
 ) -> Result<Value, CafleetError> {
@@ -372,10 +374,12 @@ pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
 
+    use crate::broker::runtime as storage;
     use crate::broker::runtime::test_support::*;
-    use crate::broker::runtime::{self as storage, *};
+    use crate::broker::runtime::*;
 
     #[test]
     fn metadata_removes_all_screen_fields_and_hashes_only_post_policy_evidence() {
@@ -418,7 +422,8 @@ mod tests {
     }
 
     fn independent_evidence_digest(value: &Value) -> String {
-        use sha2::{Digest, Sha256};
+        use sha2::Digest;
+        use sha2::Sha256;
         fn sorted(value: &Value) -> Value {
             match value {
                 Value::Object(object) => {

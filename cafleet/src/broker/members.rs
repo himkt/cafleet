@@ -1,12 +1,27 @@
-#[cfg(test)]
-use rusqlite::TransactionBehavior;
-use rusqlite::{Connection, OptionalExtension, params};
-
-use super::records::{
-    MemberActivity, MemberKind, MemberRecord, MemberStatus, Placement, RegisteredMember,
-};
+use crate::broker::MemberActivity;
+use crate::broker::MemberKind;
+use crate::broker::MemberRecord;
+use crate::broker::MemberStatus;
+use crate::broker::Placement;
+use crate::broker::RegisteredMember;
+use crate::broker::runtime::RuntimeSnapshot;
 use crate::error::CafleetError;
-use crate::time::{now_stamp, parse_lenient};
+use crate::time::now_stamp;
+use crate::time::parse_lenient;
+use rusqlite::Connection;
+use rusqlite::OptionalExtension;
+use rusqlite::params;
+
+pub(crate) fn missing_run(member_id: i64) -> CafleetError {
+    CafleetError::App(format!("member {member_id} has no recorded run"))
+}
+
+pub(crate) fn require_runtime(member: &MemberRecord) -> Result<&RuntimeSnapshot, CafleetError> {
+    member
+        .runtime
+        .as_ref()
+        .ok_or_else(|| missing_run(member.member_id))
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct NewPlacement {
@@ -17,20 +32,6 @@ pub(crate) struct NewPlacement {
     pub(crate) coding_agent: String,
 }
 
-#[cfg(test)]
-pub(crate) fn register_member(
-    conn: &mut Connection,
-    fleet_id: i64,
-    name: &str,
-    description: &str,
-    placement: Option<&NewPlacement>,
-) -> Result<RegisteredMember, CafleetError> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let member = register_member_rows(&tx, fleet_id, name, description, placement)?;
-    tx.commit()?;
-    Ok(member)
-}
-
 pub(crate) fn register_member_rows(
     conn: &Connection,
     fleet_id: i64,
@@ -39,7 +40,7 @@ pub(crate) fn register_member_rows(
     placement: Option<&NewPlacement>,
 ) -> Result<RegisteredMember, CafleetError> {
     let now = now_stamp();
-    super::fleets::require_live_fleet(conn, fleet_id)?;
+    crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
     let member_id = insert_member_row(conn, fleet_id, name, description, &now)?;
     if let Some(placement) = placement {
         insert_placement_row(conn, member_id, placement, &now)?;
@@ -122,7 +123,7 @@ pub(crate) fn get_member(
     member_id: i64,
     fleet_id: i64,
 ) -> Result<Option<MemberRecord>, CafleetError> {
-    super::fleets::require_live_fleet(conn, fleet_id)?;
+    crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
     let mut member = conn
         .query_row(
             &format!(
@@ -136,7 +137,7 @@ pub(crate) fn get_member(
         )
         .optional()?;
     if let Some(member) = &mut member {
-        member.runtime = super::runtime::member_runtime(conn, member_id)?;
+        member.runtime = crate::broker::runtime::member_runtime(conn, member_id)?;
     }
     Ok(member)
 }
@@ -165,17 +166,6 @@ pub(crate) fn active_member_fleet(
     )
     .optional()
     .map_err(crate::error::CafleetError::from)
-}
-
-#[cfg(test)]
-pub(crate) fn deregister_member(
-    conn: &mut Connection,
-    member_id: i64,
-) -> Result<bool, CafleetError> {
-    let tx = conn.transaction()?;
-    let changed = deregister_member_rows(&tx, member_id)?;
-    tx.commit()?;
-    Ok(changed)
 }
 
 pub(crate) fn deregister_member_rows(
@@ -207,22 +197,6 @@ pub(crate) fn deregister_member_rows(
         [member_id],
     )?;
     Ok(true)
-}
-
-#[cfg(test)]
-pub(crate) fn update_placement_pane_id(
-    conn: &mut Connection,
-    member_id: i64,
-    pane_id: &str,
-) -> Result<Option<Placement>, CafleetError> {
-    conn.query_row(
-        "UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2
-         RETURNING backend, mux_session, mux_window_id, mux_pane_id, coding_agent, created_at",
-        params![pane_id, member_id],
-        |row| Placement::from_row(row, 0),
-    )
-    .optional()
-    .map_err(crate::error::CafleetError::from)
 }
 
 fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, CafleetError> {
@@ -262,7 +236,7 @@ pub(crate) fn list_members(
     conn: &Connection,
     fleet_id: i64,
 ) -> Result<Vec<MemberActivity>, CafleetError> {
-    super::fleets::require_live_fleet(conn, fleet_id)?;
+    crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
     let now = chrono::Utc::now();
     let mut rows = roster_rows(conn, fleet_id)?;
     for row in &mut rows {
@@ -271,11 +245,70 @@ pub(crate) fn list_members(
     Ok(rows)
 }
 
+pub(crate) fn active_member(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<MemberRecord, CafleetError> {
+    let missing = || CafleetError::App(format!("Member {member_id} not found"));
+    let fleet_id = crate::broker::active_member_fleet(conn, member_id)?.ok_or_else(missing)?;
+    crate::broker::get_member(conn, member_id, fleet_id)?.ok_or_else(missing)
+}
+pub(crate) fn require_pinned_fleet(
+    member_id: i64,
+    actual_fleet: i64,
+    expected_fleet: Option<i64>,
+    operation: &str,
+) -> Result<(), CafleetError> {
+    if expected_fleet.is_some_and(|expected| expected != actual_fleet) {
+        return Err(CafleetError::App(format!(
+            "Member {member_id} changed fleets during {operation}"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
+    use crate::broker::members::*;
+    use rusqlite::TransactionBehavior;
+    pub(crate) fn register_member(
+        conn: &mut Connection,
+        fleet_id: i64,
+        name: &str,
+        description: &str,
+        placement: Option<&NewPlacement>,
+    ) -> Result<RegisteredMember, CafleetError> {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let member = register_member_rows(&tx, fleet_id, name, description, placement)?;
+        tx.commit()?;
+        Ok(member)
+    }
+    pub(crate) fn deregister_member(
+        conn: &mut Connection,
+        member_id: i64,
+    ) -> Result<bool, CafleetError> {
+        let tx = conn.transaction()?;
+        let changed = deregister_member_rows(&tx, member_id)?;
+        tx.commit()?;
+        Ok(changed)
+    }
+    pub(crate) fn update_placement_pane_id(
+        conn: &mut Connection,
+        member_id: i64,
+        pane_id: &str,
+    ) -> Result<Option<Placement>, CafleetError> {
+        conn.query_row(
+            "UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2
+         RETURNING backend, mux_session, mux_window_id, mux_pane_id, coding_agent, created_at",
+            params![pane_id, member_id],
+            |row| Placement::from_row(row, 0),
+        )
+        .optional()
+        .map_err(crate::error::CafleetError::from)
+    }
     use rusqlite::Connection;
 
-    use super::NewPlacement;
+    use crate::broker::members::NewPlacement;
 
     pub(crate) fn placement(pane: Option<&str>) -> NewPlacement {
         NewPlacement {
@@ -293,21 +326,31 @@ pub(crate) mod test_support {
         name: &str,
         pane: Option<&str>,
     ) -> i64 {
-        super::register_member(conn, fleet, name, "assignment", Some(&placement(pane)))
-            .unwrap()
-            .member_id
+        crate::broker::members::test_support::register_member(
+            conn,
+            fleet,
+            name,
+            "assignment",
+            Some(&placement(pane)),
+        )
+        .unwrap()
+        .member_id
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{placement, register};
-    use super::*;
     use crate::broker;
+    use crate::broker::MemberStatus;
     use crate::broker::fleets::test_support::create_fleet_fixture;
-    use crate::broker::records::MemberStatus;
+    use crate::broker::members::test_support::deregister_member;
+    use crate::broker::members::test_support::placement;
+    use crate::broker::members::test_support::register;
+    use crate::broker::members::test_support::register_member;
+    use crate::broker::members::test_support::update_placement_pane_id;
+    use crate::broker::members::*;
+    use crate::cli::guarded_delete_fleet;
     use crate::db::test_support::migrated_conn;
-    use crate::deletion::test_support::guarded_delete_fleet;
 
     #[test]
     fn registration_and_placement_updates_preserve_required_fields_and_valid_absence() {

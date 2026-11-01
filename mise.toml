@@ -21,7 +21,5 @@ run = [
 description = "Install skills"
 
 [tasks.all-install]
-run = [
-  {"task" = "//cafleet:install"},
-  {"task" = "//:skill-install"},
-]
+run = [{ task = "//cafleet:install" }, { task = "//:skill-install" }]
+description = "Install the CLI and the working-tree skills"

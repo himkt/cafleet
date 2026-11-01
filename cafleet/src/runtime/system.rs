@@ -1,18 +1,30 @@
 //! The real process-facing seams: the subprocess [`CommandRunner`] and the
 //! PATH/HOME [`SpawnProbe`].
 
-use std::io::{self, Read, Write};
-use std::os::fd::{AsFd, BorrowedFd};
-
-use nix::fcntl::{FcntlArg, OFlag, fcntl};
-use nix::poll::{PollFd, PollFlags, poll};
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
-
 use crate::coding_agent::SpawnProbe;
-use crate::multiplexer::{CommandRunner, RunError, TimedRunError};
+use crate::multiplexer::CommandRunner;
+use crate::multiplexer::RunError;
+use crate::multiplexer::TimedRunError;
+use nix::fcntl::FcntlArg;
+use nix::fcntl::OFlag;
+use nix::fcntl::fcntl;
+use nix::poll::PollFd;
+use nix::poll::PollFlags;
+use nix::poll::poll;
+use std::ffi::OsStr;
+use std::io;
+use std::io::Read;
+use std::io::Write;
+use std::os::fd::AsFd;
+use std::os::fd::BorrowedFd;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Child;
+use std::process::Command;
+use std::process::ExitStatus;
+use std::process::Stdio;
+use std::time::Duration;
+use std::time::Instant;
 
 pub(crate) fn random_bytes(bytes: &mut [u8; 32]) -> io::Result<()> {
     std::fs::File::open("/dev/urandom").and_then(|mut file| file.read_exact(bytes))
@@ -74,10 +86,6 @@ impl CommandRunner for SystemRunner {
 
     fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
         run_process_until(argv, deadline)
-    }
-
-    fn sleep(&self, seconds: f64) {
-        std::thread::sleep(Duration::from_secs_f64(seconds));
     }
 }
 
@@ -447,12 +455,17 @@ pub(crate) fn read_stdin() -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::io;
-    use std::ops::{Deref, DerefMut};
+    use std::ops::Deref;
+    use std::ops::DerefMut;
     use std::path::Path;
-    use std::process::{Child, Command, ExitStatus, Stdio};
-    use std::time::{Duration, Instant};
+    use std::process::Child;
+    use std::process::Command;
+    use std::process::ExitStatus;
+    use std::process::Stdio;
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use crate::runtime::runner::ProcessIdentity;
+    use crate::runtime::ProcessIdentity;
 
     pub(crate) struct TestChild {
         child: Child,
@@ -530,11 +543,13 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::runtime::system::*;
     use nix::errno::Errno;
-    use nix::sys::wait::{WaitPidFlag, waitpid};
+    use nix::sys::wait::WaitPidFlag;
+    use nix::sys::wait::waitpid;
     use nix::unistd::Pid;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::Mutex;
+    use std::sync::MutexGuard;
     use tempfile::TempDir;
 
     // Concurrent process launches can exhaust a one-second deadline before sh starts.
@@ -834,7 +849,7 @@ mod tests {
     }
 
     mod test_child {
-        use super::super::test_support::TestChild;
+        use crate::runtime::system::test_support::TestChild;
         #[test]
         fn owned_child_guard_cleans_up_when_identity_setup_unwinds() {
             let mut identity = None;
@@ -847,8 +862,7 @@ mod tests {
                         .spawn()
                         .unwrap(),
                 );
-                identity =
-                    crate::runtime::runner::ProcessIdentity::read(i64::from(child.id())).unwrap();
+                identity = crate::runtime::ProcessIdentity::read(i64::from(child.id())).unwrap();
                 panic!("owned identity setup fixture unwind");
             }));
             assert!(result.is_err());

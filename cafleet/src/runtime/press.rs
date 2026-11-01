@@ -1,15 +1,14 @@
-use std::time::Duration;
-
-use rusqlite::Connection;
-
-use crate::broker::{
-    self,
-    records::{MemberKind, MemberRecord},
-};
+use crate::broker;
+use crate::broker::MemberKind;
+use crate::broker::MemberRecord;
 use crate::config::Settings;
+use crate::db::with_database_budget;
 use crate::error::CafleetError;
-use crate::input::{Deadline, with_database_budget};
-use crate::multiplexer::{AnyMultiplexer, PressKeys};
+use crate::multiplexer::AnyMultiplexer;
+use crate::multiplexer::PressKeys;
+use crate::time::Deadline;
+use rusqlite::Connection;
+use std::time::Duration;
 
 pub(crate) struct KeyAcknowledgment {
     pub(crate) member_id: i64,
@@ -48,7 +47,7 @@ pub(crate) fn press_member(
     deadline
         .remaining()
         .map_err(|cause| effect_error(member_id, cause, false))?;
-    let mux = super::resolve_mux(settings)
+    let mux = crate::runtime::resolve_mux(settings)
         .map_err(|cause| effect_error(member_id, CafleetError::App(cause.to_string()), false))?;
     press_member_with_mux(conn, settings, member_id, keys, deadline, &mux)
 }
@@ -80,8 +79,8 @@ pub(crate) fn press_member_with_mux(
                 "press backend does not match the recorded placement".into(),
             ));
         }
-        let _span = crate::signals::DeferTermination::begin()?;
-        let locked = crate::input::lock_member_with_reservation(
+        let _span = crate::time::DeferTermination::begin()?;
+        let locked = crate::pane_lock::lock_member_with_reservation(
             conn,
             settings,
             &member,
@@ -128,20 +127,26 @@ pub(crate) fn press_member_with_mux(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::broker::records::Placement;
+    use crate::broker::Placement;
     use crate::config::Settings;
     use crate::error::CafleetError;
-    use crate::input::{Deadline, PaneLock};
-    use crate::multiplexer::{
-        AnyMultiplexer, CommandRunner, PressKeys, RunError, TimedRunError, TmuxMultiplexer,
-    };
-    use crate::runtime::runner::test_support::Fixture;
-    use nix::sys::signal::{SigSet, Signal};
+    use crate::multiplexer::AnyMultiplexer;
+    use crate::multiplexer::CommandRunner;
+    use crate::multiplexer::PressKeys;
+    use crate::multiplexer::RunError;
+    use crate::multiplexer::TimedRunError;
+    use crate::multiplexer::TmuxMultiplexer;
+    use crate::pane_lock::PaneLock;
+    use crate::runtime::press::*;
+    use crate::runtime::test_support::Fixture;
+    use crate::time::Deadline;
+    use nix::sys::signal::SigSet;
+    use nix::sys::signal::Signal;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::rc::Rc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     #[derive(Clone, Copy, Debug)]
     enum Mode {
@@ -181,9 +186,6 @@ mod tests {
         }
         fn run_for(&self, _: &[String], _: Duration) -> Result<String, RunError> {
             panic!("press does not renew a relative phase budget")
-        }
-        fn sleep(&self, _: f64) {
-            panic!("explicit keys have no prompt settling phase")
         }
         fn run_until(&self, args: &[String], until: Instant) -> Result<String, TimedRunError> {
             assert_eq!(until, self.until);
@@ -327,7 +329,7 @@ mod tests {
     fn post_refusal_lock_diagnostic(probe: &Probe) -> String {
         use std::os::unix::fs::MetadataExt;
 
-        let path = crate::input::lock_path(&probe.database_url, &probe.placement);
+        let path = crate::pane_lock::lock_path(&probe.database_url, &probe.placement);
         let metadata = path.as_ref().map(|path| {
             std::fs::symlink_metadata(path).map(|metadata| {
                 format!(

@@ -1,12 +1,13 @@
+use crate::multiplexer::BackendCore;
+use crate::multiplexer::CommandRunner;
+use crate::multiplexer::MultiplexerContext;
+use crate::multiplexer::MultiplexerError;
+use crate::multiplexer::PLACEMENT_MISMATCH;
+use crate::multiplexer::PaneCleanup;
+use crate::multiplexer::PaneOwnership;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::rc::Rc;
-
-use serde_json::Value;
-
-use super::{
-    BackendCore, CommandRunner, Lead, MultiplexerContext, MultiplexerError, PLACEMENT_MISMATCH,
-    PaneCleanup, PaneInput, PaneOwnership,
-};
 
 const PANE_NOT_FOUND: &str = "pane_not_found";
 
@@ -107,7 +108,7 @@ impl HerdrMultiplexer {
         }
     }
 
-    pub(crate) fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+    pub(crate) fn bounded(&self, deadline: crate::time::Deadline) -> Self {
         Self {
             core: self.core.bounded(deadline),
         }
@@ -141,12 +142,12 @@ impl HerdrMultiplexer {
 
     pub(crate) fn validate_key_target(
         &self,
-        placement: &crate::broker::records::Placement,
-        deadline: crate::input::Deadline,
+        placement: &crate::broker::Placement,
+        deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
-        super::check_deadline(deadline)?;
+        crate::multiplexer::check_deadline(deadline)?;
         self.ensure_available()?;
-        super::check_deadline(deadline)?;
+        crate::multiplexer::check_deadline(deadline)?;
         let current = parse_envelope(&self.core.press_run(
             &herdr_argv(&["herdr", "pane", "current"]),
             deadline,
@@ -189,8 +190,8 @@ impl HerdrMultiplexer {
     pub(crate) fn send_keys(
         &self,
         pane_id: &str,
-        keys: &super::PressKeys,
-        deadline: crate::input::Deadline,
+        keys: &crate::multiplexer::PressKeys,
+        deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
         let mut argv = herdr_argv(&["herdr", "pane", "send-keys", pane_id]);
         argv.extend(keys.herdr_arguments());
@@ -370,33 +371,16 @@ impl HerdrMultiplexer {
         Ok(())
     }
 
-    pub(crate) fn send_prompt(
-        &self,
-        target_pane_id: &str,
-        text: &str,
-        lead: Lead,
-    ) -> Result<(), MultiplexerError> {
-        self.core.send_prompt(
-            text,
-            &PaneInput {
-                escape: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "escape"]),
-                literal: herdr_argv(&["herdr", "pane", "send-text", target_pane_id, text]),
-                enter: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
-            },
-            lead,
-        )
-    }
-
     /// `herdr pane read` prints the raw terminal buffer (no envelope); the
-    /// shared capture windowing ([`super::capture_window`]) enforces the last-N
+    /// shared capture windowing ([`crate::multiplexer::capture_window`]) enforces the last-N
     /// window client-side — the daemon may return more rows than requested.
     pub(crate) fn capture_pane(
         &self,
         target_pane_id: &str,
         lines: i64,
     ) -> Result<String, MultiplexerError> {
-        super::check_capture_lines(lines)?;
-        let fetch_depth = lines + super::CAPTURE_OVER_FETCH_LINES;
+        crate::multiplexer::check_capture_lines(lines)?;
+        let fetch_depth = lines + crate::multiplexer::CAPTURE_OVER_FETCH_LINES;
         let raw = self.run(
             &herdr_argv(&[
                 "herdr",
@@ -412,7 +396,7 @@ impl HerdrMultiplexer {
             ]),
             None,
         )?;
-        Ok(super::capture_window(&raw, lines))
+        Ok(crate::multiplexer::capture_window(&raw, lines))
     }
 
     pub(crate) fn kill_pane(
@@ -536,10 +520,15 @@ fn right_column(panes: &[Value]) -> Result<Vec<Value>, MultiplexerError> {
 mod tests {
     use serde_json::json;
 
-    use crate::multiplexer::test_support::{
-        FakeRunner, argv, env, herdr_envelope, herdr_error_stderr, run_event, sleep_event,
-    };
-    use crate::multiplexer::{HerdrMultiplexer, Lead, MultiplexerContext, RunError};
+    use crate::multiplexer::HerdrMultiplexer;
+    use crate::multiplexer::MultiplexerContext;
+    use crate::multiplexer::RunError;
+    use crate::multiplexer::test_support::FakeRunner;
+    use crate::multiplexer::test_support::argv;
+    use crate::multiplexer::test_support::env;
+    use crate::multiplexer::test_support::herdr_envelope;
+    use crate::multiplexer::test_support::herdr_error_stderr;
+    use crate::multiplexer::test_support::run_event;
 
     fn herdr_env() -> std::collections::HashMap<String, String> {
         env(&[("HERDR_ENV", "1")])
@@ -773,31 +762,6 @@ mod tests {
             .split_window(&reference(), &[], &argv(&["claude"]))
             .unwrap();
         assert_eq!(pane, "w1:p3", "a rebalance failure never fails the spawn");
-    }
-
-    #[test]
-    fn escape_lead_sends_the_escape_key_and_settles_before_the_literal() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.succeed(3);
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let text = "[cafleet msg 5 from 2 timestamp] hello";
-        mux.send_prompt("w1:p2", text, Lead::Escape).unwrap();
-        assert_eq!(
-            runner.run_argvs(),
-            vec![
-                argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]),
-                argv(&["herdr", "pane", "send-text", "w1:p2", text]),
-                argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
-            ]
-        );
-        let events = runner.events();
-        assert_eq!(events.len(), 5, "{events:?}");
-        assert_eq!(
-            events[0],
-            run_event(&["herdr", "pane", "send-keys", "w1:p2", "escape"], Some(1))
-        );
-        assert_eq!(events[1], sleep_event(0.5));
-        assert_eq!(events[3], sleep_event(1.0));
     }
 
     #[test]

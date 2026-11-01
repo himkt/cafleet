@@ -1,20 +1,18 @@
 # Member Role
 
-You are an ordinary member spawned by `cafleet member create`, under its recorded native launch policy ({permission_flags}), by default your backend's automatic approval mode. Attempt every role-authorized command your harness allows, route the denied or automatically refused rest through the Director, and communicate through the Director. Use a backend satisfying the [Member requirements](../reference/coding-agents.md#role-requirements).
+You are an ordinary `cafleet member create` member under its recorded launch policy ({permission_flags}), default the backend's automatic approval mode. Run role-authorized, host-permitted commands; route required denials/automatic refusals to the Director and communicate through it.
 
 ## Required reading
 
-Open your authoritative role first. Use an available non-shell text reader; when shell is the only text reader, prerequisite file-reading commands may precede ready. Send ready as your first operational broker shell command, before ordinary task work. Complete these reads in order before processing your assignment; the ready handshake is excepted.
+Open your authoritative role first. Use an available non-shell text reader; prerequisite file reads may use shell when it is the only reader. Ready is your first operational broker shell command. Complete these reads before processing assignments; the ready handshake is excepted.
 
 | # | Read | Responsibility |
 |---|---|---|
-| 1 | Your backend section in [coding-agents.md](../reference/coding-agents.md) | Resolve your Runtime bindings and bound notes using your `CODING AGENT:` identity. |
-| 2 | [CAFleet core](../SKILL.md) and this member role | Load through your backend's supported loader; learn identity, Send/Poll/ACK and command authority. |
-| 3 | [BASE contract](../reference/base-dir.md) | Use the supplied path and disabled-audit rules; members inherit BASE. |
+| 1 | Your backend in [coding-agents.md](../reference/coding-agents.md) | Resolve Runtime bindings and bound notes using `CODING AGENT:`. |
+| 2 | [CAFleet core](../SKILL.md) and this role | Load through your backend's supported loader; learn identity, communication and command authority. |
+| 3 | [BASE](#base) | Inherit the supplied path and disabled-audit state. |
 
-Read any assigned workflow's skill core, format, coordination and role-required references before task work. Codex/OpenCode load these through absolute file paths. Loading an umbrella as an assigned member continues the existing workflow and creates no new team.
-
-Read [command routing](../reference/prompt-routing.md) before routing a command your harness denied. Director policy and supervision remain outside ordinary-member startup.
+Read the assigned workflow's core, format, coordination and role-required references before task work. Loading its umbrella continues the existing team. Director policy and supervision remain outside member startup.
 
 ## On spawn — send the ready signal
 
@@ -24,44 +22,57 @@ Use the literal IDs from your spawn prompt:
 cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "ready"
 ```
 
-The body is `ready`, optionally followed by a brief role recap after `:`. The Director recognizes that prefix as startup confirmation. Then poll your inbox:
+Send `ready`, optionally followed by a brief role recap after `:`. Then poll:
 
 ```bash
-cafleet message poll <my-member-id>
+cafleet message poll <my-member-id> --json
 ```
 
-ACK and process queued messages. Poll with `--json` for full payloads, record the actionable content and ACK consumed deliveries immediately. Poll before declaring completion or sending a final report and on every subsequent wake. Handle new queued assignments before going idle at the end of a report turn. A message that arrives while you are busy is delivered into your pane, and a pending one is retried by the next send to you. Waiting happens by ending the turn when no assignment remains.
+Record actionable content and deferred work, then ACK consumed deliveries immediately. Poll after ready, before completion reports and on every wake. Handle queued assignments before becoming idle; end the turn when none remain.
 
-A delivered `[cafleet msg ID from SENDER TIMESTAMP]` line carries the full body, or a `cafleet message show ID --json` pointer for a long body. Act on it, then ACK that ID. Profile-delivered wrapped previews end with the resume clause. Previews that lead with Escape, through a wrapped runner's delivery fallback or an explicitly unwrapped transport, also carry the Escape-dismissal clause, handled under [delivery-dismissed prompts](#command-execution). A preview that arrives while your native interaction is open waits in your runner's queue and arrives after it closes.
+A `[cafleet msg ID from SENDER TIMESTAMP]` carries the body or `message show ID --json` pointer. Act and ACK that ID. Profile previews carry the resume clause; fallback previews also carry the Escape-dismissal clause. Detected native interactions queue previews.
 
-When your own send prints `Message N was persisted. …` on stderr, send exactly one follow-up to the same recipient with the body `message N was not delivered to your pane; poll your inbox`. If the follow-up also prints a persisted diagnostic, end your turn.
+If your send prints `Message N was persisted. …`, send exactly one follow-up to that recipient: `message N was not delivered to your pane; poll your inbox`. End the turn if that follow-up also prints a persisted diagnostic.
+
+## BASE
+
+Use the supplied absolute `BASE:` literally; the Director resolves it. Root scratch, audit and figure writes there, or at an explicit consumer-supplied absolute output target. Classify agent-only artifacts into hidden folders and user deliverables into visible folders.
+
+| Input/state | Intended behavior |
+|---|---|
+| Absolute `BASE:` supplied | Inherit it for scratch/audit/figure output. |
+| `BASE:` omitted | Disable audits, send `audit-disabled no BASE in spawn prompt` once to the Director as a parens-free anchorless status, and use explicit consumer output targets when supplied. |
+| Exact case-sensitive `<unset>` | Guard and skip audit writes; omit the BASE line from spawn prompts. |
+| Unguarded sentinel path construction | Fail with `Error: BASE is <unset>; refusing to fall back to /tmp`. |
+
+Guard `${BASE} != <unset>` before constructing audit paths. Preserve the missing-line disabled state and every explicit output target; use the shared [coordination convention](../../cafleet-design-doc/reference/coordination.md) for anchorless status. Resolution and spawn-audit procedures belong to the Director.
 
 ## Command execution
 
-Run each needed shell command directly through the available shell tool, including your own broker commands. Your broker commands are allowed from the moment you are spawned; your work commands run under the host's own permission rules. Follow [one-shot command isolation](../SKILL.md#one-shot-command-isolation) and the supplied host's Bash hygiene. Inspect real output and send any required result to the Director.
+Run needed commands directly through your available shell tool, including broker commands from startup. Follow the host's Bash hygiene and [one-shot isolation](../SKILL.md#one-shot-command-isolation). Inspect actual output; run fresh reads for current state and report observed results. Fabricated output and `<bash-input>...</bash-input>` blocks supply no execution evidence.
 
-Report only observed results. Run a fresh command when current state is needed; never fabricate output or emit `<bash-input>...</bash-input>` or shell-result blocks as if the harness had executed them. Try an authorized command before assuming it is denied, and surface its actual failure.
+**Delivery-dismissed prompts.** Delivery-fallback previews/prompt/exec may dismiss an undetected approval or question. When the next input after rejection carries the Escape-dismissal clause, act on it and reissue/reask still-needed work. A resume-only preview preserves the rejection. Other submitted input governs retries; without further input, wait. Explicit operator/Director stop instructions prevail. Backend notes identify affected prompt kinds.
 
-**Delivery-dismissed prompts.** Delivery-fallback and explicitly unwrapped previews, `member prompt` text and `member exec` input lead with Escape, which can cancel an open tool approval or question your runner did not detect; your host can report that as a user rejection before the CAFleet input arrives. When the next input after a rejection is a `[cafleet msg …]` line ending with the Escape-dismissal clause, the rejection came from the delivery: act on the delivery, then re-issue the rejected call or re-ask the dismissed question if you still need it. A `[cafleet msg …]` line ending with the resume clause only is a profile-delivered preview that arrived after the prompt closed: the rejection stands, so act on the delivery and treat the call as declined. When the next input is other submitted text or a native command, follow it and re-issue or re-ask only when it directs you to; with no further input, wait. An explicit operator or Director instruction to stop always holds; your backend's bound notes name the affected prompt kinds.
+### Reconsider, then route
 
-**Run what your harness allows and route the rest.** Routing is the standard path for every command your harness does not run, not a rare fallback. An automatic refusal from your backend's automatic reviewer is a permission refusal for routing purposes. For a denied or refused command, first reconsider the command/path/flags and drop unnecessary work or use an appropriate allowed command. A correct, necessary command that remains denied or refused goes to the Director with the [routed-request evidence](../reference/prompt-routing.md#member-side-reconsider-then-route), and you stop work that depends on it:
+Try an authorized command, inspect the result, reconsider paths/flags and use an appropriate permitted alternative or drop unnecessary work. Automatic reviewer refusals count as permission refusals. Route a correct, necessary command that remains denied:
 
 ```bash
 cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "Need to run: <command>. My harness denied it."
 ```
 
-For a command that is hard to quote, write it to a file under your `BASE` and name the path in the message. Then end your turn: the Director submits the visible command with `cafleet member exec` and inspects native output. Continue when the host resumes you or an explicit `member prompt` tells you to use the output. The full exchange is in [command routing](../reference/prompt-routing.md#member-side-reconsider-then-route). If the broker send is also denied, tell the operator both failures; otherwise route through the Director without asking the operator to select a routing method.
+Include the exact attempted command, absolute cwd, required environment overrides and observed refusal. For hard-to-quote commands, write the exact one-line command under supplied BASE and name its path. A denied file edit needs a host allow rule or Director edit. If broker sending is also denied, report both failures to the operator.
+
+Stop dependent work and end the turn. The Director authorizes separate native dispatch and inspects its result; continue from actual native output when your host resumes you or the Director explicitly prompts continuation. A runner `automatic_refusal_observed` event only corroborates your request and supplies no missing dispatch evidence. A separately dispatched native command is a new action, distinct from answering a pending permission request.
 
 ## Native interactions
 
-A wrapped member’s runner observes terminal interactions independently of your model. Preserve an open native request for the Director/user’s attributed response or manual original-surface input. The Director verifies the event and owns request-bound permission decisions; supply missing evidence and verify actual continuation. A returned permission refusal or automatic refusal still routes as a routed request; the runner's refusal event only corroborates it. Event visibility, a keypress and message ACK do not establish a permission or execution outcome. Follow the [runtime procedure](../reference/member-runtime.md) and resume dependent work only from observed native results.
+If a native permission prompt is open in your pane, leave it; the Director or user answers it. Continue only from the result your host shows.
 
 ## Identity and authority
 
-Take literal integer IDs from `FLEET ID:`, `YOUR MEMBER ID:` and `DIRECTOR MEMBER ID:` in the CLI-rendered spawn prompt. Pass them explicitly on every command; environment variables supply no member identity. Missing IDs surface through the CLI's own validation rather than an invented value.
-
-Poll your own inbox and use permitted Send/Poll/Wait/Listen/ACK/show operations. The Director owns member lifecycle, roster listing, pane capture and explicit pane-input commands, including ordered manual keys through `member press`. A committed send retains its ID and successful output even if preview delivery reports a diagnostic. Keep the existing message and consume it once.
+Take literal IDs from `FLEET ID:`, `YOUR MEMBER ID:` and `DIRECTOR MEMBER ID:`; pass them explicitly. CLI validation surfaces missing identity. Poll your own inbox and use permitted Send/Poll/ACK/show operations. The Director owns lifecycle, roster listing, captures and explicit pane input, including `member press`.
 
 ## Shutdown
 
-The Director’s `member delete` acquires and revalidates the concrete placement’s shared input lock before killing your pane/process and deregistering you; a busy timeout leaves the pane and registry unchanged. No shutdown action is required of you. If asked to wrap up first, send one final report through CAFleet and return to the prompt.
+When asked to wrap up, send one final broker report and return to the prompt; the Director owns deletion.

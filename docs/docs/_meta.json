@@ -1,6 +1,6 @@
 [
   { "type": "file", "name": "quickstart", "label": "Quickstart" },
-  { "type": "dir", "name": "how-to", "label": "How-to guides" },
+  { "type": "file", "name": "mixed-backend-team", "label": "Run a fleet" },
   { "type": "dir", "name": "concepts", "label": "Concepts" },
   { "type": "file", "name": "contributing", "label": "Contributing" }
 ]

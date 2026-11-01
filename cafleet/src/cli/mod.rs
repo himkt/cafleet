@@ -1,15 +1,19 @@
-mod doctor;
+pub(crate) use crate::cli::member::MemberCapture;
+use crate::config::Settings;
+use crate::error::CafleetError;
+use crate::multiplexer::AnyMultiplexer;
+use crate::output::format_json;
+use crate::runtime::resolve_mux;
+use crate::runtime::system::read_stdin;
+use clap::Parser;
+use clap::Subcommand;
+use serde_json::Value;
+
 mod fleet;
-mod helpers;
 mod member;
 mod message;
 mod runtime;
 mod setup;
-
-use clap::{Parser, Subcommand};
-
-use crate::config::Settings;
-use crate::error::CafleetError;
 
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -34,7 +38,7 @@ enum Command {
     /// Migrate storage and install embedded coding-agent skills/presets.
     Setup(setup::SetupArgs),
     /// Report independent environment, database and backend checks.
-    Doctor(doctor::DoctorArgs),
+    Doctor(setup::DoctorArgs),
     /// Fleet lifecycle.
     #[command(subcommand)]
     Fleet(fleet::FleetCommand),
@@ -63,30 +67,20 @@ pub fn run() -> Result<(), CafleetError> {
 
 fn invocation_connection(
     database_url: &str,
-    deadline: crate::input::Deadline,
+    deadline: crate::time::Deadline,
 ) -> Result<rusqlite::Connection, CafleetError> {
-    let path = crate::db::database_path(database_url)?;
-    if !std::path::Path::new(path).try_exists().map_err(|cause| {
-        CafleetError::App(format!("cannot inspect database at '{path}': {cause}"))
-    })? {
-        return Err(CafleetError::App(
-            "no cafleet database; run 'cafleet setup'".into(),
-        ));
-    }
+    let missing_database = || CafleetError::App("no cafleet database; run 'cafleet setup'".into());
     let validate = |conn: &mut rusqlite::Connection| {
-        crate::input::with_database_budget(conn, deadline, |conn| {
-            crate::diagnosis::classify_selected_schema(
-                conn,
-                crate::db::head_version(),
-                database_url,
-            )
-            .require_current()
+        crate::db::with_database_budget(conn, deadline, |conn| {
+            crate::db::classify_selected_schema(conn, crate::db::head_version(), database_url)
+                .require_current()
         })
     };
-    let mut preflight = crate::db::connect_read_only(database_url)?;
+    let mut preflight =
+        crate::db::open_existing(database_url, true)?.ok_or_else(missing_database)?;
     validate(&mut preflight)?;
     drop(preflight);
-    let mut conn = crate::db::connect(database_url)?;
+    let mut conn = crate::db::open_existing(database_url, false)?.ok_or_else(missing_database)?;
     validate(&mut conn)?;
     Ok(conn)
 }
@@ -94,9 +88,9 @@ fn invocation_connection(
 fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
     match command {
         Command::Setup(cmd) => setup::run(settings, cmd),
-        Command::Doctor(cmd) => doctor::run(settings, cmd),
+        Command::Doctor(cmd) => setup::doctor(settings, cmd),
         Command::MemberRun { descriptor } => {
-            let code = crate::runtime::runner::run(settings, &descriptor)?;
+            let code = crate::runtime::run(settings, &descriptor)?;
             std::process::exit(code)
         }
         Command::Member(member::MemberCommand::Press {
@@ -104,7 +98,7 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
             keys,
             json,
         }) => {
-            let deadline = crate::input::Deadline::inherited_or_new();
+            let deadline = crate::time::Deadline::inherited_or_new();
             let keys = crate::multiplexer::PressKeys::parse(&keys)?;
             let mut conn =
                 invocation_connection(&settings.database_url, deadline).map_err(|cause| {
@@ -118,7 +112,7 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
             member::press(&mut conn, settings, member_id, &keys, json, deadline)
         }
         Command::Permission(command) => {
-            let deadline = crate::input::Deadline::new();
+            let deadline = crate::time::Deadline::new();
             runtime::permission_preflight(&command)
                 .map_err(|source| runtime::permission_error(&command, source))?;
             let mut conn = invocation_connection(&settings.database_url, deadline)
@@ -127,11 +121,11 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
         }
         mut command => {
             let mut conn =
-                invocation_connection(&settings.database_url, crate::input::Deadline::new())?;
+                invocation_connection(&settings.database_url, crate::time::Deadline::new())?;
             if let Command::Member(command) = &mut command {
                 member::prepare_input(command)?;
             }
-            let deadline = crate::input::Deadline::new();
+            let deadline = crate::time::Deadline::new();
             match command {
                 Command::Fleet(cmd) => fleet::run(&mut conn, settings, cmd, deadline),
                 Command::Member(cmd) => member::run(&mut conn, settings, cmd, deadline),
@@ -149,9 +143,126 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
     }
 }
 
+pub(crate) fn available_mux(
+    settings: &Settings,
+    deadline: Option<crate::time::Deadline>,
+) -> Result<AnyMultiplexer, CafleetError> {
+    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+    let mux = match deadline {
+        Some(deadline) => mux.bounded(deadline),
+        None => mux,
+    };
+    mux.ensure_available()
+        .map_err(|e| CafleetError::App(e.to_string()))?;
+    Ok(mux)
+}
+
+pub(crate) fn checked(
+    validate: fn(&str) -> Result<(), CafleetError>,
+) -> impl Fn(&str) -> Result<String, String> + Clone + Send + Sync + 'static {
+    move |value| {
+        validate(value).map_err(|cause| cause.to_string())?;
+        Ok(value.into())
+    }
+}
+
+pub(crate) fn nonblank(
+    message: &'static str,
+) -> impl Fn(&str) -> Result<String, String> + Clone + Send + Sync + 'static {
+    move |value| {
+        if value.trim().is_empty() {
+            Err(message.into())
+        } else {
+            Ok(value.into())
+        }
+    }
+}
+
+fn is_blank(text: &str) -> bool {
+    text.chars()
+        .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
+}
+
+pub(crate) fn resolve_body(
+    inline: Option<&str>,
+    file: Option<&str>,
+    flag: &str,
+) -> Result<String, CafleetError> {
+    let body = read_body(inline, file, flag)?;
+    if !is_blank(&body) {
+        return Ok(body);
+    }
+    Err(match file {
+        None => CafleetError::Usage("text may not be empty.".to_string()),
+        Some("-") => CafleetError::App(format!("{flag} -: stdin is empty.")),
+        Some(path) => CafleetError::App(format!("{flag} {path}: file is empty.")),
+    })
+}
+
+pub(crate) fn resolve_command_body(
+    inline: Option<&str>,
+    file: Option<&str>,
+) -> Result<String, CafleetError> {
+    let mut body = read_body(inline, file, "--file")?;
+    if file.is_some() {
+        if body.ends_with("\r\n") {
+            body.truncate(body.len() - 2);
+        } else if body.ends_with('\n') {
+            body.pop();
+        }
+    }
+    if !crate::pane_lock::valid_input(&body) {
+        return Err(CafleetError::Usage(
+            "command must be one non-empty line without control characters.".into(),
+        ));
+    }
+    Ok(body)
+}
+
+fn read_body(inline: Option<&str>, file: Option<&str>, flag: &str) -> Result<String, CafleetError> {
+    match (inline, file) {
+        (Some(text), None) => Ok(text.to_string()),
+        (None, Some("-")) => {
+            let bytes = read_stdin().map_err(|e| CafleetError::App(format!("{flag} -: {e}")))?;
+            String::from_utf8(bytes)
+                .map_err(|_| CafleetError::App(format!("{flag} -: file is not valid UTF-8.")))
+        }
+        (None, Some(path)) => {
+            let bytes = std::fs::read(path).map_err(|e| {
+                let message = match e.kind() {
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::IsADirectory => {
+                        format!("{flag} {path}: file does not exist or is not a regular file.")
+                    }
+                    _ => format!("{flag} {path}: file is not readable."),
+                };
+                CafleetError::App(format!("{message} ({e})"))
+            })?;
+            String::from_utf8(bytes)
+                .map_err(|_| CafleetError::App(format!("{flag} {path}: file is not valid UTF-8.")))
+        }
+        (Some(_), Some(_)) | (None, None) => {
+            unreachable!("clap's required argument group supplies exactly one body source")
+        }
+    }
+}
+
+pub(crate) fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
+    if json {
+        println!("{}", format_json(payload));
+    } else {
+        println!("{}", text());
+    }
+}
+
+#[cfg(test)]
+pub(crate) use crate::cli::fleet::test_support::guarded_delete_fleet;
+#[cfg(test)]
+pub(crate) use crate::cli::member::substitute_spawn_placeholders;
+
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::{CliArgs, Command};
+    use crate::cli::CliArgs;
+    use crate::cli::Command;
     use clap::Parser;
     use clap::error::ErrorKind;
 
@@ -172,13 +283,115 @@ pub(crate) mod test_support {
         assert_eq!(error.kind(), kind, "{args:?}: {error}");
         assert!(error.to_string().contains(input), "{args:?}: {error}");
     }
+
+    pub(super) fn isolated_cli(
+        settings: &crate::config::Settings,
+        args: &[&str],
+    ) -> (std::process::Output, String) {
+        use crate::runtime::system::test_support::TestChild;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+        use std::process::Stdio;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mux = dir.path().join("tmux");
+        let pane_log = dir.path().join("pane.log");
+        std::fs::write(
+            &mux,
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&mux, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let stdout_path = dir.path().join("stdout");
+        let stderr_path = dir.path().join("stderr");
+        let started = Instant::now();
+        let mut child = TestChild::new(
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    crate::cli::tests::isolated_cli_child_path(),
+                    "--ignored",
+                    "--nocapture",
+                    "--test-threads=1",
+                    "--quiet",
+                ])
+                .env(
+                    "CAFLEET_TEST_ISOLATED_CLI",
+                    serde_json::json!({"database_url":settings.database_url,"args":args})
+                        .to_string(),
+                )
+                .env("CAFLEET_TEST_PANE_LOG", &pane_log)
+                .env("PATH", dir.path())
+                .env("TMUX", "cafleet-test,1,0")
+                .env_remove("HERDR_ENV")
+                .env("RUST_BACKTRACE", "0")
+                .stdin(Stdio::null())
+                .stdout(Stdio::from(std::fs::File::create(&stdout_path).unwrap()))
+                .stderr(Stdio::from(std::fs::File::create(&stderr_path).unwrap()))
+                .spawn()
+                .unwrap(),
+        );
+        let status = child.poll_until(started + Duration::from_secs(10)).unwrap();
+        if status.is_none() {
+            child.terminate_until(started + Duration::from_secs(12));
+        }
+        let output = std::process::Output {
+            status: status.unwrap_or_else(|| {
+                panic!(
+                    "isolated CLI exceeded its deadline: {:?}",
+                    std::fs::read_to_string(&stderr_path).unwrap()
+                )
+            }),
+            stdout: std::fs::read(stdout_path).unwrap(),
+            stderr: std::fs::read(stderr_path).unwrap(),
+        };
+        let pane_calls = if pane_log.exists() {
+            std::fs::read_to_string(pane_log).unwrap()
+        } else {
+            String::new()
+        };
+        (output, pane_calls)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::*;
-    use super::*;
+    use crate::cli::test_support::*;
+    use crate::cli::*;
     use clap::error::ErrorKind;
+
+    pub(super) fn isolated_cli_child_path() -> &'static str {
+        test_path!(isolated_cli_child)
+    }
+
+    #[test]
+    #[ignore = "owned CLI subprocess entry"]
+    fn isolated_cli_child() {
+        let config: serde_json::Value = serde_json::from_str(
+            &std::env::var("CAFLEET_TEST_ISOLATED_CLI")
+                .expect("explicit isolated CLI configuration"),
+        )
+        .unwrap();
+        let database = crate::db::database_path(config["database_url"].as_str().unwrap()).unwrap();
+        let settings =
+            crate::config::Settings::for_database(std::path::Path::new(database), Some("tmux"));
+        let args = config["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect::<Vec<_>>();
+        let command = parse_cli(&args).unwrap();
+        match dispatch(&settings, command) {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("Error: {error}");
+                std::process::exit(error.exit_code());
+            }
+        }
+    }
 
     #[test]
     fn ordinary_commands_preserve_refused_wal_database_and_sidecar_bytes() {
@@ -232,7 +445,7 @@ mod tests {
         assert!(
             invocation_connection(
                 &format!("sqlite:///{}", path.display()),
-                crate::input::Deadline::new()
+                crate::time::Deadline::new()
             )
             .is_err()
         );
@@ -466,12 +679,12 @@ mod tests {
                 match (base[0], parse(&args)) {
                     (
                         "member",
-                        Command::Member(member::MemberCommand::Create {
+                        Command::Member(member::MemberCommand::Create(member::CreateArgs {
                             fleet_id,
                             name,
                             description,
                             ..
-                        }),
+                        })),
                     ) => assert_eq!(
                         (fleet_id, name.as_str(), description.as_str()),
                         (17, "worker", "work")
@@ -626,22 +839,17 @@ mod tests {
     }
 
     #[test]
-    fn member_exec_help_describes_wrapped_and_unwrapped_input_and_orders_member_before_command() {
+    fn member_exec_help_describes_runner_delivery_and_orders_member_before_command() {
         use clap::CommandFactory;
         let help = subcommand_help(&["member", "exec"]);
         let lower = help.to_lowercase();
-        for term in ["unwrapped", "escape"] {
-            assert!(
-                lower.contains(term),
-                "member exec help mentions {term}: {help}"
-            );
-        }
         assert!(
-            lower
-                .split("unwrapped")
-                .next()
-                .is_some_and(|before| before.contains("wrapped")),
-            "member exec help describes wrapped members before the unwrapped exception: {help}"
+            lower.contains("runner"),
+            "member exec help describes runner delivery: {help}"
+        );
+        assert!(
+            lower.contains("fallback") || lower.contains("falls back"),
+            "member exec help describes delivery fallback: {help}"
         );
         let mut command = CliArgs::command();
         let usage = flattened(
@@ -782,7 +990,85 @@ mod tests {
             descriptor.to_str().unwrap(),
         ])
         .unwrap();
-        assert!(super::dispatch(&settings, args.command).is_err());
+        assert!(crate::cli::dispatch(&settings, args.command).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn body_files_preserve_exact_bytes_and_report_invalid_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("body.txt");
+        let name = path.to_str().unwrap();
+        for text in ["界🙂\nnext\r\n", "{literal}\ttext", " padded "] {
+            std::fs::write(&path, text).unwrap();
+            assert_eq!(resolve_body(None, Some(name), "--file").unwrap(), text);
+        }
+        for text in ["", " \t\n", "\u{1c}\u{1f}", "\u{2003}"] {
+            std::fs::write(&path, text).unwrap();
+            assert_eq!(
+                resolve_body(Some(text), None, "--file")
+                    .unwrap_err()
+                    .exit_code(),
+                2
+            );
+            assert_eq!(
+                resolve_body(None, Some(name), "--file")
+                    .unwrap_err()
+                    .exit_code(),
+                1
+            );
+        }
+        std::fs::write(&path, [0xff]).unwrap();
+        assert!(
+            resolve_body(None, Some(name), "--file")
+                .unwrap_err()
+                .to_string()
+                .contains("UTF-8")
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            resolve_body(None, Some(name), "--file")
+                .unwrap_err()
+                .to_string()
+                .contains(name)
+        );
+        assert!(resolve_body(None, Some(dir.path().to_str().unwrap()), "--file").is_err());
+    }
+
+    #[test]
+    fn native_command_files_strip_only_one_terminal_line_ending() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("command.txt");
+        let name = path.to_str().unwrap();
+        for (source, expected) in [
+            ("printf '界🙂'", "printf '界🙂'"),
+            ("echo literal\n", "echo literal"),
+            ("echo literal\r\n", "echo literal"),
+            ("  echo literal  \n", "  echo literal  "),
+        ] {
+            std::fs::write(&path, source).unwrap();
+            assert_eq!(resolve_command_body(None, Some(name)).unwrap(), expected);
+        }
+        for source in [
+            "",
+            "  ",
+            "echo x\n\n",
+            "echo x\r",
+            "echo\tx",
+            "one\ntwo",
+            "\0",
+            "\u{7f}",
+        ] {
+            std::fs::write(&path, source).unwrap();
+            assert!(
+                resolve_command_body(None, Some(name)).is_err(),
+                "{source:?}"
+            );
+        }
+        assert_eq!(
+            resolve_command_body(Some("echo literal"), None).unwrap(),
+            "echo literal"
+        );
+        assert!(resolve_command_body(Some("echo literal\n"), None).is_err());
     }
 }

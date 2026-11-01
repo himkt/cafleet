@@ -1,0 +1,2610 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "claude-2.1.302-default-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "d5112771ae6402b817219410802d6997e3eac5522a5c3597fe8d2dcaf5c2da11"
+    },
+    {
+      "id": "claude-2.1.302-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "1ba4998e14104889df5b9ccbcf99ec2be4c5351333b0100297d0feaaf013814a"
+    },
+    {
+      "id": "claude-2.1.302-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "b130bfb88df5d046e8220d55c36d32e35900219eabf38c855f5d4505e3c8f7d8"
+    },
+    {
+      "id": "claude-2.1.302-idle-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "51032849fa9d5a2c97a30e9ed445d5e182814898a19c6882b82051d3d5a4fd0c"
+    },
+    {
+      "id": "claude-2.1.302-wrapped-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 52,
+      "source_ref": "native/claude.json",
+      "sha256": "b14c136a03de2cbae048ce2b72a6cae8fbbbf06c39ee035e15b9289a77c24414"
+    },
+    {
+      "id": "claude-2.1.302-wrapped-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 52,
+      "source_ref": "native/claude.json",
+      "sha256": "beff9a72618d5e68d79bf04bf24f38e992f6868022ce8ec412f4918c4a6e013b"
+    },
+    {
+      "id": "claude-2.1.302-wrapped-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 52,
+      "source_ref": "native/claude.json",
+      "sha256": "ca5b3ff87cb45c362ec11cea805f6be39c4646a1933431c550ce5a2bcbd7c144"
+    },
+    {
+      "id": "claude-2.1.302-boxed-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 89,
+      "source_ref": "native/claude.json",
+      "sha256": "14595daf18c6547fa0c9cebaa0046dfaf2b59b539b38d1ec107e52be960d2234"
+    },
+    {
+      "id": "claude-2.1.302-boxed-single-row-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "63bbb13f9f1533df38efc10620b272b25dcacc29b1937470fe92635d4b87851f"
+    },
+    {
+      "id": "claude-2.1.302-auto-approved-done-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "41a7ed53c592bb7c31f9b793f8a3cb68b228b9ca3f0ba846f8aa5062b8c80d72"
+    },
+    {
+      "id": "claude-2.1.302-auto-approved-running-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "e00ff052dc7331da018ad9e77a9cec07d0b9fdaebb0450420610e69ed076d2b4"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-allow-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "68d140204ac589eb6f10ceae321b9b61dbdbf8207dbff10a6533def6b43790ab"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-deny-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 90,
+      "source_ref": "native/claude.json",
+      "sha256": "eebc0c516f37180c922aef29c228f0f20426d89e986bd47d25183b1805177fae"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "a7e44009b268e10f6dc71ea6f64ee1910f1d841e28ef8266951978cb57c40fa9"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 90,
+      "source_ref": "native/claude.json",
+      "sha256": "2372829b652700d1d7e58b611411b210a8c7c29d350c0dea9a4e7c8a8ece43fb"
+    },
+    {
+      "id": "claude-2.1.302-auto-ask-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8e2d82837ca578bcd3259d475a04adad418781e3f9b1c284e5c9ed7b474de4d1"
+    },
+    {
+      "id": "claude-2.1.302-auto-fresh-first-launch-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8f31374068199b8c1bc4782e4bf683706651d5d51333c43f830f8a3328159d23"
+    },
+    {
+      "id": "claude-2.1.302-auto-fresh-onboarding-theme-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "13f7813fbaffe6fdad4849e4f0a78a43756fb80f542d11826af6f4f8f5c94259"
+    },
+    {
+      "id": "claude-2.1.302-auto-idle-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "857dac6224ed46bc0b02e22855eaa0bbdfc1bccc225cfc1723e0bf71d58570ad"
+    },
+    {
+      "id": "claude-2.1.302-auto-model-switch-question-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8d872b4f087ce188d44fb05bbc0a5dc495f19b8ab9db51982cd6f434a74c9adc"
+    },
+    {
+      "id": "claude-2.1.302-auto-quote-false-positive-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "f633c7aeb16dc850818010ee4bd92905423190cfbcbdd0c891c6bf4df1d20fdb"
+    },
+    {
+      "id": "claude-2.1.302-auto-refusal-notice-expired-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "71dd040421a438b50b6c666e96914ebca17cfd2b617dc792b97c8382f6401fa1"
+    },
+    {
+      "id": "claude-2.1.302-auto-refusal-notice-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "ad45d832bd03ff02225b86ff3969d63fab90238da76cf751138069e943786e10"
+    },
+    {
+      "id": "claude-2.1.302-auto-refusal-notice-working-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "0b9e4ffd9928a4c02335a06c79530b2aa1d87d5836cb6780274658fc2178c225"
+    },
+    {
+      "id": "claude-2.1.302-auto-transcript-viewer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "899a010e792c7f7c098809a2b658c88de9fb94bb3b945cc014bbc9b168532f98"
+    },
+    {
+      "id": "claude-2.1.302-auto-two-refusals-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "1ce8c0dead80a9641ea851932bad75309091da0cbf135a62945bc12ab0729061"
+    },
+    {
+      "id": "claude-2.1.302-auto-unavailable-manual-footer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8a0a9e57d349ba70fe3eb71f5d18a9d37a3eeb7d648f55479e42a5813028c01e"
+    },
+    {
+      "id": "claude-2.1.302-auto-unavailable-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "882199da44084b9e2437ad938ae2cf45ec376a329c35af5b2dbdb87a323f738a"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-quote-false-positive-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "57bbf63cca57c5d12b3955f676308e70e6ae902a5d97767259b0c57a7306a5fd"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-above-form-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "39b3c6fb92f63e3d2dc76bb1637d6362b4fc69acb41e48b13d34d37b11c76111"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 20,
+      "cols": 60,
+      "source_ref": "native/claude.json",
+      "sha256": "31b79d652bde0269fab5618154c4e5b51b124d5edf9fb6a004385ce90892653f"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-restored-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "cbb4a4dd411846a39ec6c2e5b200f653dab8390de5eb70b3a87c9100bd3c8743"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 60,
+      "source_ref": "native/claude.json",
+      "sha256": "9bf076e942dfdc73713b3e3be3d7a65669ab20835ac101701f880faebf6ca0fe"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 20,
+      "cols": 60,
+      "source_ref": "native/claude.json",
+      "sha256": "aea2a20586624fd4621ee78522db26db169f2cd3852a0d9ad0290d87eebaa514"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-transcript-viewer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "3e5272c9225497d3bbb19abda7cf40463c68689a5acf15b0e6a9ec220b024388"
+    },
+    {
+      "id": "claude-2.1.302-auto-verbose-two-refusals-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "4054e7934a6b17bcc4f11c94b6d4d77305d36deb32625316d024ff79aadeed43"
+    },
+    {
+      "id": "claude-2.1.302-trust-dialog-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "9b398951d4f9494b9b09f2761eb59cafaeb97bb775eb42758842b14f4d48935f"
+    },
+    {
+      "id": "claude-2.1.302-access-allow-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c5242d8a4803a0e23fbf3b62c86533721b3b9226d7e3115162a34112400d54ce"
+    },
+    {
+      "id": "claude-2.1.302-access-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "4be2914ab73e416eb7091cba67aa2d73796526f6a0dd269931758f80b27d44fe"
+    },
+    {
+      "id": "claude-2.1.302-access-allow-running-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "bbc1aa9382417944984f00efee5651ad0a5633179c3b5d658145373346f4f95f"
+    },
+    {
+      "id": "claude-2.1.302-access-deny-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8d97781c681c136c7ad198796f6b1325b2ebe65525c60fb6af29a0ec42f16189"
+    },
+    {
+      "id": "claude-2.1.302-access-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "13cebd2b777866d575198119d4ba117e17eb4679e1c5893e6144f5a2bd243ed0"
+    },
+    {
+      "id": "claude-2.1.302-access-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "da7d5fb8dfdf726280291a1709f8763384ff1b8972dd519f2e0d4592b59c8455"
+    },
+    {
+      "id": "claude-2.1.302-auto-env-setup-cancelled-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "80e5e74735d408d3a902919cd71c7dc486c2d3b415f00fe2bbf183f5b10f8fc5"
+    },
+    {
+      "id": "claude-2.1.302-auto-env-setup-offer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "9153fd8eb4910a8c587824de0090987ef7f92ac91e6317540898d25d73158516"
+    },
+    {
+      "id": "claude-2.1.302-auto-env-setup-wizard-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "99af6d382c63aaa630b6d1abcd07757899ffa24299b3c4112dca4a59f4fb0e4e"
+    },
+    {
+      "id": "claude-2.1.302-default-manual-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "9eb822d50dad92fefec6c7c35fee34d9f6f53d99f6b7009500f53f4c3d62f96d"
+    },
+    {
+      "id": "codex-0.163.0-on-request-permission-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d1c1211619921055a8611ecb717f2979acfc3194000d5a3f8d2c65d2f6d84c6c"
+    },
+    {
+      "id": "codex-0.163.0-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "f580b511048d83568b7c140c7a7b3c2f68209a16272efe2789666ad111a0abb5"
+    },
+    {
+      "id": "codex-0.163.0-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "9fa04ec011d2ca937c455ec164756f0bf3e0144e6bf4fdbdcba1993ea25d8a2a"
+    },
+    {
+      "id": "codex-0.163.0-idle-composer-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "1588266671b1635803517f638c4bc78cbd1ef7a67c27206ef6e745cb06deda21"
+    },
+    {
+      "id": "codex-0.163.0-auto-approved-escalated-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d7a6de648664fa74babcc47534b8e0e2fb01fa0a84de129b42ffd98acccde4d2"
+    },
+    {
+      "id": "codex-0.163.0-auto-denial-limit-interrupted-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "ae6f41bde2f3624ed6ec3dd51cef7c8da425cf326bfa4b91492a1a9705232234"
+    },
+    {
+      "id": "codex-0.163.0-auto-denial-limit-warning-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "a052f4252c9ac539ee92bf4c86a79d81315db0ad6d4c4b0187188436c66b4e54"
+    },
+    {
+      "id": "codex-0.163.0-auto-expanded-detail-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d2a07375cf04ce9f4d751f78fe4e545aef2e77feee9d6f926b24b88263e3b467"
+    },
+    {
+      "id": "codex-0.163.0-auto-fresh-idle-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "3697226b5f2845404301b08f96afac5b63b56fb663a0b2c3b6a6b822b0b35294"
+    },
+    {
+      "id": "codex-0.163.0-auto-idle-composer-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "13fd467582a640b5fe00a885d1d70f696018a2835a612cf24de0fff1878ea736"
+    },
+    {
+      "id": "codex-0.163.0-auto-quote-false-positive-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "36a438d184345e31328e417349a42c970d579802c107b7b4b5d557b69558495e"
+    },
+    {
+      "id": "codex-0.163.0-auto-refusal-after-overlay-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "22ec0df0211f0be6b2bfaaa012c2fdb1bf6e66e1261e65eba5cc825bddb29b1a"
+    },
+    {
+      "id": "codex-0.163.0-auto-refusal-idle-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "1103b4a1a783a6bdd051a3289c713d39fe32fd3c8e9f2268ae15f3929fa3c9e8"
+    },
+    {
+      "id": "codex-0.163.0-auto-refusal-warning-overlay-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "45d1bdbd44b4c37e69d6255af772c0774ad769d439a3bf9292243bbc92959d65"
+    },
+    {
+      "id": "codex-0.163.0-auto-refusal-working-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "2faea60f305a69d6726612069eb9223b7376528fd5bb190eb2b5b11131606166"
+    },
+    {
+      "id": "codex-0.163.0-auto-reviewing-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "bf035e8535ce9fb630cad8260b641e0eb4fc886acba404f0010d8edb80ecdb54"
+    },
+    {
+      "id": "codex-0.163.0-auto-sandbox-failure-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d37d479f2dac772906e6e14267cdfec5a4fcc42ad7a0d163292ab74ffd9a0d2d"
+    },
+    {
+      "id": "codex-0.163.0-auto-second-launch-idle-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "d2f9d91e01d9819e9b3b0c010a7c69ffab8c3ecfeae18451926e618b136b9963"
+    },
+    {
+      "id": "codex-0.163.0-auto-status-indicator-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "753ada8bac6654a05f99d702cc3fd5a9d53d52c6fbd35dd5bd6e2e56593962cc"
+    },
+    {
+      "id": "codex-0.163.0-auto-two-refusals-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "8c40ec579d9f5e0706e3a5234cb853ada8c3e84a24dda5dc50669ed3d7dbe617"
+    },
+    {
+      "id": "codex-0.163.0-auto-two-refusals-resized-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 80,
+      "source_ref": "native/codex.json",
+      "sha256": "0b32ea70606ab32afb31e745f2417fc449317e8c76f5fed6fb90c6b89e566a7f"
+    },
+    {
+      "id": "codex-0.163.0-auto-two-refusals-restored-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "9133089826a49e7dd96d6797cd921156a9f381da57e8fb358fdda6f5d00c1114"
+    },
+    {
+      "id": "codex-0.163.0-auto-warning-overlay-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "f33b7a4d9be23da2209b88e682bccdf0299b8fae51049d60e4027b01c3b04655"
+    },
+    {
+      "id": "opencode-2.1.4-ask-permission-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "31624353766ee2b1ac59cf6aa65ecbc7be37f68bf623534fcc5e88e549e3afdc"
+    },
+    {
+      "id": "opencode-2.1.4-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "1bb21c1ee4dad8b775475c880c1806efad11f58e0671ba93dab9dd08902c01f2"
+    },
+    {
+      "id": "opencode-2.1.4-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "509b3aa2363c28aa5b17d3596f04071da7add1535efa2ba511ae991f7a5f360a"
+    },
+    {
+      "id": "opencode-2.1.4-deny-pre-stage-2",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "3cc29217195df5ccf0b1c6b7cf3e4a9550d879c9a390d512aca1eb1390fb3ab9"
+    },
+    {
+      "id": "opencode-2.1.4-deny-pre-stage-3",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "db4af848b437a24440741def76a73f3e6e4e0fb4560fb36f8f80edb934c7d975"
+    },
+    {
+      "id": "opencode-2.1.4-focus-always-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "f42122ea6de285169cce554ec73e3227155b18b54357f8d565bada247ebd1e77"
+    },
+    {
+      "id": "opencode-2.1.4-idle-composer-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "c48a4a45d85f7eff591d494588753bc57609c6a46f9734f243308775961abc88"
+    },
+    {
+      "id": "claude-2.1.308-prompt-empty-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "e3e43e0ccf0f3f9c7adb2fbdf8bb1aca6e8d59cafaff7ee8dee66de009c30555"
+    },
+    {
+      "id": "claude-2.1.308-prompt-typed-literal-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "409494565f1eade8f6f83346f686973c4f50ec6734ae302477f476ed58eeacf6"
+    },
+    {
+      "id": "claude-2.1.308-prompt-post-submit-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "7bc70ba419a1ab0388ebf521d37db6039e944ecc90ecdc6bf0044aee7f6da868"
+    },
+    {
+      "id": "claude-2.1.308-exec-empty-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "997b6e573b858d1cbf5aa0079a26d069b534023e00b865ea85c3e43951679a6f"
+    },
+    {
+      "id": "claude-2.1.308-exec-typed-literal-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "a2de8c903cd78a78d7802e131187bfdcf5cada9f1b0dc0a8e1b13f1be455907b"
+    },
+    {
+      "id": "claude-2.1.308-exec-post-submit-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "dffe51b01a51953149baf19e2c422995a74f61f8cc4b63260d8d082f1d75d46c"
+    },
+    {
+      "id": "codex-0.163.0-prompt-empty-composer-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "938532f90b62d607941ae3a1cf656ea18e3a8b16d2f01ff46e30e5f091bf99e5"
+    },
+    {
+      "id": "codex-0.163.0-prompt-typed-literal-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "15888148ca28061693743c4c821283cb713e3e4c7a9f0fea17d50eb3842c6bb6"
+    },
+    {
+      "id": "codex-0.163.0-prompt-post-submit-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "6668020160ee84c4b8c1f510f938fde9f267ab2e516454fec11c8395733efa22"
+    },
+    {
+      "id": "codex-0.163.0-exec-empty-composer-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "938532f90b62d607941ae3a1cf656ea18e3a8b16d2f01ff46e30e5f091bf99e5"
+    },
+    {
+      "id": "codex-0.163.0-exec-typed-literal-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "e5603c641c4bb073abfaf0587f4019689a97eae08e389bbdab151ea53ceaab79"
+    },
+    {
+      "id": "codex-0.163.0-exec-post-submit-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex.json",
+      "sha256": "a5b27f5bbd2fc4c5ceec610519cfd5b212e608f5b7b61518d07f7f479a242431"
+    },
+    {
+      "id": "opencode-2.1.4-prompt-empty-composer-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "46246b89227ecddb3a88a02ebb6db055f51a270046a3b3f750486d5015e3920e"
+    },
+    {
+      "id": "opencode-2.1.4-prompt-typed-literal-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "65e19f3b7c7ae439a83f29117cd3dc6644e8febe618610d84be6b8d2ac3eeec4"
+    },
+    {
+      "id": "opencode-2.1.4-prompt-post-submit-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "c2bf6f4c234166be49e31e453ba1593d975dbcdbde8d883f800f8dab8b70780c"
+    },
+    {
+      "id": "opencode-2.1.4-exec-empty-composer-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "46246b89227ecddb3a88a02ebb6db055f51a270046a3b3f750486d5015e3920e"
+    },
+    {
+      "id": "opencode-2.1.4-exec-typed-literal-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "3202e1b8610b65bbc2308faf29df70d8f3d7a6e804d58617b2950c228e6c3a50"
+    },
+    {
+      "id": "opencode-2.1.4-exec-post-submit-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode.json",
+      "sha256": "62e032a459bce32eee67f2d623ae049a6cb92093a5a6f5e6269fc96412b98365"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-permission-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode.json",
+      "sha256": "a1afbe5562d782ea1db3944bebb97f4179f7c5162713525764b82589e478821c"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode.json",
+      "sha256": "7496aa6a0bbc25ec208b3ee714e2d4475d71d6356950a65b67445d53b50d9b45"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode.json",
+      "sha256": "bf41c244c6c91f743168a423aab538de8556afde985f745148f5869737e24bc5"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-long-command-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode.json",
+      "sha256": "5ff6950a7446cc39b7911747f4f9e24c64554182a14e9eddf1c56aa9a82a4a8e"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-idle-composer-057-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/opencode.json",
+      "sha256": "2bdbc6814ef7b0b1c51fd478c1305ab7d1de6a59dfc02f367152434947ff2aa5"
+    },
+    {
+      "id": "opencode-2.1.4-compact-permission-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode.json",
+      "sha256": "5f6a260dfb315fd4a945869574c8f2c0eb16f0c4455f16e3425d10bb89d968a1"
+    },
+    {
+      "id": "opencode-2.1.4-compact-deny-pre-stage-2-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode.json",
+      "sha256": "643b03f0731765a27a3ffa9cd59ae181ebf1fb4a9f72cd804e31fd10d409e9a1"
+    },
+    {
+      "id": "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 55,
+      "source_ref": "native/opencode.json",
+      "sha256": "68acd10220de9fc9c26e64b8e605914c71b3547f6c68e7115ff14b2bc73be284"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-permission-min-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode.json",
+      "sha256": "6696328020ad1e17cbad8db07bcc62fc7481a13c7286f359e987d2d72f4ef9b2"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode.json",
+      "sha256": "901fd37776f2ed9c8f2b442a69cea0d4f632ee32ea1a65e15de100bef99a9f57"
+    },
+    {
+      "id": "opencode-2.1.4-narrow-deny-pre-stage-3-min-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/opencode.json",
+      "sha256": "4fd67984fbf6ba83054300d57514f77b64bf61ee1249bf8f2d944775a419b925"
+    },
+    {
+      "id": "claude-2.1.308-auto-tip-padded-question-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.308",
+      "rows": 35,
+      "cols": 200,
+      "source_ref": "native/claude.json",
+      "sha256": "06ea00f0dab9ff2544c07efe761abcb0b5a85afda2fdae3e098dcdcf2d907b50"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "3c0dafed86e2a2c11eaebd61f53d233eafeeb57bc625c332015cb06bc06f8fd2"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-long-path-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c13a42bd54489d9818368ec009e184503db2d445191360626a6f24329bfaa12e"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "2207c4a42715a110b738278fb5e5ac89ea1ef41295e1ca63cc78448883febe49"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "536f4469a4e51a69036e50eecbe09cf94c639ac8b09bd28ac15c277afa12babd"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-allow-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "bfc3254b0a006dc90d10b16b169192eb2ce78f37be77758b32061fc653354fc2"
+    },
+    {
+      "id": "claude-2.1.309-read-outside-deny-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "a3c61d7bfed936f50f90f4ef011d47ab5e09e790cfc9870b46463ff7d74a53f6"
+    },
+    {
+      "id": "claude-2.1.309-edit-outside-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.309",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "7612b2b6764ce45bd6aad104bae3af08644a3c7b1a044a01207a386cfe6b89fc"
+    }
+  ],
+  "profiles": [
+    {
+      "backend": "claude",
+      "min_version": "2.1.302",
+      "rules": [
+        {
+          "id": "claude-bash-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ Bash command\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "approval",
+              "scope": "line",
+              "pattern": "^ This command requires approval\\s*$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^❯\\u{a0}",
+            "end_pattern": "^❯\\u{a0}",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^❯\\u{a0}"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-ask-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ Bash command\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "ask_rule",
+              "scope": "line",
+              "pattern": "^ │ Ask rule \\S"
+            },
+            {
+              "id": "auto_hint",
+              "scope": "line",
+              "pattern": "^ /permissions to let auto mode decide\\s*$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-bash-permission-auto-tip",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ Bash command\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Bash command\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "access",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, and always allow access to \\S.* from this project\\s*$"
+            },
+            {
+              "id": "switch",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 4\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-read-outside-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ Read outside the working directories\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Read outside the working directories\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Allow this read outside the working directories\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "keep_allowing",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories\\s*$"
+            },
+            {
+              "id": "block_from_now",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)\\s*$"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-startup",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ {2,3}Teach auto mode about your environment\\?\\s*$",
+            "end_pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel\\s*$",
+            "max_rows": 14,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ {2,3}Teach auto mode about your environment\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ {2,3}❯ \\S"
+            },
+            {
+              "id": "footer",
+              "scope": "line",
+              "pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-refusal",
+          "priority": 40,
+          "observation": "automatic_refusal",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^● [A-Z][A-Za-z]*\\(",
+            "end_pattern": "^  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[",
+            "max_rows": 8,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "\\A● (?P<tool>[A-Z][A-Za-z]*)\\((?P<operation>[^\\n]*(?:\\n  [^⎿\\n][^\\n]*)*?)\\)\\s*\\n  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[(?P<category>[^\\]\\n]+)\\] ∙(?: see(?: https://code\\.claude\\.com/docs/s/claude-code-auto-mode)?)?\\s*\\z"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": [],
+            "native_request_id": null
+          },
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-refusal-notice",
+          "priority": 40,
+          "observation": "automatic_refusal",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ +[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\] · /permissions",
+            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
+            "max_rows": 2,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "operation",
+              "scope": "line",
+              "pattern": "^ +(?P<operation>[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\]) · /permissions"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": [],
+            "native_request_id": null
+          },
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-unavailable",
+          "priority": 40,
+          "observation": "automatic_review_unavailable",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ +auto mode disabled by settings\\b",
+            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
+            "max_rows": 2,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "notice",
+              "scope": "line",
+              "pattern": "^ +(?P<notice>auto mode disabled by settings)"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-mode-indicator",
+          "priority": 40,
+          "observation": "automatic_review_available",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
+            "end_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
+            "max_rows": 1,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "mode",
+              "scope": "line",
+              "pattern": "^  ⏵⏵ (?P<mode>auto mode) on \\(shift\\+tab to cycle\\)"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "annotations": {
+          "rule_ids": [
+            "claude-auto-refusal",
+            "claude-auto-refusal-notice",
+            "claude-auto-unavailable",
+            "claude-auto-mode-indicator"
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-auto-verbose-two-refusals-1",
+            "claude-2.1.302-auto-verbose-refusal-restored-idle-1",
+            "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1",
+            "claude-2.1.302-auto-refusal-notice-working-1",
+            "claude-2.1.302-auto-refusal-notice-idle-1",
+            "claude-2.1.302-auto-two-refusals-notice-1",
+            "claude-2.1.302-auto-unavailable-notice-1",
+            "claude-2.1.302-auto-idle-composer-1",
+            "claude-2.1.302-auto-quote-false-positive-1",
+            "claude-2.1.302-auto-verbose-quote-false-positive-1",
+            "claude-2.1.302-auto-transcript-viewer-1",
+            "claude-2.1.302-auto-verbose-transcript-viewer-1",
+            "claude-2.1.302-auto-unavailable-manual-footer-1"
+          ]
+        },
+        "detection": {
+          "rule_ids": [
+            "claude-bash-permission",
+            "claude-auto-ask-permission",
+            "claude-bash-permission-auto-tip",
+            "claude-read-outside-permission",
+            "claude-auto-startup"
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-access-permission-1",
+            "claude-2.1.302-access-allow-pre-stage-1",
+            "claude-2.1.302-access-deny-pre-stage-1",
+            "claude-2.1.302-auto-env-setup-offer-1",
+            "claude-2.1.302-auto-env-setup-wizard-1",
+            "claude-2.1.302-default-permission-1",
+            "claude-2.1.302-wrapped-permission-1",
+            "claude-2.1.302-boxed-permission-1",
+            "claude-2.1.302-boxed-single-row-permission-1",
+            "claude-2.1.302-auto-ask-permission-1",
+            "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
+            "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1",
+            "claude-2.1.302-auto-verbose-refusal-above-form-1",
+            "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1",
+            "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1",
+            "claude-2.1.308-auto-tip-padded-question-1",
+            "claude-2.1.309-read-outside-permission-1",
+            "claude-2.1.309-read-outside-long-path-1",
+            "claude-2.1.309-edit-outside-permission-1"
+          ]
+        },
+        "composer": {
+          "rule_ids": [
+            "claude-idle-composer"
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-idle-composer-1",
+            "claude-2.1.302-auto-idle-composer-1",
+            "claude-2.1.302-default-manual-idle-1"
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "claude-2.1.308-prompt-empty-composer-1",
+                "claude-2.1.308-prompt-typed-literal-1",
+                "claude-2.1.308-prompt-post-submit-1"
+              ]
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "claude-2.1.308-exec-empty-composer-1",
+                "claude-2.1.308-exec-typed-literal-1",
+                "claude-2.1.308-exec-post-submit-1"
+              ]
+            }
+          }
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-bash-permission",
+            "answer_rule_id": "claude-bash-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-bash-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.302-allow-pre-stage-1",
+              "claude-2.1.302-wrapped-allow-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-bash-permission",
+            "answer_rule_id": "claude-bash-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "claude-bash-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.302-deny-pre-stage-1",
+              "claude-2.1.302-wrapped-deny-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-auto-ask-permission",
+            "answer_rule_id": "claude-auto-ask-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-auto-ask-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.302-auto-ask-permission-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-auto-ask-permission",
+            "answer_rule_id": "claude-auto-ask-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "32",
+                "required_rule_id": "claude-auto-ask-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
+              "claude-2.1.302-auto-verbose-refusal-above-form-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-bash-permission-auto-tip",
+            "answer_rule_id": "claude-bash-auto-tip-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-bash-permission-auto-tip",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.302-access-allow-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-bash-permission-auto-tip",
+            "answer_rule_id": "claude-bash-auto-tip-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "claude-bash-permission-auto-tip",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.302-access-deny-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-read-outside-permission",
+            "answer_rule_id": "claude-read-outside-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "claude-read-outside-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.309-read-outside-allow-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-read-outside-permission",
+            "answer_rule_id": "claude-read-outside-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-read-outside-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.309-read-outside-deny-pre-stage-1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "backend": "codex",
+      "min_version": "0.163.0",
+      "rules": [
+        {
+          "id": "codex-exec-approval",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^  Would you like to run the following command\\?\\s*$",
+            "end_pattern": "^  Press enter to confirm or esc to cancel\\s*$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  Would you like to run the following command\\?\\s*$"
+            },
+            {
+              "id": "environment",
+              "scope": "line",
+              "pattern": "^  Environment: \\S+\\s*$"
+            },
+            {
+              "id": "reason",
+              "scope": "line",
+              "pattern": "^  Reason: \\S"
+            },
+            {
+              "id": "operation",
+              "scope": "line",
+              "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^› [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "codex-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^› ",
+            "end_pattern": "^› ",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^› "
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
+        },
+        {
+          "id": "codex-auto-review-refusal",
+          "priority": 40,
+          "observation": "automatic_refusal",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^✗ Request denied for codex to run \\S",
+            "end_pattern": "^\\s*$",
+            "max_rows": 6,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "\\A✗ Request denied for codex to run (?P<operation>[^\\n]*\\S(?:\\n  [^\\n]*\\S)*)\\s*\\n\\s*\\z"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": "  "
+            },
+            "choices": [],
+            "native_request_id": null
+          },
+          "frame": {
+            "require_patterns": [
+              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
+            ],
+            "reject_patterns": [
+              "^  k keep & next · esc dismiss & close"
+            ]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "codex-auto-review-indicator",
+          "priority": 40,
+          "observation": "automatic_review_available",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
+            "end_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
+            "max_rows": 1,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "mode",
+              "scope": "line",
+              "pattern": "^  Permissions: +(?P<mode>Workspace \\(Approve for me\\))\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "frame": {
+            "require_patterns": [
+              "^(?:› Ask Codex to do anything|  \\? for shortcuts)"
+            ],
+            "reject_patterns": [
+              "^  k keep & next · esc dismiss & close"
+            ]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "annotations": {
+          "rule_ids": [
+            "codex-auto-review-refusal",
+            "codex-auto-review-indicator"
+          ],
+          "fixture_ids": [
+            "codex-0.163.0-auto-refusal-working-1",
+            "codex-0.163.0-auto-refusal-idle-1",
+            "codex-0.163.0-auto-refusal-after-overlay-1",
+            "codex-0.163.0-auto-two-refusals-1",
+            "codex-0.163.0-auto-two-refusals-resized-1",
+            "codex-0.163.0-auto-two-refusals-restored-1",
+            "codex-0.163.0-auto-denial-limit-interrupted-1",
+            "codex-0.163.0-auto-status-indicator-1",
+            "codex-0.163.0-auto-quote-false-positive-1",
+            "codex-0.163.0-auto-refusal-warning-overlay-1",
+            "codex-0.163.0-auto-warning-overlay-1",
+            "codex-0.163.0-auto-expanded-detail-1"
+          ]
+        },
+        "detection": {
+          "rule_ids": [
+            "codex-exec-approval"
+          ],
+          "fixture_ids": [
+            "codex-0.163.0-on-request-permission-1"
+          ]
+        },
+        "composer": {
+          "rule_ids": [
+            "codex-idle-composer"
+          ],
+          "fixture_ids": [
+            "codex-0.163.0-idle-composer-1",
+            "codex-0.163.0-auto-idle-composer-1",
+            "codex-0.163.0-auto-fresh-idle-1"
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "codex-0.163.0-prompt-empty-composer-1",
+                "codex-0.163.0-prompt-typed-literal-1",
+                "codex-0.163.0-prompt-post-submit-1"
+              ]
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "codex-0.163.0-exec-empty-composer-1",
+                "codex-0.163.0-exec-typed-literal-1",
+                "codex-0.163.0-exec-post-submit-1"
+              ]
+            }
+          }
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "codex-exec-approval",
+            "answer_rule_id": "codex-exec-allow-y",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "79",
+                "required_rule_id": "codex-exec-approval",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "codex-0.163.0-allow-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "codex-exec-approval",
+            "answer_rule_id": "codex-exec-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "codex-exec-approval",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "codex-0.163.0-deny-pre-stage-1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "backend": "opencode",
+      "min_version": "2.1.4",
+      "rules": [
+        {
+          "id": "opencode-shell-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^  △ Permission required\\s*$",
+            "end_pattern": "  ⇆ select  enter confirm  esc reject\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  △ Permission required\\s*$"
+            },
+            {
+              "id": "shell",
+              "scope": "line",
+              "pattern": "^   # Shell command(?:\\s|$)"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^  \\$ (?P<operation>\\S[^\\n]*(?:\\n  \\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "
+            },
+            {
+              "id": "unclipped",
+              "scope": "region",
+              "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  \\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "
+            },
+            {
+              "id": "controls",
+              "scope": "region",
+              "pattern": "(?m)^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject *| *(?:\\n *)*\\n  ⇆ select  enter confirm  esc reject *)\\z"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$",
+              "focus_style": "background"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^   (?P<label>Allow once)   "
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": "  ",
+              "margin_rows": "continuation",
+              "row_trailer": "█"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "opencode-reject-reason",
+          "priority": 100,
+          "observation": "permission_continuation",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^  △ Reject permission\\s*$",
+            "end_pattern": "  enter confirm  esc cancel\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  △ Reject permission\\s*$"
+            },
+            {
+              "id": "empty_reason",
+              "scope": "region",
+              "pattern": "(?m)^  △ Reject permission *(?:\\n *)*\\n  Tell OpenCode what to do differently *(?:\\n *)*\\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *| *(?:\\n *)*\\n  enter confirm  esc cancel *)\\z"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false,
+          "continues_rule_id": "opencode-shell-permission",
+          "continues_choice_id": "deny-once",
+          "fixture_ids": [
+            "opencode-2.1.4-deny-pre-stage-3",
+            "opencode-2.1.4-narrow-deny-pre-stage-3-057-1"
+          ]
+        },
+        {
+          "id": "opencode-shell-permission-compact",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^△ Permission required\\s*$",
+            "end_pattern": "pgup/pgdn scroll\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^△ Permission required\\s*$"
+            },
+            {
+              "id": "shell",
+              "scope": "line",
+              "pattern": "^# Shell command(?:\\s|$)"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^\\$ (?P<operation>\\S[^\\n]*(?:\\n\\S[^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "
+            },
+            {
+              "id": "unclipped",
+              "scope": "region",
+              "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n\\S[^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "
+            },
+            {
+              "id": "controls",
+              "scope": "region",
+              "pattern": "(?m)^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll *| *(?:\\n *)*\\npgup/pgdn scroll *)\\z"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?\\s*$",
+              "focus_style": "background"
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ (?P<label>Allow once)   "
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_trailer": "█"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "opencode-reject-reason-compact",
+          "priority": 100,
+          "observation": "permission_continuation",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^△ Reject permission\\s*$",
+            "end_pattern": "^enter reject esc back\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^△ Reject permission\\s*$"
+            },
+            {
+              "id": "empty_reason",
+              "scope": "region",
+              "pattern": "(?m)^△ Reject permission *(?:\\n *)*\\nTell OpenCode what to do differently *(?:\\n *)*\\nenter reject esc back *\\z"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false,
+          "continues_rule_id": "opencode-shell-permission-compact",
+          "continues_choice_id": "deny-once",
+          "fixture_ids": [
+            "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+            "opencode-2.1.4-narrow-deny-pre-stage-3-min-1"
+          ]
+        },
+        {
+          "id": "opencode-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^┃ ",
+            "end_pattern": "^┃ ",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^┃ "
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "annotations": null,
+        "detection": {
+          "rule_ids": [
+            "opencode-shell-permission",
+            "opencode-shell-permission-compact"
+          ],
+          "fixture_ids": [
+            "opencode-2.1.4-ask-permission-1",
+            "opencode-2.1.4-narrow-permission-057-1",
+            "opencode-2.1.4-compact-permission-055-1",
+            "opencode-2.1.4-narrow-permission-min-1"
+          ]
+        },
+        "composer": {
+          "rule_ids": [
+            "opencode-idle-composer"
+          ],
+          "fixture_ids": [
+            "opencode-2.1.4-idle-composer-1",
+            "opencode-2.1.4-narrow-idle-composer-057-1"
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "opencode-2.1.4-prompt-empty-composer-1",
+                "opencode-2.1.4-prompt-typed-literal-1",
+                "opencode-2.1.4-prompt-post-submit-1"
+              ]
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "opencode-2.1.4-exec-empty-composer-1",
+                "opencode-2.1.4-exec-typed-literal-1",
+                "opencode-2.1.4-exec-post-submit-1"
+              ]
+            }
+          }
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "opencode-shell-permission",
+            "answer_rule_id": "opencode-shell-allow-once",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "allow-once",
+                "required_focus_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "opencode-2.1.4-allow-pre-stage-1",
+              "opencode-2.1.4-narrow-permission-057-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "opencode-shell-permission",
+            "answer_rule_id": "opencode-shell-deny-once",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "68",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "allow-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "deny-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission",
+                "required_choice_id": "deny-once",
+                "required_screen_rule_id": "opencode-reject-reason"
+              }
+            ],
+            "fixture_ids": [
+              "opencode-2.1.4-deny-pre-stage-1",
+              "opencode-2.1.4-deny-pre-stage-2",
+              "opencode-2.1.4-deny-pre-stage-3",
+              "opencode-2.1.4-narrow-permission-057-1",
+              "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
+              "opencode-2.1.4-narrow-deny-pre-stage-3-057-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "opencode-shell-permission-compact",
+            "answer_rule_id": "opencode-shell-compact-allow-once",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "allow-once",
+                "required_focus_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "opencode-2.1.4-compact-permission-055-1",
+              "opencode-2.1.4-narrow-permission-min-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "opencode-shell-permission-compact",
+            "answer_rule_id": "opencode-shell-compact-deny-once",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "68",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "allow-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "deny-once",
+                "required_focus_choice_id": "deny-once"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "opencode-shell-permission-compact",
+                "required_choice_id": "deny-once",
+                "required_screen_rule_id": "opencode-reject-reason-compact"
+              }
+            ],
+            "fixture_ids": [
+              "opencode-2.1.4-compact-permission-055-1",
+              "opencode-2.1.4-compact-deny-pre-stage-2-055-1",
+              "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+              "opencode-2.1.4-narrow-permission-min-1",
+              "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
+              "opencode-2.1.4-narrow-deny-pre-stage-3-min-1"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,12 +1,11 @@
-use std::io::Write;
-use std::path::{Path, PathBuf};
-
-use rusqlite::Connection;
-
 use crate::coding_agent::CodingAgent;
-use crate::config_dir::{EnvLookup, opencode_skills_base};
-use crate::embedded::{PRESETS, SKILLS, lookup};
+use crate::config::EnvLookup;
+use crate::config::opencode_skills_base;
 use crate::error::CafleetError;
+use rusqlite::Connection;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
 
 pub(crate) struct AgentPaths {
     pub(crate) identity: String,
@@ -122,9 +121,21 @@ fn remove_existing_target(target: &Path) -> std::io::Result<()> {
     }
 }
 
+include!(concat!(env!("OUT_DIR"), "/embedded_data.rs"));
+
+pub(crate) fn lookup(
+    table: &'static [(&'static str, &'static [u8])],
+    path: &str,
+) -> Option<&'static [u8]> {
+    table
+        .iter()
+        .find(|(entry, _)| *entry == path)
+        .map(|(_, bytes)| *bytes)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::assets::*;
     use std::os::unix::fs::symlink;
 
     fn expected_presets(agent: CodingAgent, base: &Path) -> Vec<(&'static str, PathBuf)> {

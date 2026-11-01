@@ -1,10 +1,12 @@
-use std::{borrow::Cow, fmt};
+use std::borrow::Cow;
+use std::fmt;
+
+pub(crate) type Result<T> = std::result::Result<T, CafleetError>;
 
 #[derive(Debug, Clone)]
 pub enum CafleetError {
     Usage(String),
     App(String),
-    Value(String),
     DatabaseBusy(String),
     DeadlineExceeded,
     WithDiagnostics {
@@ -23,7 +25,6 @@ impl CafleetError {
         let message = format!("{self}\n{diagnostic}");
         match self {
             Self::Usage(_) => Self::Usage(message),
-            Self::Value(_) => Self::Value(message),
             Self::WithDiagnostics { cause, .. } if cause.exit_code() == 2 => Self::Usage(message),
             Self::App(_)
             | Self::InvalidStoredValue { .. }
@@ -35,9 +36,9 @@ impl CafleetError {
 
     /// Keep the primary failure and append the cleanup failure when both fail.
     pub(crate) fn merge_cleanup<T>(
-        result: Result<T, Self>,
-        cleanup: Result<(), Self>,
-    ) -> Result<T, Self> {
+        result: std::result::Result<T, Self>,
+        cleanup: std::result::Result<(), Self>,
+    ) -> std::result::Result<T, Self> {
         match (result, cleanup) {
             (Ok(value), Ok(())) => Ok(value),
             (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(cleanup.message())),
@@ -50,7 +51,6 @@ impl CafleetError {
             CafleetError::WithDiagnostics { cause, .. } => cause.exit_code(),
             CafleetError::Usage(_) => 2,
             CafleetError::App(_)
-            | CafleetError::Value(_)
             | CafleetError::DatabaseBusy(_)
             | CafleetError::DeadlineExceeded
             | CafleetError::InvalidStoredValue { .. } => 1,
@@ -64,7 +64,6 @@ impl CafleetError {
             }
             CafleetError::Usage(message)
             | CafleetError::App(message)
-            | CafleetError::Value(message)
             | CafleetError::DatabaseBusy(message) => Cow::Borrowed(message),
             CafleetError::DeadlineExceeded => Cow::Borrowed("operation exceeded its deadline"),
             CafleetError::InvalidStoredValue { field, value } => {
@@ -108,7 +107,7 @@ impl std::error::Error for CafleetError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::error::*;
 
     #[test]
     fn usage_error_maps_to_exit_code_2() {

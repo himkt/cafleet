@@ -4,7 +4,7 @@ Create a reviewed design document with a Director, Drafter and independent Revie
 
 ## Required reading
 
-Read and resolve your [backend](../../cafleet/reference/coding-agents.md), then the [Director role](../../cafleet/roles/director.md), [file layout](../reference/guidelines.md#file-layout), [BASE resolver](../../cafleet/reference/base-dir.md), [supervision](../../cafleet/reference/supervision.md), [coordination](../reference/coordination.md) and [guidelines](../reference/guidelines.md). These references own model selection, paths, reception, messages and document format.
+Read and resolve your [backend](../../cafleet/reference/coding-agents.md), then the [Director role](../../cafleet/roles/director.md), [file layout](../reference/guidelines.md#file-layout), [BASE write protocol](../../cafleet/roles/director.md#base-directory-resolution), [supervision](../../cafleet/roles/director.md#supervision), [coordination](../reference/coordination.md) and [guidelines](../reference/guidelines.md). These references own model selection, paths, reception, messages and document format.
 
 Use absolute role/core/backend paths and the canonical CAFleet spawn frame with the Step 1 delta table. Preserve literal identity placeholders, BASE/output paths and role boundaries. Assigned members continue this team. Read recovery or shutdown immediately before those actions.
 
@@ -21,7 +21,7 @@ For an existing document, retain its content. Existing user-relay markers enter 
 ### Step 1: Register & Spawn Members (Director)
 
 1. Diagnose actual prerequisites with `cafleet doctor`, register the calling Director and retain returned literal IDs.
-2. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake).
+2. Follow [Director wake](../../cafleet/roles/director.md#director-wake).
 3. Spawn the [Drafter](roles/drafter.md) and [Reviewer](roles/reviewer.md) with their role paths, required skills, concrete document/BASE paths and scoped assignments.
 4. Receive and ACK ready before depending on a member. Dispatch each assignment when its inputs exist; inspect actual placement when launch evidence is uncertain.
 

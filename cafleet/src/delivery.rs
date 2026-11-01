@@ -1,23 +1,31 @@
 use crate::broker;
-use crate::broker::records::{MemberKind, Placement};
-use crate::broker::runtime::{
-    self as storage, InputDisposition, InputKind, InputState, PermissionReceiptIdentity,
-};
+use crate::broker::MemberKind;
+use crate::broker::MessageRecord;
+use crate::broker::Placement;
+use crate::broker::runtime as storage;
+use crate::broker::runtime::InputDisposition;
+use crate::broker::runtime::InputKind;
+use crate::broker::runtime::InputState;
+use crate::broker::runtime::PermissionReceiptIdentity;
 use crate::config::Settings;
+use crate::db::complete_database_budget;
+use crate::db::with_database_budget;
 use crate::error::CafleetError;
-use crate::input::{Deadline, PaneLock, complete_database_budget, with_database_budget};
-use crate::multiplexer::{
-    AnyMultiplexer, INPUT_RESERVATION, INSUFFICIENT_INPUT_BUDGET, Lead, MIN_LITERAL_BUDGET,
-    MultiplexerError,
-};
-use crate::receive::{AttemptEnd, AttemptOutcome, NotificationError};
-use crate::runtime::runner::{
-    InputCommandHost, InputFailure, NativeInputHost, PreparedSubmission, RealInputDeadlineClock,
-    SubmissionStatus, SubmitInput, find_submission, submit_wrapped_input_under_pane_lock_with_host,
-    validate_submission_target,
-};
+use crate::runtime::InputCommandHost;
+use crate::runtime::InputFailure;
+use crate::runtime::NativeInputHost;
+use crate::runtime::PreparedSubmission;
+use crate::runtime::RealInputDeadlineClock;
+use crate::runtime::SubmissionStatus;
+use crate::runtime::SubmitInput;
+use crate::runtime::find_submission;
+use crate::runtime::submit_wrapped_input_under_pane_lock_with_host;
+use crate::runtime::validate_submission_target;
+use crate::time::Clock;
+use crate::time::Deadline;
 use rusqlite::Connection;
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 pub(crate) const INLINE_BODY_LIMIT: usize = 4000;
 const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
@@ -43,18 +51,11 @@ fn fold_visible(text: &str) -> String {
     result
 }
 
-pub(crate) fn notification_line(message: &broker::records::MessageRecord) -> String {
-    format!(
-        "{} {DISMISSED_PROMPT_NOTE}",
-        canonical_preview_line(message)
-    )
-}
-
 pub(crate) fn fallback_preview_line(canonical: &str) -> String {
     format!("{canonical} {DISMISSED_PROMPT_NOTE}")
 }
 
-pub(crate) fn canonical_preview_line(message: &broker::records::MessageRecord) -> String {
+pub(crate) fn canonical_preview_line(message: &broker::MessageRecord) -> String {
     let folded = fold_visible(&message.text);
     let body = if folded.chars().count() <= INLINE_BODY_LIMIT {
         folded
@@ -85,19 +86,6 @@ pub(crate) fn notification_error(
     }
 }
 
-fn storage_failure(
-    member_id: i64,
-    message_id: i64,
-    error: CafleetError,
-) -> Result<AttemptEnd, CafleetError> {
-    match error {
-        CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded => Ok(AttemptEnd::Failed(
-            notification_error(member_id, message_id, error),
-        )),
-        error => Err(error),
-    }
-}
-
 pub(crate) fn deliver_pending(
     conn: &mut Connection,
     settings: &Settings,
@@ -113,7 +101,6 @@ pub(crate) fn deliver_pending(
         expected_fleet,
         deadline,
         attempted,
-        || crate::runtime::resolve_mux(settings),
         &mut NativeInputHost,
     )
 }
@@ -130,16 +117,13 @@ fn read_snapshot<T>(
     Ok(result)
 }
 
-type PreviewSnapshot = (
-    broker::records::MemberRecord,
-    broker::records::MessageRecord,
-);
+type PreviewSnapshot = (broker::MemberRecord, broker::MessageRecord);
 
 fn eligible_member(
     conn: &Connection,
     member_id: i64,
     expected_fleet: Option<i64>,
-) -> Result<Option<broker::records::MemberRecord>, CafleetError> {
+) -> Result<Option<broker::MemberRecord>, CafleetError> {
     let Some(fleet_id) = broker::active_member_fleet(conn, member_id)? else {
         return Ok(None);
     };
@@ -168,10 +152,6 @@ fn preview_snapshot(
     })
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the delivery seam takes every production argument plus the multiplexer resolver and input host that tests inject"
-)]
 fn deliver_pending_with(
     conn: &mut Connection,
     settings: &Settings,
@@ -179,144 +159,35 @@ fn deliver_pending_with(
     expected_fleet: Option<i64>,
     deadline: Deadline,
     attempted: &BTreeSet<i64>,
-    resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
     host: &mut impl InputCommandHost,
 ) -> Result<AttemptOutcome, CafleetError> {
-    let deadline = Deadline::until(crate::input::bounded_by_inherited(conn, deadline.instant()));
+    let deadline = Deadline::until(crate::db::bounded_by_inherited(conn, deadline.instant()));
     with_database_budget(conn, deadline, |conn| {
         let ended = |end| Ok(AttemptOutcome::ended(end));
-        let failed = |message_id, cause: String| {
-            AttemptEnd::Failed(notification_error(member_id, message_id, cause))
-        };
         let Some((member, initial)) =
             preview_snapshot(conn, member_id, expected_fleet, deadline, attempted)?
         else {
             return ended(AttemptEnd::NoPending);
         };
+        if let Err(cause) = broker::members::require_runtime(&member) {
+            return ended(AttemptEnd::Failed(notification_error(
+                member_id,
+                initial.message_id,
+                cause,
+            )));
+        }
         let Some(placement) = member.placement.clone().filter(|p| p.mux_pane_id.is_some()) else {
             return ended(AttemptEnd::Held);
         };
-        if member.runtime.is_some() {
-            return deliver_wrapped_pending(
-                conn,
-                settings,
-                (member, initial),
-                &placement,
-                deadline,
-                attempted,
-                host,
-            );
-        }
-        let fleet_id = member.fleet_id;
-        let lock = PaneLock::acquire_within(
-            &settings.database_url,
+        deliver_wrapped_pending(
+            conn,
+            settings,
+            (member, initial),
             &placement,
-            deadline.reserving(INPUT_RESERVATION),
-        );
-        let _guard = match lock {
-            Ok(Some(guard)) => guard,
-            Ok(None) => {
-                let still_pending = match read_snapshot(conn, deadline, |conn| {
-                    broker::oldest_pending_preview(conn, member_id, attempted)
-                }) {
-                    Ok(pending) => pending,
-                    Err(error) => {
-                        return ended(storage_failure(member_id, initial.message_id, error)?);
-                    }
-                };
-                return ended(match still_pending {
-                    None => AttemptEnd::NoPending,
-                    Some(message) => failed(message.message_id, "pane input remained busy".into()),
-                });
-            }
-            Err(error) => {
-                return ended(failed(
-                    initial.message_id,
-                    format!("pane input: {}", error.message()),
-                ));
-            }
-        };
-        let _span = crate::signals::DeferTermination::begin()?;
-        let (current, first) =
-            match preview_snapshot(conn, member_id, Some(fleet_id), deadline, attempted) {
-                Ok(Some(snapshot)) => snapshot,
-                Ok(None) => return ended(AttemptEnd::NoPending),
-                Err(error) => return ended(storage_failure(member_id, initial.message_id, error)?),
-            };
-        if current.placement != member.placement {
-            return ended(AttemptEnd::Held);
-        }
-        let mux = match resolve().and_then(|mux| {
-            mux.ensure_available()?;
-            Ok(mux.bounded(deadline))
-        }) {
-            Ok(mux) => mux,
-            Err(error) => return ended(failed(first.message_id, error.to_string())),
-        };
-        let pane = placement
-            .mux_pane_id
-            .as_deref()
-            .expect("concrete preview placement");
-        let mut sent = Vec::new();
-        let mut lead = Lead::Escape;
-        let mut candidate_id = first.message_id;
-        let end = loop {
-            if deadline.remaining().is_err() {
-                break if sent.is_empty() {
-                    failed(candidate_id, INSUFFICIENT_INPUT_BUDGET.into())
-                } else {
-                    AttemptEnd::BudgetExhausted
-                };
-            }
-            let snapshot = read_snapshot(conn, deadline, |conn| {
-                let Some(current) = eligible_member(conn, member_id, Some(fleet_id))? else {
-                    return Ok(None);
-                };
-                let candidate = broker::oldest_pending_preview(conn, member_id, attempted)?;
-                Ok(Some((current, candidate)))
-            });
-            let (current, candidate) = match snapshot {
-                Ok(Some(snapshot)) => snapshot,
-                Ok(None) => break AttemptEnd::NoPending,
-                Err(error) => break storage_failure(member_id, candidate_id, error)?,
-            };
-            if current.placement != member.placement {
-                break AttemptEnd::Held;
-            }
-            let Some(message) = candidate else {
-                break AttemptEnd::Drained;
-            };
-            candidate_id = message.message_id;
-            if !deadline
-                .remaining()
-                .is_ok_and(|remaining| remaining >= lead.reserved() + MIN_LITERAL_BUDGET)
-            {
-                break if sent.is_empty() {
-                    failed(candidate_id, INSUFFICIENT_INPUT_BUDGET.into())
-                } else {
-                    AttemptEnd::BudgetExhausted
-                };
-            }
-            if let Err(error) = mux.send_prompt(pane, &notification_line(&message), lead) {
-                break failed(candidate_id, error.to_string());
-            }
-            lead = Lead::Direct;
-            match complete_database_budget(conn, deadline, |conn| {
-                broker::messaging::stamp_notified_validated(
-                    conn,
-                    candidate_id,
-                    &crate::time::now_stamp(),
-                )
-            }) {
-                Ok(_) => sent.push(candidate_id),
-                Err(error) => break storage_failure(member_id, candidate_id, error)?,
-            }
-        };
-        Ok(AttemptOutcome {
-            sent,
-            end,
-            held_reason: None,
-        })
+            deadline,
+            attempted,
+            host,
+        )
     })
 }
 
@@ -330,12 +201,7 @@ fn deliver_wrapped_pending(
     host: &mut impl InputCommandHost,
 ) -> Result<AttemptOutcome, CafleetError> {
     let (member, mut message) = initial;
-    let run = member
-        .runtime
-        .as_ref()
-        .expect("wrapped delivery has its run")
-        .run
-        .clone();
+    let run = broker::members::require_runtime(&member)?.run.clone();
     let identity = PermissionReceiptIdentity::for_run(&run);
     enum Stage {
         Submission,
@@ -471,8 +337,8 @@ fn deliver_wrapped_pending(
                 || current
                     .runtime
                     .as_ref()
-                    .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run))
-                    != Some(crate::runtime::runner::stable_run_identity(&run))
+                    .map(|runtime| crate::runtime::stable_run_identity(&runtime.run))
+                    != Some(crate::runtime::stable_run_identity(&run))
             {
                 break AttemptEnd::Held;
             }
@@ -525,56 +391,247 @@ fn deliver_wrapped_pending(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PendingPreview {
+    pub(crate) member_id: i64,
+    pub(crate) message_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReceiveSnapshot {
+    pub(crate) messages: Vec<MessageRecord>,
+    pub(crate) pending: Vec<PendingPreview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NotificationError {
+    pub(crate) member_id: i64,
+    pub(crate) message_id: i64,
+    pub(crate) error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttemptOutcome {
+    pub(crate) sent: Vec<i64>,
+    pub(crate) end: AttemptEnd,
+    /// The recipient runner's reason when it held the preview without accepting it.
+    pub(crate) held_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AttemptEnd {
+    NoPending,
+    Held,
+    Failed(NotificationError),
+}
+
+impl AttemptOutcome {
+    pub(crate) fn ended(end: AttemptEnd) -> Self {
+        Self {
+            sent: Vec::new(),
+            end,
+            held_reason: None,
+        }
+    }
+}
+
+pub(crate) trait ReceiveIo {
+    fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot, CafleetError>;
+    fn attempt(
+        &mut self,
+        member_id: i64,
+        deadline: Deadline,
+        attempted: &BTreeSet<i64>,
+    ) -> Result<AttemptOutcome, CafleetError>;
+}
+
+pub(crate) fn wait<C: Clock, I: ReceiveIo>(
+    clock: &C,
+    io: &mut I,
+    timeout: Duration,
+) -> Result<Vec<MessageRecord>, CafleetError> {
+    let started = clock.now();
+    let expires = started + timeout;
+    let mut next_check = started;
+    let mut last_interval = None;
+    let mut cursor = None;
+    let mut messages = Vec::new();
+    let mut attempted = BTreeSet::new();
+    loop {
+        let now = clock.now();
+        if now >= expires {
+            break;
+        }
+        if now < next_check {
+            clock.sleep(next_check.min(expires).duration_since(now));
+            continue;
+        }
+        let snapshot = match io.check(Deadline::until(expires.min(now + Duration::from_secs(5)))) {
+            Ok(snapshot) => snapshot,
+            Err(CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded) => {
+                let now = clock.now();
+                if now >= expires {
+                    break;
+                }
+                next_check =
+                    started + Duration::from_secs(now.duration_since(started).as_secs() + 1);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        messages = snapshot.messages;
+        let now = clock.now();
+        if !messages.is_empty() || now >= expires {
+            break;
+        }
+        let interval = now.duration_since(started).as_secs();
+        let selected = if last_interval == Some(interval) {
+            None
+        } else {
+            let eligible = snapshot
+                .pending
+                .iter()
+                .filter(|preview| !attempted.contains(&preview.message_id));
+            eligible
+                .clone()
+                .filter(|preview| cursor.is_none_or(|cursor| preview.member_id > cursor))
+                .min_by_key(|preview| preview.member_id)
+                .or_else(|| eligible.min_by_key(|preview| preview.member_id))
+        };
+        if let Some(preview) = selected {
+            let member = preview.member_id;
+            cursor = Some(member);
+            last_interval = Some(interval);
+            let outcome =
+                match io.attempt(
+                    member,
+                    Deadline::until(now + Duration::from_secs(5)),
+                    &attempted,
+                ) {
+                    Ok(outcome) => outcome,
+                    Err(
+                        error @ (CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded),
+                    ) => AttemptOutcome::ended(AttemptEnd::Failed(
+                        crate::delivery::notification_error(member, preview.message_id, error),
+                    )),
+                    Err(error) => return Err(error),
+                };
+            if let AttemptEnd::Failed(error) = outcome.end {
+                assert_eq!(
+                    error.member_id, member,
+                    "the owned attempt reports its selected member"
+                );
+                assert!(
+                    attempted.insert(error.message_id),
+                    "one invocation attempts each failed message at most once"
+                );
+                eprintln!("{}", error.error);
+            }
+            next_check = clock.now();
+        } else {
+            next_check = started + Duration::from_secs(interval + 1);
+        }
+    }
+    Ok(messages)
+}
+
+pub(crate) struct BrokerReceiver<'a> {
+    conn: &'a mut Connection,
+    settings: &'a Settings,
+    member_id: i64,
+    fleet_id: Option<i64>,
+}
+
+impl<'a> BrokerReceiver<'a> {
+    pub(crate) fn new(conn: &'a mut Connection, settings: &'a Settings, member_id: i64) -> Self {
+        Self {
+            conn,
+            settings,
+            member_id,
+            fleet_id: None,
+        }
+    }
+}
+
+fn subject_fleet(
+    conn: &Connection,
+    member_id: i64,
+    expected: Option<i64>,
+) -> Result<i64, CafleetError> {
+    let fleet = broker::active_member_fleet(conn, member_id)?
+        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
+    broker::members::require_pinned_fleet(member_id, fleet, expected, "receive")?;
+    broker::fleets::require_live_fleet(conn, fleet)?;
+    Ok(fleet)
+}
+
+impl ReceiveIo for BrokerReceiver<'_> {
+    fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot, CafleetError> {
+        let (snapshot, fleet) = crate::db::with_database_budget(self.conn, deadline, |conn| {
+            let tx = conn.transaction()?;
+            let fleet = subject_fleet(&tx, self.member_id, self.fleet_id)?;
+            let messages = broker::poll_messages(&tx, self.member_id)?;
+            let pending = broker::messaging::pending_previews(&tx, fleet, self.member_id)?
+                .into_iter()
+                .map(|(member_id, message_id)| PendingPreview {
+                    member_id,
+                    message_id,
+                })
+                .collect();
+            tx.commit()?;
+            Ok((ReceiveSnapshot { messages, pending }, fleet))
+        })?;
+        self.fleet_id = Some(fleet);
+        Ok(snapshot)
+    }
+
+    fn attempt(
+        &mut self,
+        member_id: i64,
+        deadline: Deadline,
+        attempted: &BTreeSet<i64>,
+    ) -> Result<AttemptOutcome, CafleetError> {
+        let fleet = crate::db::with_database_budget(self.conn, deadline, |conn| {
+            subject_fleet(conn, self.member_id, self.fleet_id)
+        })?;
+        crate::delivery::deliver_pending(
+            self.conn,
+            self.settings,
+            member_id,
+            Some(fleet),
+            deadline,
+            attempted,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
     use crate::db::test_support::migrated_conn;
-    use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
-    use crate::receive::AttemptEnd;
-    use crate::runtime::runner::{
-        ControlIdentity, HealthSnapshot, InputCommandHost, InputControlOperation,
-        InputControlReply, InputControlRequest, InputFailure, NativeInputHost, ReceiptAction,
-        ReceiptReply,
-    };
-    use std::{
-        collections::{BTreeSet, HashMap},
-        rc::Rc,
-        time::{Duration, Instant},
-    };
-
-    struct FinishingRunner {
-        deadline: Deadline,
-        submitted: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    }
+    use crate::delivery::AttemptEnd;
+    use crate::delivery::*;
+    use crate::pane_lock::PaneLock;
+    use crate::runtime::ControlIdentity;
+    use crate::runtime::HealthSnapshot;
+    use crate::runtime::InputCommandHost;
+    use crate::runtime::InputControlOperation;
+    use crate::runtime::InputControlReply;
+    use crate::runtime::InputControlRequest;
+    use crate::runtime::InputFailure;
+    use crate::runtime::NativeInputHost;
+    use crate::runtime::ReceiptAction;
+    use crate::runtime::ReceiptReply;
+    use std::collections::BTreeSet;
+    use std::time::Duration;
+    use std::time::Instant;
 
     fn settings_for(conn: &Connection) -> Settings {
         Settings::for_database(std::path::Path::new(conn.path().unwrap()), None)
     }
 
-    fn deliver_natively(
-        conn: &mut Connection,
-        settings: &Settings,
-        member_id: i64,
-        expected_fleet: Option<i64>,
-        deadline: Deadline,
-        attempted: &BTreeSet<i64>,
-        resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
-    ) -> Result<AttemptOutcome, CafleetError> {
-        deliver_pending_with(
-            conn,
-            settings,
-            member_id,
-            expected_fleet,
-            deadline,
-            attempted,
-            resolve,
-            &mut NativeInputHost,
-        )
-    }
-
-    fn wrapped_line(message: &broker::records::MessageRecord, body: &str) -> String {
+    fn wrapped_line(message: &crate::broker::MessageRecord, body: &str) -> String {
         format!(
             "[cafleet msg {} from {} {}] {body} [cafleet] Resume your work if something was still running.",
             message.message_id, message.from_member_id, message.created_at
@@ -590,7 +647,7 @@ mod tests {
     }
 
     fn wrapped_attempt(
-        fixture: &mut crate::runtime::runner::service::test_support::ServiceFixture,
+        fixture: &mut crate::runtime::service::test_support::ServiceFixture,
         deadline: Deadline,
     ) -> Result<AttemptOutcome, CafleetError> {
         let settings = settings_for(&fixture.fixture.conn);
@@ -607,7 +664,6 @@ mod tests {
             Some(fixture.fixture.run.fleet_id),
             deadline,
             &BTreeSet::new(),
-            || panic!("wrapped delivery uses its runner, not a multiplexer"),
             &mut host,
         );
         if let Ok(result) = &outcome {
@@ -631,7 +687,7 @@ mod tests {
             &mut self,
             _: &Settings,
             _: &broker::runtime::RunRecord,
-            _: &broker::records::Placement,
+            _: &crate::broker::Placement,
             _: Deadline,
         ) -> std::result::Result<Option<PaneLock>, InputFailure> {
             panic!("retained delivery is resolved before the pane wait")
@@ -656,7 +712,7 @@ mod tests {
     struct DeliveryHost {
         inner: NativeInputHost,
         settings: Settings,
-        placement: broker::records::Placement,
+        placement: crate::broker::Placement,
         until: Instant,
         calls: [usize; 3],
         expiration: Option<u64>,
@@ -668,11 +724,7 @@ mod tests {
         taken: Option<PaneLock>,
     }
     impl DeliveryHost {
-        fn new(
-            settings: &Settings,
-            placement: &broker::records::Placement,
-            until: Instant,
-        ) -> Self {
+        fn new(settings: &Settings, placement: &crate::broker::Placement, until: Instant) -> Self {
             Self {
                 inner: NativeInputHost,
                 settings: settings.clone(),
@@ -702,7 +754,7 @@ mod tests {
             &mut self,
             settings: &Settings,
             run: &broker::runtime::RunRecord,
-            placement: &broker::records::Placement,
+            placement: &crate::broker::Placement,
             deadline: Deadline,
         ) -> std::result::Result<Option<PaneLock>, InputFailure> {
             self.calls[0] += 1;
@@ -799,7 +851,7 @@ mod tests {
             ));
             if let Some(reason) = self.runner_held {
                 return Ok(InputControlReply::Submission(
-                    crate::runtime::runner::SubmissionResult::held(reason),
+                    crate::runtime::SubmissionResult::held(reason),
                 ));
             }
             let reply = self.inner.exchange(run, request, deadline)?;
@@ -817,7 +869,7 @@ mod tests {
 
     #[test]
     fn wrapped_send_is_submitted_and_stamped_when_another_writer_takes_the_released_lock() {
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let settings = settings_for(&fixture.fixture.conn);
@@ -839,7 +891,6 @@ mod tests {
                     Some(run.fleet_id),
                     Deadline::until(until),
                     &BTreeSet::new(),
-                    || panic!("wrapped delivery uses its runner, not a multiplexer"),
                     &mut host,
                 )
                 .expect("a submission the runner accepted is a delivered send");
@@ -855,7 +906,7 @@ mod tests {
 
     #[test]
     fn wrapped_delivery_reports_the_runner_held_reason() {
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let settings = settings_for(&fixture.fixture.conn);
@@ -877,7 +928,6 @@ mod tests {
                     Some(run.fleet_id),
                     Deadline::until(until),
                     &BTreeSet::new(),
-                    || panic!("wrapped delivery uses its runner, not a multiplexer"),
                     &mut host,
                 )
                 .unwrap();
@@ -889,13 +939,15 @@ mod tests {
     }
 
     fn assert_later_failure_preserves_committed_prefix(later_candidate: bool) {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::{
-            Arc, Mutex,
-            atomic::{AtomicBool, Ordering},
-        };
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
 
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let settings = settings_for(&fixture.fixture.conn);
@@ -966,7 +1018,6 @@ mod tests {
                     Some(run.fleet_id),
                     Deadline::until(until),
                     &BTreeSet::new(),
-                    || panic!("wrapped prefix regression uses its actual runner"),
                     &mut host,
                 );
                 let removed = fixture
@@ -1024,10 +1075,13 @@ mod tests {
                     "failure is the original SQL cause, before original expiry"
                 );
                 drop(observed);
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
-                let records = crate::runtime::runner::service::test_support::input_service::input_service_records(fixture);
+                let records =
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture,
+                    );
                 assert_eq!(
                     records
                         .iter()
@@ -1049,7 +1103,6 @@ mod tests {
                     Some(run.fleet_id),
                     Deadline::until(outer),
                     &BTreeSet::from([second.message_id]),
-                    || panic!("committed history schedules no replay"),
                     &mut NoDeliveryHost,
                 )
                 .unwrap();
@@ -1111,8 +1164,11 @@ mod tests {
 
     #[test]
     fn wrapped_delivery_history_and_conflicts_precede_the_real_held_pane_lock() {
-        use broker::runtime::{self as storage, InputDisposition, InputKind, InputState};
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        use crate::broker::runtime as storage;
+        use crate::broker::runtime::InputDisposition;
+        use crate::broker::runtime::InputKind;
+        use crate::broker::runtime::InputState;
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
@@ -1174,7 +1230,6 @@ mod tests {
                         Some(run.fleet_id),
                         Deadline::until(outer),
                         &BTreeSet::new(),
-                        || panic!("retained preview has no mux"),
                         &mut NoDeliveryHost,
                     )
                     .unwrap();
@@ -1205,20 +1260,24 @@ mod tests {
                     Some(run.fleet_id),
                     Deadline::until(outer),
                     &BTreeSet::new(),
-                    || panic!("conflicting preview has no mux"),
                     &mut NoDeliveryHost,
                 )
                 .unwrap_err();
                 assert!(!failure.to_string().contains("conflicting private preview"));
                 assert_eq!(fixture.fixture.conn.total_changes(), changes);
-                assert!(crate::runtime::runner::service::test_support::input_service::input_service_records(fixture).is_empty());
+                assert!(
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture
+                    )
+                    .is_empty()
+                );
             },
         );
     }
 
     #[test]
     fn wrapped_delivery_retirement_expiry_preserves_the_notified_prefix_without_retyping() {
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run =
                     broker::runtime::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
@@ -1243,7 +1302,6 @@ mod tests {
                     Some(run.fleet_id),
                     Deadline::until(until),
                     &BTreeSet::new(),
-                    || panic!("wrapped retirement uses no mux"),
                     &mut host,
                 )
                 .unwrap();
@@ -1272,16 +1330,18 @@ mod tests {
                         .end,
                     AttemptEnd::NoPending
                 );
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
                 assert_eq!(
-                crate::runtime::runner::service::test_support::input_service::input_service_records(fixture)
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture
+                    )
                     .iter()
                     .filter(|record| record["line"] == expected)
                     .count(),
-                1
-            );
+                    1
+                );
                 assert_eq!(
                     preview_row(&fixture.fixture.conn, run.run_id, message.message_id),
                     Some(row)
@@ -1311,7 +1371,7 @@ mod tests {
     fn preview_digest(run_id: i64, message_id: i64, literal: &str) -> String {
         storage::input_payload_digest(
             run_id,
-            &crate::runtime::runner::SubmitInput {
+            &crate::runtime::SubmitInput {
                 operation_key: format!("preview:{run_id}:{message_id}"),
                 input_kind: InputKind::Preview,
                 message_id: Some(message_id),
@@ -1322,12 +1382,13 @@ mod tests {
 
     #[test]
     fn wrapped_delivery_submits_real_preview_and_atomically_settles_the_actual_message() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let message = broker::send_message(
@@ -1381,24 +1442,22 @@ mod tests {
                     stamped_under_guard.load(Ordering::SeqCst),
                     "actual stamp uses the supplied connection while holding the borrowed lock"
                 );
-                assert!(
-                    matches!(outcome.end, AttemptEnd::Drained | AttemptEnd::NoPending),
-                    "{outcome:?}"
+                assert_eq!(outcome.end, AttemptEnd::NoPending, "{outcome:?}");
+                crate::runtime::service::test_support::input_service::wait_input_service_record(
+                    fixture, &expected, outer,
                 );
-                crate::runtime::runner::service::test_support::input_service::wait_input_service_record(fixture, &expected, outer);
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
                 let row =
                     preview_row(&fixture.fixture.conn, run.run_id, message.message_id).unwrap();
                 assert_eq!(row.kind, broker::runtime::InputKind::Preview);
                 assert_eq!(row.message_id, Some(message.message_id));
-                assert_eq!(row.payload_digest_version, 2);
                 assert_eq!(
                     row.payload_digest,
                     crate::digest::sha256_hex(
                         crate::digest::canonical_json(&serde_json::json!({
-                            "payload_digest_version":2,"run_id":run.run_id,"kind":"preview",
+                            "run_id":run.run_id,"kind":"preview",
                             "message_id":message.message_id,"literal":expected
                         }))
                         .as_bytes()
@@ -1420,7 +1479,10 @@ mod tests {
                     )
                     .unwrap();
                 assert_eq!(status, "input_required");
-                let records = crate::runtime::runner::service::test_support::input_service::input_service_records(fixture);
+                let records =
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture,
+                    );
                 assert_eq!(
                     records
                         .iter()
@@ -1444,7 +1506,7 @@ mod tests {
 
     #[test]
     fn wrapped_delivery_failed_stamp_retries_the_same_receipt_without_retyping() {
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run = fixture.fixture.run.clone();
                 let message = broker::send_message(
@@ -1471,7 +1533,9 @@ mod tests {
                     "first={first:?}; trigger_cleanup={removed:?}"
                 );
                 removed.unwrap();
-                crate::runtime::runner::service::test_support::input_service::wait_input_service_record(fixture, &expected, outer);
+                crate::runtime::service::test_support::input_service::wait_input_service_record(
+                    fixture, &expected, outer,
+                );
                 let row =
                     preview_row(&fixture.fixture.conn, run.run_id, message.message_id).unwrap();
                 assert_eq!(row.state, broker::runtime::InputState::Accepted);
@@ -1481,20 +1545,20 @@ mod tests {
                 );
                 let settings = settings_for(&fixture.fixture.conn);
                 let mut independent = crate::db::connect(&settings.database_url).unwrap();
-                let outcome = deliver_natively(
+                let outcome = deliver_pending(
                     &mut independent,
                     &settings,
                     run.member_id,
                     Some(run.fleet_id),
                     Deadline::until(outer),
                     &BTreeSet::new(),
-                    || panic!("wrapped retry uses its durable receipt"),
                 )
                 .unwrap();
                 assert_eq!(outcome.sent, vec![message.message_id], "{outcome:?}");
                 let settled = preview_row(&independent, run.run_id, message.message_id).unwrap();
-                assert!(
-                    matches!(outcome.end, AttemptEnd::Drained | AttemptEnd::NoPending),
+                assert_eq!(
+                    outcome.end,
+                    AttemptEnd::NoPending,
                     "retry requires actual retirement acknowledgment: {outcome:?}"
                 );
                 assert_eq!(settled.input_id, row.input_id);
@@ -1504,16 +1568,18 @@ mod tests {
                     Some(broker::runtime::InputDisposition::Submitted)
                 );
                 assert!(preview_stamp(&independent, message.message_id).is_some());
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
                 assert_eq!(
-                crate::runtime::runner::service::test_support::input_service::input_service_records(fixture)
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture
+                    )
                     .iter()
                     .filter(|record| record["line"] == expected)
                     .count(),
-                1
-            );
+                    1
+                );
                 let count: i64 = independent.query_row("SELECT count(*) FROM member_input_operations WHERE run_id=?1 AND kind='preview'", [run.run_id], |row| row.get(0)).unwrap();
                 assert_eq!(count, 1);
             },
@@ -1556,17 +1622,18 @@ mod tests {
             let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
             let settings = settings_for(&conn);
             let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
-            let lock =
-                crate::input::lock_path(&settings.database_url, member.placement.as_ref().unwrap())
-                    .unwrap();
-            let outcome = deliver_natively(
+            let lock = crate::pane_lock::lock_path(
+                &settings.database_url,
+                member.placement.as_ref().unwrap(),
+            )
+            .unwrap();
+            let outcome = deliver_pending(
                 &mut conn,
                 &settings,
                 director,
                 Some(fleet),
                 Deadline::new(),
                 &BTreeSet::new(),
-                || panic!("Director delivery must finish before multiplexer resolution"),
             )
             .unwrap();
             assert!(outcome.sent.is_empty());
@@ -1577,80 +1644,11 @@ mod tests {
         }
     }
 
-    impl CommandRunner for FinishingRunner {
-        fn binary_exists(&self, _: &str) -> bool {
-            true
-        }
-        fn run(&self, argv: &[String], _: Option<u64>) -> Result<String, RunError> {
-            assert_ne!(argv[1], "capture-pane", "delivery never captures the pane");
-            assert_eq!(argv[1], "send-keys");
-            if argv.last().unwrap() == "Enter" {
-                std::thread::sleep(self.deadline.remaining().unwrap() + Duration::from_millis(5));
-                self.submitted
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
-            }
-            Ok(String::new())
-        }
-        fn sleep(&self, _: f64) {}
-    }
-
-    #[test]
-    fn a_completed_submission_is_stamped_even_when_its_budget_has_just_expired() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "stamp");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-        let settings = settings_for(&conn);
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
-        let submitted = Arc::new(AtomicBool::new(false));
-        let stamped = submitted.clone();
-        conn.authorizer(Some(move |context: AuthContext<'_>| {
-            if stamped.load(Ordering::SeqCst)
-                && matches!(
-                    context.action,
-                    AuthAction::Read {
-                        table_name: "sqlite_master" | "sqlite_schema" | "refinery_schema_history",
-                        ..
-                    }
-                )
-            {
-                return Authorization::Deny;
-            }
-            Authorization::Allow
-        }))
-        .unwrap();
-        let deadline = Deadline::until(Instant::now() + Duration::from_millis(3200));
-        let mux = fake_mux(Rc::new(FinishingRunner {
-            deadline,
-            submitted,
-        }));
-        let outcome = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            deadline,
-            &BTreeSet::new(),
-            || Ok(mux),
-        )
-        .unwrap();
-        assert_eq!(outcome.sent, vec![message.message_id]);
-        assert!(deadline.remaining().is_err());
-        assert!(
-            broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
-                .unwrap()
-                .is_none()
-        );
-    }
-
     #[test]
     fn preview_reads_share_one_snapshot_when_another_connection_changes_placement_and_text() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use rusqlite::hooks::AuthAction;
+        use rusqlite::hooks::AuthContext;
+        use rusqlite::hooks::Authorization;
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
         conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
@@ -1704,614 +1702,7 @@ mod tests {
         assert_eq!(current, "changed");
     }
 
-    fn fake_mux(runner: Rc<dyn CommandRunner>) -> AnyMultiplexer {
-        AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-            runner,
-            HashMap::from([("TMUX".into(), "test".into())]),
-        ))
-    }
-
-    #[test]
-    fn a_drain_submits_pending_messages_fifo_with_one_escape_and_keeps_full_rows() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "fifo");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let bodies = [
-            "雪\n\t\u{1b}! shell".to_owned(),
-            "界".repeat(INLINE_BODY_LIMIT + 1),
-        ];
-        let messages: Vec<_> = bodies
-            .iter()
-            .map(|body| broker::send_message(&mut conn, director, worker, body).unwrap())
-            .collect();
-        let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-        runner.succeed(5);
-        let result = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            Deadline::new(),
-            &BTreeSet::new(),
-            || Ok(fake_mux(runner.clone())),
-        )
-        .unwrap();
-        assert_eq!(
-            result.sent,
-            messages
-                .iter()
-                .map(|message| message.message_id)
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(result.end, AttemptEnd::Drained);
-        let calls = runner.run_argvs();
-        assert_eq!(calls.len(), 5);
-        assert_eq!(
-            calls
-                .iter()
-                .filter(|call| call.last().unwrap() == "Escape")
-                .count(),
-            1
-        );
-        assert_eq!(calls[1].last().unwrap(), &notification_line(&messages[0]));
-        assert_eq!(calls[3].last().unwrap(), &notification_line(&messages[1]));
-        assert!(calls[3].last().unwrap().contains("cafleet message show"));
-        assert_eq!(
-            broker::poll_messages(&conn, worker)
-                .unwrap()
-                .iter()
-                .map(|message| message.text.clone())
-                .collect::<Vec<_>>(),
-            bodies.into_iter().rev().collect::<Vec<_>>()
-        );
-        assert!(
-            broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn a_worker_drain_with_both_directions_pending_never_names_the_root_directors_pane() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "both directions");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
-        let assignment = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-        let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-        runner.succeed(3);
-        let result = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            Deadline::new(),
-            &BTreeSet::new(),
-            || Ok(fake_mux(runner.clone())),
-        )
-        .unwrap();
-        assert_eq!(result.sent, vec![assignment.message_id]);
-        assert_eq!(result.end, AttemptEnd::Drained);
-        let calls = runner.run_argvs();
-        assert_eq!(calls.len(), 3);
-        for call in &calls {
-            assert!(call.iter().any(|arg| arg == "%2"), "{call:?}");
-            assert!(!call.iter().any(|arg| arg.contains("%0")), "{call:?}");
-        }
-        assert_eq!(
-            calls
-                .iter()
-                .filter(|call| call.last().unwrap() == "Escape")
-                .count(),
-            1
-        );
-        assert_eq!(preview_stamp(&conn, reply.message_id), None);
-        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
-    }
-
-    #[test]
-    fn placement_changes_during_a_real_lock_wait_are_detected_before_input() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "placement wait");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let message = broker::send_message(&mut conn, director, worker, "pending").unwrap();
-        let settings = settings_for(&conn);
-        let placement = placement_of(&conn, worker, fleet);
-        let guard = PaneLock::try_acquire(&settings.database_url, &placement)
-            .unwrap()
-            .unwrap();
-        let path = conn.path().unwrap().to_owned();
-        let release = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(80));
-            Connection::open(path)
-                .unwrap()
-                .execute(
-                    "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
-                    [worker],
-                )
-                .unwrap();
-            drop(guard);
-        });
-        let result = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            Deadline::new(),
-            &BTreeSet::new(),
-            || panic!("changed placement finishes before transport resolution"),
-        )
-        .unwrap();
-        release.join().unwrap();
-        assert_eq!(result, AttemptOutcome::ended(AttemptEnd::Held));
-        assert_eq!(
-            broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
-                .unwrap()
-                .unwrap(),
-            message
-        );
-    }
-
-    #[test]
-    fn self_sends_and_pending_placements_keep_durable_rows_without_resolving_transport() {
-        for (target_self, pane) in [(true, Some("%2")), (false, None)] {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "held preview");
-            let worker = register(&mut conn, fleet, "worker", pane);
-            let sender = if target_self { worker } else { director };
-            let message = broker::send_message(&mut conn, sender, worker, "durable").unwrap();
-            let settings = settings_for(&conn);
-            let result = deliver_natively(
-                &mut conn,
-                &settings,
-                worker,
-                Some(fleet),
-                Deadline::new(),
-                &BTreeSet::new(),
-                || panic!("ineligible preview has no transport effects"),
-            )
-            .unwrap();
-            assert_eq!(
-                result.end,
-                if target_self {
-                    AttemptEnd::NoPending
-                } else {
-                    AttemptEnd::Held
-                }
-            );
-            assert_eq!(broker::poll_messages(&conn, worker).unwrap(), [message]);
-            assert!(result.sent.is_empty());
-        }
-    }
-
-    fn expected_failure(member_id: i64, message_id: i64, cause: &str) -> AttemptEnd {
-        AttemptEnd::Failed(crate::receive::NotificationError {
-            member_id,
-            message_id,
-            error: format!(
-                "message {message_id} was not notified to member {member_id}: {cause}; the next send to member {member_id} or the next message wait retries it."
-            ),
-        })
-    }
-
-    #[test]
-    fn delivery_skips_attempted_message_ids_and_stamps_only_the_later_message() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "exclusions");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let first = broker::send_message(&mut conn, director, worker, "failed earlier").unwrap();
-        let next = broker::send_message(&mut conn, director, worker, "next message").unwrap();
-        let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-        runner.succeed(3);
-        let result = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            Deadline::new(),
-            &BTreeSet::from([first.message_id]),
-            || Ok(fake_mux(runner.clone())),
-        )
-        .unwrap();
-        assert_eq!(result.sent, vec![next.message_id]);
-        assert_eq!(result.end, AttemptEnd::Drained);
-        let literals: Vec<_> = runner
-            .run_argvs()
-            .into_iter()
-            .filter(|argv| argv.iter().any(|arg| arg == "-l"))
-            .collect();
-        assert_eq!(literals.len(), 1);
-        assert!(
-            literals[0]
-                .last()
-                .unwrap()
-                .contains(&format!("[cafleet msg {} from ", next.message_id))
-        );
-        assert_eq!(
-            broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
-                .unwrap()
-                .unwrap()
-                .message_id,
-            first.message_id
-        );
-    }
-
-    #[test]
-    fn resolution_and_availability_failures_use_the_exact_not_notified_diagnostic() {
-        for resolution in [true, false] {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "multiplexer failure");
-            let worker = register(&mut conn, fleet, "worker", Some("%2"));
-            let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-            let settings = settings_for(&conn);
-            let result = deliver_natively(
-                &mut conn,
-                &settings,
-                worker,
-                Some(fleet),
-                Deadline::new(),
-                &BTreeSet::new(),
-                || {
-                    if resolution {
-                        Err(MultiplexerError::new("resolution unavailable"))
-                    } else {
-                        Ok(fake_mux(
-                            crate::multiplexer::test_support::FakeRunner::without_binaries(),
-                        ))
-                    }
-                },
-            )
-            .unwrap();
-            assert!(result.sent.is_empty());
-            assert_eq!(
-                result.end,
-                expected_failure(
-                    worker,
-                    message.message_id,
-                    if resolution {
-                        "resolution unavailable"
-                    } else {
-                        "tmux binary not found on PATH"
-                    }
-                )
-            );
-            assert_eq!(
-                broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
-                    .unwrap()
-                    .unwrap()
-                    .message_id,
-                message.message_id
-            );
-        }
-    }
-
-    #[test]
-    fn busy_lock_and_lock_acquisition_errors_use_the_exact_not_notified_diagnostic() {
-        for busy in [true, false] {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "lock failure");
-            let worker = register(&mut conn, fleet, "worker", Some("%2"));
-            let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-            let settings = settings_for(&conn);
-            let placement = placement_of(&conn, worker, fleet);
-            let guard;
-            let cause = if busy {
-                guard = PaneLock::try_acquire(&settings.database_url, &placement).unwrap();
-                assert!(guard.is_some());
-                "pane input remained busy".to_string()
-            } else {
-                let path = crate::input::lock_path(&settings.database_url, &placement).unwrap();
-                std::fs::write(path.parent().unwrap(), "occupied").unwrap();
-                let error = PaneLock::try_acquire(&settings.database_url, &placement)
-                    .err()
-                    .expect("a regular file cannot serve as the lock directory");
-                guard = None;
-                format!("pane input: {error}")
-            };
-            let result = deliver_natively(
-                &mut conn,
-                &settings,
-                worker,
-                Some(fleet),
-                Deadline::until(Instant::now() + Duration::from_millis(500)),
-                &BTreeSet::new(),
-                || panic!("a failed lock finishes before multiplexer resolution"),
-            )
-            .unwrap();
-            assert_eq!(
-                result.end,
-                expected_failure(worker, message.message_id, &cause)
-            );
-            assert!(result.sent.is_empty());
-            drop(guard);
-        }
-    }
-
-    #[test]
-    fn an_insufficient_first_line_budget_reports_the_exact_not_notified_diagnostic() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "budget");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-        let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-        let result = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            Deadline::until(Instant::now() + Duration::from_millis(500)),
-            &BTreeSet::new(),
-            || Ok(fake_mux(runner.clone())),
-        )
-        .unwrap();
-        assert_eq!(
-            result.end,
-            expected_failure(
-                worker,
-                message.message_id,
-                "insufficient pane input budget for literal input, settle and Enter"
-            )
-        );
-        assert!(runner.events().is_empty());
-    }
-
-    #[test]
-    fn every_transport_stage_uses_the_same_not_notified_template_and_preserves_the_cause() {
-        for successes in 0..=2 {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "transport");
-            let worker = register(&mut conn, fleet, "worker", Some("%2"));
-            let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-            let settings = settings_for(&conn);
-            let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-            let expected = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-            for fixture in [&runner, &expected] {
-                for _ in 0..successes {
-                    fixture.respond(Ok(String::new()));
-                }
-                fixture.respond(Err(RunError::Failed {
-                    stderr: "distinct transport failure".into(),
-                }));
-            }
-            let cause = fake_mux(expected)
-                .send_prompt("%2", &notification_line(&message), Lead::Escape)
-                .unwrap_err()
-                .to_string();
-            let result = deliver_natively(
-                &mut conn,
-                &settings,
-                worker,
-                Some(fleet),
-                Deadline::new(),
-                &BTreeSet::new(),
-                || Ok(fake_mux(runner.clone())),
-            )
-            .unwrap();
-            assert_eq!(
-                result.end,
-                expected_failure(worker, message.message_id, &cause)
-            );
-            assert!(result.sent.is_empty());
-            assert_eq!(runner.run_argvs().len(), successes + 1);
-            assert_eq!(
-                broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
-                    .unwrap()
-                    .unwrap()
-                    .message_id,
-                message.message_id
-            );
-        }
-    }
-
-    #[test]
-    fn a_failure_after_one_submission_keeps_the_sent_prefix_and_names_the_current_candidate() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "partial drain");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let first = broker::send_message(&mut conn, director, worker, "first").unwrap();
-        let next = broker::send_message(&mut conn, director, worker, "next").unwrap();
-        let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-        for _ in 0..3 {
-            runner.respond(Ok(String::new()));
-        }
-        runner.respond(Err(RunError::Failed {
-            stderr: "next literal failed".into(),
-        }));
-        let expected = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-        expected.respond(Err(RunError::Failed {
-            stderr: "next literal failed".into(),
-        }));
-        let cause = fake_mux(expected)
-            .send_prompt("%2", &notification_line(&next), Lead::Direct)
-            .unwrap_err()
-            .to_string();
-        let result = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            Deadline::new(),
-            &BTreeSet::new(),
-            || Ok(fake_mux(runner.clone())),
-        )
-        .unwrap();
-        assert_eq!(result.sent, vec![first.message_id]);
-        assert_eq!(
-            result.end,
-            expected_failure(worker, next.message_id, &cause)
-        );
-        assert_eq!(runner.run_argvs().len(), 4);
-    }
-
-    #[test]
-    fn a_fatal_stamp_error_retains_its_storage_cause() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "fatal stamp");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-        conn.execute_batch(
-            "CREATE TRIGGER reject_stamp BEFORE UPDATE OF notified_at ON messages
-            BEGIN SELECT RAISE(ABORT, 'injected stamp corruption'); END;",
-        )
-        .unwrap();
-        let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-        runner.succeed(3);
-        let error = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            Deadline::new(),
-            &BTreeSet::new(),
-            || Ok(fake_mux(runner)),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(error, CafleetError::App(ref cause) if cause.contains("injected stamp corruption"))
-        );
-        assert_eq!(preview_stamp(&conn, message.message_id), None);
-    }
-
-    #[test]
-    fn a_fatal_under_lock_snapshot_error_retains_its_storage_cause() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "fatal snapshot");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-        let settings = settings_for(&conn);
-        let path = conn.path().unwrap().to_string();
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-        let error = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            Deadline::new(),
-            &BTreeSet::new(),
-            || {
-                Connection::open(path)
-                    .unwrap()
-                    .execute(
-                        "UPDATE members SET description=zeroblob(1) WHERE member_id=?1",
-                        [worker],
-                    )
-                    .unwrap();
-                Ok(fake_mux(runner.clone()))
-            },
-        )
-        .unwrap_err();
-        assert!(
-            error.message().contains("Invalid column type Blob"),
-            "{error}"
-        );
-        assert!(runner.events().is_empty());
-    }
-
-    #[test]
-    fn recipient_changes_after_resolution_are_revalidated_before_any_input() {
-        for change in ["departure", "promotion", "placement"] {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "revalidation");
-            let worker = register(&mut conn, fleet, "worker", Some("%2"));
-            let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-            let settings = settings_for(&conn);
-            let path = conn.path().unwrap().to_string();
-            let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-            let result = deliver_natively(
-                &mut conn, &settings, worker, Some(fleet), Deadline::new(), &BTreeSet::new(),
-                || {
-                    let other = Connection::open(path).unwrap();
-                    match change {
-                        "departure" => { other.execute("UPDATE members SET status='deregistered' WHERE member_id=?1", [worker]).unwrap(); }
-                        "promotion" => { other.execute("UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2", rusqlite::params![worker, fleet]).unwrap(); }
-                        "placement" => { other.execute("UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1", [worker]).unwrap(); }
-                        _ => unreachable!(),
-                    }
-                    Ok(fake_mux(runner.clone()))
-                },
-            ).unwrap();
-            assert!(result.sent.is_empty());
-            assert_eq!(
-                result.end,
-                if change == "placement" {
-                    AttemptEnd::Held
-                } else {
-                    AttemptEnd::NoPending
-                }
-            );
-            assert!(runner.events().is_empty());
-            assert_eq!(preview_stamp(&conn, message.message_id), None);
-        }
-    }
-
-    #[test]
-    fn under_lock_snapshot_contention_returns_a_retryable_diagnostic_for_the_current_candidate() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "snapshot contention");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-        let settings = settings_for(&conn);
-        let blocker = Connection::open(conn.path().unwrap()).unwrap();
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-        let result = deliver_natively(
-            &mut conn,
-            &settings,
-            worker,
-            Some(fleet),
-            Deadline::until(Instant::now() + Duration::from_millis(500)),
-            &BTreeSet::new(),
-            || {
-                blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
-                Ok(fake_mux(runner.clone()))
-            },
-        )
-        .unwrap();
-        assert!(result.sent.is_empty());
-        let AttemptEnd::Failed(error) = result.end else {
-            panic!("snapshot contention leaves a per-message retry diagnostic");
-        };
-        assert_eq!(
-            (error.member_id, error.message_id),
-            (worker, message.message_id)
-        );
-        let database = expected_failure(
-            worker,
-            message.message_id,
-            "database error: database is locked",
-        );
-        let deadline = expected_failure(
-            worker,
-            message.message_id,
-            "operation exceeded its deadline",
-        );
-        assert!(
-            AttemptEnd::Failed(error.clone()) == database || AttemptEnd::Failed(error) == deadline
-        );
-        assert!(runner.events().is_empty());
-        blocker.execute_batch("ROLLBACK").unwrap();
-    }
-
-    use crate::broker::records::MessageRecord;
+    use crate::broker::MessageRecord;
 
     const TS: &str = MessageRecord::FIXTURE_STAMP;
     const CLAUSES: &str = "[cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.";
@@ -2321,7 +1712,7 @@ mod tests {
     }
 
     fn line_body(text: &str) -> String {
-        let line = notification_line(&record(text));
+        let line = fallback_preview_line(&canonical_preview_line(&record(text)));
         let prefix = format!("[cafleet msg 57 from 15 {TS}] ");
         let suffix = format!(" {CLAUSES}");
         assert!(line.starts_with(&prefix), "{line}");
@@ -2336,7 +1727,9 @@ mod tests {
     #[test]
     fn the_line_matches_the_specified_example() {
         assert_eq!(
-            notification_line(&record("ready (doc)\nsee the reviewer notes")),
+            fallback_preview_line(&canonical_preview_line(&record(
+                "ready (doc)\nsee the reviewer notes"
+            ))),
             format!("[cafleet msg 57 from 15 {TS}] ready (doc)⏎see the reviewer notes {CLAUSES}")
         );
     }
@@ -2344,8 +1737,10 @@ mod tests {
     #[test]
     fn multiline_tab_and_control_characters_are_folded_visibly() {
         assert_eq!(line_body("a\r\nb\nc\rd\tx\x1b\x7f"), "a⏎b⏎c⏎d␉x\\x1b\\x7f");
-        let line = notification_line(&record("! printf danger\r\nnext\u{0}"));
-        assert!(crate::input::valid_input(&line), "{line:?}");
+        let line = fallback_preview_line(&canonical_preview_line(&record(
+            "! printf danger\r\nnext\u{0}",
+        )));
+        assert!(crate::pane_lock::valid_input(&line), "{line:?}");
     }
 
     #[test]
@@ -2383,14 +1778,16 @@ mod tests {
     }
 
     mod deferred_preview {
-        use super::*;
         use crate::broker::runtime::RunRecord;
-        use crate::runtime::runner::service::test_support::ServiceFixture;
-        use crate::runtime::runner::service::test_support::input_service::{
-            FORM_LINE, input_service_barrier, input_service_records, manual,
-            wait_input_service_record, with_detecting_input_service,
-        };
-        use crate::runtime::runner::*;
+        use crate::delivery::tests::*;
+        use crate::runtime::service::test_support::ServiceFixture;
+        use crate::runtime::service::test_support::input_service::FORM_LINE;
+        use crate::runtime::service::test_support::input_service::input_service_barrier;
+        use crate::runtime::service::test_support::input_service::input_service_records;
+        use crate::runtime::service::test_support::input_service::manual;
+        use crate::runtime::service::test_support::input_service::wait_input_service_record;
+        use crate::runtime::service::test_support::input_service::with_detecting_input_service;
+        use crate::runtime::*;
 
         /// Consumes the runtime-event notifications the detected interaction sends the
         /// Director, so only the preview's own delivery is observed.
@@ -2465,7 +1862,6 @@ mod tests {
                 assert_eq!(queued.state, InputState::Ready);
                 assert!(queued.deferred_at.is_some());
                 assert_eq!(queued.defer_reason.as_deref(), Some("interaction_open"));
-                assert_eq!(queued.payload_digest_version, 2);
                 assert!(stamp(fixture, message.message_id).is_none());
                 assert!(
                     input_service_records(fixture).is_empty(),
@@ -2594,6 +1990,295 @@ mod tests {
                     "both queued previews drain once, in order, without another send or wait"
                 );
             });
+        }
+    }
+    use crate::time::test_support::TestClock;
+    use std::cell::Cell;
+
+    struct RecordingIo<C, A> {
+        check: C,
+        attempt: A,
+    }
+
+    impl<C, A> ReceiveIo for RecordingIo<C, A>
+    where
+        C: FnMut(Deadline) -> Result<ReceiveSnapshot, CafleetError>,
+        A: FnMut(i64, Deadline, &BTreeSet<i64>) -> Result<AttemptOutcome, CafleetError>,
+    {
+        fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot, CafleetError> {
+            (self.check)(deadline)
+        }
+
+        fn attempt(
+            &mut self,
+            member: i64,
+            deadline: Deadline,
+            excluded: &BTreeSet<i64>,
+        ) -> Result<AttemptOutcome, CafleetError> {
+            (self.attempt)(member, deadline, excluded)
+        }
+    }
+
+    fn snapshot(pending: &[(i64, i64)]) -> ReceiveSnapshot {
+        ReceiveSnapshot {
+            messages: Vec::new(),
+            pending: pending
+                .iter()
+                .map(|&(member_id, message_id)| PendingPreview {
+                    member_id,
+                    message_id,
+                })
+                .collect(),
+        }
+    }
+
+    fn message(id: i64) -> MessageRecord {
+        MessageRecord::fixture(id, 2, 1, &"雪\nfull reply".repeat(300))
+    }
+
+    fn no_attempt(_: i64, _: Deadline, _: &BTreeSet<i64>) -> Result<AttemptOutcome, CafleetError> {
+        panic!("the subject inbox or empty candidate set takes priority");
+    }
+
+    #[test]
+    fn existing_inbox_returns_full_records_before_retry_or_sleep() {
+        let clock = TestClock::new();
+        let expected = vec![message(9), message(8)];
+        let mut io = RecordingIo {
+            check: |_| {
+                Ok(ReceiveSnapshot {
+                    messages: expected.clone(),
+                    pending: snapshot(&[(2, 3)]).pending,
+                })
+            },
+            attempt: no_attempt,
+        };
+        assert_eq!(
+            wait(&clock, &mut io, Duration::from_secs(30)).unwrap(),
+            expected
+        );
+        assert_eq!(clock.elapsed.get(), Duration::ZERO);
+    }
+
+    #[test]
+    fn idle_checks_cap_work_and_finish_at_the_original_expiry() {
+        let clock = TestClock::new();
+        let mut budgets = Vec::new();
+        let mut io = RecordingIo {
+            check: |deadline: Deadline| {
+                budgets.push(deadline.remaining_at(clock.now()).unwrap());
+                Ok(snapshot(&[]))
+            },
+            attempt: no_attempt,
+        };
+        assert!(
+            wait(&clock, &mut io, Duration::from_millis(6500))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(clock.elapsed.get(), Duration::from_millis(6500));
+        assert_eq!(
+            budgets,
+            [5000, 5000, 4500, 3500, 2500, 1500, 500].map(Duration::from_millis)
+        );
+    }
+
+    #[test]
+    fn retries_rotate_members_and_exclude_each_failed_message_for_one_invocation() {
+        let clock = TestClock::new();
+        let mut attempts = Vec::new();
+        let mut io = RecordingIo {
+            check: |_| Ok(snapshot(&[(2, 20), (2, 21), (5, 50)])),
+            attempt: |member, deadline: Deadline, excluded: &BTreeSet<i64>| {
+                assert_eq!(
+                    deadline.remaining_at(clock.now()).unwrap(),
+                    Duration::from_secs(5)
+                );
+                let id = match member {
+                    2 if excluded.contains(&20) => 21,
+                    2 => 20,
+                    5 => 50,
+                    _ => panic!("unexpected retry member {member}"),
+                };
+                attempts.push((clock.elapsed.get(), member, excluded.clone()));
+                Ok(AttemptOutcome::ended(AttemptEnd::Failed(
+                    crate::delivery::notification_error(member, id, "unavailable"),
+                )))
+            },
+        };
+        wait(&clock, &mut io, Duration::from_secs(4)).unwrap();
+        assert_eq!(
+            attempts,
+            vec![
+                (Duration::ZERO, 2, BTreeSet::new()),
+                (Duration::from_secs(1), 5, BTreeSet::from([20])),
+                (Duration::from_secs(2), 2, BTreeSet::from([20, 50])),
+            ]
+        );
+        let mut retried = false;
+        let mut io = RecordingIo {
+            check: |_| Ok(snapshot(&[(2, 20)])),
+            attempt: |_, _, excluded: &BTreeSet<i64>| {
+                assert!(excluded.is_empty());
+                retried = true;
+                clock.advance(Duration::from_secs(1));
+                Ok(AttemptOutcome::ended(AttemptEnd::NoPending))
+            },
+        };
+        wait(&clock, &mut io, Duration::from_secs(1)).unwrap();
+        assert!(retried);
+    }
+
+    #[test]
+    fn a_reply_after_a_retry_precedes_the_next_retry() {
+        let clock = TestClock::new();
+        let attempted = Cell::new(false);
+        let mut io = RecordingIo {
+            check: |_| {
+                Ok(if attempted.get() {
+                    ReceiveSnapshot {
+                        messages: vec![message(7)],
+                        pending: snapshot(&[(5, 50)]).pending,
+                    }
+                } else {
+                    snapshot(&[(2, 20), (5, 50)])
+                })
+            },
+            attempt: |member, _, _: &BTreeSet<i64>| {
+                assert_eq!(member, 2);
+                assert!(!attempted.replace(true));
+                Ok(AttemptOutcome::ended(AttemptEnd::Held))
+            },
+        };
+        assert_eq!(
+            wait(&clock, &mut io, Duration::from_secs(10)).unwrap(),
+            vec![message(7)]
+        );
+        assert_eq!(clock.elapsed.get(), Duration::ZERO);
+    }
+
+    #[test]
+    fn live_membership_and_slow_attempts_preserve_rotation_without_catch_up() {
+        let clock = TestClock::new();
+        let mut members = Vec::new();
+        let mut io = RecordingIo {
+            check: |_| {
+                Ok(if clock.elapsed.get().is_zero() {
+                    snapshot(&[(2, 20), (5, 50)])
+                } else {
+                    snapshot(&[(1, 10), (8, 80)])
+                })
+            },
+            attempt: |member, _, _: &BTreeSet<i64>| {
+                members.push((clock.elapsed.get(), member));
+                clock.advance(Duration::from_millis(2400));
+                Ok(AttemptOutcome::ended(AttemptEnd::Held))
+            },
+        };
+        wait(&clock, &mut io, Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            members,
+            [
+                (Duration::ZERO, 2),
+                (Duration::from_millis(2400), 8),
+                (Duration::from_millis(4800), 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn an_attempt_near_expiry_keeps_its_own_budget_and_performs_no_final_read() {
+        let clock = TestClock::new();
+        let mut checks = 0;
+        let mut io = RecordingIo {
+            check: |deadline: Deadline| {
+                checks += 1;
+                assert_eq!(checks, 1);
+                assert_eq!(
+                    deadline.remaining_at(clock.now()).unwrap(),
+                    Duration::from_secs(1)
+                );
+                clock.advance(Duration::from_millis(900));
+                Ok(snapshot(&[(2, 20)]))
+            },
+            attempt: |_, deadline: Deadline, _: &BTreeSet<i64>| {
+                assert_eq!(
+                    deadline.remaining_at(clock.now()).unwrap(),
+                    Duration::from_secs(5)
+                );
+                clock.advance(Duration::from_secs(2));
+                Ok(AttemptOutcome::ended(AttemptEnd::NoPending))
+            },
+        };
+        wait(&clock, &mut io, Duration::from_secs(1)).unwrap();
+        assert_eq!(checks, 1);
+    }
+
+    #[test]
+    fn transient_snapshot_contention_recovers_and_fatal_errors_keep_their_cause() {
+        let clock = TestClock::new();
+        let mut calls = 0;
+        let mut io = RecordingIo {
+            check: |_| {
+                calls += 1;
+                if calls == 1 {
+                    Err(CafleetError::DatabaseBusy("held writer".into()))
+                } else {
+                    Ok(ReceiveSnapshot {
+                        messages: vec![message(3)],
+                        pending: Vec::new(),
+                    })
+                }
+            },
+            attempt: no_attempt,
+        };
+        assert_eq!(
+            wait(&clock, &mut io, Duration::from_secs(3)).unwrap(),
+            vec![message(3)]
+        );
+        assert_eq!(clock.elapsed.get(), Duration::from_secs(1));
+        for during_attempt in [false, true] {
+            let mut io = RecordingIo {
+                check: |_| {
+                    if during_attempt {
+                        Ok(snapshot(&[(2, 20)]))
+                    } else {
+                        Err(CafleetError::App("corrupt subject".into()))
+                    }
+                },
+                attempt: |_, _, _: &BTreeSet<i64>| Err(CafleetError::App("corrupt subject".into())),
+            };
+            assert!(
+                matches!(wait(&clock, &mut io, Duration::from_secs(1)), Err(CafleetError::App(cause)) if cause == "corrupt subject")
+            );
+        }
+    }
+
+    #[test]
+    fn attempt_contention_excludes_the_selected_message_and_late_checks_start_no_input() {
+        for late in [false, true] {
+            let clock = TestClock::new();
+            let mut calls = 0;
+            let mut io = RecordingIo {
+                check: |_| {
+                    if late {
+                        clock.advance(Duration::from_secs(1));
+                    }
+                    Ok(snapshot(&[(2, 20)]))
+                },
+                attempt: |_, _, excluded: &BTreeSet<i64>| {
+                    calls += 1;
+                    assert!(excluded.is_empty());
+                    Err(CafleetError::DeadlineExceeded)
+                },
+            };
+            wait(
+                &clock,
+                &mut io,
+                Duration::from_secs(if late { 1 } else { 3 }),
+            )
+            .unwrap();
+            assert_eq!(calls, usize::from(!late));
         }
     }
 }

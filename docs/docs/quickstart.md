@@ -239,4 +239,4 @@ members, exchange a message, then shut down the team.” The skill manages
 the bootstrap and supervision protocol.
 
 For the complete command sequence and backend variations, follow
-[Run a fleet](how-to/mixed-backend-team.md#manual-lifecycle).
+[Run a fleet](mixed-backend-team.md#manual-lifecycle).

@@ -132,7 +132,7 @@ A member may need to communicate something that does not point at any heading, f
 - They MUST NOT match the `<verb> (<pointer>)` schema (no parentheses) and the Director MUST treat them as informational, not as work signals.
 - They do NOT add markers to the design doc.
 
-If a member finds themselves needing to send anchorless status updates frequently, that is a stall signal — the Director's [stall-response ladder](../../cafleet/reference/supervision.md#stall-response) still applies.
+If a member finds themselves needing to send anchorless status updates frequently, that is a stall signal — the Director's [stall-response ladder](../../cafleet/roles/director.md#stall-response) still applies.
 
 ## Finalize-Time Cleanup
 

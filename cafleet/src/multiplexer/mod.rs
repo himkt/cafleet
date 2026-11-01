@@ -1,45 +1,13 @@
-pub(crate) mod herdr;
-mod keys;
-pub(crate) mod tmux;
-pub(crate) use keys::PressKeys;
-
+use crate::error::CafleetError;
+pub(crate) use crate::multiplexer::herdr::HerdrMultiplexer;
+pub(crate) use crate::multiplexer::tmux::TmuxMultiplexer;
 use std::fmt;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
-pub(crate) use herdr::HerdrMultiplexer;
-pub(crate) use tmux::TmuxMultiplexer;
-
-pub(crate) const SUBMIT_DELAY: f64 = 1.0;
-pub(crate) const ESCAPE_SETTLE_DELAY: f64 = 0.5;
-pub(crate) const ESCAPE_TIMEOUT: Duration = Duration::from_secs(1);
-pub(crate) const MIN_LITERAL_BUDGET: Duration = Duration::from_millis(500);
-pub(crate) const REVALIDATION_MARGIN: Duration = Duration::from_millis(500);
-const DIRECT_RESERVATION: Duration =
-    Duration::from_millis((SUBMIT_DELAY * 1000.0) as u64).saturating_add(Duration::from_secs(1));
-const ESCAPE_RESERVATION: Duration =
-    DIRECT_RESERVATION.saturating_add(Duration::from_millis((ESCAPE_SETTLE_DELAY * 1000.0) as u64));
-pub(crate) const INPUT_RESERVATION: Duration = REVALIDATION_MARGIN
-    .saturating_add(MIN_LITERAL_BUDGET)
-    .saturating_add(ESCAPE_RESERVATION);
-pub(crate) const INSUFFICIENT_INPUT_BUDGET: &str =
-    "insufficient pane input budget for literal input, settle and Enter";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Lead {
-    Escape,
-    Direct,
-}
-
-impl Lead {
-    /// The settle and Enter time a submission keeps back from its literal input.
-    pub(crate) fn reserved(self) -> Duration {
-        match self {
-            Lead::Escape => ESCAPE_RESERVATION,
-            Lead::Direct => DIRECT_RESERVATION,
-        }
-    }
-}
+pub(crate) mod herdr;
+pub(crate) mod tmux;
 
 /// The concrete session, window and pane returned by context discovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,11 +44,6 @@ impl MultiplexerError {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn pane_cleanup(&self) -> Option<&PaneCleanup> {
-        self.pane_cleanup.as_ref()
-    }
-
     pub(crate) fn submission_started(&self) -> bool {
         self.submission_started
     }
@@ -93,6 +56,13 @@ impl MultiplexerError {
     pub(crate) fn with_pane_cleanup(mut self, cleanup: PaneCleanup) -> Self {
         self.pane_cleanup = Some(cleanup);
         self
+    }
+}
+
+#[cfg(test)]
+impl MultiplexerError {
+    pub(crate) fn pane_cleanup(&self) -> Option<&PaneCleanup> {
+        self.pane_cleanup.as_ref()
     }
 }
 
@@ -195,16 +165,9 @@ pub(crate) trait CommandRunner {
                 cleanup_diagnostics: Vec::new(),
             })
     }
-    fn sleep(&self, seconds: f64);
     fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
         Ok(None)
     }
-}
-
-pub(crate) struct PaneInput {
-    pub(crate) escape: Vec<String>,
-    pub(crate) literal: Vec<String>,
-    pub(crate) enter: Vec<String>,
 }
 
 fn whole_seconds(duration: Duration) -> u64 {
@@ -212,8 +175,6 @@ fn whole_seconds(duration: Duration) -> u64 {
 }
 
 const PLACEMENT_MISMATCH: &str = "press target context does not match the recorded placement";
-
-type RunErrorMapper<'a> = dyn Fn(&[String], Option<u64>, RunError) -> MultiplexerError + 'a;
 
 fn map_run_error(
     name: &str,
@@ -244,7 +205,7 @@ fn map_run_error(
     }
 }
 
-fn check_deadline(deadline: crate::input::Deadline) -> Result<(), MultiplexerError> {
+fn check_deadline(deadline: crate::time::Deadline) -> Result<(), MultiplexerError> {
     deadline
         .remaining()
         .map(|_| ())
@@ -271,7 +232,7 @@ struct BackendCore {
 }
 
 impl BackendCore {
-    fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+    fn bounded(&self, deadline: crate::time::Deadline) -> Self {
         Self {
             runner: DeadlineRunner::wrap(self.runner.clone(), deadline),
             env: self.env.clone(),
@@ -337,7 +298,7 @@ impl BackendCore {
     fn press_run(
         &self,
         argv: &[String],
-        deadline: crate::input::Deadline,
+        deadline: crate::time::Deadline,
         writing: bool,
     ) -> Result<String, MultiplexerError> {
         check_deadline(deadline)?;
@@ -362,7 +323,7 @@ impl BackendCore {
     fn send_keys(
         &self,
         argv: &[String],
-        deadline: crate::input::Deadline,
+        deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
         let output = self.press_run(argv, deadline, true)?;
         if !output.trim().is_empty() {
@@ -374,84 +335,17 @@ impl BackendCore {
         }
         Ok(())
     }
-
-    fn send_prompt(
-        &self,
-        text: &str,
-        input: &PaneInput,
-        lead: Lead,
-    ) -> Result<(), MultiplexerError> {
-        if !crate::input::valid_input(text) {
-            return Err(MultiplexerError::new(
-                "send_prompt: text must be one non-empty line without control characters",
-            ));
-        }
-        let bounded = self.bounded(crate::input::Deadline::new());
-        submit_prompt(
-            bounded.runner.as_ref(),
-            input,
-            lead,
-            &|argv, timeout_secs, error| bounded.map_error(argv, timeout_secs, error),
-            self.pane_gone,
-        )
-    }
-}
-
-fn submit_prompt(
-    runner: &dyn CommandRunner,
-    input: &PaneInput,
-    lead: Lead,
-    map_error: &RunErrorMapper<'_>,
-    pane_gone: fn(&str) -> bool,
-) -> Result<(), MultiplexerError> {
-    let PaneInput {
-        escape,
-        literal,
-        enter,
-    } = input;
-    let unreserved = |reserved: Duration| {
-        runner
-            .remaining_budget()
-            .map_err(|error| map_error(literal, None, error))?
-            .expect("submission uses a deadline-bounded runner")
-            .checked_sub(reserved)
-            .filter(|budget| !budget.is_zero())
-            .ok_or_else(|| MultiplexerError::new(INSUFFICIENT_INPUT_BUDGET))
-    };
-    let slack = unreserved(lead.reserved())?;
-    if lead == Lead::Escape {
-        let timeout = slack.min(ESCAPE_TIMEOUT);
-        runner
-            .run_for(escape, timeout)
-            .map_err(|error| map_error(escape, Some(whole_seconds(timeout)), error))?;
-        runner.sleep(ESCAPE_SETTLE_DELAY);
-    }
-    let literal_budget = unreserved(Lead::Direct.reserved())?;
-    runner.run_for(literal, literal_budget).map_err(|error| {
-        let not_sent = match &error {
-            RunError::BinaryNotFound(_) | RunError::NotStarted(_) => true,
-            RunError::Failed { stderr } => pane_gone(stderr),
-            RunError::Timeout => false,
-        };
-        let error = map_error(literal, Some(whole_seconds(literal_budget)), error);
-        if not_sent { error } else { error.after_write() }
-    })?;
-    runner.sleep(SUBMIT_DELAY);
-    runner
-        .run(enter, Some(5))
-        .map_err(|error| map_error(enter, Some(5), error).after_write())?;
-    Ok(())
 }
 
 pub(crate) struct DeadlineRunner {
     runner: Rc<dyn CommandRunner>,
-    deadline: crate::input::Deadline,
+    deadline: crate::time::Deadline,
 }
 
 impl DeadlineRunner {
     pub(crate) fn wrap(
         runner: Rc<dyn CommandRunner>,
-        deadline: crate::input::Deadline,
+        deadline: crate::time::Deadline,
     ) -> Rc<dyn CommandRunner> {
         Rc::new(Self { runner, deadline })
     }
@@ -487,16 +381,6 @@ impl CommandRunner for DeadlineRunner {
             return Err(TimedRunError::before_launch());
         }
         self.runner.run_until(argv, deadline)
-    }
-
-    fn sleep(&self, seconds: f64) {
-        if let Ok(remaining) = self.deadline.remaining() {
-            self.runner.sleep(
-                Duration::from_secs_f64(seconds)
-                    .min(remaining)
-                    .as_secs_f64(),
-            );
-        }
     }
 
     fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
@@ -578,7 +462,7 @@ impl AnyMultiplexer {
         }
     }
 
-    pub(crate) fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+    pub(crate) fn bounded(&self, deadline: crate::time::Deadline) -> Self {
         match self {
             Self::Tmux(mux) => Self::Tmux(mux.bounded(deadline)),
             Self::Herdr(mux) => Self::Herdr(mux.bounded(deadline)),
@@ -603,8 +487,8 @@ impl AnyMultiplexer {
 
     pub(crate) fn validate_key_target(
         &self,
-        placement: &crate::broker::records::Placement,
-        deadline: crate::input::Deadline,
+        placement: &crate::broker::Placement,
+        deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
         match self {
             Self::Tmux(mux) => mux.validate_key_target(placement, deadline),
@@ -616,7 +500,7 @@ impl AnyMultiplexer {
         &self,
         pane_id: &str,
         keys: &PressKeys,
-        deadline: crate::input::Deadline,
+        deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
         match self {
             Self::Tmux(mux) => mux.send_keys(pane_id, keys, deadline),
@@ -640,18 +524,6 @@ impl AnyMultiplexer {
         match self {
             Self::Tmux(mux) => mux.split_window(reference, env, command),
             Self::Herdr(mux) => mux.split_window(reference, env, command),
-        }
-    }
-
-    pub(crate) fn send_prompt(
-        &self,
-        target_pane_id: &str,
-        text: &str,
-        lead: Lead,
-    ) -> Result<(), MultiplexerError> {
-        match self {
-            Self::Tmux(mux) => mux.send_prompt(target_pane_id, text, lead),
-            Self::Herdr(mux) => mux.send_prompt(target_pane_id, text, lead),
         }
     }
 
@@ -725,22 +597,135 @@ fn resolve_multiplexer_name(
     }
 }
 
+const NAMED_KEYS: &[(&str, &str, &str)] = &[
+    ("Space", "Space", "space"),
+    ("Escape", "Escape", "esc"),
+    ("Enter", "Enter", "enter"),
+    ("Tab", "Tab", "tab"),
+    ("Backspace", "BSpace", "backspace"),
+    ("Up", "Up", "up"),
+    ("Down", "Down", "down"),
+    ("Left", "Left", "left"),
+    ("Right", "Right", "right"),
+];
+
+#[derive(Debug)]
+enum PressKey {
+    Literal(u8),
+    Named(&'static (&'static str, &'static str, &'static str)),
+    Function(u8),
+    Control(u8),
+    ShiftTab,
+}
+
+#[derive(Debug)]
+pub(crate) struct PressKeys(Vec<PressKey>);
+
+impl PressKeys {
+    pub(crate) fn parse(keys: &[String]) -> Result<Self, CafleetError> {
+        if !(1..=64).contains(&keys.len()) {
+            return Err(CafleetError::Usage(
+                "press requires between 1 and 64 keys".into(),
+            ));
+        }
+        let mut parsed = Vec::with_capacity(keys.len());
+        for (index, token) in keys.iter().enumerate() {
+            if token.len() > 32 {
+                return Err(CafleetError::Usage(format!(
+                    "press key at position {} exceeds 32 UTF-8 bytes",
+                    index + 1
+                )));
+            }
+            let key = if token.len() == 1 && (b'!'..=b'~').contains(&token.as_bytes()[0]) {
+                Some(PressKey::Literal(token.as_bytes()[0]))
+            } else if let Some(named) = NAMED_KEYS
+                .iter()
+                .find(|named| token.eq_ignore_ascii_case(named.0))
+            {
+                Some(PressKey::Named(named))
+            } else if token.eq_ignore_ascii_case("Shift+Tab") {
+                Some(PressKey::ShiftTab)
+            } else if token.len() == 6
+                && token
+                    .get(..5)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("Ctrl+"))
+                && token.as_bytes()[5].is_ascii_alphabetic()
+            {
+                Some(PressKey::Control(token.as_bytes()[5].to_ascii_lowercase()))
+            } else {
+                (1..=12)
+                    .find(|n| token.eq_ignore_ascii_case(&format!("F{n}")))
+                    .map(PressKey::Function)
+            };
+            parsed.push(key.ok_or_else(|| {
+                CafleetError::Usage(format!(
+                    "invalid press key at position {}: {}",
+                    index + 1,
+                    serde_json::to_string(token).expect("strings serialize")
+                ))
+            })?);
+        }
+        Ok(Self(parsed))
+    }
+
+    pub(crate) fn canonical(&self) -> Vec<String> {
+        self.0
+            .iter()
+            .map(|key| match key {
+                PressKey::Literal(byte) => char::from(*byte).to_string(),
+                PressKey::Named(named) => named.0.into(),
+                PressKey::Function(n) => format!("F{n}"),
+                PressKey::Control(byte) => format!("Ctrl+{}", char::from(*byte)),
+                PressKey::ShiftTab => "Shift+Tab".into(),
+            })
+            .collect()
+    }
+
+    pub(super) fn tmux_arguments(&self) -> Vec<String> {
+        self.0
+            .iter()
+            .map(|key| match key {
+                PressKey::Literal(byte) => format!("0x{byte:02x}"),
+                PressKey::Named(named) => named.1.into(),
+                PressKey::Function(n) => format!("F{n}"),
+                PressKey::Control(byte) => format!("C-{}", char::from(*byte)),
+                PressKey::ShiftTab => "BTab".into(),
+            })
+            .collect()
+    }
+
+    pub(super) fn herdr_arguments(&self) -> Vec<String> {
+        self.0
+            .iter()
+            .map(|key| match key {
+                PressKey::Literal(b'+') => "plus".into(),
+                PressKey::Literal(b'-') => "minus".into(),
+                PressKey::Literal(b';') => "semicolon".into(),
+                PressKey::Literal(byte) => char::from(*byte).to_string(),
+                PressKey::Named(named) => named.2.into(),
+                PressKey::Function(n) => format!("f{n}"),
+                PressKey::Control(byte) => format!("ctrl+{}", char::from(*byte)),
+                PressKey::ShiftTab => "shift+tab".into(),
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::cell::RefCell;
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::HashMap;
+    use std::collections::VecDeque;
     use std::rc::Rc;
 
-    use super::{CommandRunner, RunError};
+    use crate::multiplexer::CommandRunner;
+    use crate::multiplexer::RunError;
 
     #[derive(Debug, Clone, PartialEq)]
     pub(crate) enum Event {
         Run {
             argv: Vec<String>,
             timeout_secs: Option<u64>,
-        },
-        Sleep {
-            seconds: f64,
         },
     }
 
@@ -781,15 +766,11 @@ pub(crate) mod test_support {
             self.events.borrow().clone()
         }
 
-        /// Just the argv of each `Run` event, in order.
         pub(crate) fn run_argvs(&self) -> Vec<Vec<String>> {
             self.events
                 .borrow()
                 .iter()
-                .filter_map(|event| match event {
-                    Event::Run { argv, .. } => Some(argv.clone()),
-                    Event::Sleep { .. } => None,
-                })
+                .map(|Event::Run { argv, .. }| argv.clone())
                 .collect()
         }
     }
@@ -809,10 +790,6 @@ pub(crate) mod test_support {
                 .pop_front()
                 .unwrap_or_else(|| panic!("unexpected process call: {argv:?}"))
         }
-
-        fn sleep(&self, seconds: f64) {
-            self.events.borrow_mut().push(Event::Sleep { seconds });
-        }
     }
 
     pub(crate) fn argv(parts: &[&str]) -> Vec<String> {
@@ -824,10 +801,6 @@ pub(crate) mod test_support {
             argv: argv(parts),
             timeout_secs,
         }
-    }
-
-    pub(crate) fn sleep_event(seconds: f64) -> Event {
-        Event::Sleep { seconds }
     }
 
     pub(crate) fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -846,17 +819,29 @@ pub(crate) mod test_support {
     pub(crate) fn herdr_error_stderr(code: &str) -> String {
         serde_json::json!({"error": {"code": code, "message": "boom"}, "id": 1}).to_string()
     }
+    use crate::multiplexer::*;
+    pub(crate) fn parse(tokens: &[&str]) -> PressKeys {
+        PressKeys::parse(
+            &tokens
+                .iter()
+                .map(|token| (*token).into())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::keys::test_support::parse;
-    use super::test_support::{FakeRunner, argv, env, herdr_envelope};
-    use super::*;
-    use crate::broker::records::Placement;
-    use crate::input::Deadline;
+    use crate::broker::Placement;
+    use crate::multiplexer::test_support::FakeRunner;
+    use crate::multiplexer::test_support::argv;
+    use crate::multiplexer::test_support::env;
+    use crate::multiplexer::test_support::herdr_envelope;
+    use crate::multiplexer::test_support::parse;
+    use crate::multiplexer::*;
+    use crate::time::Deadline;
     use std::cell::RefCell;
-    use std::collections::VecDeque;
 
     fn adapter(backend: &str, runner: Rc<FakeRunner>) -> AnyMultiplexer {
         match backend {
@@ -954,12 +939,6 @@ mod tests {
                 }
             }
             assert_eq!(actual, vec![expected]);
-            assert!(
-                runner
-                    .events()
-                    .iter()
-                    .all(|event| matches!(event, test_support::Event::Run { .. }))
-            );
             assert!(runner.responses.borrow().is_empty());
 
             let unreadable = FakeRunner::with_binary(backend);
@@ -1044,9 +1023,6 @@ mod tests {
         fn run_until(&self, _: &[String], deadline: Instant) -> Result<String, TimedRunError> {
             self.0.borrow_mut().push(deadline);
             Ok(String::new())
-        }
-        fn sleep(&self, _: f64) {
-            panic!("absolute execution has no phase sleep")
         }
     }
 
@@ -1153,88 +1129,6 @@ mod tests {
     }
 
     #[test]
-    fn each_backend_send_prompt_stops_at_the_failed_stage_and_carries_its_cause() {
-        const TEXT: &str = "  /help with literal $HOME; !  ";
-        for backend in ["tmux", "herdr"] {
-            let (pane, stages) = match backend {
-                "tmux" => (
-                    "%5",
-                    [
-                        argv(&["tmux", "send-keys", "-t", "%5", "Escape"]),
-                        argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", TEXT]),
-                        argv(&["tmux", "send-keys", "-t", "%5", "Enter"]),
-                    ],
-                ),
-                _ => (
-                    "w1:p2",
-                    [
-                        argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]),
-                        argv(&["herdr", "pane", "send-text", "w1:p2", TEXT]),
-                        argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"]),
-                    ],
-                ),
-            };
-            let mut cases = vec![
-                (Lead::Escape, Some(0), "injected escape failure".to_string()),
-                (Lead::Direct, Some(1), "injected first write failure".into()),
-                (Lead::Escape, Some(1), "injected first write failure".into()),
-                (Lead::Direct, Some(2), "injected enter failure".into()),
-                (Lead::Escape, Some(2), "injected enter failure".into()),
-                (Lead::Direct, None, String::new()),
-            ];
-            if backend == "herdr" {
-                cases.push((
-                    Lead::Escape,
-                    Some(0),
-                    super::test_support::herdr_error_stderr("pane_not_found"),
-                ));
-            }
-            for (lead, failed, stderr) in cases {
-                let context = format!("{backend} {lead:?} {failed:?} {stderr}");
-                let runner = FakeRunner::with_binary(backend);
-                let first = usize::from(lead == Lead::Direct);
-                let last = failed.unwrap_or(2);
-                for _ in first..last {
-                    runner.respond(Ok(String::new()));
-                }
-                if failed.is_some() {
-                    runner.respond(Err(RunError::Failed {
-                        stderr: stderr.clone(),
-                    }));
-                } else {
-                    runner.respond(Ok(String::new()));
-                }
-                let result = adapter(backend, runner.clone()).send_prompt(pane, TEXT, lead);
-                assert_eq!(runner.run_argvs(), stages[first..=last], "{context}");
-                assert_eq!(
-                    runner.events().len(),
-                    2 * (last + 1 - first) - 1,
-                    "{context}"
-                );
-                for event in runner.events() {
-                    if let super::test_support::Event::Run { timeout_secs, .. } = event {
-                        assert!(
-                            timeout_secs.is_some_and(|seconds| seconds > 0 && seconds <= 5),
-                            "{context}"
-                        );
-                    }
-                }
-                match failed {
-                    None => result.unwrap(),
-                    Some(stage) => {
-                        let error = result.unwrap_err();
-                        assert!(
-                            error.to_string().contains(stderr.trim()),
-                            "{context}: {error}"
-                        );
-                        assert_eq!(error.submission_started(), stage > 0, "{context}");
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
     fn capture_window_drops_only_the_visually_blank_tail_then_keeps_the_last_lines() {
         for (raw, lines, expected) in [
             ("l1\nl2\nl3\nx\rY\n", 2, "l3\nx\rY"),
@@ -1263,141 +1157,6 @@ mod tests {
         }
     }
 
-    struct BudgetRunner {
-        budgets: RefCell<VecDeque<Duration>>,
-        calls: RefCell<Vec<(String, Duration)>>,
-        sleeps: RefCell<Vec<f64>>,
-        failure: Option<(String, RunError)>,
-    }
-
-    impl BudgetRunner {
-        fn new(budgets: &[u64], failure: Option<(&str, RunError)>) -> Self {
-            Self {
-                budgets: RefCell::new(budgets.iter().copied().map(Duration::from_millis).collect()),
-                calls: RefCell::new(Vec::new()),
-                sleeps: RefCell::new(Vec::new()),
-                failure: failure.map(|(stage, error)| (stage.into(), error)),
-            }
-        }
-    }
-
-    impl CommandRunner for BudgetRunner {
-        fn binary_exists(&self, _: &str) -> bool {
-            panic!("submission has already resolved its backend")
-        }
-
-        fn run(&self, argv: &[String], timeout: Option<u64>) -> Result<String, RunError> {
-            self.run_for(
-                argv,
-                Duration::from_secs(timeout.expect("Enter is bounded")),
-            )
-        }
-
-        fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
-            let [stage] = argv else {
-                panic!("one stage token is required")
-            };
-            assert!(matches!(stage.as_str(), "escape" | "literal" | "enter"));
-            self.calls.borrow_mut().push((stage.clone(), timeout));
-            match &self.failure {
-                Some((failed, error)) if stage == failed => Err(error.clone()),
-                _ => Ok(String::new()),
-            }
-        }
-
-        fn sleep(&self, seconds: f64) {
-            self.sleeps.borrow_mut().push(seconds);
-        }
-
-        fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
-            Ok(Some(
-                self.budgets
-                    .borrow_mut()
-                    .pop_front()
-                    .expect("each remaining-budget query is specified"),
-            ))
-        }
-    }
-
-    fn submit(runner: &BudgetRunner, lead: Lead) -> Result<(), MultiplexerError> {
-        submit_prompt(
-            runner,
-            &PaneInput {
-                escape: vec!["escape".into()],
-                literal: vec!["literal".into()],
-                enter: vec!["enter".into()],
-            },
-            lead,
-            &|_, _, error| MultiplexerError::new(format!("{error:?}")),
-            |cause| cause == "gone",
-        )
-    }
-
-    #[test]
-    fn reserved_budgets_cap_escape_and_recompute_literal_after_settling() {
-        let runner = BudgetRunner::new(&[3000, 2500], None);
-        submit(&runner, Lead::Escape).unwrap();
-        assert_eq!(
-            *runner.calls.borrow(),
-            [
-                ("escape".into(), Duration::from_millis(500)),
-                ("literal".into(), Duration::from_millis(500)),
-                ("enter".into(), Duration::from_secs(5))
-            ]
-        );
-        assert_eq!(*runner.sleeps.borrow(), [0.5, 1.0]);
-        let runner = BudgetRunner::new(&[5000, 5000], None);
-        submit(&runner, Lead::Escape).unwrap();
-        assert_eq!(runner.calls.borrow()[0].1, Duration::from_secs(1));
-        let runner = BudgetRunner::new(&[2500], None);
-        assert!(submit(&runner, Lead::Escape).is_err());
-        assert!(runner.calls.borrow().is_empty());
-        let runner = BudgetRunner::new(&[3000, 2000], None);
-        assert!(submit(&runner, Lead::Escape).is_err());
-        assert_eq!(runner.calls.borrow().len(), 1);
-    }
-
-    #[test]
-    fn only_started_literal_or_enter_failures_make_submission_uncertain() {
-        for (stage, failure, uncertain, calls) in [
-            ("escape", RunError::Timeout, false, 1),
-            ("literal", RunError::NotStarted("expired".into()), false, 2),
-            (
-                "literal",
-                RunError::BinaryNotFound("missing".into()),
-                false,
-                2,
-            ),
-            (
-                "literal",
-                RunError::Failed {
-                    stderr: "gone".into(),
-                },
-                false,
-                2,
-            ),
-            ("literal", RunError::Timeout, true, 2),
-            (
-                "literal",
-                RunError::Failed {
-                    stderr: "unknown".into(),
-                },
-                true,
-                2,
-            ),
-            ("enter", RunError::NotStarted("expired".into()), true, 3),
-        ] {
-            let runner = BudgetRunner::new(&[5000, 4500], Some((stage, failure)));
-            assert_eq!(
-                submit(&runner, Lead::Escape)
-                    .unwrap_err()
-                    .submission_started(),
-                uncertain
-            );
-            assert_eq!(runner.calls.borrow().len(), calls);
-        }
-    }
-
     #[test]
     fn expired_deadlines_start_no_native_command_or_optional_layout_restore() {
         let runner = test_support::FakeRunner::without_binaries();
@@ -1405,7 +1164,7 @@ mod tests {
             runner.clone(),
             test_support::env(&[]),
         ))
-        .bounded(crate::input::Deadline::until(std::time::Instant::now()));
+        .bounded(crate::time::Deadline::until(std::time::Instant::now()));
         assert!(
             mux.restore_after_close(PostCloseLayout::HerdrTab("tab".into()))
                 .is_err()
@@ -1413,34 +1172,90 @@ mod tests {
         assert!(runner.events().is_empty());
     }
 
+    fn usage(tokens: &[String], expected: &str) {
+        let failure = match PressKeys::parse(tokens) {
+            Ok(_) => panic!("the key vector is outside the common grammar"),
+            Err(failure) => failure,
+        };
+        assert!(matches!(&failure, CafleetError::Usage(message) if message == expected));
+        assert_eq!(failure.exit_code(), 2);
+    }
     #[test]
-    fn each_backend_classifies_confirmed_missing_panes_before_literal_submission() {
-        for backend in ["tmux", "herdr"] {
-            let runner = test_support::FakeRunner::without_binaries();
-            runner.respond(Err(RunError::Failed {
-                stderr: if backend == "tmux" {
-                    "no such pane: missing".into()
-                } else {
-                    test_support::herdr_error_stderr("pane_not_found")
-                },
-            }));
-            let mux = match backend {
-                "tmux" => AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-                    runner.clone(),
-                    test_support::env(&[]),
-                )),
-                "herdr" => AnyMultiplexer::Herdr(HerdrMultiplexer::new(
-                    runner.clone(),
-                    test_support::env(&[]),
-                )),
-                _ => unreachable!(),
-            };
-            assert!(
-                !mux.send_prompt("missing", "literal", Lead::Direct)
-                    .unwrap_err()
-                    .submission_started()
+    fn press_keys_validate_the_complete_common_grammar_and_byte_count_bounds() {
+        let keys = parse(&[
+            "A",
+            "a",
+            "+",
+            "-",
+            ";",
+            "!",
+            "~",
+            "sPaCe",
+            "ESCAPE",
+            "enter",
+            "Tab",
+            "Backspace",
+            "up",
+            "down",
+            "left",
+            "right",
+            "f1",
+            "F12",
+            "cTrL+A",
+            "CTRL+Z",
+            "sHiFt+tAb",
+        ]);
+        assert_eq!(
+            keys.canonical(),
+            argv(&[
+                "A",
+                "a",
+                "+",
+                "-",
+                ";",
+                "!",
+                "~",
+                "Space",
+                "Escape",
+                "Enter",
+                "Tab",
+                "Backspace",
+                "Up",
+                "Down",
+                "Left",
+                "Right",
+                "F1",
+                "F12",
+                "Ctrl+a",
+                "Ctrl+z",
+                "Shift+Tab",
+            ])
+        );
+        assert_eq!(
+            PressKeys::parse(&vec!["a".into(); 64])
+                .unwrap()
+                .canonical()
+                .len(),
+            64
+        );
+        usage(&[], "press requires between 1 and 64 keys");
+        usage(
+            &vec!["a".into(); 65],
+            "press requires between 1 and 64 keys",
+        );
+        let long = "é".repeat(17);
+        usage(
+            &["Enter".into(), long],
+            "press key at position 2 exceeds 32 UTF-8 bytes",
+        );
+        for invalid in ["F0", "F13", "Ctrl+1", " ", "é"] {
+            usage(
+                &["a".into(), invalid.into()],
+                &format!(
+                    "invalid press key at position 2: {}",
+                    serde_json::to_string(invalid).unwrap()
+                ),
             );
-            assert_eq!(runner.run_argvs().len(), 1);
         }
     }
 }

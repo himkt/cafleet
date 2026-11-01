@@ -1,13 +1,15 @@
-use clap::Subcommand;
-use clap::builder::{PossibleValuesParser, TypedValueParser};
-use rusqlite::Connection;
-
-use super::helpers::{checked, emit, nonblank};
 use crate::broker::runtime;
+use crate::cli::checked;
+use crate::cli::emit;
+use crate::cli::nonblank;
 use crate::error::CafleetError;
-use crate::runtime::runner::{
-    validate_operation_key, validate_permission_reference, validate_request_token,
-};
+use crate::runtime::validate_operation_key;
+use crate::runtime::validate_permission_reference;
+use crate::runtime::validate_request_token;
+use clap::Subcommand;
+use clap::builder::PossibleValuesParser;
+use clap::builder::TypedValueParser;
+use rusqlite::Connection;
 
 fn positive_id(value: &str) -> Result<i64, String> {
     let id = value
@@ -72,7 +74,7 @@ pub(crate) fn event(conn: &Connection, command: EventCommand) -> Result<(), Cafl
     match command {
         EventCommand::Show { event_id, json } => {
             let view = runtime::get_event(conn, event_id)?;
-            emit(json, &crate::presentation::runtime_event(&view), || {
+            emit(json, &crate::output::json::runtime_event(&view), || {
                 crate::output::format_runtime_event(&view)
             });
             Ok(())
@@ -84,12 +86,12 @@ pub(crate) fn input(
     conn: &mut Connection,
     settings: &crate::config::Settings,
     command: InputCommand,
-    deadline: crate::input::Deadline,
+    deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
     match command {
         InputCommand::Show { input_id, json } => {
             let input = runtime::get_input(conn, input_id)?;
-            emit(json, &crate::presentation::input_operation(&input), || {
+            emit(json, &crate::output::json::input_operation(&input), || {
                 crate::output::format_input_operation(&input)
             });
             Ok(())
@@ -105,7 +107,7 @@ pub(crate) fn input(
                 Disposition::NotSubmitted => runtime::InputDisposition::NotSubmitted,
                 Disposition::AbandonedUncertain => runtime::InputDisposition::AbandonedUncertain,
             };
-            let input = crate::runtime::runner::reconcile_input(
+            let input = crate::runtime::reconcile_input(
                 conn,
                 settings,
                 input_id,
@@ -114,7 +116,7 @@ pub(crate) fn input(
                 deadline,
             )
             .map_err(CafleetError::from)?;
-            emit(json, &crate::presentation::input_operation(&input), || {
+            emit(json, &crate::output::json::input_operation(&input), || {
                 crate::output::format_input_operation(&input)
             });
             Ok(())
@@ -196,11 +198,11 @@ pub(crate) fn permission(
     conn: &mut Connection,
     settings: &crate::config::Settings,
     command: PermissionCommand,
-    deadline: crate::input::Deadline,
+    deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
-    use crate::runtime::runner::{
-        PermissionInspectInput, PermissionRespondInput, SubmissionStatus,
-    };
+    use crate::runtime::PermissionInspectInput;
+    use crate::runtime::PermissionRespondInput;
+    use crate::runtime::SubmissionStatus;
     match command {
         PermissionCommand::Inspect {
             interaction_id,
@@ -208,7 +210,7 @@ pub(crate) fn permission(
             director_member_id,
             json,
         } => {
-            let inspection = crate::runtime::runner::inspect_permission(
+            let inspection = crate::runtime::inspect_permission(
                 conn,
                 settings,
                 &PermissionInspectInput {
@@ -221,7 +223,7 @@ pub(crate) fn permission(
             .map_err(CafleetError::from)?;
             emit(
                 json,
-                &crate::presentation::permission_inspection(&inspection),
+                &crate::output::json::permission_inspection(&inspection),
                 || crate::output::format_permission_inspection(&inspection),
             );
             Ok(())
@@ -241,7 +243,7 @@ pub(crate) fn permission(
             operation_key,
             json,
         } => {
-            let response = crate::runtime::runner::respond_permission(
+            let response = crate::runtime::respond_permission(
                 conn,
                 settings,
                 &PermissionRespondInput {
@@ -263,7 +265,7 @@ pub(crate) fn permission(
             .map_err(CafleetError::from)?;
             emit(
                 json,
-                &crate::presentation::permission_response_result(&response),
+                &crate::output::json::permission_response_result(&response),
                 || crate::output::format_permission_response_result(&response),
             );
             if response.submission.status == SubmissionStatus::Accepted {
@@ -295,7 +297,7 @@ pub(crate) fn permission_preflight(command: &PermissionCommand) -> Result<(), Ca
         ..
     } = command
     {
-        crate::runtime::runner::validate_permission_attribution(*decision_source, *director_mode)?;
+        crate::runtime::validate_permission_attribution(*decision_source, *director_mode)?;
     }
     Ok(())
 }
@@ -313,7 +315,7 @@ pub(crate) fn permission_error(command: &PermissionCommand, source: CafleetError
             Some(operation_key.clone()),
         ),
     };
-    crate::runtime::runner::InputFailure {
+    crate::runtime::InputFailure {
         source,
         run_id,
         interaction_id,
@@ -325,18 +327,20 @@ pub(crate) fn permission_error(command: &PermissionCommand, source: CafleetError
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::broker::runtime as storage;
     use crate::cli::CliArgs;
+    use crate::cli::runtime::*;
     use crate::cli::test_support::usage_error;
     use crate::config::Settings;
-    use crate::input::{Deadline, PaneLock};
+    use crate::pane_lock::PaneLock;
+    use crate::time::Deadline;
     use clap::Parser;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     #[test]
     fn live_receipt_cli_reconciles_real_exec_history_and_preserves_repeat_evidence() {
-        crate::runtime::runner::service::test_support::input_service::with_input_service(
+        crate::runtime::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
@@ -429,24 +433,27 @@ mod tests {
                 held.validate_binding(&settings.database_url, &placement)
                     .unwrap();
                 drop(held);
-                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                crate::runtime::service::test_support::input_service::input_service_barrier(
                     fixture, outer,
                 );
                 assert_eq!(
-                crate::runtime::runner::service::test_support::input_service::input_service_records(fixture)
+                    crate::runtime::service::test_support::input_service::input_service_records(
+                        fixture
+                    )
                     .iter()
                     .map(|record| record["line"].as_str().unwrap().to_owned())
                     .collect::<Vec<_>>(),
-                ["barrier"],
-                "receipt-only CLI work sends no native input"
-            );
+                    ["barrier"],
+                    "receipt-only CLI work sends no native input"
+                );
             },
         );
     }
 
     #[test]
     fn uncertain_permission_respond_reply_reports_the_recorded_write_failed_reason() {
-        use crate::runtime::runner::input_client_test_support::{Case, Retained};
+        use crate::runtime::input_client_test_support::Case;
+        use crate::runtime::input_client_test_support::Retained;
         let mut case = Case::new(Retained::Uncertain);
         let input = case.command();
         let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
@@ -490,7 +497,7 @@ mod tests {
     }
 
     mod permission_entry {
-        use super::*;
+        use crate::cli::runtime::tests::*;
 
         fn inspect() -> Vec<String> {
             [

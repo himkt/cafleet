@@ -1,27 +1,37 @@
-mod native_version;
-#[cfg(test)]
-pub(crate) use native_version::version_token;
-pub(crate) use native_version::{NativeVersion, native_launch_identity};
-mod policy;
-pub(crate) use policy::LaunchPolicySelection;
-pub(crate) mod profiles;
-pub(crate) use profiles::ComposerOperation;
-#[cfg(test)]
-pub(crate) use profiles::ScreenRegion;
-pub(crate) use profiles::{
-    AnnotationBlock, AnnotationFingerprint, Detector, MatchEvidence, ObservationKind,
-    ScreenObservation, SemanticFingerprint,
-};
-pub(crate) use profiles::{AnswerCapability, ProfileCatalog};
-pub(crate) use profiles::{AnswerMatch, AnswerPlan};
-pub(crate) use profiles::{AnswerStage, StageGate};
+pub(crate) mod catalog;
+pub(crate) mod detector;
 
-use std::path::{Path, PathBuf};
-
-use clap::ValueEnum;
-
-use crate::config_dir::{self, EnvLookup};
+use crate::broker::runtime::Coverage;
+use crate::broker::runtime::ModeSource;
+pub(crate) use crate::coding_agent::catalog::AnswerCapability;
+pub(crate) use crate::coding_agent::catalog::AnswerPlan;
+pub(crate) use crate::coding_agent::catalog::AnswerStage;
+pub(crate) use crate::coding_agent::catalog::ComposerOperation;
+pub(crate) use crate::coding_agent::catalog::ProfileCatalog;
+pub(crate) use crate::coding_agent::catalog::StageGate;
+pub(crate) use crate::coding_agent::detector::AnnotationBlock;
+pub(crate) use crate::coding_agent::detector::AnnotationFingerprint;
+pub(crate) use crate::coding_agent::detector::AnswerMatch;
+pub(crate) use crate::coding_agent::detector::Detector;
+pub(crate) use crate::coding_agent::detector::MatchEvidence;
+pub(crate) use crate::coding_agent::detector::ObservationKind;
+pub(crate) use crate::coding_agent::detector::ScreenObservation;
+pub(crate) use crate::coding_agent::detector::SemanticFingerprint;
+use crate::config::EnvLookup;
 use crate::error::CafleetError;
+use clap::ValueEnum;
+use std::cmp::Ordering;
+use std::io::Read;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::mpsc;
+use std::time::Duration;
+use std::time::Instant;
+
+#[cfg(test)]
+pub(crate) use crate::coding_agent::detector::ScreenRegion;
 
 pub(crate) trait SpawnProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf>;
@@ -66,9 +76,9 @@ impl CodingAgent {
         let default = match self {
             Self::Claude => home.join(".claude"),
             Self::Codex => home.join(".codex"),
-            Self::Opencode => config_dir::opencode_skills_base(home),
+            Self::Opencode => crate::config::opencode_skills_base(home),
         };
-        config_dir::resolve(self.config_variable(), env, default)
+        crate::config::resolve(self.config_variable(), env, default)
     }
 
     pub(crate) fn spawn_environment(
@@ -78,7 +88,7 @@ impl CodingAgent {
     ) -> Result<Vec<(String, String)>, CafleetError> {
         let mut environment = vec![("CAFLEET_DATABASE_URL".to_owned(), database_url.to_owned())];
         if let Some(value) = env(self.config_variable()) {
-            config_dir::require_absolute(self.config_variable(), &value)?;
+            crate::config::require_absolute(self.config_variable(), &value)?;
             environment.push((self.config_variable().to_owned(), value));
         }
         Ok(environment)
@@ -173,9 +183,367 @@ pub(crate) fn coding_agent(name: &str) -> Option<CodingAgent> {
         .find(|agent| agent.name() == name)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LaunchPolicySelection {
+    pub(crate) requested_mode: Option<String>,
+    pub(crate) resolved_mode: String,
+    pub(crate) mode_source: ModeSource,
+    pub(crate) permission_argv: Vec<String>,
+    backend: CodingAgent,
+    native_version: Option<String>,
+}
+impl CodingAgent {
+    fn default_policy(self) -> &'static str {
+        match self {
+            Self::Claude => "auto",
+            Self::Codex => "approve-for-me",
+            Self::Opencode => "cafleet",
+        }
+    }
+    pub(crate) fn permission_mode_help() -> String {
+        let catalog = Self::all()
+            .iter()
+            .map(|agent| {
+                format!(
+                    "{}: {} (default {})",
+                    agent.name(),
+                    agent.policy_choices(None).join(", "),
+                    agent.default_policy()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!("Launch-only native permission policy for the resolved backend — {catalog}")
+    }
+    pub(crate) fn policy_choices(self, native_version: Option<&str>) -> Vec<String> {
+        let choices: &[&str] = match (self, native_version) {
+            (Self::Claude, None | Some("2.1.302")) => &[
+                "default",
+                "manual",
+                "dontAsk",
+                "acceptEdits",
+                "auto",
+                "bypassPermissions",
+                "plan",
+            ],
+            (Self::Codex, None | Some("0.163.0")) => &["on-request", "never", "approve-for-me"],
+            (Self::Opencode, _) => &["cafleet", "cafleet-ask"],
+            _ => &[],
+        };
+        choices.iter().map(|value| (*value).into()).collect()
+    }
+    fn permission_arguments(self, mode: &str) -> Vec<String> {
+        match self {
+            Self::Claude => vec!["--permission-mode".into(), mode.into()],
+            Self::Codex if mode == "approve-for-me" => vec!["--approve-for-me".into()],
+            Self::Codex => vec![
+                "--ask-for-approval".into(),
+                mode.into(),
+                "--sandbox".into(),
+                "workspace-write".into(),
+            ],
+            Self::Opencode => vec!["--agent".into(), mode.into()],
+        }
+    }
+    pub(crate) fn resolve_policy(
+        self,
+        native_version: Option<&str>,
+        requested: Option<&str>,
+    ) -> Result<LaunchPolicySelection, CafleetError> {
+        let choices = self.policy_choices(native_version);
+        if let Some(value) = requested
+            && !choices.iter().any(|choice| choice == value)
+        {
+            return Err(CafleetError::Usage(format!(
+                "--permission-mode for {} must be one of {} (got '{value}')",
+                self.name(),
+                choices.join(", ")
+            )));
+        }
+        let mode = requested.unwrap_or_else(|| self.default_policy());
+        Ok(LaunchPolicySelection {
+            requested_mode: requested.map(str::to_owned),
+            resolved_mode: mode.into(),
+            mode_source: if requested.is_some() {
+                ModeSource::Explicit
+            } else {
+                ModeSource::Default
+            },
+            permission_argv: self.permission_arguments(mode),
+            backend: self,
+            native_version: native_version.map(str::to_owned),
+        })
+    }
+    pub(crate) fn build_spawn_argv_with_policy(
+        self,
+        prompt: &str,
+        display_name: &str,
+        model: Option<&str>,
+        effort: Option<&str>,
+        policy: &LaunchPolicySelection,
+    ) -> Result<Vec<String>, CafleetError> {
+        if policy.backend != self
+            || *policy
+                != self.resolve_policy(
+                    policy.native_version.as_deref(),
+                    policy.requested_mode.as_deref(),
+                )?
+        {
+            return Err(CafleetError::Usage(
+                "launch policy does not match its backend/catalog".into(),
+            ));
+        }
+        self.validate_model(model)?;
+        self.validate_effort(effort)?;
+        let mut argv = vec![self.name().into()];
+        if self == Self::Opencode {
+            argv.extend(["mini".into(), "--standalone".into()]);
+        }
+        argv.extend(policy.permission_argv.clone());
+        if self == Self::Claude {
+            argv.extend([
+                "--prompt-suggestions".into(),
+                "false".into(),
+                "--allowedTools".into(),
+                "Bash(cafleet message *)".into(),
+                "--name".into(),
+                display_name.into(),
+            ]);
+        }
+        if let Some(model) = model {
+            argv.extend(["--model".into(), model.into()]);
+        }
+        if let Some(effort) = effort {
+            match self {
+                Self::Claude => argv.extend(["--effort".into(), effort.into()]),
+                Self::Codex => argv.push(format!("--config=model_reasoning_effort={effort}")),
+                Self::Opencode => unreachable!("effort validated before argv construction"),
+            }
+        }
+        if self == Self::Opencode {
+            argv.push("--prompt".into());
+        }
+        argv.push(prompt.into());
+        Ok(argv)
+    }
+    #[cfg(test)]
+    pub(crate) fn validate_spawn_policy_argv(
+        self,
+        argv: &[String],
+        policy: &LaunchPolicySelection,
+    ) -> Result<(), CafleetError> {
+        let invalid = || CafleetError::App("capture emitted permission argv mismatch".into());
+        let baseline = self.build_spawn_argv_with_policy("", "", None, None, policy)?;
+        let name_index = (self == Self::Claude).then(|| {
+            baseline
+                .iter()
+                .position(|value| value == "--name")
+                .expect("Claude name option")
+                + 1
+        });
+        let display_name = match name_index {
+            Some(index) => argv.get(index).ok_or_else(invalid)?.as_str(),
+            None => "",
+        };
+        let mut cursor = baseline.len() - 1 - usize::from(self == Self::Opencode);
+        let model = if argv.len() > cursor + 1 && argv[cursor] == "--model" {
+            let value = argv.get(cursor + 1).ok_or_else(invalid)?;
+            cursor += 2;
+            Some(value.as_str())
+        } else {
+            None
+        };
+        let effort = if argv.len() > cursor + 1 {
+            match self {
+                Self::Claude if argv[cursor] == "--effort" => {
+                    let value = argv.get(cursor + 1).ok_or_else(invalid)?;
+                    cursor += 2;
+                    Some(value.as_str())
+                }
+                Self::Codex => {
+                    let value = argv[cursor].strip_prefix("--config=model_reasoning_effort=");
+                    if value.is_some() {
+                        cursor += 1;
+                    }
+                    value
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let tail = argv.get(cursor..).ok_or_else(invalid)?;
+        let prompt = match (self, tail) {
+            (_, []) => None,
+            (Self::Opencode, [flag, prompt]) if flag == "--prompt" => Some(prompt.as_str()),
+            (Self::Claude | Self::Codex, [prompt]) => Some(prompt.as_str()),
+            _ => return Err(invalid()),
+        };
+        let mut expected = self.build_spawn_argv_with_policy(
+            prompt.unwrap_or(""),
+            display_name,
+            model,
+            effort,
+            policy,
+        )?;
+        if prompt.is_none() {
+            expected.truncate(expected.len() - 1 - usize::from(self == Self::Opencode));
+        }
+        if argv.len() != expected.len() || argv.get(1..) != expected.get(1..) {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+}
+
+const OUTPUT_BYTES: u64 = 4096;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeVersion(semver::Version);
+
+impl NativeVersion {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        semver::Version::parse(text).ok().map(Self)
+    }
+    pub(crate) fn precedence(&self, other: &Self) -> Ordering {
+        self.0.cmp_precedence(&other.0)
+    }
+}
+
+pub(crate) struct NativeLaunchIdentity {
+    pub(crate) native_version: Option<String>,
+    pub(crate) coverage: Coverage,
+    pub(crate) warning: Option<String>,
+}
+
+pub(crate) fn native_launch_identity(
+    backend: CodingAgent,
+    probe: Result<String, CafleetError>,
+    catalog: &ProfileCatalog,
+) -> Result<NativeLaunchIdentity, CafleetError> {
+    match probe {
+        Ok(version) => {
+            if let Some(minimum) = catalog.unsupported_minimum(backend, &version) {
+                return Err(CafleetError::App(format!(
+                    "unsupported native version for {}: {version}; minimum supported version is {minimum}",
+                    backend.name()
+                )));
+            }
+            let capabilities = catalog.capabilities(backend, Some(&version));
+            Ok(NativeLaunchIdentity {
+                native_version: Some(version),
+                coverage: capabilities.detection,
+                warning: None,
+            })
+        }
+        Err(cause) => Ok(NativeLaunchIdentity {
+            native_version: None,
+            coverage: Coverage::Unknown,
+            warning: Some(format!(
+                "Warning: native version unavailable for {}: {}; coverage unknown.",
+                backend.name(),
+                cause.message()
+            )),
+        }),
+    }
+}
+
+fn bounded_output(source: impl Read + Send + 'static) -> mpsc::Receiver<std::io::Result<Vec<u8>>> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = source
+            .take(OUTPUT_BYTES)
+            .read_to_end(&mut bytes)
+            .map(|_| bytes);
+        // The receiver is dropped once the probe has already failed at its deadline.
+        let _ = sender.send(result);
+    });
+    receiver
+}
+
+impl CodingAgent {
+    pub(crate) fn probe_native_version(
+        self,
+        executable: &Path,
+        deadline: Instant,
+    ) -> Result<String, CafleetError> {
+        let fail =
+            |detail: String| CafleetError::App(format!("{} --version {detail}", self.name()));
+        let mut child = Command::new(executable)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|cause| fail(format!("could not start: {cause}")))?;
+        let stdout = bounded_output(child.stdout.take().expect("piped probe stdout"));
+        let stderr = bounded_output(child.stderr.take().expect("piped probe stderr"));
+        let status = loop {
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|cause| fail(format!("wait failed: {cause}")))?
+            {
+                break status;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                child
+                    .kill()
+                    .map_err(|cause| fail(format!("timed out and could not be killed: {cause}")))?;
+                child
+                    .wait()
+                    .map_err(|cause| fail(format!("timed out and could not be reaped: {cause}")))?;
+                return Err(fail("did not finish within its deadline".into()));
+            }
+            std::thread::sleep(Duration::from_millis(10).min(deadline - now));
+        };
+        let collect = |receiver: mpsc::Receiver<std::io::Result<Vec<u8>>>| {
+            receiver
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .map_err(|_| fail("output did not close within its deadline".into()))?
+                .map_err(|cause| fail(format!("output could not be read: {cause}")))
+        };
+        let output = collect(stdout)?;
+        let diagnostic = collect(stderr)?;
+        if !status.success() {
+            let first = String::from_utf8_lossy(&diagnostic)
+                .lines()
+                .next()
+                .map(str::to_owned);
+            return Err(fail(match first {
+                Some(line) if !line.trim().is_empty() => format!("exited with {status}: {line}"),
+                _ => format!("exited with {status}"),
+            }));
+        }
+        let text =
+            String::from_utf8(output).map_err(|_| fail("printed non-UTF-8 output".into()))?;
+        let first = text
+            .lines()
+            .next()
+            .ok_or_else(|| fail("printed no output".into()))?;
+        version_token(first)
+            .map(str::to_owned)
+            .map_err(|cause| fail(cause.into()))
+    }
+}
+
+pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {
+    let tokens = line
+        .split_whitespace()
+        .map(|token| token.strip_prefix('v').unwrap_or(token))
+        .filter(|token| NativeVersion::parse(token).is_some())
+        .collect::<Vec<_>>();
+    match tokens.as_slice() {
+        [version] => Ok(version),
+        [] => Err("printed no version token"),
+        _ => Err("printed several version tokens"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::coding_agent::*;
 
     struct Probe {
         agent: CodingAgent,
@@ -637,14 +1005,15 @@ mod tests {
         let home = home();
         assert_eq!(
             CodingAgent::Opencode.config_dir(&|_| None, &home).unwrap(),
-            config_dir::opencode_skills_base(&home)
+            crate::config::opencode_skills_base(&home)
         );
     }
 
     #[test]
     fn native_launch_probes_and_launches_the_same_resolved_executable() {
         use std::os::unix::fs::PermissionsExt;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
         let dir = tempfile::tempdir().unwrap();
         let executable = dir.path().join("versions/2.1.302/claude");
         std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
@@ -722,6 +1091,479 @@ mod tests {
                 )
                 .is_err(),
             "a launched argv[0] is always an absolute path"
+        );
+    }
+
+    #[test]
+    fn version_token_records_the_documented_first_lines_without_a_leading_v() {
+        for (line, expected) in [
+            ("2.1.302 (Claude Code)", "2.1.302"),
+            ("codex-cli 0.163.0", "0.163.0"),
+            ("opencode v2.1.4", "2.1.4"),
+            ("v1.2.3-beta.1", "1.2.3-beta.1"),
+        ] {
+            assert_eq!(version_token(line), Ok(expected), "{line}");
+        }
+    }
+
+    #[test]
+    fn version_token_counts_a_v_prefixed_token_toward_the_exactly_one_token_rule() {
+        assert_eq!(
+            version_token("v2.1.4 2.1.5"),
+            Err("printed several version tokens")
+        );
+        assert_eq!(
+            version_token("opencode v2.1.4 v2.1.5"),
+            Err("printed several version tokens")
+        );
+    }
+
+    #[test]
+    fn version_token_accepts_semver_prerelease_and_build_metadata_together() {
+        for (line, expected) in [
+            ("v2.1.310-beta.1+build.5", "2.1.310-beta.1+build.5"),
+            ("codex-cli 1.0.0+exp.sha.5114f85", "1.0.0+exp.sha.5114f85"),
+        ] {
+            assert_eq!(version_token(line), Ok(expected), "{line}");
+        }
+    }
+
+    #[test]
+    fn version_token_requires_one_complete_canonical_semver_token() {
+        for line in [
+            "codex 2.1",
+            "codex 2.1.302.1",
+            "codex 01.2.3",
+            "codex 1.2.3-01",
+        ] {
+            assert_eq!(
+                version_token(line),
+                Err("printed no version token"),
+                "{line}"
+            );
+        }
+        assert_eq!(version_token("codex 2.1 build 2.1.302"), Ok("2.1.302"));
+        assert_eq!(
+            version_token("2.1.302 1.0.0-beta"),
+            Err("printed several version tokens")
+        );
+    }
+
+    #[test]
+    fn version_token_accepts_only_a_single_optional_leading_v() {
+        for line in [
+            "opencode vv2.1.4",
+            "opencode V2.1.4",
+            "opencode v",
+            "opencode v2",
+        ] {
+            assert_eq!(
+                version_token(line),
+                Err("printed no version token"),
+                "{line}"
+            );
+        }
+    }
+
+    mod native_version_probe {
+        use crate::coding_agent::tests::*;
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::PathBuf;
+
+        fn stub(dir: &Path, name: &str, body: &str) -> PathBuf {
+            let path = dir.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn probe(executable: &Path) -> Result<String, CafleetError> {
+            CodingAgent::Claude
+                .probe_native_version(executable, Instant::now() + Duration::from_secs(2))
+        }
+
+        #[test]
+        fn native_version_probe_records_the_single_version_token_of_a_version_only_invocation() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = stub(
+                dir.path(),
+                "native",
+                "[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nread -r ignored || true\nprintf '%s\\n' '2.1.302 (Claude Code)'\nprintf 'ignored\\n' >&2",
+            );
+            assert_eq!(probe(&path).unwrap(), "2.1.302");
+        }
+
+        #[test]
+        fn native_version_probe_rejects_failed_ambiguous_invalid_or_missing_versions() {
+            let dir = tempfile::tempdir().unwrap();
+            for (index, (case, body)) in [
+                ("nonzero exit", "printf '2.1.302\\n'; exit 1"),
+                (
+                    "version outside the first line",
+                    "printf 'Claude Code\\n2.1.302\\n'",
+                ),
+                ("empty output", "exit 0"),
+                ("non-UTF-8 output", "printf '2.1.302 \\377\\n'"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let path = stub(dir.path(), &format!("native-{index}"), body);
+                assert!(probe(&path).is_err(), "{case} must not yield a version");
+            }
+            assert!(
+                probe(&dir.path().join("absent")).is_err(),
+                "unstartable binary"
+            );
+        }
+
+        #[test]
+        fn native_version_probe_kills_and_reaps_a_probe_running_at_its_bound() {
+            let dir = tempfile::tempdir().unwrap();
+            let pid_file = dir.path().join("probe.pid");
+            let path = stub(
+                dir.path(),
+                "native",
+                &format!(
+                    "printf '%s' \"$$\" > '{}'\nexec /bin/sleep 30",
+                    pid_file.display()
+                ),
+            );
+            // A stub launch can take about half a second on a macOS host, so the bound leaves the
+            // stub time to record its pid and reach its sleep before the probe times out.
+            let bound = Duration::from_secs(2);
+            let start = Instant::now();
+            let result = CodingAgent::Claude.probe_native_version(&path, start + bound);
+            assert!(result.is_err());
+            assert!(
+                start.elapsed() < bound + Duration::from_secs(1),
+                "{:?}",
+                start.elapsed()
+            );
+            let pid: i32 = std::fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+            assert_eq!(
+                nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None),
+                Err(nix::errno::Errno::ESRCH),
+                "the timed-out probe is killed and reaped"
+            );
+        }
+
+        use crate::coding_agent::catalog::test_support::BUNDLED_BOUNDARIES;
+        use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
+        use crate::coding_agent::catalog::test_support::thresholds;
+
+        fn launched(
+            backend: CodingAgent,
+            version: &str,
+            catalog: &ProfileCatalog,
+        ) -> NativeLaunchIdentity {
+            native_launch_identity(backend, Ok(version.into()), catalog)
+                .unwrap_or_else(|error| panic!("{backend:?} {version}: {}", error.message()))
+        }
+
+        #[test]
+        fn native_launch_identity_selects_the_boundary_profile_from_its_minimum_onwards() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for boundary in BUNDLED_BOUNDARIES {
+                let backend = boundary.backend;
+                for version in std::iter::once(boundary.min_version).chain(boundary.later) {
+                    let identity = launched(backend, version, &catalog);
+                    assert_eq!(identity.native_version.as_deref(), Some(version));
+                    assert_eq!(
+                        catalog
+                            .capabilities(backend, Some(version))
+                            .min_version
+                            .as_deref(),
+                        Some(boundary.min_version),
+                        "{backend:?} {version}"
+                    );
+                    assert_eq!(identity.coverage, Coverage::Tested, "{backend:?} {version}");
+                    assert_eq!(
+                        identity.warning, None,
+                        "{backend:?} {version} launches without a version-mismatch warning"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn native_launch_identity_rejects_a_known_version_below_the_lowest_boundary() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for boundary in BUNDLED_BOUNDARIES {
+                let below = boundary.below;
+                let error =
+                    match native_launch_identity(boundary.backend, Ok(below.into()), &catalog) {
+                        Err(error) => error,
+                        Ok(_) => panic!("{:?} {below} must not launch", boundary.backend),
+                    };
+                assert_eq!(error.exit_code(), 1, "{below}");
+                assert_eq!(
+                    error.message(),
+                    format!(
+                        "unsupported native version for {}: {below}; minimum supported version is {}",
+                        boundary.backend.name(),
+                        boundary.min_version
+                    )
+                );
+            }
+            let several = ProfileCatalog::from_definitions(&thresholds(&[
+                ("high", "2.0.0"),
+                ("low", "1.0.0"),
+            ]))
+            .unwrap();
+            let error =
+                match native_launch_identity(CodingAgent::Codex, Ok("0.9.0".into()), &several) {
+                    Err(error) => error,
+                    Ok(_) => panic!("0.9.0 is below every boundary"),
+                };
+            assert_eq!(
+                error.message(),
+                "unsupported native version for codex: 0.9.0; minimum supported version is 1.0.0"
+            );
+        }
+
+        #[test]
+        fn native_launch_identity_launches_a_failed_probe_with_unknown_coverage_and_its_warning() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            let failed = native_launch_identity(
+                CodingAgent::Codex,
+                Err(CafleetError::App("probe exited with status 1".into())),
+                &catalog,
+            )
+            .unwrap_or_else(|error| panic!("a failed probe still launches: {}", error.message()));
+            assert_eq!(failed.native_version, None);
+            assert_eq!(failed.coverage, Coverage::Unknown);
+            assert_eq!(
+                failed.warning.as_deref(),
+                Some(
+                    "Warning: native version unavailable for codex: probe exited with status 1; coverage unknown."
+                )
+            );
+        }
+
+        #[test]
+        fn native_launch_identity_without_any_profile_for_the_backend_records_unknown_silently() {
+            let catalog =
+                ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+            for backend in [CodingAgent::Claude, CodingAgent::Opencode] {
+                let identity = launched(backend, "2.1.302", &catalog);
+                assert_eq!(identity.native_version.as_deref(), Some("2.1.302"));
+                assert_eq!(identity.coverage, Coverage::Unknown);
+                assert_eq!(identity.warning, None);
+            }
+        }
+    }
+
+    fn version(backend: CodingAgent) -> Option<&'static str> {
+        versions(backend)[0]
+    }
+
+    /// The bundled exact version, an unprobed launch and unbundled versions.
+    fn versions(backend: CodingAgent) -> &'static [Option<&'static str>] {
+        match backend {
+            CodingAgent::Claude => &[Some("2.1.302"), None, Some("2.1.306")],
+            CodingAgent::Codex => &[Some("0.163.0"), None, Some("0.164.0")],
+            CodingAgent::Opencode => &[None, Some("2.1.4"), Some("2.1.3"), Some("9.0.0-beta.1")],
+        }
+    }
+
+    /// The versions with an explicit-choice catalog: Claude and Codex offer one
+    /// only at the bundled version or unprobed; OpenCode at every version.
+    fn catalog_versions(backend: CodingAgent) -> &'static [Option<&'static str>] {
+        match backend {
+            CodingAgent::Claude | CodingAgent::Codex => &versions(backend)[..2],
+            CodingAgent::Opencode => versions(backend),
+        }
+    }
+
+    fn permission_argv(backend: CodingAgent, selected: &str) -> Vec<String> {
+        match backend {
+            CodingAgent::Claude => vec!["--permission-mode".into(), selected.into()],
+            CodingAgent::Codex if selected == "approve-for-me" => vec!["--approve-for-me".into()],
+            CodingAgent::Codex => vec![
+                "--ask-for-approval".into(),
+                selected.into(),
+                "--sandbox".into(),
+                "workspace-write".into(),
+            ],
+            CodingAgent::Opencode => vec!["--agent".into(), selected.into()],
+        }
+    }
+
+    #[test]
+    fn runtime_policy_omission_selects_each_backends_automatic_default_argv() {
+        for &backend in CodingAgent::all() {
+            for &native_version in versions(backend) {
+                let selection = backend.resolve_policy(native_version, None).unwrap();
+                let expected_mode = match backend {
+                    CodingAgent::Claude => "auto",
+                    CodingAgent::Codex => "approve-for-me",
+                    CodingAgent::Opencode => "cafleet",
+                };
+                assert_eq!(selection.requested_mode, None, "{native_version:?}");
+                assert_eq!(selection.resolved_mode, expected_mode, "{native_version:?}");
+                assert_eq!(selection.mode_source, ModeSource::Default);
+                assert_eq!(
+                    selection.permission_argv,
+                    permission_argv(backend, expected_mode)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_each_registered_explicit_choice_maps_to_one_literal_native_mode() {
+        for &backend in CodingAgent::all() {
+            for &native_version in catalog_versions(backend) {
+                let choices = backend.policy_choices(native_version);
+                assert!(!choices.is_empty());
+                assert_eq!(choices, backend.policy_choices(None), "{native_version:?}");
+                let mut unique = std::collections::BTreeSet::new();
+                for mode in choices {
+                    assert!(unique.insert(mode.clone()), "duplicate policy {mode}");
+                    let selection = backend.resolve_policy(native_version, Some(&mode)).unwrap();
+                    assert_eq!(selection.requested_mode.as_deref(), Some(mode.as_str()));
+                    assert_eq!(selection.resolved_mode, mode);
+                    assert_eq!(selection.mode_source, ModeSource::Explicit);
+                    assert_eq!(selection.permission_argv, permission_argv(backend, &mode));
+                    let mut expected: Vec<String> = match backend {
+                        CodingAgent::Claude => vec![
+                            "claude".into(),
+                            "--permission-mode".into(),
+                            mode.clone(),
+                            "--prompt-suggestions".into(),
+                            "false".into(),
+                            "--allowedTools".into(),
+                            "Bash(cafleet message *)".into(),
+                            "--name".into(),
+                            "fixture name".into(),
+                        ],
+                        CodingAgent::Codex => {
+                            let mut argv = vec!["codex".into()];
+                            argv.extend(permission_argv(backend, &mode));
+                            argv
+                        }
+                        CodingAgent::Opencode => vec![
+                            "opencode".into(),
+                            "mini".into(),
+                            "--standalone".into(),
+                            "--agent".into(),
+                            mode.clone(),
+                        ],
+                    };
+                    expected.extend(["--model".into(), "provider/model".into()]);
+                    let effort = (backend != CodingAgent::Opencode).then_some("high");
+                    match backend {
+                        CodingAgent::Claude => expected.extend(["--effort".into(), "high".into()]),
+                        CodingAgent::Codex => {
+                            expected.push("--config=model_reasoning_effort=high".into())
+                        }
+                        CodingAgent::Opencode => expected.push("--prompt".into()),
+                    }
+                    expected.push("literal '$x' `text` assignment".into());
+                    assert_eq!(
+                        backend
+                            .build_spawn_argv_with_policy(
+                                "literal '$x' `text` assignment",
+                                "fixture name",
+                                Some("provider/model"),
+                                effort,
+                                &selection
+                            )
+                            .unwrap(),
+                        expected
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_invalid_explicit_selection_reports_backend_and_catalog_choices() {
+        for &backend in CodingAgent::all() {
+            for invalid in ["", " ", "unsupported-fixture-mode"] {
+                let failure = backend
+                    .resolve_policy(version(backend), Some(invalid))
+                    .expect_err("invalid explicit policy must fail");
+                assert!(matches!(failure, CafleetError::Usage(_)));
+                let text = failure.message();
+                assert!(text.contains(backend.name()), "{text}");
+                for choice in backend.policy_choices(version(backend)) {
+                    assert!(text.contains(&choice), "{text}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_fixed_preset_and_unknown_native_version_keep_launch_intent() {
+        let backend = CodingAgent::Opencode;
+        assert_eq!(backend.policy_choices(None), ["cafleet", "cafleet-ask"]);
+        assert_eq!(
+            backend
+                .resolve_policy(None, Some("cafleet"))
+                .unwrap()
+                .mode_source,
+            ModeSource::Explicit
+        );
+        for &backend in CodingAgent::all() {
+            let known = backend.resolve_policy(version(backend), None).unwrap();
+            let unknown = backend.resolve_policy(None, None).unwrap();
+            assert_eq!(unknown.resolved_mode, known.resolved_mode);
+            assert_eq!(unknown.permission_argv, known.permission_argv);
+        }
+    }
+
+    #[test]
+    fn runtime_policy_opencode_unknown_choice_fails_with_the_exact_usage_error() {
+        for native_version in [None, Some("2.1.4")] {
+            let failure = CodingAgent::Opencode
+                .resolve_policy(native_version, Some("ask"))
+                .expect_err("unknown OpenCode policy must fail");
+            assert!(matches!(failure, CafleetError::Usage(_)));
+            assert_eq!(
+                failure.message(),
+                "--permission-mode for opencode must be one of cafleet, cafleet-ask (got 'ask')"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_help_lists_every_catalog_with_the_automatic_defaults() {
+        assert_eq!(
+            CodingAgent::permission_mode_help(),
+            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet)"
+        );
+    }
+
+    #[test]
+    fn runtime_policy_codex_unknown_choice_fails_with_the_exact_usage_error() {
+        for native_version in [None, Some("0.163.0")] {
+            for value in ["auto", "untrusted", "approve_for_me"] {
+                let failure = CodingAgent::Codex
+                    .resolve_policy(native_version, Some(value))
+                    .expect_err("unknown Codex policy must fail");
+                assert!(matches!(failure, CafleetError::Usage(_)));
+                assert_eq!(failure.exit_code(), 2);
+                assert_eq!(
+                    failure.message(),
+                    format!(
+                        "--permission-mode for codex must be one of on-request, never, approve-for-me (got '{value}')"
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_foreign_selection_is_rejected_before_native_argv_construction() {
+        let selected = CodingAgent::Claude
+            .resolve_policy(Some("2.1.302"), Some("default"))
+            .unwrap();
+        assert!(
+            CodingAgent::Codex
+                .build_spawn_argv_with_policy("assignment", "worker", None, None, &selected)
+                .is_err()
         );
     }
 }
