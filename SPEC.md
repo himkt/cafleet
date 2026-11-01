@@ -1950,7 +1950,9 @@ Native evidence is the provenance of a profile interval. Catalog validation requ
 
 ##### Bundled profiles and native screen fixtures
 
-The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. Each profile's capabilities rest on accepted native captures taken on a native version within its interval. A bundled profile entry has required `backend`, `min_version`, `rules` and `capabilities`, and no other key; documentation and messages name a profile by its backend and boundary, as in "the OpenCode profile from `2.1.4`". Each fixture entry keeps its own `native_version` as the actual capture version. Each existing profile's `min_version` is the native version its captures were taken on, and adding operation plans to an existing entry changes its contents without introducing a new boundary.
+The bundled catalog and the native screen fixtures recorded in its fixture registry are embedded in the CAFleet binary. Each profile's capabilities rest on accepted native captures taken on a native version within its interval. A bundled profile entry has required `backend`, `min_version`, `rules` and `capabilities`, and no other key; documentation and messages name a profile by its backend and boundary, as in "the OpenCode profile from `2.1.4`". Each fixture entry keeps its own `native_version` as the actual capture version. Each existing profile's `min_version` is the native version its captures were taken on, and adding operation plans to an existing entry changes its contents without introducing a new boundary.
+
+The embedded fixture registry uses `coding_agent/profiles/native/<backend>.json` for each backend with catalogued native screens. A fixture entry has exactly `id,kind,backend,native_version,rows,cols,source_ref,sha256`; `source_ref` selects `native/<backend>.json`, and `sha256` is the lowercase SHA-256 hex of `digest::canonical_json` applied to that entry's screen object. The loader validates every catalog fixture entry, including screens that no profile capability cites.
 
 Each automatic-mode profile replaces its predecessor as its version's bundled profile and keeps every predecessor rule and answer plan unchanged. Codex 0.163.0 shows no startup notice or opt-in dialog for `approve-for-me`, so its profile declares no startup rule. Claude Code 2.1.302 shows its `Teach auto mode about your environment?` dialog at most once per native configuration, described below, and the profile declares the question rule `claude-auto-startup` for it.
 
@@ -2152,34 +2154,45 @@ A capture whose compact control text sits on row 35 masks row 0, a transcript ro
 | A non-shell permission | Never asks under the `cafleet-ask` preset |
 | A typed reason identical to the placeholder | Cannot be told from an empty textarea; such typing is human input, which fails the deny stage-3 gate inside a response |
 
-A native screen fixture records one captured terminal screen with exactly these fields, of which only `cell_backgrounds` is optional:
+A backend fixture file has exactly these required fields:
 
 | Field | Requirement |
 |---|---|
 | `schema_version` | `1` |
-| `fixture_id` | Equals the catalog fixture `id` |
+| `backend` | Equals the backend of every catalog fixture entry referring to this file |
 | `provenance` | `native` |
-| `backend`, `native_version` | Equal the catalog fixture entry |
+| `screens` | An object mapping each catalog fixture `id` to its captured screen object |
+
+Screen keys follow their entries' order in `bundled.json` `fixtures[]` for that backend. Backend fixture files use 2-space pretty JSON with one array element per line. The catalog entry supplies each screen's capture `native_version`; the containing file supplies its schema, backend and provenance.
+
+Each screen object has exactly these fields, of which only `cell_backgrounds` is optional:
+
+| Field | Requirement |
+|---|---|
 | `rows`, `cols` | Positive measured geometry, equal to the catalog fixture entry |
 | `alternate_screen`, `screen_seq`, `cursor_row`, `cursor_col` | Measured screen state; `cursor_row` is below `rows`, and `cursor_col` is at most `cols`, where `cursor_col` equal to `cols` records the terminal's pending-wrap position after the last column |
 | `lines` | Exactly `rows` captured row texts, in viewport order |
 | `masked_rows` | Unique zero-based row indices, each `{"row":N,"reason":"reviewed_privacy"}`; the corresponding `lines` entry is the empty string |
 | `cell_backgrounds` | Optional runs `{"row":N,"start_col":C,"end_col":E,"bg":COLOUR}`, one per maximal run of cells in an unmasked row that share one non-default background, `end_col` exclusive; `COLOUR` is `{"kind":"indexed","index":I}` or `{"kind":"rgb","r":R,"g":G,"b":B}`. An absent key means every cell has the default background. |
 
-The capture-to-fixture conversion derives `cell_backgrounds` from the capture grid's per-cell `bg`, and fixture replay sets each run's background before writing its row text, so a fixture reproduces the focus styling a `focus_style` matcher reads.
+The capture-to-fixture conversion inserts the converted screen under its catalog fixture `id` in `coding_agent/profiles/native/<backend>.json`. It derives `cell_backgrounds` from the capture grid's per-cell `bg`, and fixture replay sets each run's background before writing its row text, so a fixture reproduces the focus styling a `focus_style` matcher reads.
 
-Masking applies only to rows removed by the reviewed capture privacy policy, such as home paths and account, model or plan text. Every other row keeps its captured text exactly, including trailing spaces. The detection region of every rule citing the fixture lies entirely in unmasked rows, and a masked fixture keeps `provenance` `native`.
+Masking applies only to rows removed by the reviewed capture privacy policy, such as home paths and account, model or plan text. Every other row keeps its captured text exactly, including trailing spaces. The detection region of every rule citing the fixture lies entirely in unmasked rows, and the containing fixture file carries `provenance` `native`.
 
-The bundled catalog fails to load unless each bundled fixture satisfies all of these:
+The bundled catalog loads only when each source reference resolves to an embedded backend file, every file's screen keys correspond to its catalog fixture entries, and every screen satisfies its canonical digest and field contract. Loading reports these validation errors:
 
-- Its embedded bytes hash to the catalog entry's `sha256`.
-- It parses with exactly the fields above.
-- It declares `native` provenance.
-- It matches the entry's backend, version and geometry.
-- Every row declared in `masked_rows` is in range and empty.
-- Every `cell_backgrounds` run lies inside the geometry and outside masked rows, has `start_col` below `end_col`, overlaps no other run and carries a valid non-default colour.
+| Condition | Error |
+|---|---|
+| The source file is not embedded | `bundled fixture bytes are not embedded` |
+| File `schema_version` differs from `1`, `provenance` differs from `native`, or `backend` differs from the entry | `bundled fixture file identity differs from its catalog entry` |
+| The entry's `id` is absent from `screens` | `bundled fixture screen is missing` |
+| A `screens` key has no catalog fixture entry | `bundled fixture file holds an uncited screen` |
+| The canonical screen digest differs from the entry's `sha256` | `bundled fixture digest mismatch for <ID>: catalog <SHA>, computed <SHA>` |
+| Screen `rows` or `cols` differ from the entry | `bundled fixture identity differs from its catalog entry` |
 
-A synthetic fixture, an undeclared alteration or a digest mismatch therefore rejects the bundled catalog. Synthetic fixtures remain available to explicitly selected test catalogs.
+Each file and screen parses with exactly its fields above. Every row declared in `masked_rows` is in range and empty. Every `cell_backgrounds` run lies inside the geometry and outside masked rows, has `start_col` below `end_col`, overlaps no other run and carries a valid non-default colour. JSON formatting leaves the canonical screen digest unchanged.
+
+A synthetic fixture, an undeclared screen alteration or a digest mismatch rejects the bundled catalog. Synthetic fixtures remain available to explicitly selected test catalogs.
 
 A rule's cursor condition treats a pending-wrap cursor as standing on the last cell of its row, both in fixtures and on live screens. A region spanning the full width therefore counts a cursor at column `cols` on one of its rows as inside the region.
 
