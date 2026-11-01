@@ -5593,7 +5593,7 @@ mod tests {
             }
 
             #[test]
-            fn preview_receipts_use_the_versioned_canonical_digest_and_reject_another_literal() {
+            fn preview_receipts_use_the_canonical_digest_and_reject_another_literal() {
                 with_permission_host(Duration::from_secs(5), |host| {
                     let message = crate::broker::send_message(
                         &mut host.fixture.conn,
@@ -5612,10 +5612,9 @@ mod tests {
                         "interaction_open",
                     );
                     let input = row(host, id);
-                    assert_eq!(input.payload_digest_version, 2);
                     let expected = crate::digest::sha256_hex(
                         crate::digest::canonical_json(&serde_json::json!({
-                            "payload_digest_version":2,"run_id":host.fixture.run.run_id,
+                            "run_id":host.fixture.run.run_id,
                             "kind":"preview","message_id":message.message_id,"literal":canonical
                         }))
                         .as_bytes(),
@@ -6443,7 +6442,7 @@ mod tests {
             fn preview_digest(host: &Host, message: i64, canonical: &str) -> String {
                 crate::digest::sha256_hex(
                     crate::digest::canonical_json(&serde_json::json!({
-                        "payload_digest_version":2,"run_id":host.fixture.run.run_id,
+                        "run_id":host.fixture.run.run_id,
                         "kind":"preview","message_id":message,"literal":canonical
                     }))
                     .as_bytes(),
@@ -6473,7 +6472,6 @@ mod tests {
                         input.delivery_reason.as_deref(),
                         Some("submission_plan_unavailable")
                     );
-                    assert_eq!(input.payload_digest_version, 2);
                     assert_eq!(
                         input.payload_digest,
                         preview_digest(host, message.message_id, &canonical)
@@ -6543,6 +6541,10 @@ mod tests {
                         })
                         .unwrap();
                     assert_eq!(rows, 1);
+                    assert_eq!(
+                        input.payload_digest,
+                        preview_digest(host, message.message_id, &canonical)
+                    );
                 });
             }
         }

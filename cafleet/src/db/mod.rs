@@ -779,7 +779,7 @@ mod tests {
                 ),
                 (
                     "member_input_operations",
-                    "input_id run_id operation_key kind payload_digest state created_at updated_at message_id disposition evidence_ref delivery_method delivery_reason deferred_at defer_reason payload_digest_version uncertain_cause",
+                    "input_id run_id operation_key kind payload_digest state created_at updated_at message_id disposition evidence_ref delivery_method delivery_reason deferred_at defer_reason uncertain_cause",
                 ),
                 (
                     "member_permission_responses",

@@ -216,7 +216,6 @@ impl NewReservation<'_> {
     pub(crate) const PLAIN: Self = Self {
         selection: None,
         defer_reason: None,
-        payload_digest_version: 1,
     };
 }
 
@@ -760,6 +759,12 @@ mod tests {
             message_id: None,
             literal: literal.into(),
         };
+        let exec = SubmitInput {
+            operation_key: "exec:7".into(),
+            input_kind: InputKind::Exec,
+            message_id: None,
+            literal: literal.into(),
+        };
         let quoted = serde_json::to_string(literal).unwrap();
         let expected = |kind: &str, message_id: &str| {
             crate::digest::sha256_hex(
@@ -771,6 +776,7 @@ mod tests {
         };
         assert_eq!(input_payload_digest(7, &preview), expected("preview", "9"));
         assert_eq!(input_payload_digest(7, &prompt), expected("prompt", "null"));
+        assert_eq!(input_payload_digest(7, &exec), expected("exec", "null"));
     }
 
     #[test]

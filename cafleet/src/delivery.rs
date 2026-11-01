@@ -1212,12 +1212,11 @@ mod tests {
                     preview_row(&fixture.fixture.conn, run.run_id, message.message_id).unwrap();
                 assert_eq!(row.kind, broker::runtime::InputKind::Preview);
                 assert_eq!(row.message_id, Some(message.message_id));
-                assert_eq!(row.payload_digest_version, 2);
                 assert_eq!(
                     row.payload_digest,
                     crate::digest::sha256_hex(
                         crate::digest::canonical_json(&serde_json::json!({
-                            "payload_digest_version":2,"run_id":run.run_id,"kind":"preview",
+                            "run_id":run.run_id,"kind":"preview",
                             "message_id":message.message_id,"literal":expected
                         }))
                         .as_bytes()
@@ -1609,7 +1608,6 @@ mod tests {
                 assert_eq!(queued.state, InputState::Ready);
                 assert!(queued.deferred_at.is_some());
                 assert_eq!(queued.defer_reason.as_deref(), Some("interaction_open"));
-                assert_eq!(queued.payload_digest_version, 2);
                 assert!(stamp(fixture, message.message_id).is_none());
                 assert!(
                     input_service_records(fixture).is_empty(),

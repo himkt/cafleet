@@ -407,7 +407,6 @@ mod tests {
                     "delivery",
                     "deferred_at",
                     "defer_reason",
-                    "payload_digest_version",
                     "uncertain_cause",
                 ],
             );
@@ -433,7 +432,6 @@ mod tests {
             assert_eq!(output["input"]["delivery"], Value::Null);
             assert_eq!(output["input"]["deferred_at"], Value::Null);
             assert_eq!(output["input"]["defer_reason"], Value::Null);
-            assert_eq!(output["input"]["payload_digest_version"], 1);
             assert_eq!(audit["decision"], "allow");
             assert_eq!(audit["director_mode"], "auto");
             assert_eq!(audit["decided_at"], receipt.response.decided_at);
@@ -729,7 +727,6 @@ mod tests {
                     "delivery",
                     "deferred_at",
                     "defer_reason",
-                    "payload_digest_version",
                     "uncertain_cause",
                 ],
             );
@@ -818,7 +815,6 @@ mod tests {
                 assert_key_order(&output["delivery"], &["status", "method", "reason"]);
                 assert_eq!(output["deferred_at"].is_null(), !deferred, "{assignment}");
                 assert_eq!(output["defer_reason"].is_null(), !deferred, "{assignment}");
-                assert_eq!(output["payload_digest_version"], 1);
             }
             let queued_with_method = fixture.input(&owner, "exec:invalid", InputKind::Exec, None);
             fixture

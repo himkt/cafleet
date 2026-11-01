@@ -20,8 +20,6 @@ pub(crate) use events::{
     get_event, input_delivery_result_cause, latest_event_seq, persist_transition,
     update_interaction_evidence,
 };
-#[cfg(test)]
-pub(crate) use inputs::input_payload_digest;
 pub(crate) use inputs::{
     InputReservation, NewReservation, UNRESOLVED_INPUT, begin_deferred_attempt,
     has_unresolved_ordinary_attempt, requeue_zero_byte_immediate, reserve_input_with_provenance,
