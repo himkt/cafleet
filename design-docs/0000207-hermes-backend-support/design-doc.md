@@ -349,8 +349,7 @@ Step 3 documents the Hermes contract as targeted. Before the final reinstall and
 |---|---|
 | SPEC §6.9 Hermes profile section | Final rule IDs, per-capability `tested`/`unknown` status, measured allow/deny key stages, `W_min` and layout limits, which gates share a form, decision-evidence lines |
 | `coding-agents.md` `## hermes` notes | Effective-configuration owner, `terminal.client_env_passthrough` merge, observed native forms, deny-glob refusal rendering |
-
-| `docs/` prerequisite pages, doctor rows and their SPEC §6.3 entries | The passthrough prerequisite and the gateway check, when Step 6 shows they apply |
+| `docs/` prerequisite pages, doctor rows and their SPEC §6.3 entries | The `terminal.client_env_passthrough` merge and its doctor row |
 
 ### Error contracts
 
