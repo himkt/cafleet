@@ -40,7 +40,7 @@ Static findings from the installed Hermes package (`/home/linuxbrew/.linuxbrew/C
 
 The SQLite `member_runs.backend` column carries `CHECK(backend IN ('claude','codex','opencode'))`. The `cafleet_v9.db` format family has been released (tag `0.30.3` contains `V1__baseline.sql`), so adding a backend to that check needs a `V2` successor migration.
 
-None of the live evidence (stream probes, runner acceptance on tmux and herdr, prompt captures) exists yet. Both verdicts start at `no`.
+Steps 4, 6 and 7 recorded the live evidence (stream probes, prompt captures and runner acceptance on tmux and herdr) in `runtime-evidence.md`; § Role evaluation carries the resulting verdicts.
 
 ---
 
@@ -51,7 +51,7 @@ None of the live evidence (stream probes, runner acceptance on tmux and herdr, p
 | Director | `yes` | Goal lifecycle: native `/goal` lifecycle controls in installed source and in-session `/help goal`, 2026.9.24, checked 2026-11-02. Background execution: CAFleet stream probe with `terminal` `background=true`, `notify=true` finite `wait` renewed per completion, consumed at turn boundaries without user input (runtime-evidence.md § 4.4 runs 2–3), 2026.9.24, checked 2026-11-02. |
 | Member | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |
 
-Step 4 and Step 7 replace these rows with the recorded evidence. Each Evidence cell keeps the shape of SPEC § Role eligibility: source, native version and `checked YYYY-MM-DD` per requirement group, in at most two sentences. A Member `yes` names its bundled profile ("the Hermes profile from `2026.9.24`").
+Each Evidence cell keeps the shape of SPEC § Role eligibility: source, native version and `checked YYYY-MM-DD` per requirement group, in at most two sentences. A Member `yes` names its bundled profile ("the Hermes profile from `2026.9.24`").
 
 ---
 
@@ -293,7 +293,7 @@ The `## hermes` section follows the Template in `.claude/rules/documentation-mai
 | Setup installs the six Director-only `approvals.deny` globs, and `member create` refuses a configuration that lacks any of them. A matching command is blocked before review and routes like any refusal. | `{permission_flags}`; member routing; setup |
 | A gateway-backed session can keep work running after its pane closes; deletion settles it (see `member delete`) | Director shutdown and recovery |
 | Native shell input through leading `!` runs locally in the classic REPL; the Director authorizes routed native input under its host rules | Director-side dispatch |
-| The member's terminal tool needs `CAFLEET_DATABASE_URL` (prerequisite from Step 6) | Member startup; setup |
+| Setup merges `terminal.client_env_passthrough` so each member's terminal tool sees its own `CAFLEET_DATABASE_URL` and multiplexer variables | Member startup; setup |
 
 ### Schema
 
@@ -348,7 +348,8 @@ Step 3 documents the Hermes contract as targeted. Before the final reinstall and
 | Surface | Content taken from the evidence |
 |---|---|
 | SPEC §6.9 Hermes profile section | Final rule IDs, per-capability `tested`/`unknown` status, measured allow/deny key stages, `W_min` and layout limits, which gates share a form, decision-evidence lines |
-| `coding-agents.md` `## hermes` notes | Effective-configuration owner, `terminal.env_passthrough` prerequisite, observed native forms, deny-glob refusal rendering |
+| `coding-agents.md` `## hermes` notes | Effective-configuration owner, `terminal.client_env_passthrough` merge, observed native forms, deny-glob refusal rendering |
+
 | `docs/` prerequisite pages, doctor rows and their SPEC §6.3 entries | The passthrough prerequisite and the gateway check, when Step 6 shows they apply |
 
 ### Error contracts

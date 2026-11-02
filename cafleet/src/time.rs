@@ -82,6 +82,11 @@ impl Deadline {
             .ok_or(CafleetError::DeadlineExceeded)
     }
 
+    /// The deadline `extension` later.
+    pub(crate) fn extended_by(self, extension: Duration) -> Self {
+        Self(self.0 + extension)
+    }
+
     /// The deadline `reserve` earlier; already expired when less than `reserve` remains.
     pub(crate) fn reserving(self, reserve: Duration) -> Self {
         Self(

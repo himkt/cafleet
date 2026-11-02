@@ -731,6 +731,37 @@ pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use crate::error::CafleetError;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    pub(crate) fn executable_stub(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    pub(crate) fn run_stub<T>(
+        mut run: impl FnMut() -> Result<T, CafleetError>,
+    ) -> Result<T, CafleetError> {
+        // A parallel test's fork can briefly inherit a fresh stub's write descriptor.
+        for _ in 0..50 {
+            match run() {
+                Err(error) if error.message().contains("Text file busy") => {
+                    std::thread::sleep(Duration::from_millis(20))
+                }
+                result => return result,
+            }
+        }
+        panic!("an executable stub stayed busy")
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use crate::coding_agent::*;
 
@@ -1237,18 +1268,18 @@ mod tests {
 
     #[test]
     fn native_launch_probes_and_launches_the_same_resolved_executable() {
-        use std::os::unix::fs::PermissionsExt;
+        use crate::coding_agent::test_support::executable_stub;
+        use crate::coding_agent::test_support::run_stub;
         use std::time::Duration;
         use std::time::Instant;
         let dir = tempfile::tempdir().unwrap();
-        let executable = dir.path().join("versions/2.1.302/claude");
-        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
-        std::fs::write(
-            &executable,
-            "#!/bin/sh\n[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '2.1.302 (Claude Code)\\n'\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let versions = dir.path().join("versions/2.1.302");
+        std::fs::create_dir_all(&versions).unwrap();
+        let executable = executable_stub(
+            &versions,
+            "claude",
+            "[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '2.1.302 (Claude Code)\\n'",
+        );
         struct Resolved {
             executable: PathBuf,
             home: PathBuf,
@@ -1288,9 +1319,10 @@ mod tests {
             .unwrap();
         assert_eq!(resolved, executable);
         assert_eq!(
-            backend
-                .probe_native_version(&resolved, Instant::now() + Duration::from_secs(2))
-                .unwrap(),
+            run_stub(
+                || backend.probe_native_version(&resolved, Instant::now() + Duration::from_secs(2))
+            )
+            .unwrap(),
             "2.1.302",
             "the probe runs the resolved executable"
         );
@@ -1411,20 +1443,15 @@ mod tests {
     }
 
     mod native_version_probe {
+        use crate::coding_agent::test_support::executable_stub as stub;
+        use crate::coding_agent::test_support::run_stub;
         use crate::coding_agent::tests::*;
-        use std::os::unix::fs::PermissionsExt;
-        use std::path::PathBuf;
-
-        fn stub(dir: &Path, name: &str, body: &str) -> PathBuf {
-            let path = dir.join(name);
-            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-            path
-        }
 
         fn probe(executable: &Path) -> Result<String, CafleetError> {
-            CodingAgent::Claude
-                .probe_native_version(executable, Instant::now() + Duration::from_secs(2))
+            run_stub(|| {
+                CodingAgent::Claude
+                    .probe_native_version(executable, Instant::now() + Duration::from_secs(2))
+            })
         }
 
         #[test]
@@ -1842,10 +1869,11 @@ mod tests {
     }
 
     pub(super) mod hermes {
+        use crate::coding_agent::test_support::executable_stub;
+        use crate::coding_agent::test_support::run_stub;
         use crate::coding_agent::tests::*;
         use serde_json::json;
         use std::cell::RefCell;
-        use std::os::unix::fs::PermissionsExt;
 
         const HERMES_EFFORTS: [&str; 8] = [
             "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
@@ -2169,25 +2197,14 @@ mod tests {
         }
 
         fn stub(dir: &Path, body: &str) -> PathBuf {
-            let path = dir.join("hermes");
-            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-            path
+            executable_stub(dir, "hermes", body)
         }
 
         fn probe(executable: &Path) -> Result<String, CafleetError> {
-            // A parallel test's fork can briefly inherit the stub's write descriptor.
-            for _ in 0..50 {
-                let result = CodingAgent::Hermes
-                    .probe_native_version(executable, Instant::now() + Duration::from_secs(2));
-                match &result {
-                    Err(error) if error.message().contains("Text file busy") => {
-                        std::thread::sleep(Duration::from_millis(20))
-                    }
-                    _ => return result,
-                }
-            }
-            panic!("the stub stayed busy: {}", executable.display())
+            run_stub(|| {
+                CodingAgent::Hermes
+                    .probe_native_version(executable, Instant::now() + Duration::from_secs(2))
+            })
         }
 
         #[test]

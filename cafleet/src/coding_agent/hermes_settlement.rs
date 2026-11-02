@@ -22,6 +22,8 @@ pub(crate) trait HermesSettlementHost {
     fn client_exited(&mut self) -> Result<bool, CafleetError>;
     fn send_keys(&mut self, keys: &[&str]) -> Result<(), CafleetError>;
     fn capture(&mut self) -> Result<String, CafleetError>;
+    /// Whether the composer holds no typed text; its placeholder suggestion does not count.
+    fn composer_empty(&mut self) -> Result<bool, CafleetError>;
     fn record_session_id(&mut self, session_id: &str) -> Result<(), CafleetError>;
     fn processes_json(&mut self, home: &Path) -> Result<Option<String>, CafleetError>;
     /// Whether the registered process still runs: `pid` alive with `host_start_time`, Hermes's
@@ -41,7 +43,7 @@ pub(crate) const STOP_COMMAND: [&str; 5] = ["/", "s", "t", "o", "p"];
 pub(crate) const EXIT_COMMAND: [&str; 5] = ["/", "e", "x", "i", "t"];
 // Escape closes an open completion menu; the composer has no line-kill key, and Ctrl+C on an
 // empty composer ends the client without stopping its session, so leftover text is erased by
-// backspacing.
+// backspacing and the composer is verified empty before each command.
 pub(crate) const CLEAR_KEYS: [&str; 61] = {
     let mut keys = ["Backspace"; 61];
     keys[0] = "Escape";
@@ -104,17 +106,12 @@ pub(crate) fn already_exited_warning(member_id: i64) -> String {
     )
 }
 
-/// The deletion deadline for a run of `backend`: settling a Hermes session takes several native
-/// round trips, so Hermes runs get a longer budget than the ordinary command deadline.
-pub(crate) fn deletion_deadline(backend: &str) -> crate::time::Deadline {
-    if backend == crate::coding_agent::CodingAgent::Hermes.name() {
-        crate::time::Deadline::until(Instant::now() + HERMES_DELETION_BUDGET)
-    } else {
-        crate::time::Deadline::new()
-    }
+/// The budget of one Hermes member's settlement, which takes several native round trips.
+pub(crate) fn settlement_deadline() -> crate::time::Deadline {
+    crate::time::Deadline::until(Instant::now() + SETTLEMENT_BUDGET)
 }
 
-pub(crate) const HERMES_DELETION_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+pub(crate) const SETTLEMENT_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 
 fn stop_client(host: &mut dyn HermesSettlementHost, until: Instant) -> Result<String, String> {
     if busy(&host.capture().map_err(message)?) {
@@ -163,6 +160,10 @@ fn submit_command<T>(
     mut done: impl FnMut(&str) -> Option<T>,
 ) -> Result<T, String> {
     host.send_keys(&CLEAR_KEYS).map_err(message)?;
+    host.pause();
+    if !host.composer_empty().map_err(message)? {
+        return Err("the Hermes composer still holds text after clearing".into());
+    }
     host.send_keys(command).map_err(message)?;
     host.pause();
     host.send_keys(&MENU_CLOSE_KEYS).map_err(message)?;
@@ -280,6 +281,55 @@ fn message(cause: CafleetError) -> String {
     cause.message().into_owned()
 }
 
+/// Whether the bottom-most composer row (`❯ `) of an SGR-carrying capture holds no typed text.
+/// Hermes draws its placeholder suggestion in italics and typed text without, so the row is
+/// empty when every visible character after the prefix is italic or blank.
+pub(crate) fn composer_row_empty(screen: &str) -> bool {
+    static TOKEN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"\x1b\[([0-9;]*)m|\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|([^\x1b])",
+        )
+        .expect("the capture token pattern is valid")
+    });
+    let Some(row) = screen
+        .lines()
+        .rev()
+        .find(|line| crate::output::strip_ansi(line).starts_with("❯ "))
+    else {
+        return false;
+    };
+    let mut italic = false;
+    let mut visible = Vec::new();
+    for token in TOKEN.captures_iter(row) {
+        if let Some(params) = token.get(1) {
+            let mut codes = params.as_str().split(';');
+            while let Some(code) = codes.next() {
+                match code {
+                    "" | "0" | "23" => italic = false,
+                    "3" => italic = true,
+                    // Extended colours carry their arguments in the following parameters.
+                    "38" | "48" | "58" => match codes.next() {
+                        Some("5") => drop(codes.next()),
+                        Some("2") => {
+                            for _ in 0..3 {
+                                codes.next();
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        } else if let Some(character) = token.get(2) {
+            visible.push((character.as_str(), italic));
+        }
+    }
+    visible
+        .iter()
+        .skip(2)
+        .all(|(character, italic)| *italic || character.trim().is_empty())
+}
+
 /// The effective Hermes home for the configuration base `base`: the directory of the file
 /// `hermes config path` names, which follows a sticky `active_profile`.
 pub(crate) fn effective_home(
@@ -295,7 +345,7 @@ pub(crate) fn effective_home(
     )
     .map_err(|cause| {
         CafleetError::App(format!(
-            "cannot resolve the Hermes home through 'hermes config path': {cause}"
+            "cannot read hermes configuration through 'hermes config path': {cause}"
         ))
     })?;
     Path::new(config.trim())
@@ -304,13 +354,13 @@ pub(crate) fn effective_home(
         .map(Path::to_path_buf)
         .ok_or_else(|| {
             CafleetError::App(format!(
-                "'hermes config path' printed no absolute file path: {}",
+                "cannot read hermes configuration through 'hermes config path': printed no absolute file path: {}",
                 config.trim()
             ))
         })
 }
 
-/// Stops and verifies a Hermes run's session work through its pane (design U4).
+/// Stops and verifies a Hermes run's session work through its pane.
 pub(crate) fn settle_run(
     conn: &rusqlite::Connection,
     mux: &crate::multiplexer::AnyMultiplexer,
@@ -371,6 +421,12 @@ impl HermesSettlementHost for PaneSettlementHost<'_> {
             .map(|screen| crate::output::strip_ansi(&screen))
             .map_err(|cause| CafleetError::App(cause.to_string()))
     }
+    fn composer_empty(&mut self) -> Result<bool, CafleetError> {
+        self.mux
+            .capture_pane(self.pane_id, CAPTURE_LINES)
+            .map(|screen| composer_row_empty(&screen))
+            .map_err(|cause| CafleetError::App(cause.to_string()))
+    }
     fn record_session_id(&mut self, session_id: &str) -> Result<(), CafleetError> {
         let mut session = crate::broker::runtime::native_session(self.conn, self.run_id)?
             .ok_or_else(|| {
@@ -422,6 +478,8 @@ impl HermesSettlementHost for PaneSettlementHost<'_> {
 #[cfg(test)]
 mod tests {
     use crate::coding_agent::hermes_settlement::*;
+    use crate::coding_agent::test_support::executable_stub;
+    use crate::coding_agent::test_support::run_stub;
     use std::time::Duration;
 
     const MEMBER: i64 = 7;
@@ -545,6 +603,9 @@ mod tests {
         fn capture(&mut self) -> Result<String, CafleetError> {
             Ok(self.screen.join("\n"))
         }
+        fn composer_empty(&mut self) -> Result<bool, CafleetError> {
+            Ok(self.composer.is_empty())
+        }
         fn record_session_id(&mut self, session_id: &str) -> Result<(), CafleetError> {
             self.recorded.push(session_id.to_owned());
             Ok(())
@@ -661,6 +722,48 @@ mod tests {
     }
 
     #[test]
+    fn settlement_fails_without_typing_a_command_when_clearing_leaves_text_in_the_composer() {
+        let mut host = Host::working();
+        host.screen = vec![IDLE.into()];
+        let draft = "x".repeat(CLEAR_KEYS.len() + 9);
+        host.composer = draft.clone();
+        assert_eq!(
+            settled(&mut host, None).unwrap_err().message(),
+            format!(
+                "hermes work for member {MEMBER} could not be verified as stopped: the Hermes composer still holds text after clearing; member was not deleted."
+            )
+        );
+        assert_eq!(host.composer, draft[..draft.len() - (CLEAR_KEYS.len() - 1)]);
+        assert!(host.submitted.is_empty());
+        assert_eq!(host.enters, 0);
+        assert!(host.recorded.is_empty());
+    }
+
+    #[test]
+    fn composer_row_is_empty_only_when_its_bottom_row_shows_the_italic_placeholder_or_nothing() {
+        for (screen, empty) in [
+            ("❯ ", true),
+            ("\x1b[1m❯ \x1b[0m", true),
+            (
+                "\x1b[1m❯ \x1b[0m\x1b[3;2mTurn these notes into a to-do list\x1b[0m",
+                true,
+            ),
+            ("❯ \x1b[3mhint\x1b[23m   ", true),
+            ("❯ typed draft", false),
+            ("❯ \x1b[3mhint\x1b[23mx", false),
+            ("❯ \x1b[3mhint\x1b[0mx", false),
+            ("❯ \x1b[38;5;3mcolored draft\x1b[0m", false),
+            ("❯ \x1b[38;2;3;3;3mcolored draft\x1b[0m", false),
+            ("❯ earlier prompt\n❯ \x1b[3mhint\x1b[0m", true),
+            ("❯ \x1b[3mhint\x1b[0m\n❯ typed", false),
+            ("╭──╮\n│ no composer │", false),
+            ("", false),
+        ] {
+            assert_eq!(composer_row_empty(screen), empty, "{screen:?}");
+        }
+    }
+
+    #[test]
     fn settlement_presses_enter_again_when_the_first_one_arrives_before_the_menu() {
         let mut host = Host::working();
         host.dropped_enters = 1;
@@ -703,18 +806,16 @@ mod tests {
     }
 
     #[test]
-    fn hermes_deletion_gets_the_longer_settlement_budget_and_other_backends_the_command_deadline() {
-        for (backend, seconds) in [("hermes", 20), ("claude", 5), ("codex", 5), ("opencode", 5)] {
-            let before = Instant::now();
-            let deadline = deletion_deadline(backend).instant();
-            let after = Instant::now();
-            let budget = Duration::from_secs(seconds);
-            assert!(
-                deadline >= before + budget && deadline <= after + budget,
-                "{backend}: {:?} after the call",
-                deadline.saturating_duration_since(after)
-            );
-        }
+    fn one_member_settlement_gets_twenty_seconds_from_its_start() {
+        let before = Instant::now();
+        let deadline = settlement_deadline().instant();
+        let after = Instant::now();
+        let budget = Duration::from_secs(20);
+        assert!(
+            deadline >= before + budget && deadline <= after + budget,
+            "{:?} after the call",
+            deadline.saturating_duration_since(after)
+        );
     }
 
     #[test]
@@ -837,26 +938,15 @@ mod tests {
     }
 
     fn resolved_home(body: &str) -> Result<PathBuf, CafleetError> {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("hermes");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        // A parallel test's fork can briefly inherit the stub's write descriptor.
-        for _ in 0..50 {
-            let result = effective_home(
+        let path = executable_stub(dir.path(), "hermes", body);
+        run_stub(|| {
+            effective_home(
                 &path,
                 Path::new("/srv/hermes"),
                 Instant::now() + Duration::from_secs(2),
-            );
-            match &result {
-                Err(error) if error.message().contains("Text file busy") => {
-                    std::thread::sleep(Duration::from_millis(20))
-                }
-                _ => return result,
-            }
-        }
-        panic!("the stub stayed busy: {}", path.display())
+            )
+        })
     }
 
     #[test]
@@ -872,14 +962,14 @@ mod tests {
             resolved_home("printf 'config.yaml\\n'")
                 .unwrap_err()
                 .message(),
-            "'hermes config path' printed no absolute file path: config.yaml"
+            "cannot read hermes configuration through 'hermes config path': printed no absolute file path: config.yaml"
         );
         let failure = resolved_home("echo 'no profile' >&2\nexit 4").unwrap_err();
         assert_eq!(failure.exit_code(), 1);
         assert!(
             failure
                 .message()
-                .starts_with("cannot resolve the Hermes home through 'hermes config path': "),
+                .starts_with("cannot read hermes configuration through 'hermes config path': "),
             "{}",
             failure.message()
         );

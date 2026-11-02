@@ -245,7 +245,7 @@ environment variable, falling back to the default when the variable is unset:
 | codex | `CODEX_HOME` | `$CODEX_HOME` | `~/.codex` | `<base>/skills` | `<base>/rules/cafleet.rules` |
 | opencode (skills) | — (fixed discovery path) | — | `~/.config/opencode` | `<base>/skills` | — |
 | opencode (preset) | `OPENCODE_CONFIG_DIR` | `$OPENCODE_CONFIG_DIR` | `~/.config/opencode` | — | `<base>/agents/cafleet.md`, `<base>/agents/cafleet-ask.md` |
-| hermes | `HERMES_HOME` | `$HERMES_HOME` | `~/.hermes` | `<base>/skills` | — (setup merges `approvals.deny` instead; § Hermes approval rules) |
+| hermes | `HERMES_HOME` | `$HERMES_HOME` | `~/.hermes` | `<base>/skills` | — (setup merges `approvals.deny` and `terminal.client_env_passthrough` instead; § Hermes approval rules) |
 
 opencode discovers skills only at fixed paths but loads agent definitions from
 `OPENCODE_CONFIG_DIR` as well, so only the presets follow the variable.
@@ -296,7 +296,7 @@ preset of the agent, in this order:
 | codex | `presets/codex/cafleet.rules` | `<codex base>/rules/cafleet.rules` (default `~/.codex/rules/cafleet.rules`) |
 | opencode | `presets/opencode/cafleet.md` | `<preset base>/agents/cafleet.md` (default `~/.config/opencode/agents/cafleet.md`) |
 | opencode | `presets/opencode/cafleet-ask.md` | `<preset base>/agents/cafleet-ask.md` (default `~/.config/opencode/agents/cafleet-ask.md`) |
-| hermes | — (skills, then the `approvals.deny` merge below) | — |
+| hermes | — (skills, then the `approvals.deny` and `terminal.client_env_passthrough` merges below) | — |
 
 Each backend replaces every embedded skill sequentially, then replaces each of its presets in order. Existing targets
 are deleted before their replacements are written. Unrelated skills remain
@@ -724,9 +724,9 @@ Member creation validates policy, evidence configuration and assignment, and rec
 | After the split: handshake, placement publication, `start` or the started-state check | Shut down the owned runner and child when the runner already owns the run, close the created pane, then the same descriptor/run/member rollback | Member deregistered, placement removed, run `failed` |
 
 For a `hermes` run whose child started, compensation runs the Hermes work
-settlement (§6.7 Hermes work settlement) after the owned runner shutdown and
-before closing the pane; an unverified settlement appends its cause as a
-cleanup diagnostic.
+settlement (§6.7 Hermes work settlement) before the owned runner shutdown,
+under its own 20-second settlement budget; an unverified settlement appends its
+cause as a cleanup diagnostic.
 
 Continue remaining compensation even if an earlier cleanup fails. A pane the
 backend already tried to close is never closed again by the creation rollback.
@@ -754,7 +754,7 @@ runtime presentation contract (§6.3 Runtime presentation).
 
 For a member with a recorded run, request owned runner shutdown under that identity before pane/registry cleanup, retaining explicit unconfirmed-child diagnostics and recoverable runtime records. A run-less ordinary row skips runner shutdown, closes its recorded pane under the deletion lock and deregisters; teardown does not require a runtime. Attempt remaining event replay before deregistration only within the remaining operation deadline. Lock the concrete placement before kill/deregistration. A member without a concrete pane needs no lock. Retry contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
 
-For a `hermes` run, after runner shutdown and before pane/registry finalization, run the Hermes work settlement (§6.7 Hermes work settlement) within the same deadline. When the stop cannot be verified, exit 1 with `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.`, retain the runner's cleanup records and the member row, and let a retry re-run the settlement.
+For a `hermes` run, before runner shutdown and after the pane lock is held, run the Hermes work settlement (§6.7 Hermes work settlement) under its own 20-second settlement budget; the time it takes extends the five-second deletion deadline, so the lock's five-second contention bound is unchanged. When the stop cannot be verified, exit 1 with `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.`, retain the runner's cleanup records and the member row, and let a retry re-run the settlement.
 
 Revalidate pending or absent placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, mandatory registry finalization uses the later of the original deadline and one second after finalization begins, allowing short reader/writer contention to clear; actual database failures report that the pane was closed and preserve the database cause. Optional layout work follows mandatory finalization within the original deadline. A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
 
@@ -1970,6 +1970,8 @@ member's Hermes will enforce. Each failure exits 1 before registration:
 |---|---|
 | The command cannot start, times out, exits nonzero or prints anything other than a JSON object | `Error: cannot read hermes configuration through 'hermes config get': <cause>` |
 | `deny` is absent, is not an array of strings, or lacks a CAFleet Director-only glob (§6.3 Hermes approval rules) | `Error: hermes approvals.deny lacks CAFleet's Director-only rules: <glob>, …; run 'cafleet setup --coding-agent hermes'` |
+| `hermes config path` (run with the same bounds to resolve the effective Hermes home, § Hermes work settlement) cannot start, times out or exits nonzero | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
+| `hermes config path` prints no absolute file path | `Error: cannot read hermes configuration through 'hermes config path': printed no absolute file path: <stdout>` |
 
 The checks run in table order, and the missing globs are listed in their
 canonical order. `doctor` runs the same command read-only (§6.3 Hermes
@@ -1988,7 +1990,7 @@ a `hermes` run stop that work and verify the stop:
 | Registered background processes | `/stop` stops the session's registered processes; settlement waits for its report (`Stopped N process(es).` or `No running background processes.`) |
 | Verification | The client printed its exit summary and the run's native child exited; no `<home>/processes.json` entry whose `owner_task_id` is the session ID has a live `pid` with its `host_start_time` (the `/proc/<pid>/stat` start field), where `<home>` is the directory of `hermes config path` under the stored base. On a platform without a comparable start time, a live `pid` counts as running. |
 
-Deletion runs settlement for a `hermes` run before the runner shutdown. `member delete` of a member whose run is `hermes`, and `fleet delete` of a fleet with a `hermes` run, use a 20-second deadline; other deletions keep the 5-second command deadline. A step that does not complete before the deadline, or a running registered process, fails with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` and keeps the member row. A retry after a recorded session ID and an exited client re-runs only the verification. When the client had already exited before settlement recorded a session ID, deletion prints `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway` to stderr and completes. Creation compensation runs the same settlement for a started `hermes` run, and a failure becomes a compensation diagnostic.
+Deletion runs settlement for a `hermes` run before the runner shutdown. Each `hermes` member's settlement, in `member delete` and in `fleet delete`, has its own 20-second budget, and the time it takes extends the 5-second deletion deadline for the remaining cleanup and for later fleet members. A step that does not complete within the settlement budget, or a running registered process, fails with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` and keeps the member row. A retry after a recorded session ID and an exited client re-runs only the verification. When the client had already exited before settlement recorded a session ID, deletion prints `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway` to stderr and completes. Creation compensation runs the same settlement for a started `hermes` run, and a failure becomes a compensation diagnostic.
 
 CAFleet never stops or restarts a Hermes gateway, kills by process name or
 touches a session it does not own.

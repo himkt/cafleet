@@ -209,6 +209,8 @@ Hermes availability preflight, after the config-dir and PATH checks: one bounded
 |---|---|
 | Command fails, times out or prints no JSON object | `Error: cannot read hermes configuration through 'hermes config get': <cause>` |
 | `deny` lacks a Director-only glob | `Error: hermes approvals.deny lacks CAFleet's Director-only rules: <glob>, …; run 'cafleet setup --coding-agent hermes'` |
+| `hermes config path` (resolves the effective home for deletion settlement) fails or times out | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
+| `hermes config path` prints no absolute file path | `Error: cannot read hermes configuration through 'hermes config path': printed no absolute file path: <stdout>` |
 
 The member environment forwards a set `HERMES_HOME`.
 
@@ -220,7 +222,7 @@ Failure compensation shuts down owned runner/child, closes pane, removes descrip
 
 ### `member delete`
 
-`cafleet member delete MEMBER_ID [--json]` shuts down a recorded runner, closes the locked pane and deregisters. Run-less teardown skips runner shutdown while retaining pane close/deregistration. Busy: `member ID's pane input remained busy for 5 seconds; member was not deleted.`, exit 1 unchanged. Post-close database errors retain the cause and closed-pane evidence. Layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages. Before runner shutdown, a `hermes` run's session work is stopped through native pane input (`Ctrl+C` when busy, then `/stop` and `/exit`) and its registered background processes are verified as stopped, under a 20-second deadline (also for `fleet delete` of a fleet with a `hermes` run). An unverified stop exits 1 with `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.` and keeps the member, and a retry re-runs the settlement. A client that had already exited prints `warning: hermes client for member ID had already exited; its session work may still be running in the Hermes gateway` and the deletion completes.
+`cafleet member delete MEMBER_ID [--json]` shuts down a recorded runner, closes the locked pane and deregisters. Run-less teardown skips runner shutdown while retaining pane close/deregistration. Busy: `member ID's pane input remained busy for 5 seconds; member was not deleted.`, exit 1 unchanged. Post-close database errors retain the cause and closed-pane evidence. Layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages. Before runner shutdown, a `hermes` run's session work is stopped through native pane input (`Ctrl+C` when busy, then `/stop` and `/exit`) and its registered background processes are verified as stopped, with its own 20-second settlement budget per Hermes member (also in `fleet delete`), whose duration extends the 5-second deletion deadline. An unverified stop exits 1 with `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.` and keeps the member, and a retry re-runs the settlement. A client that had already exited prints `warning: hermes client for member ID had already exited; its session work may still be running in the Hermes gateway` and the deletion completes.
 
 ### `member list`
 

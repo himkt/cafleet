@@ -736,9 +736,14 @@ fn launch_registered(
     match storage::get_run(guard.conn, pending.run.run_id) {
         Ok(current) if current.owner_kind == OwnerKind::Runner => {
             if current.backend == crate::coding_agent::CodingAgent::Hermes.name()
+                && current.child_pid.is_some()
                 && let Some(pane_id) = pane.as_deref()
-                && let Err(cause) =
-                    host.settle_hermes(guard.conn, &current, pane_id, clock.storage_deadline())
+                && let Err(cause) = host.settle_hermes(
+                    guard.conn,
+                    &current,
+                    pane_id,
+                    crate::coding_agent::hermes_settlement::settlement_deadline().instant(),
+                )
             {
                 notes.push(cause.message().into_owned());
             }
@@ -1237,6 +1242,7 @@ mod tests {
         corrupt: Option<&'static str>,
         fast_exit: bool,
         cleanup_failure: bool,
+        hermes_failure: Option<&'static str>,
         lock: Option<RunLock>,
     }
 
@@ -1258,6 +1264,7 @@ mod tests {
                 corrupt: None,
                 fast_exit: false,
                 cleanup_failure: false,
+                hermes_failure: None,
                 lock: None,
             }
         }
@@ -1450,6 +1457,21 @@ mod tests {
             self.lock.take();
             Ok(ShutdownOutcome::complete(None))
         }
+        fn settle_hermes(
+            &mut self,
+            _conn: &Connection,
+            run: &RunRecord,
+            pane_id: &str,
+            _deadline: Instant,
+        ) -> Result<(), CafleetError> {
+            self.calls.push("settle");
+            assert_eq!(run.backend, "hermes");
+            assert_eq!(pane_id, "%9");
+            match self.hermes_failure {
+                Some(cause) => Err(CafleetError::App(cause.into())),
+                None => Ok(()),
+            }
+        }
         fn close_pane(&mut self, pane: &str, deadline: Instant) -> Result<(), CafleetError> {
             self.calls.push("close");
             self.deadlines.push(("close", deadline));
@@ -1463,8 +1485,12 @@ mod tests {
     }
 
     fn inputs(fixture: &Fixture) -> (PendingMemberSpec, RunSettings) {
+        inputs_for(fixture, "codex")
+    }
+
+    fn inputs_for(fixture: &Fixture, backend: &str) -> (PendingMemberSpec, RunSettings) {
         let mut placement = placement(None);
-        placement.coding_agent = "codex".into();
+        placement.coding_agent = backend.into();
         (
             PendingMemberSpec {
                 fleet_id: fixture.run.fleet_id,
@@ -1492,7 +1518,16 @@ mod tests {
         host: &mut LaunchFixtureHost,
         deadline: Instant,
     ) -> Result<LaunchOutcome, CafleetError> {
-        let (member, settings) = inputs(fixture);
+        launch_backend(fixture, host, deadline, "codex")
+    }
+
+    fn launch_backend(
+        fixture: &mut Fixture,
+        host: &mut LaunchFixtureHost,
+        deadline: Instant,
+        backend: &str,
+    ) -> Result<LaunchOutcome, CafleetError> {
+        let (member, settings) = inputs_for(fixture, backend);
         let spec = fixture.spec();
         create_registered(
             &mut fixture.conn,
@@ -2065,6 +2100,79 @@ mod tests {
             pending_run(&fixture).cleanup_state,
             CleanupState::Incomplete
         );
+    }
+
+    #[test]
+    fn hermes_creation_compensation_settles_a_started_client_before_runner_shutdown() {
+        let mut fixture = Fixture::new();
+        let mut host = LaunchFixtureHost::new(&fixture);
+        host.fail = Some("started-reply");
+        let deadline = host.now + Duration::from_secs(10);
+        let error =
+            require_launch_error(launch_backend(&mut fixture, &mut host, deadline, "hermes"));
+        assert!(error.message().contains("started reply lost"));
+        assert_eq!(
+            host.calls,
+            ["split", "prepared", "start", "settle", "shutdown", "close"]
+        );
+        assert_compensated(&fixture, &pending_run(&fixture));
+    }
+
+    #[test]
+    fn hermes_creation_settlement_failure_is_a_cleanup_diagnostic_and_compensation_continues() {
+        let mut fixture = Fixture::new();
+        let mut host = LaunchFixtureHost::new(&fixture);
+        host.fail = Some("started-reply");
+        host.hermes_failure = Some("fixture hermes settlement failed");
+        let deadline = host.now + Duration::from_secs(10);
+        let error =
+            require_launch_error(launch_backend(&mut fixture, &mut host, deadline, "hermes"));
+        let text = error.message();
+        assert!(
+            text.lines().next().unwrap().contains("started reply lost"),
+            "{text}"
+        );
+        assert_eq!(
+            text.matches("fixture hermes settlement failed").count(),
+            1,
+            "{text}"
+        );
+        assert_eq!(
+            host.calls,
+            ["split", "prepared", "start", "settle", "shutdown", "close"]
+        );
+        let run = pending_run(&fixture);
+        assert_eq!(
+            storage::get_run(&fixture.conn, run.run_id).unwrap().status,
+            RunStatus::Failed
+        );
+        assert!(
+            !RuntimePaths::for_run(&run.database_identity_json, run.run_id)
+                .unwrap()
+                .descriptor
+                .exists()
+        );
+    }
+
+    #[test]
+    fn creation_compensation_settles_only_a_hermes_run_whose_child_started() {
+        for (backend, failure) in [
+            ("hermes", "start"),
+            ("hermes", "prepared"),
+            ("codex", "started-reply"),
+        ] {
+            let mut fixture = Fixture::new();
+            let mut host = LaunchFixtureHost::new(&fixture);
+            host.fail = Some(failure);
+            let deadline = host.now + Duration::from_secs(10);
+            require_launch_error(launch_backend(&mut fixture, &mut host, deadline, backend));
+            assert!(
+                !host.calls.contains(&"settle"),
+                "{backend} {failure}: {:?}",
+                host.calls
+            );
+            assert_compensated(&fixture, &pending_run(&fixture));
+        }
     }
 
     #[test]
