@@ -1,6 +1,6 @@
 # Hermes Coding-Agent Backend Support
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 72/73 tasks complete
 **Last Updated**: 2026-11-02
 
@@ -499,3 +499,4 @@ Paid calls use the operator's configured default model. Secrets and account iden
 | 2026-11-02 | Review round 2: Member-ineligible fleet backend handling in Director model selection and the `member create` refusal. Approved by the user. |
 | 2026-11-02 | Execution rulings: plain-setup skip line, `hermes.approvals.deny` doctor row, `<config path>` from `hermes config path` (base fallback), `notify=true` and `process_manage`, observed deny-entry comment preservation, Claude row recorded limit. |
 | 2026-11-02 | User decisions U3 (stream probe turn-boundary consumption), U4 (pane-input deletion stop) and U5 (`smart` and `manual` launch modes, `terminal.client_env_passthrough` merge); Step 6a added. |
+| 2026-11-02 | Implementation complete; the global reinstall with real-home setup and doctor is deferred to the operator after merge. |
