@@ -1,7 +1,7 @@
 # Hermes Coding-Agent Backend Support
 
 **Status**: Approved
-**Progress**: 39/69 tasks complete
+**Progress**: 39/73 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -31,11 +31,11 @@ Static findings from the installed Hermes package (`/home/linuxbrew/.linuxbrew/C
 | Version | `hermes --version` prints `Hermes Agent vunknown (2026.9.24)` on its first line; the parenthesized value is `__release_date__ = "2026.9.24"`, unpadded. The current probe finds no SemVer token in that line. | `<pkg>/hermes_cli/_startup_fast.py`, `<pkg>/hermes_cli/__init__.py` |
 | Goal lifecycle | Native `/goal` with `show`, `status`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate add/remove/clear` | `<pkg>/hermes_cli/commands.py`, `<pkg>/hermes_cli/goal_command.py` |
 | Background execution | The terminal tool accepts `background=true` with `notify=true` (`notify_on_complete` is an accepted legacy alias), and the completion notification is injected into the conversation. `watch_patterns` are rate-limited (15 s cooldown, 8 lifetime hits) and unsuitable for per-record listening. | `<pkg>/tools/terminal_tool.py`, `<pkg>/tools/process_registry_notifications.py`, `<pkg>/tools/process_registry.py`; the process tool is `process_manage` |
-| Approvals | `approvals.mode` defaults to `smart`, with `timeout: 300`. Smart sends only pattern-detected dangerous commands to the guardian LLM; other commands run unreviewed. On the CLI, ESCALATE opens the full approval menu and a guardian DENY opens an owner-override menu limited to once/deny. Hardline floors, the sudo guard and `approvals.deny` globs block before any approval layer. `--yolo`, `HERMES_YOLO_MODE` and `approvals.mode: off` bypass the approval layer. | `<pkg>/tools/approval.py`, `<pkg>/tools/approval_prompt.py`, `<pkg>/tools/approval_floors.py`, `<pkg>/hermes_cli/config_defaults.py` |
+| Approvals | `approvals.mode` defaults to `smart`, with `timeout: 300`. Smart sends only pattern-detected dangerous commands to the guardian LLM; other commands run unreviewed. On the CLI, ESCALATE opens the full approval menu and a guardian DENY opens an owner-override menu limited to once/deny. Hardline floors, the sudo guard and `approvals.deny` globs block before any approval layer. `approvals.mode: off` disables approval prompts. | `<pkg>/tools/approval.py`, `<pkg>/tools/approval_prompt.py`, `<pkg>/tools/approval_floors.py`, `<pkg>/hermes_cli/config_defaults.py` |
 | Approval gates | Three gates reach a human: command, `execute_code` and plugin-escalated action/protected write | `<pkg>/tools/approval.py` (`_COMMAND_GATE`, `_EXECUTE_CODE_GATE`, `_ACTION_GATE`) |
 | Seeded query | On a real TTY, `-q` seeds an interactive session with a literal first turn; it does not set the single-query approval context | `hermes chat --help`, `<pkg>/hermes_cli/cli_single_query.py` |
 | Background-process registry | Persisted to `<HERMES_HOME>/processes.json` with `pid`, `host_start_time` and `session_key` | `<pkg>/tools/process_registry_checkpoint.py` |
-| Launch flags | `--reasoning none\|minimal\|low\|medium\|high\|xhigh\|max\|ultra`, `-m/--model`, `--provider`, `-s/--skills`, `--source`, `--in`, `--pass-session-id`. There is no `--name` analog. No flag selects `smart` or `manual`; the only per-launch approval control is the `--yolo` bypass. | `hermes chat --help` |
+| Launch flags | `--reasoning none\|minimal\|low\|medium\|high\|xhigh\|max\|ultra`, `-m/--model`, `--provider`, `-s/--skills`, `--source`, `--in`, `--pass-session-id`. There is no `--name` analog. No flag selects an approval mode. | `hermes chat --help` |
 | Configuration access | `hermes config get [--json] <key>` prints the resolved value from `load_config()`, which merges built-in defaults, `config.yaml` and the managed scope, with environment expansion. `hermes config set <key> <value>` parses list literals with `yaml.safe_load` and writes through `atomic_roundtrip_yaml_save`, a ruamel round-trip merge that preserves comments, key order, quotes and untouched nodes and replaces the file atomically. Managed keys are refused. | `<pkg>/hermes_cli/config.py` (`set_config_value`, `_coerce_config_set_value`, `load_config`), `<pkg>/utils.py` |
 
 The SQLite `member_runs.backend` column carries `CHECK(backend IN ('claude','codex','opencode'))`. The `cafleet_v9.db` format family has been released (tag `0.30.3` contains `V1__baseline.sql`), so adding a backend to that check needs a `V2` successor migration.
@@ -88,7 +88,7 @@ The classification below was checked against `CodingAgent::policy_choices`/`defa
 | `claude` | `auto` (default); `dontAsk`; `bypassPermissions` | `default`, `manual`, `acceptEdits`, `plan` |
 | `codex` | `approve-for-me` (default); `never` | `on-request` |
 | `opencode` | `cafleet` (default) | `cafleet-ask` |
-| `hermes` | `smart` (default) | — (the native `manual` approval mode is operator configuration; Hermes has no per-launch approval-mode flag, so CAFleet offers no `manual` launch choice) |
+| `hermes` | `smart` (default) | `manual` |
 
 Claude `dontAsk` denies tools that are not pre-approved without prompting, `bypassPermissions` allows without prompting, and Codex `never` returns failures without asking. Each is therefore a fixed policy and classified `auto`. Claude `acceptEdits` and `plan` still prompt, so they are `manual`. The user decided to classify by this definition (§ User decisions, U2).
 
@@ -151,7 +151,6 @@ Stream-probe procedure (also used in Step 4):
 | `--effort LEVEL` | Validated against `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; forwarded as `["--reasoning", LEVEL]` after the model tokens. Rejection: `Error: --effort for the hermes backend must be one of none, minimal, low, medium, high, xhigh, max, ultra (got '<value>').` (exit 2) |
 | `display_name` | Ignored; no `--name` analog |
 | Permission argv | None. The launch policy is the operator configuration's `approvals.mode`, which must be `smart` (preflight below). |
-| Approval bypass | Argv never contains `--yolo`. The argv unit tests assert its absence for every model, effort and policy combination. |
 | Fresh conversation | Every spawn starts a new session; argv never contains `--resume`, `--continue` or `--create-if-missing`. `--source tool` keeps member sessions out of the operator's default session lists. |
 
 Full argv shape for SPEC §6.7 Per-backend `build_spawn_argv`:
@@ -196,24 +195,24 @@ Mechanism choice: Hermes's own writer performs the edit. It is the reader the ru
 | Condition | Result (exit 1, before registration) |
 |---|---|
 | Command fails, times out or prints anything other than a JSON object | `Error: cannot read hermes configuration through 'hermes config get': <cause>` |
-| `mode` is not `smart` | `Error: hermes approvals.mode is '<value>'; CAFleet members require 'smart'` |
+| `mode` differs from the run's launch mode (`smart` when omitted) | `Error: hermes approvals.mode is '<value>'; this member's launch mode requires '<mode>'` |
 | `deny` lacks any CAFleet glob | `Error: hermes approvals.deny lacks CAFleet's Director-only rules: <glob>, …; run 'cafleet setup --coding-agent hermes'` |
 
 `cafleet doctor` runs the same command read-only and reports the same conditions as `hermes.approvals.mode` and `hermes.approvals.deny` rows after `hermes.executable`, with the same corrective command. `hermes.configuration` stays the config-dir row every backend has. With the executable absent, both rows report `info` with `unavailable: executable is absent`, as the `opencode.preset` rows do.
 
-**Effective configuration owner.** Background records that ordinary `hermes chat --cli` runs a gateway-backed agent. If a gateway process evaluates approvals and runs tools for the member's session, the effective `approvals.mode`, `approvals.deny`, `HERMES_YOLO_MODE` and tool environment belong to that process. Step 6 establishes which process evaluates approvals and runs terminal tools for a member session, and the outcome is fixed in advance:
+**Effective configuration owner.** Background records that ordinary `hermes chat --cli` runs a gateway-backed agent. If a gateway process evaluates approvals and runs tools for the member's session, the effective `approvals.mode`, `approvals.deny` and tool environment belong to that process. Step 6 establishes which process evaluates approvals and runs terminal tools for a member session, and the outcome is fixed in advance:
 
 | Step 6 finding | Specification outcome |
 |---|---|
 | The pane's `hermes` process evaluates approvals and runs tools | The preflight and child-environment rules above govern; no further check |
-| A gateway does, and Hermes exposes which `HERMES_HOME` and environment that gateway runs under (for example through `hermes gateway status` or the gateway's `/proc/<pid>/environ` on Linux) | The preflight additionally requires the serving gateway's home to equal the member's resolved base and its environment to lack `HERMES_YOLO_MODE`. Otherwise it fails with `Error: hermes gateway for <base> runs with a different home or approval bypass; restart it under the member's configuration`. Doctor reports the same. |
+| A gateway does, one per `HERMES_HOME` (Step 6 observed it) | The preflight and member-environment rules govern; the gateway serves every session of that home, so the per-session tool environment comes from `terminal.client_env_passthrough` (§ Member environment) |
 | A gateway does, and its home or environment cannot be established | Member is `no`, with that failure recorded |
 
-**Member environment.** SPEC §6.3 Member environment gains a `hermes` row forwarding `HERMES_HOME`. It also gains the rule that the spawn environment can carry removals: for `hermes`, the runner removes `HERMES_YOLO_MODE` from the native child's environment before exec. The removal is applied by the runner to the child it spawns, so it holds on tmux and herdr even when the multiplexer server's environment or the pane's shell sets the variable. The launch descriptor records the removal by name. Step 6 verifies that the member's terminal tool sees `CAFLEET_DATABASE_URL`. If the session filters it out, the documented operator prerequisite is `terminal.env_passthrough` containing `CAFLEET_DATABASE_URL`, and doctor checks it. If no configuration makes the value reach the tool, Member is `no`.
+**Member environment.** SPEC §6.3 Member environment gains a `hermes` row forwarding `HERMES_HOME`. One gateway per Hermes home runs every session's terminal tools with its own launch environment, so a member's tool sees its own `CAFLEET_*` and multiplexer values only for names in `terminal.client_env_passthrough` (Step 6). `cafleet setup --coding-agent hermes` merges that list exactly like `approvals.deny`: existing entries first, then each missing name among every `CAFLEET_*` name CAFleet sets in a member environment and the multiplexer names `TMUX`, `TMUX_PANE` and the runner's `HERDR_*` names, printing `hermes: added terminal.client_env_passthrough names -> <config path>: <name>, …` or `hermes: terminal.client_env_passthrough already holds CAFleet's member names -> <config path>`. Doctor row `hermes.client_env_passthrough` and the availability preflight report a missing name with `Error: hermes terminal.client_env_passthrough lacks CAFleet's member names: <name>, …; run 'cafleet setup --coding-agent hermes'`. Background terminal work runs through a login shell that rebuilds `PATH`, so members invoke CAFleet through an absolute executable path in background commands.
 
 **Version probe.** SPEC §6.9 Native version probe gains a backend-specific token rule. For `hermes`, the first stdout line must match `^Hermes Agent v\S+ \((?P<version>[^)]+)\)$`. The captured value must parse as canonical SemVer and becomes `native_version`; `Hermes Agent vunknown (2026.9.24)` records `2026.9.24`. A non-matching line is a probe failure, which records null and `coverage=unknown` with the existing warning. The general one-token rule stays for the other backends. The package directory version `0.22.4` is recorded only as metadata in evidence.
 
-**Launch-policy catalog** (SPEC §6.9 table row): Hermes omitted selection is `smart`. The only explicit choice is `smart`, which records `mode_source=explicit`. Any other value fails with `--permission-mode for hermes must be one of smart (got '<value>')`. The choice set is version-independent, `(Self::Hermes, _) => &["smart"]` like OpenCode's, because `smart` selects no native argv and the preflight checks the effective mode. The run record for an omitted selection is `requested_mode` `null`, `resolved_mode` `smart`, `mode_source` `default` and `permission_argv_json` `[]`.
+**Launch-policy catalog** (SPEC §6.9 table row): Hermes choices are `smart` (default, class `auto`) and `manual` (class `manual`), version-independent like OpenCode's: `(Self::Hermes, _) => &["smart", "manual"]`. Neither selects native argv; the preflight requires the effective `approvals.mode` to equal the run's launch mode. Any other value fails with `--permission-mode for hermes must be one of smart, manual (got '<value>')`. The run record for an omitted selection is `requested_mode` `null`, `resolved_mode` `smart`, `mode_source` `default` and `permission_argv_json` `[]`; an explicit `manual` records `requested_mode` and `resolved_mode` `manual` and `mode_source` `explicit`.
 
 **Model selection policy.** Hermes has no maintained model catalog. Its Role defaults set `{reviewer_model}` and `{other_model}` to `—`, meaning omit `--model`, and the operator's configured default applies. Their effort placeholders are also `—`, meaning omit `--effort`. The Director selects `hermes` only when the user names the backend or the fleet's Director runs on Hermes, never through model-name inference. A provider-prefixed model on a Hermes-pinned member passes verbatim, and inference row 1 (`/` → `opencode`) applies only when no backend is named. Cost efficiency mode on a Hermes member relays an operator choice, because there are no catalog prices. `.claude/skills/cafleet-model-list-refresh/SKILL.md` treats a backend whose catalog is "no maintained catalog" as outside the refresh scope.
 
@@ -260,18 +259,16 @@ The answer contract:
 
 Deletion stops the member's Hermes session work and every background process it registered, and verifies the stop before deregistration. An unverifiable stop makes `member delete` exit 1 and keeps the member row. CAFleet never stops or restarts the Hermes gateway, kills by process name or touches sessions it does not own.
 
-Step 6 selects the exact controls from live evidence against these requirements:
+Step 6 established that the member's turn and background processes run in the gateway and survive the death of the pane's `hermes chat` client, and that the session-scoped stop control is native input to the live client (Decision U4):
 
-| Requirement | Candidate mechanism to verify |
+| Requirement | Mechanism |
 |---|---|
-| Durable identity of the member's Hermes session | The session key that the member's turns and `processes.json` entries carry, captured after launch from a Hermes-owned source (session store row for `--source tool` with the member's cwd and launch window, or a verified Hermes command). The identity is stored in `member_runs.native_session_json`. |
-| Stop of in-flight session work after the runner kills the native client | A session-scoped Hermes control (turn interrupt or session close for that key), verified against an active turn |
-| Stop of registered background processes | `processes.json` entries whose `session_key` matches. Revalidate `pid` plus `host_start_time`, send SIGTERM, escalate to SIGKILL after 1 s, and verify exit. |
-| Verification | No running `processes.json` entry for the key, and no active turn for the session |
+| Durable identity of the member's Hermes session | The runner reads the launch banner `Session: <short id>` and resolves it to the unique full `local-<hex>` ID through `hermes sessions list --source tool`. The identity is stored in `member_runs.native_session_json`; no unique match fails the launch. |
+| Stop of in-flight session work | While the client is alive, the runner submits Ctrl-C, then `/stop`, then `/exit` with the measured submit stages, before runner shutdown |
+| Stop of registered background processes | `/stop` stops the session's registered processes |
+| Verification | No `processes.json` entry whose owner is the session ID has a live PID with the recorded start time (`/proc/<pid>/stat` field 22 against `host_start_time`), and the client exited after printing `Session: <id>` |
 
-Deletion order extends SPEC §6.3 `member delete` for `hermes` runs. After runner shutdown and before pane/registry finalization, run the Hermes settlement within the existing deletion deadline. On failure, exit 1 with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.`, retain the runner's cleanup records and the member row, and let retry re-run settlement. Creation compensation (SPEC §6.3 Creation failure compensation) runs the same settlement when a run started.
-
-If Step 6 finds no Hermes-owned source that yields a verifiable session identity with the approved argv, or no session-scoped stop control, Member is `no` with that failure recorded. Changing the argv (for example, a uniquely named `--continue <name> --create-if-missing` session) requires a user decision and a revision of this specification.
+Deletion order extends SPEC §6.3 `member delete` for `hermes` runs. Before runner shutdown, run the Hermes settlement within the existing deletion deadline. When the client is already gone, or verification fails, exit 1 with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.`, retain the runner's cleanup records and the member row, and let retry re-run settlement. The `hermes` notes document manual recovery for a dead client and that its in-flight turn runs to completion. Creation compensation (SPEC §6.3 Creation failure compensation) runs the same settlement when a run started.
 
 ### Director support
 
@@ -310,6 +307,8 @@ Step 5 adds `cafleet/migrations/V2__hermes_backend.sql` on the feature branch, a
 | U1 | Missing Director-only deny globs block launch, and setup installs them. `cafleet setup --coding-agent hermes` appends only the missing globs through `hermes config set`, preserving existing entries, their order and the rest of the file. It is idempotent and reports what it added. `member create` and doctor fail or report when any glob is missing from the effective configuration, and name the corrective command. | § Hermes launch contract, Director-only deny rules, Setup and Availability preflight |
 | U2 | Classify launch modes by definition: Claude `dontAsk` and `bypassPermissions` and Codex `never` are `auto`; Claude `acceptEdits` and `plan` are `manual` | § Member launch-mode classification |
 | U3 | The CAFleet stream probe passes when records sent during the unrelated work are consumed without user input, during that work or at the session's next turn boundary | § CAFleet stream probe |
+| U4 | Deletion stops a Hermes member through native input to its live client (Ctrl-C, `/stop`, `/exit`) and verifies the stop; a dead client makes `member delete` exit 1 with the row kept | § Member work ownership and deletion |
+| U5 | Hermes launch modes are `smart` (default) and `manual`, matched against the effective `approvals.mode`; setup merges `terminal.client_env_passthrough`; skill self-edits are a documented note restored by setup | § Hermes launch contract |
 
 The deny globs' effectiveness under `smart` is verified live, not assumed. Step 6 checks the following and records the outcome:
 
@@ -329,7 +328,7 @@ Order per `.claude/rules/documentation-maintenance.md`: `SPEC.md`, `docs/`, `REA
 | `SPEC.md` §6.7 Role eligibility | OpenCode paragraph becomes a general verdict-change paragraph | `hermes` Director and Member rows |
 | `SPEC.md` §6.7 Interface, Per-backend argv, Model selection, Reasoning effort, Backend capabilities, Contract error strings, Host evidence | cwd parameter in `build_spawn_argv` | `hermes` entries |
 | `SPEC.md` §6.3 Config-dir resolution, Asset installation, doctor check rows, `member delete`, Creation failure compensation | — | `HERMES_HOME` row. Asset installation states that setup for `hermes` edits the Hermes configuration's `approvals.deny` through `hermes config set` (merge rules, output lines, failure cause, comment caveat). Also the `hermes.approvals.mode` and `hermes.approvals.deny` doctor rows and the Hermes settlement. |
-| `SPEC.md` §6.3 Member environment | Spawn-environment removals as a concept | `hermes` row forwarding `HERMES_HOME`; `HERMES_YOLO_MODE` removal on both multiplexers |
+| `SPEC.md` §6.3 Member environment | — | `hermes` row forwarding `HERMES_HOME`; `terminal.client_env_passthrough` merge, doctor row and preflight check |
 | `SPEC.md` §6.9 Launch policy and capability registry | `auto`/`manual` class column for every backend | `hermes` row; Native version probe Hermes rule; Hermes profile section and fixtures |
 | `SPEC.md` §8 Database schema | — | `V2` shape |
 | `docs/docs/concepts/coding-agents.md` | Default-mode classification sentence and table | `hermes` row; Hermes model/effort/backend-difference notes |
@@ -358,9 +357,9 @@ Step 3 documents the Hermes contract as targeted. Before the final reinstall and
 | Condition | Result |
 |---|---|
 | Invalid `--effort` for hermes | Exit 2 with the effort error above, before any side effect |
-| Explicit `--permission-mode` other than `smart` | Exit 2: `--permission-mode for hermes must be one of smart (got '<value>')` |
+| Explicit `--permission-mode` other than `smart` or `manual` | Exit 2: `--permission-mode for hermes must be one of smart, manual (got '<value>')` |
 | `HERMES_HOME` empty or relative | Exit 1: `Error: HERMES_HOME must be an absolute path (got '<value>')` |
-| `approvals.mode` not `smart`, unreadable configuration, or a serving gateway with another home or the bypass | Exit 1 with the preflight errors above, before registration |
+| `approvals.mode` differing from the launch mode, unreadable configuration, or `terminal.client_env_passthrough` lacking a CAFleet member name | Exit 1 with the preflight errors above, before registration |
 | A CAFleet Director-only glob missing from `approvals.deny` | Exit 1 with the missing-glob error naming `cafleet setup --coding-agent hermes`, before registration |
 | Setup cannot read or write `approvals.deny` | Setup exits 1 with `failed to install hermes approval rules into <config path>: <cause>`; no `asset_installs` row for `hermes` |
 | `member create` selecting `hermes` (explicit or fleet-inherited) with Director `yes` and Member `no` | Exit 1: `Error: hermes is not Member-eligible; see Role eligibility`. The Director prevents it by relaying a Member-eligible backend choice before spawning. |
@@ -411,8 +410,8 @@ Paid calls use the operator's configured default model. Secrets and account iden
 
 ### Step 3: Hermes contract documentation (on the feature branch, verdicts `no`)
 
-- [x] `SPEC.md` §6.3: config-dir row; Asset installation with the `hermes` skills line and the `approvals.deny` merge through `hermes config set` (merge rules, output lines, failure cause, comment caveat); Member environment `HERMES_HOME` row and the `HERMES_YOLO_MODE` removal; `hermes.approvals.mode` and `hermes.approvals.deny` doctor rows; `member delete` and creation-compensation settlement <!-- completed: 2026-11-02T06:41 -->
-- [x] `SPEC.md` §6.7: argv block (no `--yolo`), model/effort rows, backend capabilities, preflight and contract error strings, host-evidence paragraph; Role eligibility rows copied from § Role evaluation <!-- completed: 2026-11-02T06:41 -->
+- [x] `SPEC.md` §6.3: config-dir row; Asset installation with the `hermes` skills line and the `approvals.deny` merge through `hermes config set` (merge rules, output lines, failure cause, comment caveat); Member environment `HERMES_HOME` row; `hermes.approvals.mode` and `hermes.approvals.deny` doctor rows; `member delete` and creation-compensation settlement <!-- completed: 2026-11-02T06:41 -->
+- [x] `SPEC.md` §6.7: argv block, model/effort rows, backend capabilities, preflight and contract error strings, host-evidence paragraph; Role eligibility rows copied from § Role evaluation <!-- completed: 2026-11-02T06:41 -->
 - [x] `SPEC.md` §6.9: `hermes` launch-policy row with class, Hermes version-probe rule, Hermes profile section as targeted (status per capability) <!-- completed: 2026-11-02T06:41 -->
 - [x] `SPEC.md` §8: `member_runs` V2 shape <!-- completed: 2026-11-02T06:41 -->
 - [x] `docs/` pages from § Documentation targets: Hermes rows, setup and prerequisite configuration (`approvals.mode: smart`, the setup-installed Director-only deny globs, `CAFLEET_DATABASE_URL` passthrough if required) <!-- completed: 2026-11-02T06:41 -->
@@ -423,9 +422,9 @@ Paid calls use the operator's configured default model. Secrets and account iden
 ### Step 4: Hermes registry, launch and Director evidence
 
 - [x] Add `CodingAgent::Hermes` with name/binary `hermes`, config variable `HERMES_HOME`, default `~/.hermes`, skills dir `<base>/skills`, and add it to the `fleet`, `member` and `setup` CLI choices and asset installation <!-- completed: 2026-11-02T07:11 -->
-- [x] Implement effort validation and `--reasoning` forwarding, verbatim `--model`, and the cwd parameter in `build_spawn_argv` for every backend. Argv unit tests per backend assert that Hermes argv never contains `--yolo`. <!-- completed: 2026-11-02T07:11 -->
+- [x] Implement effort validation and `--reasoning` forwarding, verbatim `--model`, and the cwd parameter in `build_spawn_argv` for every backend. Argv unit tests per backend. <!-- completed: 2026-11-02T07:11 -->
 - [x] Implement the Hermes version-probe rule with unit tests (matching line, `vunknown`, non-matching, several parentheses, non-SemVer date) <!-- completed: 2026-11-02T07:11 -->
-- [x] Implement the version-independent launch-policy catalog (`smart` only, `permission_argv_json` `[]`) and the `HERMES_YOLO_MODE` spawn-environment removal, with unit tests <!-- completed: 2026-11-02T07:11 -->
+- [x] Implement the version-independent launch-policy catalog (`smart` only, `permission_argv_json` `[]`), with unit tests <!-- completed: 2026-11-02T07:11 -->
 - [x] Add the Director-only deny-glob constant, plus the unit test that it equals the OpenCode `cafleet` preset's Director-owned denies <!-- completed: 2026-11-02T07:11 -->
 - [x] Implement the setup merge of `approvals.deny` through `hermes config get`/`config set`, with its output lines and failure cause. Unit tests use an injected command runner for the missing-some, missing-none, non-array, failed-set and post-write-verification cases. <!-- completed: 2026-11-02T07:11 -->
 - [x] Implement the availability preflight through one bounded `hermes config get --json approvals` call (mode, deny globs, unreadable output), using serde_json with no YAML dependency. Unit tests cover each error string. <!-- completed: 2026-11-02T07:11 -->
@@ -445,7 +444,7 @@ Paid calls use the operator's configured default model. Secrets and account iden
 
 - [ ] Launch a Hermes member under the runner on tmux and on herdr; record literal first-turn delivery, ready, poll/show/ACK and a second assignment after the first answer <!-- completed: -->
 - [ ] Establish which process evaluates approvals and runs terminal tools for a member session (pane `hermes` process or a gateway), and whether a serving gateway's `HERMES_HOME` and environment can be read. Apply the matching outcome from § Hermes launch contract, Effective configuration owner, including the gateway check or a Member `no`. <!-- completed: -->
-- [ ] Verify that the member's terminal tool sees `CAFLEET_DATABASE_URL` and the intended cwd, and that a `HERMES_YOLO_MODE` set in the tmux and herdr server environments does not reach the evaluating process. Record the required `terminal.env_passthrough` prerequisite if the session filters the database URL. <!-- completed: -->
+- [ ] Verify that the member's terminal tool sees its own `CAFLEET_DATABASE_URL`, multiplexer variables and intended cwd through `terminal.client_env_passthrough`, with two concurrent members under one Hermes home <!-- completed: -->
 - [ ] Verify that the six deny globs block, under `smart`, a plain `cafleet member prompt …`, a leading-assignment `CAFLEET_DATABASE_URL=… cafleet member press …` and the other four commands. Record how each refusal renders in the pane and tool result for routing, and extend the glob set or record Member `no` per § User decisions. <!-- completed: -->
 - [ ] Capture the guardian ESCALATE prompt (command gate) at 120, 80, 57 and 40 columns on tmux and herdr, plus each choice's continuation <!-- completed: -->
 - [ ] Capture the guardian-DENY owner-override prompt at the same widths on both multiplexers, plus each choice's continuation <!-- completed: -->
@@ -456,6 +455,13 @@ Paid calls use the operator's configured default model. Secrets and account iden
 - [ ] Measure the allow-once and deny key stages per form (typed choice and submit, or focus keys), including human-input and output races at the observed-state boundary <!-- completed: -->
 - [ ] Determine the member's Hermes session identity source and the session-scoped stop control; verify on an active turn and on running `notify=true` background processes that settlement leaves no running `processes.json` entry and no active turn for the key <!-- completed: -->
 - [ ] Find the narrowest width at which each prompt's menu fits one row (`W_min`), and record the layout breaks and limits <!-- completed: -->
+
+### Step 6a: Apply the Step 6 revisions
+
+- [ ] Remove the spawn-environment removal mechanism and every approval-bypass reference from code, tests, SPEC.md, docs/ and skills/ <!-- completed: -->
+- [ ] Launch-policy catalog `smart` and `manual` with the preflight launch-mode match and its error string, in code, tests and every documentation target <!-- completed: -->
+- [ ] Setup merge, doctor row and preflight check for `terminal.client_env_passthrough`, in code, tests and documentation <!-- completed: -->
+- [ ] `hermes` notes: gateway-owned tools, absolute CAFleet path in background commands, skill self-edits restored by setup, dead-client deletion recovery <!-- completed: -->
 
 ### Step 7: Hermes bundled profile, deletion settlement and Member acceptance
 
@@ -490,6 +496,7 @@ Paid calls use the operator's configured default model. Secrets and account iden
 | Date | Changes |
 |------|---------|
 | 2026-11-02 | Initial draft |
-| 2026-11-02 | Review round 1. Changes: approval-prompt coverage definition and Bundled support/verdict wording; existing-backend recheck; deterministic stream-probe sender; OpenCode precedent for Director `no`. Also: effective configuration through `hermes config get` and the gateway-owner outcomes; `HERMES_YOLO_MODE` removal in Member environment; timeout closure as `not_visible`; version-independent `smart`; no `--yolo`. Recorded user decisions U1 (setup-installed Director-only deny globs, launch blocked when missing) and U2 (classification by definition); evidence-driven documentation updates. |
+| 2026-11-02 | Review round 1. Changes: approval-prompt coverage definition and Bundled support/verdict wording; existing-backend recheck; deterministic stream-probe sender; OpenCode precedent for Director `no`. Also: effective configuration through `hermes config get` and the gateway-owner outcomes; timeout closure as `not_visible`; version-independent `smart`. Recorded user decisions U1 (setup-installed Director-only deny globs, launch blocked when missing) and U2 (classification by definition); evidence-driven documentation updates. |
 | 2026-11-02 | Review round 2: Member-ineligible fleet backend handling in Director model selection and the `member create` refusal. Approved by the user. |
 | 2026-11-02 | Execution rulings: plain-setup skip line, `hermes.approvals.mode` and `hermes.approvals.deny` doctor rows, `<config path>` from `hermes config path` (base fallback), `notify=true` and `process_manage`, observed deny-entry comment preservation, Claude row recorded limit. |
+| 2026-11-02 | User decisions U3 (stream probe turn-boundary consumption), U4 (pane-input deletion stop) and U5 (`smart` and `manual` launch modes, `terminal.client_env_passthrough` merge); Step 6a added. |
