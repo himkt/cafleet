@@ -21,7 +21,7 @@ Open your authoritative role first. Use an available non-shell text reader; prer
 | 1 | Your backend in [coding-agents.md](reference/coding-agents.md) | Resolve Runtime bindings and bound notes using your `CODING AGENT:` identity, or your own identity when standalone. |
 | 2 | Your [member](roles/member.md) or [Director](roles/director.md) role | Follow startup, BASE, command authority and workflow prerequisites; Directors read Recovery/Shutdown immediately before those actions. |
 
-Load skills through your executing backend's supported loader. Codex/OpenCode read this core, their backend section, each requested skill core and role-required references by absolute path. Assigned members continue their existing workflow when loading its umbrella skill.
+Load skills through your executing backend's supported loader. Backends without a native skill loader read this core, their backend section, each requested skill core and role-required references by absolute path. Assigned members continue their existing workflow when loading its umbrella skill.
 
 ## Resolve your overlay
 

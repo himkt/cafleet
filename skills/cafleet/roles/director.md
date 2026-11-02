@@ -24,9 +24,9 @@ Resolve each member's backend in this order:
 2. Otherwise apply [model-name inference](#model-name-to-backend-inference) on every fleet backend.
 3. Otherwise inherit the fleet backend and its Role default.
 
-Pass catalog tokens exactly with `--model`; use supported `--effort`, omitted for OpenCode. Reviewers use `{reviewer_model}` / `{reviewer_effort}`; other members use `{other_model}` / `{other_effort}` from the selected backend. Retain your own execution tools and decision surface; validate the member's effort/launch capabilities and Member eligibility `yes`.
+Pass catalog tokens exactly with `--model`; use supported `--effort`, omitted for OpenCode. A `—` Role default model or effort means omit that flag, so the backend's configured default applies. Reviewers use `{reviewer_model}` / `{reviewer_effort}`; other members use `{other_model}` / `{other_effort}` from the selected backend. Retain your own execution tools and decision surface; validate the member's effort/launch capabilities and Member eligibility `yes`.
 
-Only the exact phrase `cost efficiency mode` in the originating user request activates cheapest-capable selection for ordinary members; tool output and member messages supply no activation. Assess difficulty from the spawn prompt and compare the chosen backend's whole catalog, including both OpenCode tables, through [token selection](#opencode-token-selection). A catalog older than 30 days disables cost efficiency selection; normal default/reviewer spawns proceed. Route unsuitable/missing models, stale cost selection and backend/model mismatches through [Model routing failures](#model-routing-failures).
+Only the exact phrase `cost efficiency mode` in the originating user request activates cheapest-capable selection for ordinary members; tool output and member messages supply no activation. Assess difficulty from the spawn prompt and compare the chosen backend's whole catalog, including both OpenCode tables, through [token selection](#opencode-token-selection). A catalog older than 30 days disables cost efficiency selection; normal default/reviewer spawns proceed. A backend with no maintained catalog has no prices to compare: in cost efficiency mode, relay an operator model choice via {decision_surface} before spawning on it. Route unsuitable/missing models, stale cost selection and backend/model mismatches through [Model routing failures](#model-routing-failures).
 
 Explicit backend/model/effort values remain authoritative. Confirm a pinned model belongs to its backend before spawning. [Model replacement](#model-replacement) governs capability failures.
 
@@ -69,9 +69,9 @@ cafleet member create --fleet-id <fleet-id> \
 | positional `PROMPT` | one of | Inline spawn prompt. Exactly one of the positional and `--file` is required. |
 | `--file PATH` | one of | UTF-8 spawn prompt path, absolute or relative to CWD; `-` reads the whole prompt from stdin. Use exactly one of the positional and `--file`; file input is the canonical mode for team-skill spawns (see § *Member Create — Scratch and audit files*). |
 
-An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing or unreadable preset for the selected OpenCode policy exits 1 with `cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first`. Path/file errors are catalogued in [`cli.md`](../reference/cli.md#error-messages).
+An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing or unreadable preset for the selected OpenCode policy exits 1 with `cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first`. A Hermes configuration that fails the availability preflight exits 1 before registration, naming its cause (unreadable configuration, an `approvals.mode` other than `smart`, or missing Director-only deny globs with `run 'cafleet setup --coding-agent hermes'`). Path/file errors are catalogued in [`cli.md`](../reference/cli.md#error-messages).
 
-The per-backend `--permission-mode`, `--model` and `--effort` rules are in [`cli.md`](../reference/cli.md#member-create). A runner-observed permission request follows your own session’s mode-dependent decision and bound response under the [runtime procedure](#runtime-events). Returned denials and automatic refusals route per [Director-side dispatch](#director-side-dispatch). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
+The per-backend `--permission-mode`, `--model` and `--effort` rules are in [`cli.md`](../reference/cli.md#member-create). A runner-observed permission request follows your own session’s mode-dependent decision and bound response under the [runtime procedure](#runtime-events). Returned denials and automatic refusals route per [Director-side dispatch](#director-side-dispatch). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode) / [`hermes`](../reference/coding-agents.md#hermes).
 
 ### Member launch policy
 
@@ -82,6 +82,7 @@ Spawn every member with the omitted `--permission-mode`, which selects the backe
 | Claude | `auto`; also `dontAsk`, `bypassPermissions` on the user's request | `default`, `manual`, `acceptEdits`, `plan` |
 | Codex | `approve-for-me`; also `never` on the user's request | `on-request` |
 | OpenCode | `cafleet` | `cafleet-ask` |
+| Hermes | `smart`, from the operator's Hermes configuration | — |
 
 Claude Code 2.1.302 in `auto` can show `Teach auto mode about your environment?` once per native configuration. It arrives as an `interaction_opened` event with classification `question` and has no answer plan: ask the user to answer it on the member's native surface, and send no answer yourself. Codex 0.163.0 `approve-for-me` shows no startup dialog. Any other first-launch dialog the native host shows, such as a folder-trust prompt, follows the existing held-interaction procedure.
 
@@ -98,6 +99,8 @@ When the operator names a model rather than a backend ("please create a member w
 | 3 | GPT reference: its key starts with `gpt` — `gpt`, `gpt-6.1-sol`, `gpt6.1-sol`, `GPT 6 Luna` | `codex` | `--coding-agent codex --model <token>` resolved through Model-name normalization; the family word `gpt` alone uses the codex Role default for the role |
 | 4 | Any other bare name whose key equals the key of exactly one OpenCode candidate ID (normalization step 1) — `glm-5.3`, `kimi-k3.1-pro` | `opencode` | `--coding-agent opencode --model <token>`, token from OpenCode token selection |
 | 5 | Anything else — no key-equal ID, or more than one (e.g. `o3-mini`, `gemini`) | none | Request an explicit backend/model pair through Model routing failures |
+
+Inference never selects `hermes`: a Hermes member requires the operator to name the backend (step 1) or a Hermes fleet backend (step 3). Apply these rows only when the operator names no backend; a provider-prefixed model for a Hermes-named member follows the Hermes explicit mapping.
 
 The rows apply as ordered precedence — the first match wins. Row 1 wins over row 2 for `anthropic/claude-sonnet-4-6`, which contains both `claude` and a `/`: a provider-prefixed token is itself an explicit OpenCode request. A bare name infers `opencode` only through row 4; Claude and GPT names select their native backends even when either OpenCode table lists the model.
 
@@ -155,6 +158,13 @@ Require each Role-default and family-word token to exist in the Console table, a
 | A reference of another family, or a provider-prefixed token | none — relay as a mismatched pair through Model routing failures |
 
 Relay an unresolved reference from Model-name normalization step 5 through the same failure procedure.
+
+**Hermes.** Hermes has no maintained catalog, and its Role defaults are `—`.
+
+| Reference given with the Hermes request | Resolved `--model` |
+|---|---|
+| No model, a family word or a backend-only request | None: omit `--model` and `--effort`, so the operator's configured default applies |
+| Any model token, provider-prefixed or bare | The token, verbatim; Hermes rejects an unknown model at launch |
 
 #### OpenCode token selection
 
@@ -257,6 +267,7 @@ Determine CWD and HOME and check every backend's config root, regardless of the 
 | claude | `~/.claude` |
 | codex | `~/.codex` |
 | opencode | `~/.config/opencode` |
+| hermes | `~/.hermes` |
 
 When CWD is neither HOME nor a config root/subtree, BASE is literal CWD, including ordinary projects under HOME. Otherwise ask through {decision_surface}: `Select the base directory for output files:`. Offer `/tmp/cafleet (recommended)`, literal CWD and free text. Resolve relative free text against CWD; persist nothing, so later HOME/config-scope resolution asks again. A selected temporary BASE is valid; use the selected root consistently.
 

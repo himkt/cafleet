@@ -322,3 +322,47 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 |---|---|---|
 | Director | `no` | Goal lifecycle controls: not established for 2.1.4, with no goal evidence recorded, checked 2026-10-31. Background execution while supervision continues: not established for 2.1.4, checked 2026-10-31. |
 | Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: the OpenCode profile from `2.1.4`. |
+
+## hermes
+
+### Runtime bindings
+
+| Placeholder | Value |
+|---|---|
+| `{decision_surface}` | a Director-relayed operator message |
+| `{permission_flags}` | no permission argv; the operator configuration's `approvals.mode: smart` (default mode `smart`, class `auto`), with hardline floors, the sudo guard and `approvals.deny` enforced |
+| `{pane_title}` | no `--name` analog |
+| `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
+| `{effort_levels}` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (spawn flag `--effort <level>`, forwarded as `--reasoning <level>`) |
+
+### Role defaults
+
+| Placeholder | Value |
+|---|---|
+| `{reviewer_model}` | `—` (omit `--model`; the operator's configured default applies) |
+| `{reviewer_effort}` | `—` |
+| `{other_model}` | `—` (omit `--model`; the operator's configured default applies) |
+| `{other_effort}` | `—` |
+
+### Model catalog
+
+No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--model VALUE`, provider-prefixed ids included, and Hermes rejects unknown models; CAFleet never emits `--provider`. Omitted, the member uses the default provider and model in the operator's Hermes configuration (`hermes config get model`). Select `hermes` only when the user names the backend or the fleet's Director runs on Hermes, never by model-name inference. Cost efficiency mode on a Hermes member relays an operator choice, because there are no catalog prices.
+
+### Note → applies at
+
+| Note | Applies at |
+|---|---|
+| A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
+| Hermes's Director verdict is `no` (Role eligibility below), so a Hermes session follows the Director role's ineligible-backend rule. | [Director wake](../roles/director.md#director-wake) |
+| Default mode `smart` (class `auto`): commands outside Hermes's dangerous-command patterns run unreviewed; the guardian model reviews the rest and may open an ESCALATE prompt or, after a guardian DENY, an owner-override prompt offering once/deny. The member waits while the Director answers allow-once or deny through the runtime procedure; an unanswered prompt fails closed at `approvals.timeout` (default 300 s) with a BLOCKED result, which the member routes like any refusal. Hardline floors, the sudo guard and `approvals.deny` block before review and route like any refusal. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [runtime procedure](../roles/director.md#consume-observed-interactions) |
+| `cafleet setup --coding-agent hermes` merges six Director-only `approvals.deny` globs (`cafleet member prompt *`, `cafleet member exec *`, `cafleet member press *`, `cafleet member recover *`, `cafleet permission respond *`, `cafleet input reconcile *`) into the file `hermes config path` reports, and `member create` refuses a configuration whose effective `approvals.mode` is not `smart` or that lacks a glob, naming the setup command. A matching member command is blocked before review; route it to the Director. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); setup; member spawn |
+| Each pane runs `hermes chat --cli --source tool --in <cwd>` with optional `--model` and `--reasoning`, then `-q <prompt>` as a fresh conversation. `member create` forwards a set `HERMES_HOME` and removes `HERMES_YOLO_MODE` from the member's environment, so the member uses the configuration setup merged into and the preflight checked. | `{permission_flags}`; member spawn |
+| A Hermes session can keep accepted work and background processes running after its pane's client exits. `member delete` stops that session's work and its registered background processes before deregistration, and exits 1 with the member kept when it cannot verify the stop; retry the deletion after inspecting the cause. CAFleet never stops a Hermes gateway or touches sessions it does not own. | [Member Delete](../roles/director.md#member-delete); [Shutdown](../roles/director.md#shutdown) |
+| Leading-`!` input runs a native shell command in the classic REPL. The Director authorizes routed native input under its host rules. | [Native dispatch](../roles/director.md#director-side-dispatch) |
+
+### Role eligibility
+
+| Role | Eligible | Evidence |
+|---|---|---|
+| Director | `no` | Goal lifecycle: native `/goal` lifecycle controls in installed source for 2026.9.24, checked 2026-11-02; an in-session `/goal` help capture is not established yet. Background execution while supervision continues: CAFleet stream probe not established for 2026.9.24, checked 2026-11-02. |
+| Member | `no` | PTY lifecycle, coverage declaration and coverage of the default `smart` mode's approval prompts: not established for 2026.9.24, checked 2026-11-02. |
