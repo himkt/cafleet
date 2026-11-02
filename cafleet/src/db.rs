@@ -892,9 +892,9 @@ mod tests {
             migrate_to_head(&mut conn).unwrap();
             conn.pragma_update(None, "application_id", V8_APPLICATION_ID)
                 .unwrap();
-            conn.execute(
-                "UPDATE refinery_schema_history SET version=8, name='uncertain_cause'",
-                [],
+            conn.execute_batch(
+                "DELETE FROM refinery_schema_history WHERE version > 1;
+                 UPDATE refinery_schema_history SET version=8, name='uncertain_cause';",
             )
             .unwrap();
         }
@@ -1085,6 +1085,7 @@ mod tests {
         use rusqlite::params;
         use rusqlite::types::Value;
 
+        use crate::db::test_support::TableSnapshot;
         use crate::db::test_support::table_snapshot;
         use crate::db::tests::*;
 
@@ -1218,11 +1219,39 @@ mod tests {
             )
         }
 
+        /// A migrated database and an unmigrated V1 twin that serves as the schema reference.
         fn migrated() -> (Connection, Connection) {
             let before = populated_v1();
             let mut after = populated_v1();
             migrate_to_head(&mut after).unwrap();
             (before, after)
+        }
+
+        struct V1Rows {
+            runs: Vec<Vec<Value>>,
+            tables: Vec<TableSnapshot>,
+            sequences: Vec<Vec<Value>>,
+        }
+
+        const SEQUENCES: &str = "SELECT name, seq FROM sqlite_sequence ORDER BY name";
+
+        fn unchanged_table(name: &str) -> bool {
+            !matches!(
+                name,
+                "member_runs" | "refinery_schema_history" | "sqlite_sequence"
+            )
+        }
+
+        /// One populated V1 database, its rows captured before it migrates in place.
+        fn migrated_in_place() -> (V1Rows, Connection) {
+            let mut conn = populated_v1();
+            let before = V1Rows {
+                runs: v1_run_rows(&conn),
+                tables: table_snapshot(&conn, unchanged_table),
+                sequences: rows(&conn, SEQUENCES),
+            };
+            migrate_to_head(&mut conn).unwrap();
+            (before, conn)
         }
 
         #[test]
@@ -1271,28 +1300,28 @@ mod tests {
 
         #[test]
         fn successor_preserves_every_member_run_and_every_other_table_row() {
-            let (before, after) = migrated();
-            assert_eq!(v1_run_rows(&after), v1_run_rows(&before));
-            assert_eq!(v1_run_rows(&after).len(), 4);
+            let (before, after) = migrated_in_place();
+            assert_eq!(v1_run_rows(&after), before.runs);
+            assert_eq!(before.runs.len(), 4);
             assert!(
                 rows(&after, "SELECT native_session_json FROM member_runs")
                     .iter()
                     .all(|row| row == &vec![Value::Null]),
                 "existing runs carry no native session"
             );
-            let unchanged = |name: &str| {
-                !matches!(
-                    name,
-                    "member_runs" | "refinery_schema_history" | "sqlite_sequence"
-                )
-            };
             assert_eq!(
-                table_snapshot(&after, unchanged),
-                table_snapshot(&before, unchanged),
+                table_snapshot(&after, unchanged_table),
+                before.tables,
                 "other tables and the instance identity are preserved"
             );
-            let sequences = "SELECT name, seq FROM sqlite_sequence ORDER BY name";
-            assert_eq!(rows(&after, sequences), rows(&before, sequences));
+            assert!(
+                before
+                    .tables
+                    .iter()
+                    .any(|table| table.name == "runtime_database_identity" && table.rows.len() == 1),
+                "the snapshot covers the instance identity"
+            );
+            assert_eq!(rows(&after, SEQUENCES), before.sequences);
         }
 
         #[test]
@@ -1397,7 +1426,7 @@ mod tests {
 
         #[test]
         fn successor_continues_run_ids_after_the_preserved_autoincrement_sequence() {
-            let (before, after) = migrated();
+            let (before, after) = migrated_in_place();
             let sequence = |conn: &Connection| {
                 conn.query_row(
                     "SELECT seq FROM sqlite_sequence WHERE name='member_runs'",
@@ -1406,16 +1435,13 @@ mod tests {
                 )
                 .unwrap()
             };
-            assert_eq!(sequence(&after), sequence(&before));
+            assert_eq!(rows(&after, SEQUENCES), before.sequences);
+            assert_eq!(sequence(&after), 4);
             after
                 .execute("DELETE FROM member_runs WHERE run_id=4", [])
                 .unwrap();
             let next = insert_run(&after, 4, "opencode", "exited", None).unwrap();
-            assert_eq!(
-                next,
-                sequence(&before) + 1,
-                "a deleted run id is not reused"
-            );
+            assert_eq!(next, 5, "a deleted run id is not reused");
         }
 
         #[test]
@@ -1652,7 +1678,7 @@ mod tests {
             for (table, expected) in [
                 (
                     "member_runs",
-                    "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status",
+                    "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status native_session_json",
                 ),
                 (
                     "member_interactions",

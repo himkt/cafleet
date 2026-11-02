@@ -37,6 +37,11 @@ pub(crate) trait SpawnProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf>;
     fn home_dir(&self) -> PathBuf;
     fn env_var(&self, name: &str) -> Option<String>;
+    fn hermes_approvals(
+        &self,
+        executable: &Path,
+        config_base: &Path,
+    ) -> Result<String, CafleetError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -45,7 +50,17 @@ pub(crate) enum CodingAgent {
     Claude,
     Codex,
     Opencode,
+    Hermes,
 }
+
+pub(crate) const HERMES_DIRECTOR_ONLY_DENIES: [&str; 6] = [
+    "cafleet member prompt *",
+    "cafleet member exec *",
+    "cafleet member press *",
+    "cafleet member recover *",
+    "cafleet permission respond *",
+    "cafleet input reconcile *",
+];
 
 impl CodingAgent {
     pub(crate) fn all() -> &'static [Self] {
@@ -57,6 +72,7 @@ impl CodingAgent {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Opencode => "opencode",
+            Self::Hermes => "hermes",
         }
     }
 
@@ -65,6 +81,7 @@ impl CodingAgent {
             Self::Claude => "CLAUDE_CONFIG_DIR",
             Self::Codex => "CODEX_HOME",
             Self::Opencode => "OPENCODE_CONFIG_DIR",
+            Self::Hermes => "HERMES_HOME",
         }
     }
 
@@ -77,8 +94,16 @@ impl CodingAgent {
             Self::Claude => home.join(".claude"),
             Self::Codex => home.join(".codex"),
             Self::Opencode => crate::config::opencode_skills_base(home),
+            Self::Hermes => home.join(".hermes"),
         };
         crate::config::resolve(self.config_variable(), env, default)
+    }
+
+    pub(crate) fn spawn_environment_removals(self) -> &'static [&'static str] {
+        match self {
+            Self::Hermes => &["HERMES_YOLO_MODE"],
+            Self::Claude | Self::Codex | Self::Opencode => &[],
+        }
     }
 
     pub(crate) fn spawn_environment(
@@ -117,6 +142,9 @@ impl CodingAgent {
         let choices = match self {
             Self::Claude => &["low", "medium", "high", "xhigh", "max"][..],
             Self::Codex => &["minimal", "low", "medium", "high", "xhigh"][..],
+            Self::Hermes => &[
+                "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+            ][..],
             Self::Opencode => {
                 return Err(CafleetError::Usage(
                     "opencode does not support reasoning effort.".into(),
@@ -148,14 +176,19 @@ impl CodingAgent {
                 "cannot read opencode agent preset at {}: {error}; run 'cafleet setup --coding-agent opencode' first", preset.display()
             )))?;
         }
+        if self == Self::Hermes {
+            hermes_approvals_preflight(probe.hermes_approvals(&executable, &config))?;
+        }
         Ok(executable)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn launch_argv(
         self,
         executable: &Path,
         prompt: &str,
         display_name: &str,
+        cwd: &Path,
         model: Option<&str>,
         effort: Option<&str>,
         policy: &LaunchPolicySelection,
@@ -170,7 +203,7 @@ impl CodingAgent {
                 ))
             })?;
         let mut argv =
-            self.build_spawn_argv_with_policy(prompt, display_name, model, effort, policy)?;
+            self.build_spawn_argv_with_policy(prompt, display_name, cwd, model, effort, policy)?;
         argv[0] = program.into();
         Ok(argv)
     }
@@ -198,6 +231,7 @@ impl CodingAgent {
             Self::Claude => "auto",
             Self::Codex => "approve-for-me",
             Self::Opencode => "cafleet",
+            Self::Hermes => "smart",
         }
     }
     pub(crate) fn permission_mode_help() -> String {
@@ -228,6 +262,7 @@ impl CodingAgent {
             ],
             (Self::Codex, None | Some("0.163.0")) => &["on-request", "never", "approve-for-me"],
             (Self::Opencode, _) => &["cafleet", "cafleet-ask"],
+            (Self::Hermes, _) => &["smart"],
             _ => &[],
         };
         choices.iter().map(|value| (*value).into()).collect()
@@ -243,6 +278,7 @@ impl CodingAgent {
                 "workspace-write".into(),
             ],
             Self::Opencode => vec!["--agent".into(), mode.into()],
+            Self::Hermes => vec![],
         }
     }
     pub(crate) fn resolve_policy(
@@ -278,6 +314,7 @@ impl CodingAgent {
         self,
         prompt: &str,
         display_name: &str,
+        cwd: &Path,
         model: Option<&str>,
         effort: Option<&str>,
         policy: &LaunchPolicySelection,
@@ -296,8 +333,18 @@ impl CodingAgent {
         self.validate_model(model)?;
         self.validate_effort(effort)?;
         let mut argv = vec![self.name().into()];
-        if self == Self::Opencode {
-            argv.extend(["mini".into(), "--standalone".into()]);
+        match self {
+            Self::Opencode => argv.extend(["mini".into(), "--standalone".into()]),
+            Self::Hermes => {
+                let cwd = cwd.to_str().ok_or_else(|| {
+                    CafleetError::App(format!(
+                        "member working directory must be UTF-8 (got {})",
+                        cwd.display()
+                    ))
+                })?;
+                argv.extend(["chat", "--cli", "--source", "tool", "--in", cwd].map(String::from));
+            }
+            Self::Claude | Self::Codex => {}
         }
         argv.extend(policy.permission_argv.clone());
         if self == Self::Claude {
@@ -317,11 +364,14 @@ impl CodingAgent {
             match self {
                 Self::Claude => argv.extend(["--effort".into(), effort.into()]),
                 Self::Codex => argv.push(format!("--config=model_reasoning_effort={effort}")),
+                Self::Hermes => argv.extend(["--reasoning".into(), effort.into()]),
                 Self::Opencode => unreachable!("effort validated before argv construction"),
             }
         }
-        if self == Self::Opencode {
-            argv.push("--prompt".into());
+        match self {
+            Self::Opencode => argv.push("--prompt".into()),
+            Self::Hermes => argv.push("-q".into()),
+            Self::Claude | Self::Codex => {}
         }
         argv.push(prompt.into());
         Ok(argv)
@@ -480,6 +530,64 @@ fn bounded_output(source: impl Read + Send + 'static) -> mpsc::Receiver<std::io:
     receiver
 }
 
+/// Runs a native command with null stdin and bounded output, returning its
+/// UTF-8 stdout or the failure detail that callers prefix with the command.
+pub(crate) fn run_bounded(
+    executable: &Path,
+    args: &[&str],
+    environment: &[(&str, &Path)],
+    deadline: Instant,
+) -> Result<String, String> {
+    let mut child = Command::new(executable)
+        .args(args)
+        .envs(environment.iter().copied())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|cause| format!("could not start: {cause}"))?;
+    let stdout = bounded_output(child.stdout.take().expect("piped probe stdout"));
+    let stderr = bounded_output(child.stderr.take().expect("piped probe stderr"));
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|cause| format!("wait failed: {cause}"))?
+        {
+            break status;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            child
+                .kill()
+                .map_err(|cause| format!("timed out and could not be killed: {cause}"))?;
+            child
+                .wait()
+                .map_err(|cause| format!("timed out and could not be reaped: {cause}"))?;
+            return Err("did not finish within its deadline".into());
+        }
+        std::thread::sleep(Duration::from_millis(10).min(deadline - now));
+    };
+    let collect = |receiver: mpsc::Receiver<std::io::Result<Vec<u8>>>| {
+        receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|_| "output did not close within its deadline".to_owned())?
+            .map_err(|cause| format!("output could not be read: {cause}"))
+    };
+    let output = collect(stdout)?;
+    let diagnostic = collect(stderr)?;
+    if !status.success() {
+        let first = String::from_utf8_lossy(&diagnostic)
+            .lines()
+            .next()
+            .map(str::to_owned);
+        return Err(match first {
+            Some(line) if !line.trim().is_empty() => format!("exited with {status}: {line}"),
+            _ => format!("exited with {status}"),
+        });
+    }
+    String::from_utf8(output).map_err(|_| "printed non-UTF-8 output".to_owned())
+}
+
 impl CodingAgent {
     pub(crate) fn probe_native_version(
         self,
@@ -488,61 +596,103 @@ impl CodingAgent {
     ) -> Result<String, CafleetError> {
         let fail =
             |detail: String| CafleetError::App(format!("{} --version {detail}", self.name()));
-        let mut child = Command::new(executable)
-            .arg("--version")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|cause| fail(format!("could not start: {cause}")))?;
-        let stdout = bounded_output(child.stdout.take().expect("piped probe stdout"));
-        let stderr = bounded_output(child.stderr.take().expect("piped probe stderr"));
-        let status = loop {
-            if let Some(status) = child
-                .try_wait()
-                .map_err(|cause| fail(format!("wait failed: {cause}")))?
-            {
-                break status;
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                child
-                    .kill()
-                    .map_err(|cause| fail(format!("timed out and could not be killed: {cause}")))?;
-                child
-                    .wait()
-                    .map_err(|cause| fail(format!("timed out and could not be reaped: {cause}")))?;
-                return Err(fail("did not finish within its deadline".into()));
-            }
-            std::thread::sleep(Duration::from_millis(10).min(deadline - now));
-        };
-        let collect = |receiver: mpsc::Receiver<std::io::Result<Vec<u8>>>| {
-            receiver
-                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .map_err(|_| fail("output did not close within its deadline".into()))?
-                .map_err(|cause| fail(format!("output could not be read: {cause}")))
-        };
-        let output = collect(stdout)?;
-        let diagnostic = collect(stderr)?;
-        if !status.success() {
-            let first = String::from_utf8_lossy(&diagnostic)
-                .lines()
-                .next()
-                .map(str::to_owned);
-            return Err(fail(match first {
-                Some(line) if !line.trim().is_empty() => format!("exited with {status}: {line}"),
-                _ => format!("exited with {status}"),
-            }));
-        }
-        let text =
-            String::from_utf8(output).map_err(|_| fail("printed non-UTF-8 output".into()))?;
+        let text = run_bounded(executable, &["--version"], &[], deadline).map_err(fail)?;
         let first = text
             .lines()
             .next()
             .ok_or_else(|| fail("printed no output".into()))?;
-        version_token(first)
+        self.version_from_line(first)
             .map(str::to_owned)
             .map_err(|cause| fail(cause.into()))
+    }
+
+    pub(crate) fn version_from_line(self, line: &str) -> Result<&str, &'static str> {
+        match self {
+            Self::Hermes => hermes_version(line),
+            Self::Claude | Self::Codex | Self::Opencode => version_token(line),
+        }
+    }
+}
+
+fn hermes_version(line: &str) -> Result<&str, &'static str> {
+    static RULE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^Hermes Agent v\S+ \((?P<version>[^)]+)\)$")
+            .expect("the Hermes version rule is a valid pattern")
+    });
+    let version = RULE
+        .captures(line)
+        .ok_or("printed no Hermes version line")?
+        .name("version")
+        .expect("the Hermes version rule captures its version")
+        .as_str();
+    NativeVersion::parse(version)
+        .map(|_| version)
+        .ok_or("printed a non-SemVer Hermes version")
+}
+
+pub(crate) fn hermes_approvals_preflight(
+    output: Result<String, CafleetError>,
+) -> Result<(), CafleetError> {
+    let approvals = hermes_approvals(output)?;
+    hermes_approval_mode(&approvals)?;
+    hermes_approval_denies(&approvals)
+}
+
+pub(crate) fn hermes_approvals(
+    output: Result<String, CafleetError>,
+) -> Result<serde_json::Map<String, serde_json::Value>, CafleetError> {
+    let unreadable = |cause: String| {
+        CafleetError::App(format!(
+            "cannot read hermes configuration through 'hermes config get': {cause}"
+        ))
+    };
+    let text = output.map_err(|cause| unreadable(cause.message().into_owned()))?;
+    match serde_json::from_str(&text) {
+        Ok(serde_json::Value::Object(approvals)) => Ok(approvals),
+        Ok(other) => Err(unreadable(format!("expected a JSON object, got {other}"))),
+        Err(cause) => Err(unreadable(format!("invalid JSON: {cause}"))),
+    }
+}
+
+pub(crate) fn hermes_approval_mode(
+    approvals: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), CafleetError> {
+    match approvals.get("mode") {
+        Some(serde_json::Value::String(mode)) if mode == "smart" => Ok(()),
+        Some(serde_json::Value::String(mode)) => Err(hermes_mode_error(mode)),
+        Some(other) => Err(hermes_mode_error(&other.to_string())),
+        None => Err(hermes_mode_error("null")),
+    }
+}
+
+fn hermes_mode_error(mode: &str) -> CafleetError {
+    CafleetError::App(format!(
+        "hermes approvals.mode is '{mode}'; CAFleet members require 'smart'"
+    ))
+}
+
+pub(crate) fn hermes_approval_denies(
+    approvals: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), CafleetError> {
+    let present = match approvals.get("deny") {
+        Some(serde_json::Value::Array(entries)) => entries
+            .iter()
+            .map(serde_json::Value::as_str)
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let missing = HERMES_DIRECTOR_ONLY_DENIES
+        .into_iter()
+        .filter(|glob| !present.contains(glob))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(CafleetError::App(format!(
+            "hermes approvals.deny lacks CAFleet's Director-only rules: {}; run 'cafleet setup --coding-agent hermes'",
+            missing.join(", ")
+        )))
     }
 }
 
@@ -2024,8 +2174,18 @@ mod tests {
         }
 
         fn probe(executable: &Path) -> Result<String, CafleetError> {
-            CodingAgent::Hermes
-                .probe_native_version(executable, Instant::now() + Duration::from_secs(2))
+            // A parallel test's fork can briefly inherit the stub's write descriptor.
+            for _ in 0..50 {
+                let result = CodingAgent::Hermes
+                    .probe_native_version(executable, Instant::now() + Duration::from_secs(2));
+                match &result {
+                    Err(error) if error.message().contains("Text file busy") => {
+                        std::thread::sleep(Duration::from_millis(20))
+                    }
+                    _ => return result,
+                }
+            }
+            panic!("the stub stayed busy: {}", executable.display())
         }
 
         #[test]

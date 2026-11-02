@@ -1,3 +1,4 @@
+use crate::assets::HermesConfigRunner;
 use crate::assets::agent_paths;
 use crate::assets::install_agent;
 use crate::coding_agent::CodingAgent;
@@ -24,12 +25,38 @@ pub(crate) struct SetupArgs {
 pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
     let mut conn = prepare_database(settings)?;
     let home = crate::config::home_dir()?;
-    install_selected(
-        &mut conn,
-        &args.coding_agent,
-        &|name| std::env::var(name).ok(),
-        &home,
-    )
+    let env = |name: &str| std::env::var(name).ok();
+    let mut hermes = SystemHermes {
+        env: &env,
+        home: &home,
+    };
+    install_selected(&mut conn, &args.coding_agent, &env, &home, &mut hermes)
+}
+
+struct SystemHermes<'a> {
+    env: EnvLookup<'a>,
+    home: &'a Path,
+}
+
+impl HermesConfigRunner for SystemHermes<'_> {
+    fn binary_available(&self) -> bool {
+        SystemProbe.resolve_binary("hermes").is_some()
+    }
+
+    fn run(&mut self, args: &[String]) -> Result<String, CafleetError> {
+        let executable = SystemProbe
+            .resolve_binary("hermes")
+            .ok_or_else(|| CafleetError::App("binary hermes not found on PATH".into()))?;
+        let base = CodingAgent::Hermes.config_dir(self.env, self.home)?;
+        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+        crate::coding_agent::run_bounded(
+            &executable,
+            &args,
+            &[("HERMES_HOME", &base)],
+            std::time::Instant::now() + std::time::Duration::from_secs(10),
+        )
+        .map_err(CafleetError::App)
+    }
 }
 
 fn prepare_database(settings: &Settings) -> Result<Connection, CafleetError> {
@@ -77,15 +104,24 @@ fn install_selected(
     selected: &[CodingAgent],
     env: EnvLookup<'_>,
     home: &Path,
+    hermes: &mut dyn HermesConfigRunner,
 ) -> Result<(), CafleetError> {
     for agent in CodingAgent::all() {
         if selected.is_empty() || selected.contains(agent) {
             let paths = agent_paths(env, home, *agent)?;
+            let runner = if *agent == CodingAgent::Hermes
+                && (!selected.is_empty() || hermes.binary_available())
+            {
+                Some(&mut *hermes)
+            } else {
+                None
+            };
             install_agent(
                 conn,
                 *agent,
                 &paths,
                 crate::cli::VERSION,
+                runner,
                 &mut std::io::stdout(),
             )?;
         }
@@ -268,6 +304,9 @@ fn agent_checks(
                 ));
             }
         }
+        if *agent == CodingAgent::Hermes {
+            checks.extend(hermes_approval_checks(probe, &paths));
+        }
         let install_name = format!("{name}.installation");
         checks.push(match (&paths, schema) {
             (Err(cause), _) => Check::new(
@@ -331,6 +370,53 @@ fn preset_check(
             }
         }
     }
+}
+
+fn hermes_approval_checks(
+    probe: &dyn SpawnProbe,
+    paths: &Result<PathBuf, CafleetError>,
+) -> [Check; 2] {
+    const MODE: &str = "hermes.approvals.mode";
+    const DENY: &str = "hermes.approvals.deny";
+    let both = |status: &'static str, detail: String| {
+        [
+            Check::new(MODE, status, detail.clone()),
+            Check::new(DENY, status, detail),
+        ]
+    };
+    let base = match paths {
+        Ok(base) => base,
+        Err(cause) => {
+            return both(
+                "info",
+                format!("unavailable: configuration failed: {cause}"),
+            );
+        }
+    };
+    let Some(executable) = probe.resolve_binary(CodingAgent::Hermes.name()) else {
+        return both("info", "unavailable: executable is absent".into());
+    };
+    let approvals =
+        match crate::coding_agent::hermes_approvals(probe.hermes_approvals(&executable, base)) {
+            Ok(approvals) => approvals,
+            Err(cause) => return both("error", cause.message().into_owned()),
+        };
+    let row = |name: &'static str, result: Result<(), CafleetError>, ok: &str| match result {
+        Ok(()) => Check::new(name, "ok", ok),
+        Err(cause) => Check::new(name, "error", cause.message()),
+    };
+    [
+        row(
+            MODE,
+            crate::coding_agent::hermes_approval_mode(&approvals),
+            "smart",
+        ),
+        row(
+            DENY,
+            crate::coding_agent::hermes_approval_denies(&approvals),
+            "holds CAFleet's Director-only rules",
+        ),
+    ]
 }
 
 fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {

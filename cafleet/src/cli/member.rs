@@ -475,11 +475,17 @@ fn create(
                 director_id,
                 agent_name,
             )?;
-            let argv = backend.launch_argv(&executable, &prompt, name, model, effort, &policy)?;
+            let argv =
+                backend.launch_argv(&executable, &prompt, name, &cwd, model, effort, &policy)?;
             let spawn = runner::SpawnSpec {
                 argv,
                 cwd,
                 environment: environment.clone(),
+                environment_removals: backend
+                    .spawn_environment_removals()
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect(),
                 evidence_policy,
                 size,
             };

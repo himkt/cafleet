@@ -2,6 +2,7 @@
 //! PATH/HOME [`SpawnProbe`].
 
 use crate::coding_agent::SpawnProbe;
+use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::RunError;
 use crate::multiplexer::TimedRunError;
@@ -442,6 +443,20 @@ impl SpawnProbe for SystemProbe {
 
     fn env_var(&self, name: &str) -> Option<String> {
         std::env::var(name).ok()
+    }
+
+    fn hermes_approvals(
+        &self,
+        executable: &Path,
+        config_base: &Path,
+    ) -> Result<String, CafleetError> {
+        crate::coding_agent::run_bounded(
+            executable,
+            &["config", "get", "--json", "approvals"],
+            &[("HERMES_HOME", config_base)],
+            Instant::now() + Duration::from_secs(2),
+        )
+        .map_err(CafleetError::App)
     }
 }
 

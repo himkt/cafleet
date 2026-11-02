@@ -366,6 +366,9 @@ impl PtySession {
         for (key, value) in &spec.environment {
             command.env(key, value);
         }
+        for name in &spec.environment_removals {
+            command.env_remove(name);
+        }
         let child = self
             .slave
             .as_ref()

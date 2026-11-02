@@ -120,7 +120,6 @@ Under the new wording each existing verdict is unchanged. The table was checked 
 
 Step 2 re-checks each row against the bundled profile declarations in SPEC §6.9 when the wording is written.
 
-
 ### CAFleet stream probe
 
 SPEC §6.7 Role requirements gains this general definition, mirrored in `coding-agents.md` § Role requirements and in `contributing.md` step 2:
@@ -395,9 +394,6 @@ Paid calls use the operator's configured default model. Secrets and account iden
 - [x] On a fixture copy of a commented `config.yaml` in a temporary `HERMES_HOME`, run the setup merge sequence (`config get`, then `config set approvals.deny '<json>'`) twice. Record the preserved comments and order, the effect on comments attached to existing deny entries, the idempotent second run and the refusal for a managed key. <!-- completed: 2026-11-02T06:23 -->
 - [x] Record the `/goal` command definition and handlers, the terminal background/notification parameters, the process-tool action list and the `clarify` tool schema, with source paths <!-- completed: 2026-11-02T06:23 -->
 
-
-
-
 ### Step 2: Generic documentation — Member bar, mode classification, stream probe
 
 - [x] Verify each backend's mode classification against `policy_choices`/`default_policy` and SPEC §6.9, and verify the unchanged-verdict table against the bundled profile declarations <!-- completed: 2026-11-02T06:30 -->
@@ -424,9 +420,6 @@ Paid calls use the operator's configured default model. Secrets and account iden
 - [x] `.claude/skills/cafleet-model-list-refresh/SKILL.md`: Hermes outside refresh scope <!-- completed: 2026-11-02T06:41 -->
 
 ### Step 4: Hermes registry, launch and Director evidence
-
-
-
 
 - [ ] Add `CodingAgent::Hermes` with name/binary `hermes`, config variable `HERMES_HOME`, default `~/.hermes`, skills dir `<base>/skills`, and add it to the `fleet`, `member` and `setup` CLI choices and asset installation <!-- completed: -->
 - [ ] Implement effort validation and `--reasoning` forwarding, verbatim `--model`, and the cwd parameter in `build_spawn_argv` for every backend. Argv unit tests per backend assert that Hermes argv never contains `--yolo`. <!-- completed: -->

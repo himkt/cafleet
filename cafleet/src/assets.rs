@@ -1,4 +1,5 @@
 use crate::coding_agent::CodingAgent;
+use crate::coding_agent::HERMES_DIRECTOR_ONLY_DENIES;
 use crate::config::EnvLookup;
 use crate::config::opencode_skills_base;
 use crate::error::CafleetError;
@@ -11,6 +12,13 @@ pub(crate) struct AgentPaths {
     pub(crate) identity: String,
     skills_dir: PathBuf,
     presets: Vec<(String, PathBuf)>,
+}
+
+/// Runs `hermes` subcommands for setup with `HERMES_HOME` set to the resolved base.
+pub(crate) trait HermesConfigRunner {
+    fn binary_available(&self) -> bool;
+    /// `args` follow the `hermes` binary; the result is its stdout.
+    fn run(&mut self, args: &[String]) -> Result<String, CafleetError>;
 }
 
 pub(crate) fn agent_paths(
@@ -39,6 +47,7 @@ pub(crate) fn agent_paths(
                 (format!("opencode/{mode}.md"), target)
             })
             .collect(),
+        CodingAgent::Hermes => vec![],
     };
     Ok(AgentPaths {
         identity: base.display().to_string(),
@@ -52,6 +61,7 @@ pub(crate) fn install_agent(
     agent: CodingAgent,
     paths: &AgentPaths,
     version: &str,
+    hermes: Option<&mut (dyn HermesConfigRunner + '_)>,
     out: &mut dyn Write,
 ) -> Result<(), CafleetError> {
     let mut report = |line: String| {
@@ -108,8 +118,77 @@ pub(crate) fn install_agent(
             target.display()
         ))?;
     }
+    if agent == CodingAgent::Hermes {
+        let line = match hermes {
+            Some(runner) => merge_hermes_denies(runner, &paths.identity)?,
+            None => "hermes: skipped approvals.deny rules (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into(),
+        };
+        report(line)?;
+    }
     crate::broker::record_asset_install(conn, agent.name(), &paths.identity, version)?;
     Ok(())
+}
+
+/// Appends each missing Director-only glob to the effective `approvals.deny`
+/// and returns the setup line describing the result.
+fn merge_hermes_denies(
+    runner: &mut dyn HermesConfigRunner,
+    base: &str,
+) -> Result<String, CafleetError> {
+    let config = runner
+        .run(&hermes_args(&["config", "path"]))
+        .map(|stdout| stdout.trim().to_owned())
+        .map_err(|cause| hermes_rules_failure(base, &cause.message()))?;
+    let fail = |cause: String| hermes_rules_failure(&config, &cause);
+    let existing = read_hermes_denies(runner).map_err(fail)?;
+    let missing = HERMES_DIRECTOR_ONLY_DENIES
+        .into_iter()
+        .filter(|glob| !existing.iter().any(|entry| entry == glob))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(format!(
+            "hermes: approvals.deny already holds CAFleet's Director-only rules -> {config}"
+        ));
+    }
+    let mut merged = existing;
+    merged.extend(missing.iter().map(|glob| (*glob).to_owned()));
+    let value = serde_json::to_string(&merged).expect("a list of strings serializes as JSON");
+    runner
+        .run(&hermes_args(&["config", "set", "approvals.deny", &value]))
+        .map_err(|cause| fail(cause.message().into_owned()))?;
+    let written = read_hermes_denies(runner).map_err(fail)?;
+    let absent = HERMES_DIRECTOR_ONLY_DENIES
+        .into_iter()
+        .filter(|glob| !written.iter().any(|entry| entry == glob))
+        .collect::<Vec<_>>();
+    if !absent.is_empty() {
+        return Err(fail(format!(
+            "approvals.deny still lacks {} after the write",
+            absent.join(", ")
+        )));
+    }
+    Ok(format!(
+        "hermes: added approvals.deny rules -> {config}: {}",
+        missing.join(", ")
+    ))
+}
+
+fn read_hermes_denies(runner: &mut dyn HermesConfigRunner) -> Result<Vec<String>, String> {
+    let stdout = runner
+        .run(&hermes_args(&["config", "get", "--json", "approvals.deny"]))
+        .map_err(|cause| cause.message().into_owned())?;
+    serde_json::from_str::<Vec<String>>(&stdout)
+        .map_err(|cause| format!("approvals.deny is not a JSON array of strings: {cause}"))
+}
+
+fn hermes_args(args: &[&str]) -> Vec<String> {
+    args.iter().map(|arg| (*arg).to_owned()).collect()
+}
+
+fn hermes_rules_failure(config: &str, cause: &str) -> CafleetError {
+    CafleetError::App(format!(
+        "failed to install hermes approval rules into {config}: {cause}"
+    ))
 }
 
 fn remove_existing_target(target: &Path) -> std::io::Result<()> {
@@ -664,8 +743,17 @@ mod tests {
         }
 
         fn skills_line(installed: &Installed) -> String {
+            let roots = SKILLS
+                .iter()
+                .filter_map(|(path, _)| {
+                    path.strip_suffix("/SKILL.md")
+                        .filter(|root| !root.contains('/'))
+                })
+                .collect::<Vec<_>>();
+            assert!(roots.contains(&"cafleet") && roots.contains(&"cafleet-design-doc"));
             format!(
-                "hermes: installed cafleet, cafleet-design-doc (v1.2.3) -> {}",
+                "hermes: installed {} (v1.2.3) -> {}",
+                roots.join(", "),
                 installed.skills.display()
             )
         }
