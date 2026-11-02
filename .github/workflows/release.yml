@@ -33,23 +33,21 @@ jobs:
         run: pipx install cargo-zigbuild
       - name: Build the release binary
         if: "!contains(matrix.target, 'musl')"
-        working-directory: cafleet
         run: cargo build --release --target ${{ matrix.target }}
       - name: Build the release binary (zig-linked musl cross-compile)
         if: contains(matrix.target, 'musl')
-        working-directory: cafleet
         run: cargo zigbuild --release --target ${{ matrix.target }}
       - name: Package and upload the release archive
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tar -czf "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" -C "cafleet/target/${{ matrix.target }}/release" cafleet
+          tar -czf "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" cafleet
           gh release upload "${{ github.event.release.tag_name }}" "cafleet-v${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz" --clobber
       - name: Package and upload the bottle
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "keg/cafleet/${{ github.event.release.tag_name }}/bin"
-          cp "cafleet/target/${{ matrix.target }}/release/cafleet" "keg/cafleet/${{ github.event.release.tag_name }}/bin/cafleet"
+          cp "target/${{ matrix.target }}/release/cafleet" "keg/cafleet/${{ github.event.release.tag_name }}/bin/cafleet"
           tar -czf "cafleet-${{ github.event.release.tag_name }}.${{ matrix.bottle_tag }}.bottle.tar.gz" -C keg cafleet
           gh release upload "${{ github.event.release.tag_name }}" "cafleet-${{ github.event.release.tag_name }}.${{ matrix.bottle_tag }}.bottle.tar.gz" --clobber

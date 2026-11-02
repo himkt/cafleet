@@ -1,7 +1,7 @@
 # Rust package at the repository root
 
 **Status**: Approved
-**Progress**: 14/27 tasks complete
+**Progress**: 21/27 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -217,19 +217,19 @@ Installed runtime assets of the executing fleet are preserved during implementat
 - [x] Merge the Rust tasks into the root `mise.toml`, set `config_roots = ["docs"]`, point `all-install` at `//:install`, update the `build` description; `git rm cafleet/mise.toml` <!-- completed: 2026-11-02T14:30 -->
 - [x] Change `.gitignore` `/cafleet/target/` to `/target/` <!-- completed: 2026-11-02T14:30 -->
 - [x] Delete the local ignored `cafleet/target/` so the `cafleet/` directory no longer exists <!-- completed: 2026-11-02T14:30 -->
-- [ ] Director commits the move as one commit, once `mise //:test` passes on the moved tree, so rename detection keeps history <!-- completed: -->
+- [x] Director commits the move as one commit, once `mise //:test` passes on the moved tree, so rename detection keeps history <!-- completed: 2026-11-02T14:30 -->
 
 ### Step 4: Permission surfaces
 
-- [ ] Replace `Bash(mise //cafleet*)` in `.claude/settings.json` with the six enumerated `Bash(mise //:…)` entries <!-- completed: -->
-- [ ] Rewrite the six `mise //cafleet:*` entries in `presets/opencode/cafleet.md` to `mise //:<task>` in place <!-- completed: -->
-- [ ] Rewrite the six `mise //cafleet:*` entries in `presets/opencode/cafleet-ask.md` identically <!-- completed: -->
+- [x] Replace `Bash(mise //cafleet*)` in `.claude/settings.json` with the six enumerated `Bash(mise //:…)` entries <!-- completed: 2026-11-02T14:31 -->
+- [x] Rewrite the six `mise //cafleet:*` entries in `presets/opencode/cafleet.md` to `mise //:<task>` in place <!-- completed: 2026-11-02T14:31 -->
+- [x] Rewrite the six `mise //cafleet:*` entries in `presets/opencode/cafleet-ask.md` identically <!-- completed: 2026-11-02T14:31 -->
 
 ### Step 5: CI, release and versioning
 
-- [ ] Update `.github/workflows/ci.yml` cache path (`target`), `hashFiles('Cargo.lock')` and run step `mise //:${{ matrix.task }}` <!-- completed: -->
-- [ ] Update `.github/workflows/release.yml`: drop both `working-directory: cafleet`, use `target/${{ matrix.target }}/release` in the `tar -C` and `cp` paths <!-- completed: -->
-- [ ] Update `.bumpversion.toml` filenames to `Cargo.toml` and `Cargo.lock` <!-- completed: -->
+- [x] Update `.github/workflows/ci.yml` cache path (`target`), `hashFiles('Cargo.lock')` and run step `mise //:${{ matrix.task }}` <!-- completed: 2026-11-02T14:31 -->
+- [x] Update `.github/workflows/release.yml`: drop both `working-directory: cafleet`, use `target/${{ matrix.target }}/release` in the `tar -C` and `cp` paths <!-- completed: 2026-11-02T14:31 -->
+- [x] Update `.bumpversion.toml` filenames to `Cargo.toml` and `Cargo.lock` <!-- completed: 2026-11-02T14:31 -->
 
 ### Step 6: Verification
 

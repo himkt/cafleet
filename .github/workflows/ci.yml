@@ -24,7 +24,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            cafleet/target
-          key: ${{ runner.os }}-cargo-${{ matrix.task }}-${{ hashFiles('cafleet/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.task }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-${{ matrix.task }}-
-      - run: mise //cafleet:${{ matrix.task }}
+      - run: mise //:${{ matrix.task }}
