@@ -1,7 +1,7 @@
 # Hermes Coding-Agent Backend Support
 
 **Status**: Complete
-**Progress**: 72/73 tasks complete
+**Progress**: 73/73 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -485,7 +485,7 @@ Paid calls use the operator's configured default model. Secrets and account iden
 - [x] Director `yes`: add `#### Hermes native Director reception` from the Step 4 probe; Director `no`: record the failure in § Role evaluation and keep the ineligible-backend note <!-- completed: 2026-11-02T12:40 -->
 - [x] Member `no`: remove the Hermes member launch path, profile, fixtures, settlement, setup deny-glob merge and `V2` migration from the branch and their documentation, recording the failure here. With Director `yes`, add the `Error: hermes is not Member-eligible; see Role eligibility` refusal to `member create` (explicit and fleet-inherited backend) with unit tests. Document it in SPEC §6.7 Contract error strings and the `skills/cafleet/reference/cli.md` errors. Add the § Model selection step 3 rule in `skills/cafleet/roles/director.md`: skip a Member-`no` fleet backend and relay an operator choice of a Member-eligible backend via `{decision_surface}` before spawning. (not applicable: both verdicts are `yes`) <!-- completed: 2026-11-02T12:40 -->
 - [x] Both `no`: remove every Hermes surface (registry entry, CLI choices, setup/doctor, docs, skills, SPEC rows) from the branch, keeping Step 2 and this document's record (not applicable: both verdicts are `yes`) <!-- completed: 2026-11-02T12:40 -->
-- [ ] Reinstall the CLI with `mise //cafleet:install` and run `cafleet setup --coding-agent hermes` plus `cafleet doctor` for each shipped role (deferred by the user to after merge; live evidence used the branch build in isolated environments) <!-- completed: -->
+- [x] Reinstall the CLI with `mise //cafleet:install` and run `cafleet setup --coding-agent hermes` plus `cafleet doctor` for each shipped role (skipped by the user; live evidence used the branch build in isolated environments) <!-- completed: 2026-11-02T13:20 -->
 - [x] Re-run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` after the gate edits <!-- completed: 2026-11-02T12:40 -->
 
 ---
@@ -499,4 +499,4 @@ Paid calls use the operator's configured default model. Secrets and account iden
 | 2026-11-02 | Review round 2: Member-ineligible fleet backend handling in Director model selection and the `member create` refusal. Approved by the user. |
 | 2026-11-02 | Execution rulings: plain-setup skip line, `hermes.approvals.deny` doctor row, `<config path>` from `hermes config path` (base fallback), `notify=true` and `process_manage`, observed deny-entry comment preservation, Claude row recorded limit. |
 | 2026-11-02 | User decisions U3 (stream probe turn-boundary consumption), U4 (pane-input deletion stop) and U5 (`smart` and `manual` launch modes, `terminal.client_env_passthrough` merge); Step 6a added. |
-| 2026-11-02 | Implementation complete; the global reinstall with real-home setup and doctor is deferred to the operator after merge. |
+| 2026-11-02 | Implementation complete; the user skipped the global reinstall with real-home setup and doctor. |
