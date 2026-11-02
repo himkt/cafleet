@@ -7,7 +7,7 @@
 
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
-/cafleet/target/
+/target/
 /docs/doc_build/
 /docs/node_modules/
 /researches/

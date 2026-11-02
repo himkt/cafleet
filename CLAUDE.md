@@ -8,11 +8,11 @@ Load relevant skills through the executing backend's supported loader. Assigned 
 
 ## Project: CAFleet
 
-CAFleet multiplexes coding-agent sessions and coordinates them through durable point-to-point messages. The Rust package under `cafleet/` builds the unified CLI with clap, rusqlite and embedded refinery migrations. Skills and presets are embedded assets; the documentation site retains its own Node/pnpm toolchain.
+CAFleet multiplexes coding-agent sessions and coordinates them through durable point-to-point messages. The Rust package at the repository root builds the unified CLI with clap, rusqlite and embedded refinery migrations. Skills and presets are embedded assets; the documentation site retains its own Node/pnpm toolchain.
 
 ## Commands
 
-Use full mise monorepo task paths and discover available operations with `mise tasks --all`. The root `mise.toml` selects package task files through `monorepo.config_roots`; see `.claude/rules/commands.md` for invocation conventions.
+Use full mise monorepo task paths and discover available operations with `mise tasks --all`. The root `mise.toml` owns the Rust tasks and selects the documentation site's task file through `monorepo.config_roots`; see `.claude/rules/commands.md` for invocation conventions.
 
 ## Tests
 

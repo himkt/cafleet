@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     println!("cargo:rerun-if-changed=migrations");
-    println!("cargo:rerun-if-changed=../skills");
-    println!("cargo:rerun-if-changed=../presets");
+    println!("cargo:rerun-if-changed=skills");
+    println!("cargo:rerun-if-changed=presets");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by cargo");
-    let skills = Path::new(&manifest_dir).join("../skills");
-    let presets = Path::new(&manifest_dir).join("../presets");
+    let skills = Path::new(&manifest_dir).join("skills");
+    let presets = Path::new(&manifest_dir).join("presets");
 
     let mut generated = String::new();
     emit_table(&mut generated, "SKILLS", &skills);

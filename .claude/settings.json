@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(pnpm install --frozen-lockfile)",
-      "Bash(mise //cafleet*)",
+      "Bash(mise //:test*)",
+      "Bash(mise //:lint)",
+      "Bash(mise //:format)",
+      "Bash(mise //:typecheck)",
+      "Bash(mise //:build)",
+      "Bash(mise //:install)",
       "Bash(mise //docs*)",
       "Bash(mise tasks)",
       "Bash(mise tasks --all)",
