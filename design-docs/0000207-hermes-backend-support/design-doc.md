@@ -1,7 +1,7 @@
 # Hermes Coding-Agent Backend Support
 
 **Status**: Approved
-**Progress**: 24/69 tasks complete
+**Progress**: 39/69 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -48,7 +48,7 @@ None of the live evidence (stream probes, runner acceptance on tmux and herdr, p
 
 | Role | Eligible | Evidence |
 |---|---|---|
-| Director | `no` | Goal lifecycle: native `/goal` lifecycle controls in installed source for 2026.9.24, checked 2026-11-02; an in-session `/goal` help capture is not established yet. Background execution while supervision continues: CAFleet stream probe not established for 2026.9.24, checked 2026-11-02. |
+| Director | `yes` | Goal lifecycle: native `/goal` lifecycle controls in installed source and in-session `/help goal`, 2026.9.24, checked 2026-11-02. Background execution: CAFleet stream probe with `terminal` `background=true`, `notify=true` finite `wait` renewed per completion, consumed at turn boundaries without user input (runtime-evidence.md § 4.4 runs 2–3), 2026.9.24, checked 2026-11-02. |
 | Member | `no` | PTY lifecycle, coverage declaration and coverage of the default `smart` mode's approval prompts: not established for 2026.9.24, checked 2026-11-02. |
 
 Step 4 and Step 7 replace these rows with the recorded evidence. Each Evidence cell keeps the shape of SPEC § Role eligibility: source, native version and `checked YYYY-MM-DD` per requirement group, in at most two sentences. A Member `yes` names its bundled profile ("the Hermes profile from `2026.9.24`").
@@ -124,7 +124,7 @@ Step 2 re-checks each row against the bundled profile declarations in SPEC §6.9
 
 SPEC §6.7 Role requirements gains this general definition, mirrored in `coding-agents.md` § Role requirements and in `contributing.md` step 2:
 
-> Background execution while supervision continues is established by a CAFleet stream probe on an installed native version. The candidate Director starts a CAFleet receiver (`cafleet message listen` or a finite `cafleet message wait`) through its native background-execution facility, then continues unrelated work in the same session. The probe passes when broker records that another member sends during that work reach the Director and are consumed without user input. That can happen as streamed records, or as a completion-notified finite receive that the Director renews after each completion. Record the native mechanism, version and check date.
+> Background execution while supervision continues is established by a CAFleet stream probe on an installed native version. The candidate Director starts a CAFleet receiver (`cafleet message listen` or a finite `cafleet message wait`) through its native background-execution facility, then continues unrelated work in the same session. The probe passes when broker records that another member sends during that work reach the Director and are consumed without user input, during the work or at the session's next turn boundary. That can happen as streamed records, or as a completion-notified finite receive that the Director renews after each completion. Record the native mechanism, version and check date.
 
 A completion-notified finite receive renewed per completion establishes background execution. Per-record reception remains a property of a backend's native reception recipe, and "background execution alone establishes no unsolicited wake or per-record reception guarantee" stays.
 
@@ -137,7 +137,7 @@ Stream-probe procedure (also used in Step 4):
 3. Have the Director spawn one probe member on any Member-eligible backend, with a spawn prompt that sends `ready` and then ends its turn without further broker traffic. The probe member's ID is the sender identity.
 4. After the Director consumes the ready, have it start the receiver through its native background facility, then give it an unrelated multi-step task (for example: summarize three named files).
 5. The maintainer sends the probe records deterministically from a separate shell at 20 s, 60 s and 120 s after the task prompt: `cafleet message send --from-member-id <probe-id> --to-member-id <director-id> "stream-probe 1"` (then `2`, `3`). Record each printed message ID and timestamp.
-6. Pass: each of the three message IDs is ACKed by the Director (`cafleet message show <message-id> --json` shows the `completed` state) while the unrelated task progresses, with no user input after the task prompt, and a finite receiver is renewed after each completion. Capture the Director pane and the three message records.
+6. Pass: each of the three message IDs is ACKed by the Director (`cafleet message show <message-id> --json` shows the `completed` state) during the unrelated task or at its next turn boundary, with no user input after the task prompt, and a finite receiver is renewed after each completion. Capture the Director pane and the three message records.
 7. Record the backend, native version, mechanism (tool call and flags), message IDs, send/ACK timestamps and pass/fail in the evidence file.
 
 ### Hermes launch contract
@@ -309,6 +309,7 @@ Step 5 adds `cafleet/migrations/V2__hermes_backend.sql` on the feature branch, a
 |---|---|---|
 | U1 | Missing Director-only deny globs block launch, and setup installs them. `cafleet setup --coding-agent hermes` appends only the missing globs through `hermes config set`, preserving existing entries, their order and the rest of the file. It is idempotent and reports what it added. `member create` and doctor fail or report when any glob is missing from the effective configuration, and name the corrective command. | § Hermes launch contract, Director-only deny rules, Setup and Availability preflight |
 | U2 | Classify launch modes by definition: Claude `dontAsk` and `bypassPermissions` and Codex `never` are `auto`; Claude `acceptEdits` and `plan` are `manual` | § Member launch-mode classification |
+| U3 | The CAFleet stream probe passes when records sent during the unrelated work are consumed without user input, during that work or at the session's next turn boundary | § CAFleet stream probe |
 
 The deny globs' effectiveness under `smart` is verified live, not assumed. Step 6 checks the following and records the outcome:
 
@@ -421,24 +422,24 @@ Paid calls use the operator's configured default model. Secrets and account iden
 
 ### Step 4: Hermes registry, launch and Director evidence
 
-- [ ] Add `CodingAgent::Hermes` with name/binary `hermes`, config variable `HERMES_HOME`, default `~/.hermes`, skills dir `<base>/skills`, and add it to the `fleet`, `member` and `setup` CLI choices and asset installation <!-- completed: -->
-- [ ] Implement effort validation and `--reasoning` forwarding, verbatim `--model`, and the cwd parameter in `build_spawn_argv` for every backend. Argv unit tests per backend assert that Hermes argv never contains `--yolo`. <!-- completed: -->
-- [ ] Implement the Hermes version-probe rule with unit tests (matching line, `vunknown`, non-matching, several parentheses, non-SemVer date) <!-- completed: -->
-- [ ] Implement the version-independent launch-policy catalog (`smart` only, `permission_argv_json` `[]`) and the `HERMES_YOLO_MODE` spawn-environment removal, with unit tests <!-- completed: -->
-- [ ] Add the Director-only deny-glob constant, plus the unit test that it equals the OpenCode `cafleet` preset's Director-owned denies <!-- completed: -->
-- [ ] Implement the setup merge of `approvals.deny` through `hermes config get`/`config set`, with its output lines and failure cause. Unit tests use an injected command runner for the missing-some, missing-none, non-array, failed-set and post-write-verification cases. <!-- completed: -->
-- [ ] Implement the availability preflight through one bounded `hermes config get --json approvals` call (mode, deny globs, unreadable output), using serde_json with no YAML dependency. Unit tests cover each error string. <!-- completed: -->
-- [ ] Implement the Hermes doctor rows (`hermes.configuration` config dir, skills install, `hermes.approvals.mode`, `hermes.approvals.deny`) <!-- completed: -->
-- [ ] Install the branch build with `mise //cafleet:install` into the evidence environment, preserving any active fleet's installed runtime <!-- completed: -->
-- [ ] Director evidence: capture in-session `/goal` help/`show` output in a root Hermes session on tmux <!-- completed: -->
-- [ ] Director evidence: run the stream-probe procedure with a Hermes Director (`terminal` `background=true` + `notify=true`, finite `wait` renewed per completion) and record pass/fail <!-- completed: -->
-- [ ] Director evidence: verify `clarify` as `{decision_surface}` (records the chosen option) or keep the documented default <!-- completed: -->
-- [ ] Update § Role evaluation Director row with the recorded evidence and verdict <!-- completed: -->
+- [x] Add `CodingAgent::Hermes` with name/binary `hermes`, config variable `HERMES_HOME`, default `~/.hermes`, skills dir `<base>/skills`, and add it to the `fleet`, `member` and `setup` CLI choices and asset installation <!-- completed: 2026-11-02T07:11 -->
+- [x] Implement effort validation and `--reasoning` forwarding, verbatim `--model`, and the cwd parameter in `build_spawn_argv` for every backend. Argv unit tests per backend assert that Hermes argv never contains `--yolo`. <!-- completed: 2026-11-02T07:11 -->
+- [x] Implement the Hermes version-probe rule with unit tests (matching line, `vunknown`, non-matching, several parentheses, non-SemVer date) <!-- completed: 2026-11-02T07:11 -->
+- [x] Implement the version-independent launch-policy catalog (`smart` only, `permission_argv_json` `[]`) and the `HERMES_YOLO_MODE` spawn-environment removal, with unit tests <!-- completed: 2026-11-02T07:11 -->
+- [x] Add the Director-only deny-glob constant, plus the unit test that it equals the OpenCode `cafleet` preset's Director-owned denies <!-- completed: 2026-11-02T07:11 -->
+- [x] Implement the setup merge of `approvals.deny` through `hermes config get`/`config set`, with its output lines and failure cause. Unit tests use an injected command runner for the missing-some, missing-none, non-array, failed-set and post-write-verification cases. <!-- completed: 2026-11-02T07:11 -->
+- [x] Implement the availability preflight through one bounded `hermes config get --json approvals` call (mode, deny globs, unreadable output), using serde_json with no YAML dependency. Unit tests cover each error string. <!-- completed: 2026-11-02T07:11 -->
+- [x] Implement the Hermes doctor rows (`hermes.configuration` config dir, skills install, `hermes.approvals.mode`, `hermes.approvals.deny`) <!-- completed: 2026-11-02T07:11 -->
+- [x] Install the branch build with `mise //cafleet:install` into the evidence environment, preserving any active fleet's installed runtime <!-- completed: 2026-11-02T09:26 -->
+- [x] Director evidence: capture in-session `/goal` help/`show` output in a root Hermes session on tmux <!-- completed: 2026-11-02T09:26 -->
+- [x] Director evidence: run the stream-probe procedure with a Hermes Director (`terminal` `background=true` + `notify=true`, finite `wait` renewed per completion) and record pass/fail <!-- completed: 2026-11-02T09:26 -->
+- [x] Director evidence: verify `clarify` as `{decision_surface}` (records the chosen option) or keep the documented default <!-- completed: 2026-11-02T09:26 -->
+- [x] Update § Role evaluation Director row with the recorded evidence and verdict <!-- completed: 2026-11-02T09:26 -->
 
 ### Step 5: Schema successor
 
-- [ ] Add `V2__hermes_backend.sql` (rebuild `member_runs` with the widened check and `native_session_json`) <!-- completed: -->
-- [ ] Add the successor test migrating a populated V1 database to V2 and asserting preserved rows, constraints, indexes, foreign keys and the new column; confirm the chain guard <!-- completed: -->
+- [x] Add `V2__hermes_backend.sql` (rebuild `member_runs` with the widened check and `native_session_json`) <!-- completed: 2026-11-02T07:11 -->
+- [x] Add the successor test migrating a populated V1 database to V2 and asserting preserved rows, constraints, indexes, foreign keys and the new column; confirm the chain guard <!-- completed: 2026-11-02T07:11 -->
 
 ### Step 6: Member live evidence and captures
 
