@@ -28,7 +28,7 @@ Only add comments where the logic is genuinely non-obvious. Do NOT add:
 
 ## Test placement
 
-Every Rust test is an in-file unit test. It lives in one `#[cfg(test)] mod tests` block at the end of the implementation file whose behavior it exercises, and `mise //cafleet:test` runs it.
+Every Rust test is an in-file unit test. It lives in one `#[cfg(test)] mod tests` block at the end of the implementation file whose behavior it exercises, and `mise //:test` runs it.
 
 - Place each test in the file that defines the entry point it asserts on. When a test drives several files, the file that owns the asserted behavior owns the test. Group related tests in nested modules inside `mod tests`.
 - Put a helper shared by tests in several files into the implementation file that owns the type it builds, as `#[cfg(test)] pub(crate) mod test_support`. A test-only constructor or method on a production type is a `#[cfg(test)] impl` block beside that type. A helper used only by one file's tests stays inside that file's `mod tests`. Crate-wide test macros are defined at the top of `main.rs`, before the first `mod` declaration. Reuse an existing helper or production function (clocks, digests, frame codecs, fixtures) before writing another.
@@ -37,17 +37,17 @@ Every Rust test is an in-file unit test. It lives in one `#[cfg(test)] mod tests
 - Test-only harness code is itself test code: it is an inline `#[cfg(test)]` module of the implementation file it instruments.
 
 **Forbidden patterns:**
-- A test-only `.rs` file or directory: `*_tests.rs`, `*_tests/`, `cafleet/tests/`, a `#[path]`-mounted test file, or a `#[cfg(test)] mod name;` declaration that loads a separate file.
+- A test-only `.rs` file or directory: `*_tests.rs`, `*_tests/`, `tests/`, a `#[path]`-mounted test file, or a `#[cfg(test)] mod name;` declaration that loads a separate file.
 - A test-only fixture file or fixture directory.
 - A test module that exercises another file's implementation.
 - A module named `tests` that holds only shared helpers; name it `test_support`.
 
 ## Database migrations
 
-The binary embeds the SQL migration registry under `cafleet/migrations/`. The current format has an explicit application identity and a `V1__baseline.sql` baseline; the ledger version and required table/column shapes define compatibility together.
+The binary embeds the SQL migration registry under `migrations/`. The current format has an explicit application identity and a `V1__baseline.sql` baseline; the ledger version and required table/column shapes define compatibility together.
 
 A deliberate format-family reset uses a new application identity and default database filename, preserves predecessor files, and establishes a new V1 baseline. The `cafleet_v9.db` family has its own V1 baseline.
 
 Until a format family's first tagged release, edit its `V1__baseline.sql` in place; from that release onward, extend the chain. For a released family, write contiguous hand-written `V<N>__<slug>.sql` successors and preserve valid existing data with in-place schema changes where supported. Setup applies compatible pending changes transactionally and refuses an ahead or incompatible format before either write path proceeds.
 
-The chain guard in `cafleet/src/db.rs` derives the registry from the embedded migrations and asserts contiguous numbering from one baseline, so the embedded registry is the source of truth. Add a successor test for each new `V<N>__<slug>.sql` that migrates the previous head to it and checks the new shape; baseline edits retain exact current-schema coverage against fresh databases.
+The chain guard in `src/db.rs` derives the registry from the embedded migrations and asserts contiguous numbering from one baseline, so the embedded registry is the source of truth. Add a successor test for each new `V<N>__<slug>.sql` that migrates the previous head to it and checks the new shape; baseline edits retain exact current-schema coverage against fresh databases.

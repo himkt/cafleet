@@ -6,7 +6,8 @@ Develop changes through reviewed designs and the bundled CAFleet workflows. Run 
 
 | Entry | Responsibility |
 |---|---|
-| `cafleet/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters and embedded assets |
+| `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters; built by the root `Cargo.toml` and `build.rs`, which embeds `skills/` and `presets/` |
+| `migrations/` | Embedded SQL migration chain |
 | `skills/` | Installed agent-facing skills, roles and references |
 | `presets/` | Backend permission/configuration assets |
 | `docs/` | Independent operator documentation and its Node/pnpm site tooling |
@@ -24,17 +25,17 @@ Every Rust test is a unit test in a `#[cfg(test)] mod tests` block of the implem
 git clone https://github.com/himkt/cafleet.git
 ```
 
-Enter the checkout, then install the CLI through its package task:
+Enter the checkout, then install the CLI through its root task:
 
 ```bash
-mise //cafleet:install
+mise //:install
 ```
 
 ```bash
 cafleet setup
 ```
 
-Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools and selects package task files through `monorepo.config_roots`; each package's `mise.toml` owns its tasks and working directory. Run Rust validation with `mise //cafleet:test` and `mise //cafleet:lint`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use the new implementation.
+Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools and owns the Rust tasks, and selects the documentation site's task file through `monorepo.config_roots`. Run Rust validation with `mise //:test` and `mise //:lint`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use the new implementation.
 
 ### Installing the skills from your checkout
 

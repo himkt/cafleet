@@ -1,14 +1,14 @@
 # Commands
 
-Run project operations through full mise monorepo task paths. Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools and selects package task files through `monorepo.config_roots`; package-local `mise.toml` files own their tasks and working directories.
+Run project operations through full mise monorepo task paths. Use `mise tasks --all` as the task registry. The root `mise.toml` pins tools and owns the Rust tasks; `monorepo.config_roots` selects the documentation site's package task file, which owns its tasks and working directory.
 
-Required Rust validation is `mise //cafleet:test` and `mise //cafleet:lint`; `//cafleet:typecheck` remains a registry task. Use `mise //docs:build` for documentation/link checks. Find installation, formatting and release-build operations through `mise tasks --all`.
+Required Rust validation is `mise //:test` and `mise //:lint`; `//:typecheck` remains a registry task. Use `mise //docs:build` for documentation/link checks. Find installation, formatting and release-build operations through `mise tasks --all`.
 
 Rust tasks embed skills/presets and use the pinned toolchain. The documentation site owns its Node/pnpm tooling. Reinstall the CLI after Rust edits when the installed binary should change; preserve an active executing fleet's installed runtime/assets during implementation.
 
 ## mise Tasks
 
-Use `mise //<package>:<task>` for a package task and `mise //:<task>` for a root task from any directory in the repository. Tasks forward positional arguments, so `mise //cafleet:test test_name` filters tests. Place two standalone `--` separators before test-harness flags: mise consumes one and Cargo forwards the other.
+Use `mise //<package>:<task>` for a package task and `mise //:<task>` for a root task from any directory in the repository. Tasks forward positional arguments, so `mise //:test test_name` filters tests. Place two standalone `--` separators before test-harness flags: mise consumes one and Cargo forwards the other.
 
 Run tests, lint, format, type checks, builds and installation through their tasks so project configuration and host permission patterns apply. Verification/smoke commands use an assigned teammate's authorized task scope. Route an observed necessary command denial to the Director through the member protocol.
 
