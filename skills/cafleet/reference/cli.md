@@ -42,7 +42,7 @@ Place the complete DB-assigned integer subject immediately after its subcommand.
 
 Explicit `sqlite:///<path>` resolves relative paths against cwd and leaves literal tildes unexpanded. Counts require nonnegative integers: `<NAME> must be a non-negative integer (got '<value>')`.
 
-Config-location overrides `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `OPENCODE_CONFIG_DIR` require absolute paths: `Error: <VAR> must be an absolute path (got '<value>')`, exit 1. Creation forwards the selected backend's set override and `CAFLEET_DATABASE_URL`.
+Config-location overrides `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR` and `HERMES_HOME` (default `~/.hermes`) require absolute paths: `Error: <VAR> must be an absolute path (got '<value>')`, exit 1. Creation forwards the selected backend's set override and `CAFLEET_DATABASE_URL`.
 
 ## Output shapes
 
@@ -186,11 +186,11 @@ Pane operations require active placement; opaque pane IDs may be pending. Prompt
 
 `cafleet member create --fleet-id ID --name NAME --description DESCRIPTION [--coding-agent AGENT] [--model MODEL] [--permission-mode MODE] [--event-evidence POLICY] [--event-redaction-file PATH] [--effort LEVEL] (PROMPT | --file PATH) [--json]`
 
-Registers and spawns, resolving the acting Director from the fleet. Omitted backend inherits its placement backend. Description is one sentence; only Claude displays the name as pane title. Model forwards to the native CLI; OpenCode requires `<provider-id>/<model-id>`.
+Registers and spawns, resolving the acting Director from the fleet. Omitted backend inherits its placement backend. Description is one sentence; only Claude displays the name as pane title. Model forwards to the native CLI; OpenCode requires `<provider-id>/<model-id>`, and Hermes passes any value through. Hermes argv: `hermes chat --cli --source tool --in <cwd>`, then optional `--model MODEL` and `--reasoning LEVEL`, then `-q PROMPT`; it never carries `--provider`, `--resume`, `--continue` or `--create-if-missing`.
 
 Evidence defaults to `metadata`; `redacted` requires an absolute readable UTF-8 redaction file. Invalid policy/configuration combinations exit 2 before registration. `--file -` reads stdin.
 
-Permission choices: `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet)`. Invalid selection: `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, exit 2.
+Permission choices: `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart)`. Invalid selection: `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, exit 2. Mode classes (documentation only; argv and run records are unchanged): `auto` (native automatic review or a fixed allow/deny policy) is claude `auto`, `dontAsk`, `bypassPermissions`; codex `approve-for-me`, `never`; opencode `cafleet`; hermes `smart`. `manual` (native interactive approval) is claude `default`, `manual`, `acceptEdits`, `plan`; codex `on-request`; opencode `cafleet-ask`; hermes `manual`. Hermes choices emit no permission argv (`permission_argv_json` `[]`) and are recorded only; the operator configuration's `approvals.mode` governs the session. Every default is `auto`.
 
 Effort validation precedes side effects:
 
@@ -199,18 +199,30 @@ Effort validation precedes side effects:
 | claude | low, medium, high, xhigh, max | `Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').` |
 | codex | minimal, low, medium, high, xhigh | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` |
 | opencode | — | `Error: opencode does not support reasoning effort.` |
+| hermes | none, minimal, low, medium, high, xhigh, max, ultra (forwarded as `--reasoning`) | `Error: --effort for the hermes backend must be one of none, minimal, low, medium, high, xhigh, max, ultra (got '<value>').` |
 
 Invalid OpenCode model: `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').`, exit 2.
 
+Hermes availability preflight, after the config-dir and PATH checks: one bounded `hermes config get --json approvals` under the member's `HERMES_HOME`. Each failure exits 1 before registration:
+
+| Condition | Error |
+|---|---|
+| Command fails, times out or prints no JSON object | `Error: cannot read hermes configuration through 'hermes config get': <cause>` |
+| `deny` lacks a Director-only glob | `Error: hermes approvals.deny lacks CAFleet's Director-only rules: <glob>, …; run 'cafleet setup --coding-agent hermes'` |
+| `hermes config path` (resolves the effective home for deletion settlement) fails or times out | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
+| `hermes config path` prints no absolute file path | `Error: cannot read hermes configuration through 'hermes config path': printed no absolute file path: <stdout>` |
+
+The member environment forwards a set `HERMES_HOME`.
+
 Substitute exactly `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` into literal identity lines. Double literal braces `{{`/`}}`; malformed/unknown placeholders exit 2 before registration (§ Error messages).
 
-Probe native `--version`; select the greatest bundled `min_version` not exceeding it by SemVer precedence (ignore build metadata). Newer versions reuse the newest profile. Below-minimum versions fail before registration/pane creation: `unsupported native version for BACKEND: VERSION; minimum supported version is MIN_VERSION`, exit 1. Failed probes, including a first line with zero or several SemVer tokens, warn `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.` and continue with unknown coverage/fallback. Creation waits for native-child startup.
+Probe native `--version`; select the greatest bundled `min_version` not exceeding it by SemVer precedence (ignore build metadata). Newer versions reuse the newest profile. Below-minimum versions fail before registration/pane creation: `unsupported native version for BACKEND: VERSION; minimum supported version is MIN_VERSION`, exit 1. Hermes takes its version from a first line matching `^Hermes Agent v\S+ \((?P<version>[^)]+)\)$` (`Hermes Agent vunknown (2026.9.24)` records `2026.9.24`). Failed probes, including a first line with zero or several SemVer tokens or a non-matching Hermes line, warn `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.` and continue with unknown coverage/fallback. Creation waits for native-child startup.
 
 Failure compensation shuts down owned runner/child, closes pane, removes descriptor, marks run `failed` and deregisters/removes placement, retaining the primary exit category. Cleanup diagnostics include `cleanup failed for pane <id>: <detail>`, `owned child cleanup remains unconfirmed`, descriptor/run/deregistration errors and `pane ID unknown; pane cleanup unconfirmed`. Inspect unconfirmed resources.
 
 ### `member delete`
 
-`cafleet member delete MEMBER_ID [--json]` shuts down a recorded runner, closes the locked pane and deregisters. Run-less teardown skips runner shutdown while retaining pane close/deregistration. Busy: `member ID's pane input remained busy for 5 seconds; member was not deleted.`, exit 1 unchanged. Post-close database errors retain the cause and closed-pane evidence. Layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages.
+`cafleet member delete MEMBER_ID [--json]` shuts down a recorded runner, closes the locked pane and deregisters. Run-less teardown skips runner shutdown while retaining pane close/deregistration. Busy: `member ID's pane input remained busy for 5 seconds; member was not deleted.`, exit 1 unchanged. Post-close database errors retain the cause and closed-pane evidence. Layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages. Before runner shutdown, a `hermes` run's session work is stopped through native pane input (`Ctrl+C` when busy, then `/stop` and `/exit`) and its registered background processes are verified as stopped, with its own 20-second settlement budget per Hermes member (also in `fleet delete`), whose duration extends the 5-second deletion deadline. An unverified stop exits 1 with `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.` and keeps the member, and a retry re-runs the settlement. A client that had already exited prints `warning: hermes client for member ID had already exited; its session work may still be running in the Hermes gateway` and the deletion completes.
 
 ### `member list`
 
@@ -389,7 +401,9 @@ Result fields: `member_id,run_id,outcome,replayed_count,inbox_count,archived_cou
 
 `cafleet setup [--coding-agent AGENT...]` prepares/migrates the database, then installs embedded skills/presets offline in backend registry order, default every backend. First failure stops installation, exit 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>` or config-path error.
 
-`cafleet doctor [--json]` emits every `checks` entry with `name,status,detail`; statuses `ok,info,error`. Names cover multiplexer/database, backend configuration/executable/installation, OpenCode presets and `member_runtime.<run_id>`. Asset-version mismatch is info with `; run 'cafleet setup --coding-agent <agent>'`. Any error exits 1 after all checks with `Error: doctor found errors`.
+For `hermes`, setup installs the skills, then merges six Director-only globs (`cafleet member prompt *`, `cafleet member exec *`, `cafleet member press *`, `cafleet member recover *`, `cafleet permission respond *`, `cafleet input reconcile *`) into `approvals.deny` through `hermes config path`, `hermes config get --json approvals.deny` and `hermes config set approvals.deny '<compact JSON>'`, keeping existing entries and their order. It prints `hermes: approvals.deny already holds CAFleet's Director-only rules -> <config path>` or `hermes: added approvals.deny rules -> <config path>: <glob>, …`. Failure: `failed to install hermes approval rules into <config path>: <cause>`, no installation record; when `hermes config path` itself fails, `<config path>` is the resolved Hermes base. It then merges `CAFLEET_DATABASE_URL`, `TMUX`, `TMUX_PANE`, `HERDR_ENV`, `HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH` and `HERDR_SESSION` into `terminal.client_env_passthrough` the same way, printing `hermes: terminal.client_env_passthrough already holds CAFleet's member names -> <config path>` or `hermes: added terminal.client_env_passthrough names -> <config path>: <name>, …`; failure: `failed to install hermes terminal.client_env_passthrough names into <config path>: <cause>`. `--coding-agent hermes` requires `hermes` on `PATH`; plain `cafleet setup` without it installs the skills, records the installation and prints `hermes: skipped approvals.deny rules and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`.
+
+`cafleet doctor [--json]` emits every `checks` entry with `name,status,detail`; statuses `ok,info,error`. Names cover multiplexer/database, backend configuration/executable/installation, OpenCode presets, `hermes.approvals.deny` and `hermes.client_env_passthrough` (after `hermes.executable`; `ok` details `holds CAFleet's Director-only rules` and `holds CAFleet's member names`, `error` details the preflight message or `hermes terminal.client_env_passthrough lacks CAFleet's member names: <name>, …; run 'cafleet setup --coding-agent hermes'`, `info` `unavailable: executable is absent` without `hermes`) and `member_runtime.<run_id>`. Asset-version mismatch is info with `; run 'cafleet setup --coding-agent <agent>'`. Any error exits 1 after all checks with `Error: doctor found errors`.
 
 ## Error messages
 
@@ -403,6 +417,8 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | (any fleet/member/message command) | Incompatible database file | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` | 1 |
 | `member create` | The backend binary is missing | `Error: binary <name> not found on PATH` | 1 |
 | `member create` | The selected opencode preset is missing or unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
+| `member create` | The hermes configuration fails the availability preflight | The preflight errors under § `member create` | 1 |
+| `member delete` | A `hermes` run's work stop cannot be verified | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 |
 | `member create` | Unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` | 2 |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
 | `member create` | The fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |

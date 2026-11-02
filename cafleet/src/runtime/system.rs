@@ -2,6 +2,7 @@
 //! PATH/HOME [`SpawnProbe`].
 
 use crate::coding_agent::SpawnProbe;
+use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::RunError;
 use crate::multiplexer::TimedRunError;
@@ -443,6 +444,36 @@ impl SpawnProbe for SystemProbe {
     fn env_var(&self, name: &str) -> Option<String> {
         std::env::var(name).ok()
     }
+
+    fn hermes_approvals(
+        &self,
+        executable: &Path,
+        config_base: &Path,
+    ) -> Result<String, CafleetError> {
+        hermes_config_get(executable, config_base, "approvals")
+    }
+
+    fn hermes_client_env_passthrough(
+        &self,
+        executable: &Path,
+        config_base: &Path,
+    ) -> Result<String, CafleetError> {
+        hermes_config_get(executable, config_base, "terminal.client_env_passthrough")
+    }
+}
+
+fn hermes_config_get(
+    executable: &Path,
+    config_base: &Path,
+    key: &str,
+) -> Result<String, CafleetError> {
+    crate::coding_agent::run_bounded(
+        executable,
+        &["config", "get", "--json", key],
+        &[("HERMES_HOME", config_base)],
+        Instant::now() + Duration::from_secs(2),
+    )
+    .map_err(CafleetError::App)
 }
 
 /// Read stdin to EOF as raw bytes.

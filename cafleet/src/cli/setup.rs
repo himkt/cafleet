@@ -1,3 +1,4 @@
+use crate::assets::HermesConfigRunner;
 use crate::assets::agent_paths;
 use crate::assets::install_agent;
 use crate::coding_agent::CodingAgent;
@@ -24,12 +25,38 @@ pub(crate) struct SetupArgs {
 pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
     let mut conn = prepare_database(settings)?;
     let home = crate::config::home_dir()?;
-    install_selected(
-        &mut conn,
-        &args.coding_agent,
-        &|name| std::env::var(name).ok(),
-        &home,
-    )
+    let env = |name: &str| std::env::var(name).ok();
+    let mut hermes = SystemHermes {
+        env: &env,
+        home: &home,
+    };
+    install_selected(&mut conn, &args.coding_agent, &env, &home, &mut hermes)
+}
+
+struct SystemHermes<'a> {
+    env: EnvLookup<'a>,
+    home: &'a Path,
+}
+
+impl HermesConfigRunner for SystemHermes<'_> {
+    fn binary_available(&self) -> bool {
+        SystemProbe.resolve_binary("hermes").is_some()
+    }
+
+    fn run(&mut self, args: &[String]) -> Result<String, CafleetError> {
+        let executable = SystemProbe
+            .resolve_binary("hermes")
+            .ok_or_else(|| CafleetError::App("binary hermes not found on PATH".into()))?;
+        let base = CodingAgent::Hermes.config_dir(self.env, self.home)?;
+        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+        crate::coding_agent::run_bounded(
+            &executable,
+            &args,
+            &[("HERMES_HOME", &base)],
+            std::time::Instant::now() + std::time::Duration::from_secs(10),
+        )
+        .map_err(CafleetError::App)
+    }
 }
 
 fn prepare_database(settings: &Settings) -> Result<Connection, CafleetError> {
@@ -77,15 +104,24 @@ fn install_selected(
     selected: &[CodingAgent],
     env: EnvLookup<'_>,
     home: &Path,
+    hermes: &mut dyn HermesConfigRunner,
 ) -> Result<(), CafleetError> {
     for agent in CodingAgent::all() {
         if selected.is_empty() || selected.contains(agent) {
             let paths = agent_paths(env, home, *agent)?;
+            let runner = if *agent == CodingAgent::Hermes
+                && (!selected.is_empty() || hermes.binary_available())
+            {
+                Some(&mut *hermes)
+            } else {
+                None
+            };
             install_agent(
                 conn,
                 *agent,
                 &paths,
                 crate::cli::VERSION,
+                runner,
                 &mut std::io::stdout(),
             )?;
         }
@@ -268,6 +304,9 @@ fn agent_checks(
                 ));
             }
         }
+        if *agent == CodingAgent::Hermes {
+            checks.extend(hermes_approval_checks(probe, &paths));
+        }
         let install_name = format!("{name}.installation");
         checks.push(match (&paths, schema) {
             (Err(cause), _) => Check::new(
@@ -333,6 +372,52 @@ fn preset_check(
     }
 }
 
+fn hermes_approval_checks(
+    probe: &dyn SpawnProbe,
+    paths: &Result<PathBuf, CafleetError>,
+) -> [Check; 2] {
+    const DENY: &str = "hermes.approvals.deny";
+    const CLIENT_ENV: &str = "hermes.client_env_passthrough";
+    let both = |status: &'static str, detail: String| {
+        [
+            Check::new(DENY, status, detail.clone()),
+            Check::new(CLIENT_ENV, status, detail),
+        ]
+    };
+    let base = match paths {
+        Ok(base) => base,
+        Err(cause) => {
+            return both(
+                "info",
+                format!("unavailable: configuration failed: {cause}"),
+            );
+        }
+    };
+    let Some(executable) = probe.resolve_binary(CodingAgent::Hermes.name()) else {
+        return both("info", "unavailable: executable is absent".into());
+    };
+    let row = |name: &'static str, result: Result<(), CafleetError>, ok: &str| match result {
+        Ok(()) => Check::new(name, "ok", ok),
+        Err(cause) => Check::new(name, "error", cause.message()),
+    };
+    [
+        row(
+            DENY,
+            crate::coding_agent::hermes_approvals_preflight(
+                probe.hermes_approvals(&executable, base),
+            ),
+            "holds CAFleet's Director-only rules",
+        ),
+        row(
+            CLIENT_ENV,
+            crate::coding_agent::hermes_client_env_names(
+                probe.hermes_client_env_passthrough(&executable, base),
+            ),
+            "holds CAFleet's member names",
+        ),
+    ]
+}
+
 fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {
     let name = format!("{}.installation", agent.name());
     let recorded =
@@ -364,12 +449,29 @@ fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {
 
 #[cfg(test)]
 mod tests {
+    use crate::assets::test_support::FakeHermes;
     use crate::cli::CliArgs;
     use crate::cli::Command;
     use crate::cli::setup::*;
     use crate::cli::test_support::assert_error;
+    use crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH;
+    use crate::coding_agent::HERMES_DIRECTOR_ONLY_DENIES;
     use clap::Parser;
     use clap::error::ErrorKind;
+    use std::cell::RefCell;
+
+    fn complete_hermes() -> FakeHermes {
+        FakeHermes::holding(&HERMES_DIRECTOR_ONLY_DENIES)
+    }
+
+    fn installed_agents(conn: &Connection) -> Vec<String> {
+        conn.prepare("SELECT coding_agent FROM asset_installs ORDER BY coding_agent")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
 
     fn settings(home: &Path) -> Settings {
         Settings::for_database(&home.join("registry.db"), None)
@@ -402,6 +504,14 @@ mod tests {
         assert!(
             CliArgs::try_parse_from(["cafleet", "setup", "--coding-agent", "unknown"]).is_err()
         );
+        let Command::Setup(args) =
+            CliArgs::try_parse_from(["cafleet", "setup", "--coding-agent", "hermes"])
+                .unwrap()
+                .command
+        else {
+            panic!("setup command")
+        };
+        assert_eq!(args.coding_agent, [CodingAgent::Hermes]);
     }
 
     #[test]
@@ -409,25 +519,21 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let settings = settings(home.path());
         let mut conn = prepare_database(&settings).unwrap();
+        let mut hermes = complete_hermes();
         let error = install_selected(
             &mut conn,
             &[],
             &|name| (name == "CODEX_HOME").then(|| "relative".into()),
             home.path(),
+            &mut hermes,
         )
         .unwrap_err();
         assert!(error.message().contains("CODEX_HOME"));
         crate::db::classify_schema(&conn, crate::db::head_version())
             .require_current()
             .unwrap();
-        let names = conn
-            .prepare("SELECT coding_agent FROM asset_installs ORDER BY coding_agent")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(names, ["claude"]);
+        assert_eq!(installed_agents(&conn), ["claude"]);
+        assert!(hermes.calls.is_empty());
         assert!(!home.path().join(".config/opencode").exists());
     }
 
@@ -437,13 +543,19 @@ mod tests {
         let settings = settings(home.path());
         for _ in 0..2 {
             let mut conn = prepare_database(&settings).unwrap();
+            let mut hermes = complete_hermes();
             install_selected(
                 &mut conn,
                 &[CodingAgent::Claude, CodingAgent::Claude],
                 &|name| (name != "CLAUDE_CONFIG_DIR").then(|| "relative".into()),
                 home.path(),
+                &mut hermes,
             )
             .unwrap();
+            assert!(
+                hermes.calls.is_empty(),
+                "an unselected hermes is not consulted"
+            );
             assert_eq!(
                 conn.query_row("SELECT COUNT(*) FROM asset_installs", [], |row| row
                     .get::<_, i64>(0))
@@ -512,8 +624,49 @@ mod tests {
         home: PathBuf,
         executable: bool,
         invalid: Option<&'static str>,
+        approvals: Result<String, String>,
+        approval_reads: RefCell<Vec<(PathBuf, PathBuf)>>,
+        passthrough: Result<String, String>,
+        passthrough_reads: RefCell<Vec<(PathBuf, PathBuf)>>,
+    }
+    impl Probe {
+        fn new(home: &Path, executable: bool, invalid: Option<&'static str>) -> Self {
+            Self {
+                home: home.into(),
+                executable,
+                invalid,
+                approvals: Ok(serde_json::json!({
+                    "mode": "smart",
+                    "deny": HERMES_DIRECTOR_ONLY_DENIES,
+                })
+                .to_string()),
+                approval_reads: RefCell::new(Vec::new()),
+                passthrough: Ok(serde_json::json!(HERMES_CLIENT_ENV_PASSTHROUGH).to_string()),
+                passthrough_reads: RefCell::new(Vec::new()),
+            }
+        }
     }
     impl SpawnProbe for Probe {
+        fn hermes_approvals(
+            &self,
+            executable: &Path,
+            config_base: &Path,
+        ) -> Result<String, CafleetError> {
+            self.approval_reads
+                .borrow_mut()
+                .push((executable.into(), config_base.into()));
+            self.approvals.clone().map_err(CafleetError::App)
+        }
+        fn hermes_client_env_passthrough(
+            &self,
+            executable: &Path,
+            config_base: &Path,
+        ) -> Result<String, CafleetError> {
+            self.passthrough_reads
+                .borrow_mut()
+                .push((executable.into(), config_base.into()));
+            self.passthrough.clone().map_err(CafleetError::App)
+        }
         fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
             assert!(crate::coding_agent::coding_agent(name).is_some());
             self.executable
@@ -542,11 +695,7 @@ mod tests {
     #[test]
     fn independent_failures_keep_executable_discovery_and_mark_dependent_checks_unavailable() {
         let home = tempfile::tempdir().unwrap();
-        let probe = Probe {
-            home: home.path().into(),
-            executable: false,
-            invalid: Some("OPENCODE_CONFIG_DIR"),
-        };
+        let probe = Probe::new(home.path(), false, Some("OPENCODE_CONFIG_DIR"));
         let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
         assert_eq!(find(&checks, "opencode.configuration").status, "error");
         assert_eq!(find(&checks, "opencode.executable").status, "info");
@@ -568,11 +717,7 @@ mod tests {
     fn healthy_database_distinguishes_absent_stale_current_and_failed_install_queries() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
-        let probe = Probe {
-            home: home.path().into(),
-            executable: true,
-            invalid: None,
-        };
+        let probe = Probe::new(home.path(), true, None);
         let schema = SchemaState::Head {
             version: crate::db::head_version(),
         };
@@ -682,11 +827,11 @@ mod tests {
                     std::fs::write(agents.join(file), "preset").unwrap();
                 }
             }
-            let probe = Probe {
-                home: home.path().into(),
+            let probe = Probe::new(
+                home.path(),
                 executable,
-                invalid: (!valid).then_some("OPENCODE_CONFIG_DIR"),
-            };
+                (!valid).then_some("OPENCODE_CONFIG_DIR"),
+            );
             let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
             let names = checks
                 .iter()
@@ -734,6 +879,234 @@ mod tests {
                     Exact(text) => assert_eq!(check.detail, text, "{context}"),
                 }
             }
+        }
+    }
+
+    mod hermes {
+        use crate::cli::setup::tests::*;
+
+        #[test]
+        fn plain_setup_without_hermes_on_path_installs_hermes_skills_and_skips_the_merge() {
+            let home = tempfile::tempdir().unwrap();
+            let mut conn = prepare_database(&settings(home.path())).unwrap();
+            let mut hermes = complete_hermes();
+            hermes.available = false;
+            install_selected(&mut conn, &[], &|_| None, home.path(), &mut hermes).unwrap();
+            assert!(hermes.calls.is_empty(), "{:?}", hermes.calls);
+            assert!(installed_agents(&conn).contains(&"hermes".to_owned()));
+            assert!(
+                home.path()
+                    .join(".hermes/skills/cafleet/SKILL.md")
+                    .is_file()
+            );
+        }
+
+        #[test]
+        fn plain_setup_with_hermes_on_path_merges_the_deny_rules() {
+            let home = tempfile::tempdir().unwrap();
+            let mut conn = prepare_database(&settings(home.path())).unwrap();
+            let mut hermes = FakeHermes::holding(&[]);
+            install_selected(&mut conn, &[], &|_| None, home.path(), &mut hermes).unwrap();
+            assert_eq!(hermes.calls[0], FakeHermes::path_call());
+            assert_eq!(hermes.deny, serde_json::json!(HERMES_DIRECTOR_ONLY_DENIES));
+            assert!(installed_agents(&conn).contains(&"hermes".to_owned()));
+        }
+
+        #[test]
+        fn explicit_hermes_setup_without_hermes_on_path_fails_without_recording_hermes() {
+            let home = tempfile::tempdir().unwrap();
+            let mut conn = prepare_database(&settings(home.path())).unwrap();
+            let mut hermes = complete_hermes();
+            hermes.available = false;
+            let failure = install_selected(
+                &mut conn,
+                &[CodingAgent::Hermes],
+                &|_| None,
+                home.path(),
+                &mut hermes,
+            )
+            .expect_err("explicit hermes setup requires the binary");
+            assert_eq!(failure.exit_code(), 1);
+            assert_eq!(
+                failure.message(),
+                format!(
+                    "failed to install hermes approval rules into {}: binary hermes not found on PATH",
+                    home.path().join(".hermes").display()
+                )
+            );
+            assert!(installed_agents(&conn).is_empty());
+        }
+
+        #[test]
+        fn explicit_hermes_setup_uses_the_hermes_home_override() {
+            let home = tempfile::tempdir().unwrap();
+            let custom = home.path().join("hermes home");
+            let mut conn = prepare_database(&settings(home.path())).unwrap();
+            let mut hermes = complete_hermes();
+            install_selected(
+                &mut conn,
+                &[CodingAgent::Hermes],
+                &|name| (name == "HERMES_HOME").then(|| custom.display().to_string()),
+                home.path(),
+                &mut hermes,
+            )
+            .unwrap();
+            assert!(custom.join("skills/cafleet/SKILL.md").is_file());
+            assert!(!home.path().join(".hermes").exists());
+            let path: String = conn
+                .query_row(
+                    "SELECT path FROM asset_installs WHERE coding_agent='hermes'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(path, custom.display().to_string());
+        }
+
+        fn hermes_rows(probe: &Probe, home: &Path) -> Vec<(String, &'static str, String)> {
+            let checks = agent_checks(None, &SchemaState::Missing, probe, Ok(home));
+            let names = checks
+                .iter()
+                .map(|check| check.name.as_str())
+                .collect::<Vec<_>>();
+            let position = names
+                .iter()
+                .position(|name| *name == "hermes.executable")
+                .expect("hermes executable row");
+            assert_eq!(
+                names[position + 1..position + 4],
+                [
+                    "hermes.approvals.deny",
+                    "hermes.client_env_passthrough",
+                    "hermes.installation"
+                ]
+            );
+            assert_eq!(names[position - 1], "hermes.configuration");
+            checks[position + 1..position + 3]
+                .iter()
+                .map(|check| (check.name.clone(), check.status, check.detail.clone()))
+                .collect()
+        }
+
+        const DENY_OK: (&str, &str) = ("ok", "holds CAFleet's Director-only rules");
+        const PASSTHROUGH_OK: (&str, &str) = ("ok", "holds CAFleet's member names");
+
+        fn rows(
+            deny: (&'static str, &str),
+            passthrough: (&'static str, &str),
+        ) -> Vec<(String, &'static str, String)> {
+            vec![
+                ("hermes.approvals.deny".into(), deny.0, deny.1.into()),
+                (
+                    "hermes.client_env_passthrough".into(),
+                    passthrough.0,
+                    passthrough.1.into(),
+                ),
+            ]
+        }
+
+        #[test]
+        fn doctor_reports_a_healthy_hermes_configuration_from_one_read_each_of_the_resolved_home() {
+            let home = tempfile::tempdir().unwrap();
+            let mut probe = Probe::new(home.path(), true, None);
+            probe.approvals = Ok(serde_json::json!({
+                "mode": "manual",
+                "deny": HERMES_DIRECTOR_ONLY_DENIES,
+            })
+            .to_string());
+            assert_eq!(
+                hermes_rows(&probe, home.path()),
+                rows(DENY_OK, PASSTHROUGH_OK)
+            );
+            let read = [(
+                PathBuf::from("/fixture/bin/hermes"),
+                home.path().join(".hermes"),
+            )];
+            assert_eq!(*probe.approval_reads.borrow(), read);
+            assert_eq!(*probe.passthrough_reads.borrow(), read);
+        }
+
+        #[test]
+        fn doctor_marks_the_hermes_configuration_rows_unavailable_without_the_executable() {
+            let home = tempfile::tempdir().unwrap();
+            let probe = Probe::new(home.path(), false, None);
+            let absent = "unavailable: executable is absent";
+            assert_eq!(
+                hermes_rows(&probe, home.path()),
+                rows(("info", absent), ("info", absent))
+            );
+            assert!(probe.approval_reads.borrow().is_empty());
+            assert!(probe.passthrough_reads.borrow().is_empty());
+        }
+
+        #[test]
+        fn doctor_marks_the_hermes_configuration_rows_unavailable_for_an_invalid_hermes_home() {
+            let home = tempfile::tempdir().unwrap();
+            let probe = Probe::new(home.path(), true, Some("HERMES_HOME"));
+            for (_, status, detail) in hermes_rows(&probe, home.path()) {
+                assert_eq!(status, "info");
+                assert!(
+                    detail.starts_with("unavailable: configuration failed: "),
+                    "{detail}"
+                );
+            }
+            assert!(probe.approval_reads.borrow().is_empty());
+            assert!(probe.passthrough_reads.borrow().is_empty());
+        }
+
+        #[test]
+        fn doctor_reports_each_missing_hermes_entry_on_its_own_row() {
+            let home = tempfile::tempdir().unwrap();
+            let mut probe = Probe::new(home.path(), true, None);
+            probe.approvals = Ok(serde_json::json!({
+                "mode": "smart",
+                "deny": &HERMES_DIRECTOR_ONLY_DENIES[..5],
+            })
+            .to_string());
+            assert_eq!(
+                hermes_rows(&probe, home.path()),
+                rows(
+                    (
+                        "error",
+                        "hermes approvals.deny lacks CAFleet's Director-only rules: cafleet input reconcile *; run 'cafleet setup --coding-agent hermes'"
+                    ),
+                    PASSTHROUGH_OK
+                )
+            );
+            let mut probe = Probe::new(home.path(), true, None);
+            probe.passthrough =
+                Ok(serde_json::json!(["PATH", "CAFLEET_DATABASE_URL", "TMUX"]).to_string());
+            assert_eq!(
+                hermes_rows(&probe, home.path()),
+                rows(
+                    DENY_OK,
+                    (
+                        "error",
+                        &format!(
+                            "hermes terminal.client_env_passthrough lacks CAFleet's member names: {}; run 'cafleet setup --coding-agent hermes'",
+                            HERMES_CLIENT_ENV_PASSTHROUGH[2..].join(", ")
+                        )
+                    )
+                )
+            );
+        }
+
+        #[test]
+        fn doctor_reports_an_unreadable_hermes_configuration_on_the_row_it_feeds() {
+            let home = tempfile::tempdir().unwrap();
+            let unreadable = "cannot read hermes configuration through 'hermes config get': did not finish within its deadline";
+            let mut probe = Probe::new(home.path(), true, None);
+            probe.approvals = Err("did not finish within its deadline".into());
+            assert_eq!(
+                hermes_rows(&probe, home.path()),
+                rows(("error", unreadable), PASSTHROUGH_OK)
+            );
+            let mut probe = Probe::new(home.path(), true, None);
+            probe.passthrough = Err("did not finish within its deadline".into());
+            assert_eq!(
+                hermes_rows(&probe, home.path()),
+                rows(DENY_OK, ("error", unreadable))
+            );
         }
     }
 }

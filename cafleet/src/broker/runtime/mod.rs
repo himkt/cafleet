@@ -390,6 +390,45 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
     Ok(run)
 }
 
+pub(crate) fn native_session(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<Option<crate::coding_agent::hermes_settlement::NativeSession>, CafleetError> {
+    let stored: Option<String> = conn.query_row(
+        "SELECT native_session_json FROM member_runs WHERE run_id=?1",
+        [run_id],
+        |row| row.get(0),
+    )?;
+    stored
+        .map(|text| {
+            serde_json::from_str(&text).map_err(|cause| {
+                CafleetError::App(format!(
+                    "member_runs.native_session_json of run {run_id} is invalid: {cause}"
+                ))
+            })
+        })
+        .transpose()
+}
+
+pub(crate) fn set_native_session(
+    conn: &Connection,
+    run_id: i64,
+    session: &crate::coding_agent::hermes_settlement::NativeSession,
+) -> Result<(), CafleetError> {
+    let changed = conn.execute(
+        "UPDATE member_runs SET native_session_json=?1 WHERE run_id=?2",
+        params![
+            serde_json::to_string(session).expect("a native session serializes"),
+            run_id
+        ],
+    )?;
+    if changed == 1 {
+        Ok(())
+    } else {
+        Err(CafleetError::App(format!("member run {run_id} is missing")))
+    }
+}
+
 pub(crate) fn reserve_event_sequences(
     conn: &mut Connection,
     owner: &RunOwner,

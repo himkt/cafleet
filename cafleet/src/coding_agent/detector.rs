@@ -3913,4 +3913,527 @@ mod tests {
             }
         }
     }
+
+    mod hermes_profile {
+        use crate::broker::runtime::InteractionCloseReason;
+        use crate::broker::runtime::RuntimeEventKind;
+        use crate::coding_agent::detector::tests::*;
+        use crate::runtime::observation::test_support::NOW;
+        use crate::runtime::observation::test_support::open;
+        use crate::runtime::observation::test_support::tracker;
+        use std::collections::BTreeSet;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        const VERSION: &str = "2026.9.24";
+        const ESCALATE: &str = "hermes-approval-escalate";
+        const OVERRIDE: &str = "hermes-approval-override";
+        const IDLE: &str = "hermes-idle-composer";
+        const CHOICES: [&str; 2] = ["Allow once", "Deny"];
+        const FOOTER: &str = "↑/↓ to select";
+        const TIMEOUT: &str = "escalate-timeout-closure-tmux-120";
+        const COMPOSER: &str = "composer-empty-tmux-120";
+
+        const ESCALATE_ROW: &[&str] = &["bash -c '/tmp/chp/forms/permission-probe escalate'"];
+        const ESCALATE_ROWS_040: &[&str] =
+            &["bash -c", "'/tmp/chp/forms/permission-probe", "escalate'"];
+        const ESCALATE_ROWS_037: &[&str] =
+            &["bash -c", "'/tmp/chp/forms/permission-", "probe escalate'"];
+        const OVERRIDE_ROW: &[&str] = &["bash -c '/tmp/chp/forms/permission-probe override'"];
+        const OVERRIDE_ROWS_040: &[&str] =
+            &["bash -c", "'/tmp/chp/forms/permission-probe", "override'"];
+        const OVERRIDE_ROWS_028: &[&str] =
+            &["bash -c '/tmp/chp/forms/", "permission-probe", "override'"];
+
+        /// Every captured form screen, the request rule it raises and its displayed command rows.
+        const FORMS: [(&str, &str, &[&str]); 20] = [
+            ("escalate-tmux-120", ESCALATE, ESCALATE_ROW),
+            ("escalate-tmux-080", ESCALATE, ESCALATE_ROW),
+            ("escalate-tmux-057", ESCALATE, ESCALATE_ROW),
+            ("escalate-tmux-040", ESCALATE, ESCALATE_ROWS_040),
+            ("escalate-min-tmux-037", ESCALATE, ESCALATE_ROWS_037),
+            ("escalate-deny-focus-tmux-057", ESCALATE, ESCALATE_ROW),
+            ("escalate-herdr-120", ESCALATE, ESCALATE_ROW),
+            ("escalate-herdr-080", ESCALATE, ESCALATE_ROW),
+            ("escalate-herdr-057", ESCALATE, ESCALATE_ROW),
+            ("escalate-herdr-040", ESCALATE, ESCALATE_ROWS_040),
+            ("override-tmux-120", OVERRIDE, OVERRIDE_ROW),
+            ("override-tmux-080", OVERRIDE, OVERRIDE_ROW),
+            ("override-tmux-057", OVERRIDE, OVERRIDE_ROW),
+            ("override-tmux-040", OVERRIDE, OVERRIDE_ROWS_040),
+            ("override-survey-tmux-028", OVERRIDE, OVERRIDE_ROWS_028),
+            ("override-deny-focus-tmux-057", OVERRIDE, OVERRIDE_ROW),
+            ("override-herdr-120", OVERRIDE, OVERRIDE_ROW),
+            ("override-herdr-080", OVERRIDE, OVERRIDE_ROW),
+            ("override-herdr-057", OVERRIDE, OVERRIDE_ROW),
+            ("override-herdr-040", OVERRIDE, OVERRIDE_ROWS_040),
+        ];
+        const CONTINUATIONS: [&str; 8] = [
+            "escalate-allow-continuation-tmux-120",
+            "escalate-allow-continuation-tmux-040",
+            "escalate-deny-continuation-tmux-080",
+            "escalate-deny-enter-continuation-tmux-057",
+            "override-allow-continuation-tmux-120",
+            "override-allow-enter-continuation-tmux-040",
+            "override-deny-continuation-tmux-080",
+            "override-deny-enter-continuation-tmux-057",
+        ];
+
+        fn fixture(stage: &str) -> String {
+            bundled_screen(&format!("hermes-{VERSION}-{stage}-1"))
+        }
+
+        fn fixture_lines(stage: &str) -> Vec<String> {
+            let screen: Value = serde_json::from_str(&fixture(stage)).unwrap();
+            screen["lines"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|line| line.as_str().unwrap().to_owned())
+                .collect()
+        }
+
+        fn size(stage: &str) -> TerminalSize {
+            let screen: Value = serde_json::from_str(&fixture(stage)).unwrap();
+            TerminalSize {
+                rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
+                cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
+            }
+        }
+
+        fn replay(stage: &str, change: impl FnOnce(&mut Vec<String>)) -> ScreenSnapshot {
+            replay_native_fixture(&fixture(stage), change, false, None)
+        }
+
+        fn observe(screen: &ScreenSnapshot) -> ScreenObservation {
+            bundled_detector(CodingAgent::Hermes, VERSION)
+                .observe(screen)
+                .unwrap()
+        }
+
+        fn observed(stage: &str) -> ScreenObservation {
+            observe(&replay(stage, |_| {}))
+        }
+
+        fn plan(rule: &str, decision: PermissionDecision) -> AnswerPlan {
+            ProfileCatalog::bundled()
+                .unwrap()
+                .answer_plan(CodingAgent::Hermes, VERSION, rule, decision)
+                .expect("measured bundled Hermes answer plan")
+        }
+
+        fn last_row(lines: &[String], text: &str) -> usize {
+            lines
+                .iter()
+                .rposition(|line| line.contains(text))
+                .unwrap_or_else(|| panic!("a row contains {text:?}"))
+        }
+
+        fn assert_request(observation: &ScreenObservation, rule: &str, rows: &[&str], case: &str) {
+            assert_eq!(
+                observation.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "{case}"
+            );
+            assert_eq!(observation.rule_id, rule, "{case}");
+            assert_eq!(
+                observation.match_evidence,
+                MatchEvidence::Complete,
+                "{case}"
+            );
+            assert_eq!(
+                observation.raw_evidence["operation"],
+                rows.join("\n"),
+                "{case}"
+            );
+            assert_eq!(
+                observation.raw_evidence["operation_rows"],
+                rows.len(),
+                "{case}"
+            );
+            assert_eq!(
+                observation.raw_evidence["choices"],
+                json!(CHOICES),
+                "{case}"
+            );
+            assert_eq!(
+                observation.raw_evidence["native_version"], VERSION,
+                "{case}"
+            );
+            assert!(!observation.verified_noninteraction, "{case}");
+            assert!(observation.fingerprint.is_some(), "{case}");
+        }
+
+        fn assert_no_request(observation: &ScreenObservation, case: &str) {
+            assert_ne!(
+                observation.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "{case}"
+            );
+        }
+
+        /// Repaints the live countdown, where the width shows it, and the status-row spinner frame.
+        fn redraw(lines: &mut [String]) {
+            let footer = last_row(lines, FOOTER);
+            if let Some(open) = lines[footer].rfind('(') {
+                lines[footer].replace_range(open.., "(9s)");
+            }
+            let status = last_row(lines, "💻 bash -c");
+            let spinner = lines[status]
+                .chars()
+                .nth(3)
+                .expect("the status row starts with its spinner frame");
+            lines[status] = lines[status].replacen(spinner, "⠿", 1);
+        }
+
+        #[test]
+        fn hermes_detects_each_captured_form_at_every_width_on_both_multiplexers() {
+            for (stage, rule, rows) in FORMS {
+                assert_request(&observed(stage), rule, rows, stage);
+            }
+            let catalog = ProfileCatalog::bundled().unwrap();
+            let screen = replay("escalate-tmux-120", |_| {});
+            for version in [None, Some("2026.9.23")] {
+                let below = Detector::new(&catalog, CodingAgent::Hermes, version)
+                    .observe(&screen)
+                    .unwrap();
+                assert_eq!(below.kind, ObservationKind::Unknown, "{version:?}");
+                assert_eq!(below.match_evidence, MatchEvidence::Absent, "{version:?}");
+            }
+        }
+
+        #[test]
+        fn hermes_focus_follows_the_marker_row_and_a_form_without_it_matches_no_plan() {
+            let detector = bundled_detector(CodingAgent::Hermes, VERSION);
+            for (stage, rule, _) in FORMS {
+                let screen = replay(stage, |_| {});
+                let mut focused = BTreeSet::new();
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    let matched = detector
+                        .match_answer(&screen, &plan(rule, decision))
+                        .unwrap()
+                        .unwrap_or_else(|| panic!("{stage} matches its {decision:?} plan"));
+                    assert_eq!(matched.choices(), CHOICES.map(str::to_owned), "{stage}");
+                    focused.insert(matched.focus_capture().to_owned());
+                }
+                let marker = match (stage.contains("-deny-focus-"), rule) {
+                    (false, _) => "❯ 1. ",
+                    (true, ESCALATE) => "❯ 4. ",
+                    (true, _) => "❯ 2. ",
+                };
+                assert_eq!(focused.len(), 1, "{stage}: both plans share the focus");
+                assert!(
+                    focused.first().unwrap().contains(marker),
+                    "{stage}: {focused:?}"
+                );
+                let unfocused = replay(stage, |lines| {
+                    let marked = last_row(lines, "│ ❯ ");
+                    lines[marked] = lines[marked].replacen("│ ❯ ", "│   ", 1);
+                });
+                assert!(
+                    detector
+                        .match_answer(&unfocused, &plan(rule, PermissionDecision::Allow))
+                        .unwrap()
+                        .is_none(),
+                    "{stage} without its focus marker"
+                );
+            }
+        }
+
+        #[test]
+        fn hermes_answer_plans_are_the_measured_single_digit_stages_of_their_own_form() {
+            for (rule, decision, choice, byte) in [
+                (ESCALATE, PermissionDecision::Allow, "allow-once", b'1'),
+                (ESCALATE, PermissionDecision::Deny, "deny-once", b'4'),
+                (OVERRIDE, PermissionDecision::Allow, "allow-once", b'1'),
+                (OVERRIDE, PermissionDecision::Deny, "deny-once", b'2'),
+            ] {
+                let plan = plan(rule, decision);
+                assert_eq!(plan.choice_id(), choice, "{rule} {decision:?}");
+                assert_eq!(plan.capability().backend(), CodingAgent::Hermes);
+                assert_eq!(plan.capability().native_version(), VERSION);
+                assert_eq!(plan.capability().request_rule_id(), rule);
+                assert_eq!(plan.capability().decision(), decision);
+                assert_eq!(plan.stages().len(), 1, "{rule} {decision:?}");
+                let stage = &plan.stages()[0];
+                assert_eq!(stage.bytes(), &[byte], "{rule} {decision:?}");
+                assert_eq!(stage.required_rule_id(), rule);
+                assert_eq!(stage.required_choice_id(), choice);
+            }
+            let detector = bundled_detector(CodingAgent::Hermes, VERSION);
+            for (stage, other) in [
+                ("override-tmux-120", ESCALATE),
+                ("escalate-tmux-120", OVERRIDE),
+            ] {
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    assert!(
+                        detector
+                            .match_answer(&replay(stage, |_| {}), &plan(other, decision))
+                            .unwrap()
+                            .is_none(),
+                        "{other} {decision:?} plan on {stage}"
+                    );
+                }
+            }
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                assert!(
+                    ProfileCatalog::bundled()
+                        .unwrap()
+                        .answer_plan(CodingAgent::Hermes, VERSION, IDLE, decision)
+                        .is_none()
+                );
+            }
+        }
+
+        #[test]
+        fn hermes_forms_past_their_layout_limit_or_clipped_yield_no_request() {
+            for stage in ["escalate-survey-tmux-036", "override-survey-tmux-027"] {
+                assert_no_request(&observed(stage), stage);
+            }
+            for (stage, _, _) in FORMS {
+                let bottomless = replay(stage, |lines| {
+                    let bottom = last_row(lines, "╰");
+                    lines[bottom].clear();
+                });
+                assert_no_request(
+                    &observe(&bottomless),
+                    &format!("{stage} without its border"),
+                );
+            }
+            let truncated = replay("escalate-tmux-120", |lines| {
+                let command = last_row(lines, "│ bash -c '/tmp/chp/forms/permission-probe");
+                lines[command] = format!("{:<57}│", "│ bash -c '/tmp/chp/forms/permission-pro...");
+                let deny = last_row(lines, "│   4. Deny");
+                lines.insert(deny + 1, format!("{:<57}│", "│   5. Show full command"));
+                lines.remove(0);
+            });
+            assert_no_request(&observe(&truncated), "a truncated command");
+        }
+
+        #[test]
+        fn hermes_continuation_timeout_and_submitted_screens_are_the_idle_composer() {
+            for stage in CONTINUATIONS.into_iter().chain([
+                TIMEOUT,
+                "composer-prompt-submitted-tmux-120",
+                "composer-exec-submitted-tmux-120",
+            ]) {
+                let observation = observed(stage);
+                assert_no_request(&observation, stage);
+                assert_eq!(observation.kind, ObservationKind::ComposerEmpty, "{stage}");
+                assert_eq!(observation.rule_id, IDLE, "{stage}");
+            }
+        }
+
+        #[test]
+        fn hermes_idle_composer_is_a_verified_empty_composer_and_a_draft_is_not() {
+            let idle = observed(COMPOSER);
+            assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
+            assert_eq!(idle.rule_id, IDLE);
+            assert_eq!(idle.match_evidence, MatchEvidence::Complete);
+            assert!(idle.verified_noninteraction);
+            for stage in [
+                "composer-prompt-literal-tmux-120",
+                "composer-exec-literal-tmux-120",
+            ] {
+                let draft = observed(stage);
+                assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "{stage}");
+                assert!(!draft.verified_noninteraction, "{stage}");
+            }
+            let prompt = last_row(&fixture_lines(COMPOSER), "❯ ");
+            let away = observe(&replay_native_fixture(
+                &fixture(COMPOSER),
+                |_| {},
+                false,
+                Some((u16::try_from(prompt).unwrap(), 0)),
+            ));
+            assert_ne!(
+                away.kind,
+                ObservationKind::ComposerEmpty,
+                "cursor before the prefix end"
+            );
+            assert!(!away.verified_noninteraction);
+            for (stage, _, _) in FORMS {
+                assert!(!observed(stage).verified_noninteraction, "{stage}");
+            }
+        }
+
+        #[test]
+        fn hermes_composer_plans_submit_a_prompt_and_a_native_exec_in_separate_stages() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            for (operation, name, literal, typed) in [
+                (ComposerOperation::Prompt, "prompt", "ok", b"ok".to_vec()),
+                (
+                    ComposerOperation::Exec,
+                    "exec",
+                    "echo x",
+                    b"! echo x".to_vec(),
+                ),
+            ] {
+                let plan = bundled
+                    .composer_plan(CodingAgent::Hermes, VERSION, operation)
+                    .unwrap_or_else(|| panic!("{name} plan"));
+                assert_eq!(plan.rule_ids(), [IDLE.to_owned()]);
+                assert_eq!(plan.stages(literal).unwrap(), [typed, b"\r".to_vec()]);
+            }
+        }
+
+        #[test]
+        fn hermes_countdown_and_spinner_redraws_keep_the_request_identity() {
+            for (stage, rule, rows) in FORMS {
+                let original = observed(stage);
+                let redrawn = observe(&replay(stage, |lines| redraw(lines)));
+                assert_request(&redrawn, rule, rows, stage);
+                assert!(redrawn.fingerprint == original.fingerprint, "{stage}");
+            }
+        }
+
+        #[test]
+        fn hermes_fragmented_ansi_and_utf8_reads_reconstruct_the_same_observation() {
+            for (stage, rule, rows) in [
+                ("escalate-tmux-057", ESCALATE, ESCALATE_ROW),
+                ("override-herdr-040", OVERRIDE, OVERRIDE_ROWS_040),
+            ] {
+                let painted = String::from_utf8(native_fixture_bytes(&fixture(stage))).unwrap();
+                let styled = painted
+                    .replacen(
+                        "❯ 1. Allow once",
+                        "\x1b[1;38;5;220m❯ 1. Allow once\x1b[0m",
+                        1,
+                    )
+                    .replacen(
+                        "⚠️  Dangerous Command",
+                        "\x1b[1;33m⚠️  Dangerous Command\x1b[0m",
+                        1,
+                    );
+                assert_ne!(styled, painted, "{stage} carries the styled rows");
+                let bytes = styled.into_bytes();
+                let whole = {
+                    let mut state = TerminalState::new(size(stage)).unwrap();
+                    state.feed(&bytes).unwrap();
+                    observe(&state.snapshot())
+                };
+                assert_request(&whole, rule, rows, stage);
+                for chunk in [1, 2, 3, 5, 7] {
+                    let mut state = TerminalState::new(size(stage)).unwrap();
+                    for piece in bytes.chunks(chunk) {
+                        state.feed(piece).unwrap();
+                    }
+                    let split = observe(&state.snapshot());
+                    assert_request(&split, rule, rows, stage);
+                    assert!(
+                        split.fingerprint == whole.fingerprint,
+                        "{stage} chunk={chunk}"
+                    );
+                    assert_eq!(
+                        split.raw_evidence, whole.raw_evidence,
+                        "{stage} chunk={chunk}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn hermes_form_on_the_alternate_screen_is_no_request_until_drawn_on_the_primary_screen() {
+            let stage = "escalate-tmux-120";
+            let alternate = observe(&replay_native_fixture(&fixture(stage), |_| {}, true, None));
+            assert_no_request(&alternate, "the form on the alternate screen");
+            let bytes = native_fixture_bytes(&fixture(stage));
+            let mut state = TerminalState::new(size(stage)).unwrap();
+            state.feed(b"\x1b[?1049h").unwrap();
+            state.feed(&bytes).unwrap();
+            state.feed(b"\x1b[?1049l").unwrap();
+            assert_no_request(&observe(&state.snapshot()), "the restored primary screen");
+            state.feed(&bytes).unwrap();
+            assert_request(
+                &observe(&state.snapshot()),
+                ESCALATE,
+                ESCALATE_ROW,
+                "the form drawn on the primary screen",
+            );
+        }
+
+        #[test]
+        fn hermes_form_text_outside_a_live_form_is_no_request() {
+            let form = fixture_lines("escalate-tmux-120");
+            let top = last_row(&form, "╭");
+            let footer = last_row(&form, FOOTER);
+            let boxed = form[top..=last_row(&form, "╰")].to_vec();
+            let scrollback = replay(COMPOSER, |lines| {
+                let start = last_row(lines, "⚠ Approval:");
+                for (offset, row) in boxed.iter().enumerate() {
+                    lines[start + offset] = row.clone();
+                }
+            });
+            assert_no_request(
+                &observe(&scrollback),
+                "a closed form above the idle composer",
+            );
+            let quoted = replay("escalate-tmux-120", |lines| {
+                for row in &mut lines[top..=footer] {
+                    if !row.is_empty() {
+                        *row = format!("    {row}");
+                    }
+                }
+            });
+            assert_no_request(&observe(&quoted), "the form quoted in a cat of a log");
+            let footerless = replay("escalate-tmux-120", |lines| lines[footer].clear());
+            assert_no_request(&observe(&footerless), "the form without its live footer");
+            let unboxed = replay("escalate-tmux-120", |lines| {
+                for row in &mut lines[top..=footer] {
+                    *row = row.replace(['│', '╭', '╮', '╰', '╯', '─'], " ");
+                }
+            });
+            assert_no_request(&observe(&unboxed), "the form text in model output");
+        }
+
+        #[test]
+        fn hermes_redraws_stay_one_episode_the_timeout_closes_not_visible_and_a_repeat_reopens() {
+            let at = |screen: &ScreenSnapshot, output_seq: u64| {
+                let mut observation = observe(screen);
+                observation.output_seq = output_seq;
+                observation.raw_evidence["screen_seq"] = json!(output_seq);
+                observation
+            };
+            let form = replay("escalate-tmux-120", |_| {});
+            let redrawn = replay("escalate-tmux-120", |lines| redraw(lines));
+            let timeout = replay(TIMEOUT, |_| {});
+            let origin = Instant::now();
+            let millis = |value: u64| origin + Duration::from_millis(value);
+            let mut tracker = tracker();
+            open(&mut tracker, &at(&form, 1), origin);
+            let first = tracker.active_episode().expect("the form opens an episode");
+            for (seq, time) in [(2, 200), (3, 400), (4, 600)] {
+                let screen = if seq % 2 == 0 { &redrawn } else { &form };
+                let update = tracker
+                    .observe(&at(screen, seq), millis(time), NOW)
+                    .unwrap();
+                assert!(
+                    update.transitions.is_empty(),
+                    "{time} ms: {:?}",
+                    update.transitions
+                );
+                assert_eq!(tracker.active_episode(), Some(first));
+            }
+            let closes = (0..20u64)
+                .flat_map(|step| {
+                    tracker
+                        .observe(&at(&timeout, 10 + step), millis(700 + 50 * step), NOW)
+                        .unwrap()
+                        .transitions
+                })
+                .filter(|transition| transition.kind == RuntimeEventKind::InteractionClosed)
+                .collect::<Vec<_>>();
+            assert_eq!(closes.len(), 1, "{closes:?}");
+            assert_eq!(
+                closes[0].close_reason,
+                Some(InteractionCloseReason::NotVisible)
+            );
+            assert_eq!(tracker.active_episode(), None);
+            open(&mut tracker, &at(&form, 100), millis(2000));
+            let second = tracker
+                .active_episode()
+                .expect("the repeated form opens an episode");
+            assert_ne!(second.0, first.0, "a repeated prompt is a separate episode");
+        }
+    }
 }

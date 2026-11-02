@@ -203,6 +203,18 @@ pub(crate) trait DeletionHost {
     ) -> Result<crate::runtime::ShutdownOutcome, CafleetError> {
         crate::runtime::request_shutdown(conn, run, deadline.instant())
     }
+    fn settle_hermes(
+        &mut self,
+        _conn: &Connection,
+        run: &crate::broker::runtime::RunRecord,
+        _pane_id: &str,
+        _deadline: Deadline,
+    ) -> Result<(), CafleetError> {
+        Err(CafleetError::App(format!(
+            "hermes settlement of run {} requires the member's multiplexer",
+            run.run_id
+        )))
+    }
     fn close_pane(
         &mut self,
         placement: &Placement,
@@ -214,6 +226,15 @@ pub(crate) trait DeletionHost {
 pub(crate) struct MultiplexerDeletionHost<'a>(pub(crate) &'a AnyMultiplexer);
 
 impl DeletionHost for MultiplexerDeletionHost<'_> {
+    fn settle_hermes(
+        &mut self,
+        conn: &Connection,
+        run: &crate::broker::runtime::RunRecord,
+        pane_id: &str,
+        deadline: Deadline,
+    ) -> Result<(), CafleetError> {
+        crate::coding_agent::hermes_settlement::settle_run(conn, self.0, run, pane_id, deadline)
+    }
     fn close_pane(
         &mut self,
         placement: &Placement,
@@ -258,6 +279,16 @@ impl NativeFleetDeletionHost<'_> {
 }
 
 impl DeletionHost for NativeFleetDeletionHost<'_> {
+    fn settle_hermes(
+        &mut self,
+        conn: &Connection,
+        run: &crate::broker::runtime::RunRecord,
+        pane_id: &str,
+        deadline: Deadline,
+    ) -> Result<(), CafleetError> {
+        self.multiplexer(deadline)?
+            .settle_hermes(conn, run, pane_id, deadline)
+    }
     fn close_pane(
         &mut self,
         placement: &Placement,
@@ -312,7 +343,7 @@ pub(crate) fn end_member(
     snapshot: &mut MemberRecord,
     held: &PaneLock,
     host: &mut impl DeletionHost,
-    deadline: Deadline,
+    deadline: &mut Deadline,
     scope: &mut dyn FnMut(&Connection) -> Result<(), CafleetError>,
 ) -> Result<String, CafleetError> {
     use crate::broker::runtime::CleanupState;
@@ -325,6 +356,25 @@ pub(crate) fn end_member(
         .mux_pane_id
         .clone()
         .expect("an ended member has a concrete pane");
+    let hermes_run = with_database_budget(conn, *deadline, |conn| {
+        revalidate_member(conn, snapshot, "before cleanup")?;
+        scope(conn)?;
+        Ok(crate::broker::runtime::member_runtime(conn, member_id)?
+            .map(|runtime| runtime.run)
+            .filter(|run| run.backend == crate::coding_agent::CodingAgent::Hermes.name()))
+    })?;
+    if let Some(run) = hermes_run {
+        // Settlement has its own budget; the time it takes is added to the deletion deadline.
+        let started = std::time::Instant::now();
+        host.settle_hermes(
+            conn,
+            &run,
+            &pane_id,
+            crate::coding_agent::hermes_settlement::settlement_deadline(),
+        )?;
+        *deadline = deadline.extended_by(started.elapsed());
+    }
+    let deadline = *deadline;
     with_database_budget(conn, deadline, |conn| {
         revalidate_member(conn, snapshot, "before cleanup")?;
         scope(conn)?;
@@ -421,7 +471,7 @@ pub(crate) fn delete_fleet_with_host(
     conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
-    deadline: Deadline,
+    mut deadline: Deadline,
     host: &mut impl DeletionHost,
 ) -> Result<DeletedFleet, CafleetError> {
     with_database_budget(conn, deadline, |conn| {
@@ -483,7 +533,15 @@ pub(crate) fn delete_fleet_with_host(
                 Err(changed_error())
             }
         };
-        match end_member(conn, settings, member, held, host, deadline, &mut scope) {
+        match end_member(
+            conn,
+            settings,
+            member,
+            held,
+            host,
+            &mut deadline,
+            &mut scope,
+        ) {
             Ok(pane_status) => {
                 ended.push(DeletedMember {
                     member_id,
@@ -572,6 +630,7 @@ fn unplaced_member_outcomes(
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    use std::time::Duration;
     use std::time::Instant;
 
     use rusqlite::Connection;
@@ -626,7 +685,11 @@ pub(crate) mod test_support {
         pub(crate) restored: usize,
         pub(crate) recovered: Option<RunRecord>,
         pub(crate) runner_gone: bool,
+        pub(crate) hermes_failure: Option<String>,
+        settled: Option<Duration>,
     }
+
+    const SETTLEMENT_TIME: Duration = Duration::from_millis(30);
 
     impl Host {
         pub(crate) fn fleet(
@@ -676,7 +739,23 @@ pub(crate) mod test_support {
                 restored: 0,
                 recovered: None,
                 runner_gone: false,
+                hermes_failure: None,
+                settled: None,
             }
+        }
+
+        /// Every cleanup step shares the deletion deadline, which a settlement extends by the
+        /// time it took.
+        fn assert_deadline(&mut self, deadline: Instant) {
+            if let Some(settlement) = self.settled.take() {
+                let extension = deadline.saturating_duration_since(self.deadline);
+                assert!(
+                    extension >= settlement && extension < settlement + Duration::from_secs(1),
+                    "{extension:?}"
+                );
+                self.deadline = deadline;
+            }
+            assert_eq!(deadline, self.deadline);
         }
 
         fn assert_pane_owned(&self, placement: &Placement) {
@@ -703,6 +782,36 @@ pub(crate) mod test_support {
     }
 
     impl crate::cli::fleet::DeletionHost for Host {
+        fn settle_hermes(
+            &mut self,
+            conn: &Connection,
+            run: &RunRecord,
+            pane_id: &str,
+            deadline: crate::cli::fleet::Deadline,
+        ) -> Result<(), CafleetError> {
+            self.assert_connection(conn);
+            let budget = deadline.instant().saturating_duration_since(Instant::now());
+            assert!(
+                budget > Duration::from_secs(19) && budget <= Duration::from_secs(20),
+                "each Hermes member gets its own settlement budget: {budget:?}"
+            );
+            assert!(deadline.instant() > self.deadline);
+            let placement = crate::broker::get_member(conn, run.member_id, run.fleet_id)
+                .unwrap()
+                .unwrap()
+                .placement
+                .unwrap();
+            assert_eq!(placement.mux_pane_id.as_deref(), Some(pane_id));
+            self.assert_pane_owned(&placement);
+            self.calls.push("settle");
+            std::thread::sleep(SETTLEMENT_TIME);
+            self.settled = Some(SETTLEMENT_TIME);
+            match &self.hermes_failure {
+                Some(cause) => Err(CafleetError::App(cause.clone())),
+                None => Ok(()),
+            }
+        }
+
         fn shutdown(
             &mut self,
             conn: &mut Connection,
@@ -710,7 +819,7 @@ pub(crate) mod test_support {
             deadline: crate::cli::fleet::Deadline,
         ) -> Result<ShutdownOutcome, CafleetError> {
             self.assert_connection(conn);
-            assert_eq!(deadline.instant(), self.deadline);
+            self.assert_deadline(deadline.instant());
             let placement = crate::broker::get_member(conn, run.member_id, run.fleet_id)
                 .unwrap()
                 .unwrap()
@@ -767,7 +876,7 @@ pub(crate) mod test_support {
                 );
             }
             self.assert_connection(conn);
-            assert_eq!(deadline.instant(), self.deadline);
+            self.assert_deadline(deadline.instant());
             assert_eq!(expected_run.member_id, member_id);
             self.assert_pane_owned(expected_placement);
             held.validate_binding(&settings.database_url, expected_placement)
@@ -811,7 +920,7 @@ pub(crate) mod test_support {
             placement: &Placement,
             deadline: crate::cli::fleet::Deadline,
         ) -> Result<PostCloseLayout, CafleetError> {
-            assert_eq!(deadline.instant(), self.deadline);
+            self.assert_deadline(deadline.instant());
             self.assert_pane_owned(placement);
             self.calls.push("close");
             self.panes.push(placement.clone());
@@ -923,6 +1032,35 @@ mod tests {
     use crate::runtime::test_support::*;
     use crate::runtime::*;
     use crate::time::Deadline;
+
+    #[test]
+    fn fleet_create_accepts_every_registered_backend_including_hermes() {
+        use clap::Parser;
+        for &agent in crate::coding_agent::CodingAgent::all() {
+            let parsed = crate::cli::CliArgs::try_parse_from([
+                "cafleet",
+                "fleet",
+                "create",
+                "--name",
+                "fixture",
+                "--coding-agent",
+                agent.name(),
+            ]);
+            assert!(parsed.is_ok(), "{agent:?}");
+        }
+        assert!(
+            crate::cli::CliArgs::try_parse_from([
+                "cafleet",
+                "fleet",
+                "create",
+                "--name",
+                "fixture",
+                "--coding-agent",
+                "hermes",
+            ])
+            .is_ok()
+        );
+    }
 
     mod fleet {
         use crate::broker::Placement;
@@ -1118,6 +1256,61 @@ mod tests {
             );
             assert_eq!(host.calls, ["shutdown"]);
             assert_registry_active(&fixture);
+        }
+
+        #[test]
+        fn hermes_member_deletion_settles_before_shutdown_and_an_unverified_stop_keeps_the_member()
+        {
+            for failure in [
+                None,
+                Some(
+                    "hermes work for member 2 could not be verified as stopped: Hermes did not report /stop; member was not deleted.",
+                ),
+            ] {
+                let mut fixture = Fixture::new();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET backend='hermes' WHERE run_id=?1",
+                        [fixture.run.run_id],
+                    )
+                    .unwrap();
+                let settings = settings(&fixture);
+                let deadline = Deadline::new();
+                let mut host = Host::fleet(settings.clone(), fixture.run.run_id, deadline);
+                host.hermes_failure = failure.map(str::to_owned);
+                let result = delete_fleet_with_host(
+                    &mut fixture.conn,
+                    &settings,
+                    fixture.run.fleet_id,
+                    deadline,
+                    &mut host,
+                );
+                match failure {
+                    None => {
+                        result.unwrap();
+                        assert_eq!(host.calls, ["settle", "shutdown", "close"]);
+                    }
+                    Some(cause) => {
+                        let error = result.expect_err(cause);
+                        assert_eq!(error.exit_code(), 1);
+                        assert!(error.message().contains(cause), "{}", error.message());
+                        assert_eq!(
+                            host.calls,
+                            ["settle"],
+                            "no shutdown after an unverified stop"
+                        );
+                        assert_registry_active(&fixture);
+                        assert!(
+                            !storage::get_run(&fixture.conn, fixture.run.run_id)
+                                .unwrap()
+                                .status
+                                .terminal(),
+                            "the runner keeps running for a retry"
+                        );
+                    }
+                }
+            }
         }
 
         #[test]

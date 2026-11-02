@@ -8,7 +8,7 @@ Model data is refreshed at least every 30 days (last refreshed: 2026-10-25). Pri
 
 ## Role requirements
 
-A role verdict is `yes` only when evidence establishes every Eligible-tier requirement: native goal lifecycle and concurrent background execution for Directors; runner-compatible PTY, explicit detection coverage and non-interactive omitted launch policy (native automatic review when available, otherwise fixed spawn-compatible allow/deny) for Members. Otherwise record `no` with the missing evidence/failure. Bundled support leaves verdicts unchanged. Evidence carries forward until re-check; eligible Directors without verified reception use manual `poll`/finite `wait`, preserving goal/decision authority.
+A role verdict is `yes` only when evidence establishes every Eligible-tier requirement; otherwise record `no` with the missing evidence/failure. Directors need native goal lifecycle controls and background execution while supervision continues, established by a CAFleet stream probe: the candidate starts `cafleet message listen` or a finite `cafleet message wait` through its native background facility, keeps working on unrelated tasks, and consumes another member's broker records without user input, during that work or at the session's next turn boundary, streamed or as a completion-notified finite receive renewed after each completion. Members need a runner-compatible PTY, an explicit detection-coverage declaration and a classified default launch mode (`auto` — native automatic review or a fixed allow/deny policy — whenever the backend offers one; otherwise `manual`, native interactive approval) whose bundled profile detects every approval form the mode renders and declares request-bound allow and deny answers, outside the profile's recorded layout limits. An approval form is a native permission request that blocks the member until answered; question, trust, update and startup dialogs are outside it. A recorded layout limit is a profile-documented rendering no request rule matches (narrower than `W_min`, wrapped or clipped operation, uncaptured geometry), answered manually on the native surface. A default mode with no approval form meets the bar without request rules. Approval-prompt coverage counts toward the Member verdict; other bundled support leaves verdicts unchanged, and a failed probe or unselected profile still launches with `coverage=unknown`. Evidence carries forward until re-check; eligible Directors without verified reception use manual `poll`/finite `wait`, preserving goal/decision authority.
 
 ## claude
 
@@ -17,7 +17,7 @@ A role verdict is `yes` only when evidence establishes every Eligible-tier requi
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
-| `{permission_flags}` | `--permission-mode auto` |
+| `{permission_flags}` | `--permission-mode auto` (default mode `auto`, class `auto`) |
 | `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
 | `{skill_loader}` | the Skill tool |
 | `{effort_levels}` | `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`) |
@@ -59,7 +59,7 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Per-record reception follows the native recipe below. | [Director wake](../roles/director.md#director-wake) |
 | Receive Director records through one owned Monitor task using the native recipe below. Preserve the supplied `/goal` state and pending user decisions across events and renewal. | [Director wake](../roles/director.md#director-wake); [native reception](#claude-native-director-reception) |
 | Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](../roles/director.md#director-side-dispatch) |
-| Omitted `auto` runs spawn-allowed broker tools and matching host allows; its classifier reviews other calls while native rules, hooks and managed policy remain authoritative. Route refused calls; explicit interactive policies wait for a request-bound Director/user answer or manual input, and protected edits retain host boundaries. Outside-workspace file access is a native permission request; CAFleet uses only its single-request choices. | `{permission_flags}`; [routing](../roles/member.md#reconsider-then-route); [runtime handling](../roles/director.md#runtime-events) |
+| Default mode `auto` (class `auto`; explicit `dontAsk` and `bypassPermissions` are also `auto`, while `default`, `manual`, `acceptEdits` and `plan` are `manual`) runs spawn-allowed broker tools and matching host allows; its classifier reviews other calls while native rules, hooks and managed policy remain authoritative. Route refused calls; explicit interactive policies wait for a request-bound Director/user answer or manual input, and protected edits retain host boundaries. Outside-workspace file access is a native permission request; CAFleet uses only its single-request choices. | `{permission_flags}`; [routing](../roles/member.md#reconsider-then-route); [runtime handling](../roles/director.md#runtime-events) |
 
 #### Claude native Director reception
 
@@ -89,7 +89,7 @@ Retire through verified native cancellation with observed child cleanup, or stop
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{permission_flags}` | `--approve-for-me` |
+| `{permission_flags}` | `--approve-for-me` (default mode `approve-for-me`, class `auto`) |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | `minimal`, `low`, `medium`, `high`, `xhigh` (spawn flag `--effort <level>`, forwarded as `--config=model_reasoning_effort=<level>`) |
@@ -124,7 +124,7 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 | The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting. Retain native session handles and explicitly read the owned receiver while delegated work remains, preserving goal activation, pause, completion and budget authority. | [Director wake](../roles/director.md#director-wake); [native reception](#codex-native-director-reception) |
 | Native shell input displayed command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the effective TUI boundary and protocol path were not established. | [Native authorization](../roles/director.md#director-side-dispatch) |
 | The Director authorizes routed native input under its host rules; harmless command visibility establishes no second member-tool permission check. Inspect output before explicit continuation. | [Dispatch and continuation](../roles/director.md#director-side-dispatch) |
-| Run host-permitted workspace commands directly; automatic review decides escalations, and a necessary refused or denied command routes to the Director. Explicit interactive approval uses the original native surface and runtime-event procedure; the workspace sandbox and managed policy remain authoritative. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
+| Default mode `approve-for-me` (class `auto`; explicit `never` is also `auto`, explicit `on-request` is `manual`): run host-permitted workspace commands directly; automatic review decides escalations, and a necessary refused or denied command routes to the Director. Explicit interactive approval uses the original native surface and runtime-event procedure; the workspace sandbox and managed policy remain authoritative. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
 
 #### Codex native Director reception
 
@@ -152,7 +152,7 @@ Preserve goal activation, pause, completion, budget and pending-decision authori
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{permission_flags}` | `--agent cafleet`; `--agent cafleet-ask` when `--permission-mode cafleet-ask` is selected |
+| `{permission_flags}` | `--agent cafleet` (default mode `cafleet`, class `auto`); `--agent cafleet-ask` (class `manual`) when `--permission-mode cafleet-ask` is selected |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | unsupported — omit `--effort` |
@@ -312,8 +312,8 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 | Each pane runs `opencode mini --standalone --agent <mode>` with `--prompt`, optional model selection and a private server; `<mode>` is `cafleet` or the selected `cafleet-ask`, and spawn requires only that mode's installed preset. | `{permission_flags}`; member spawn |
 | Mini receives pushed notifications and direct prompts as submitted user turns. Captures can expose only the status bar; inspect retained session records for omitted input/output and broker poll/ACK for message consumption. | [Push notifications](cli.md#push-notifications); [prompt dispatch](cli.md#pane-input-and-previews) |
 | Leading-`!` input runs a native shell command in `mini`. Preserve Director authorization and member-tool permissions because the native path's effective boundary and any second permission check remain unestablished. | [Native dispatch](../roles/director.md#director-side-dispatch) |
-| The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup under `cafleet` is an issue to capture and relay. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
-| The `cafleet-ask` preset keeps the same allowlist and Director-only denies and asks for every other shell command. Its native permission form is a runtime decision: the member waits while the Director answers it through the [runtime procedure](../roles/director.md#runtime-events), then continues from the result OpenCode returns. | `{permission_flags}`; [runtime procedure](../roles/director.md#consume-observed-interactions) |
+| The default `cafleet` preset (class `auto`) allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup under `cafleet` is an issue to capture and relay. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
+| The explicit `cafleet-ask` preset (class `manual`) keeps the same allowlist and Director-only denies and asks for every other shell command. Its native permission form is a runtime decision: the member waits while the Director answers it through the [runtime procedure](../roles/director.md#runtime-events), then continues from the result OpenCode returns. | `{permission_flags}`; [runtime procedure](../roles/director.md#consume-observed-interactions) |
 | On OpenCode a deny submits an empty rejection reason and ends the member's turn with `Step interrupted`; after verifying that nothing ran, continue the member with a Director message, which its runner delivers into the idle composer. The bundled OpenCode profile detects the form at every pane width of at least `W_min` = 36 columns: rule `opencode-shell-permission` covers the wide (77 and above) and split (56–76) layouts, and `opencode-shell-permission-compact` covers the compact layout (36–55), with the same allow and deny stages; its rejection-reason dialog is `opencode-reject-reason-compact`. A narrower pane, where the choices no longer fit on one row, and a command clipped by the form's command box open no `interaction_opened` event and are answered manually on the native surface, as is a reason to give. A wrapped command that the box shows in full is detected, with `operation_rows` above 1; native fixtures back the layouts at 120, 57, 55 and 36 columns. | [Runtime procedure](../roles/director.md#consume-observed-interactions) step 7 |
 
 ### Role eligibility
@@ -322,3 +322,60 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 |---|---|---|
 | Director | `no` | Goal lifecycle controls: not established for 2.1.4, with no goal evidence recorded, checked 2026-10-31. Background execution while supervision continues: not established for 2.1.4, checked 2026-10-31. |
 | Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: the OpenCode profile from `2.1.4`. |
+
+## hermes
+
+### Runtime bindings
+
+| Placeholder | Value |
+|---|---|
+| `{decision_surface}` | the `clarify` tool with one single-select question; its result records the chosen `user_response` (members relay) |
+| `{permission_flags}` | no permission argv; the recorded mode is `smart` (default, class `auto`) or `manual` (class `manual`), and the operator configuration's `approvals.mode` governs the session, with hardline floors, the sudo guard and `approvals.deny` enforced |
+| `{pane_title}` | no `--name` analog |
+| `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
+| `{effort_levels}` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (spawn flag `--effort <level>`, forwarded as `--reasoning <level>`) |
+
+### Role defaults
+
+| Placeholder | Value |
+|---|---|
+| `{reviewer_model}` | `—` (omit `--model`; the operator's configured default applies) |
+| `{reviewer_effort}` | `—` |
+| `{other_model}` | `—` (omit `--model`; the operator's configured default applies) |
+| `{other_effort}` | `—` |
+
+### Model catalog
+
+No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--model VALUE`, provider-prefixed ids included, and Hermes rejects unknown models; CAFleet never emits `--provider`. Omitted, the member uses the default provider and model in the operator's Hermes configuration (`hermes config get model`). Select `hermes` only when the user names the backend or the fleet's Director runs on Hermes, never by model-name inference. Cost efficiency mode on a Hermes member relays an operator choice, because there are no catalog prices.
+
+### Note → applies at
+
+| Note | Applies at |
+|---|---|
+| `clarify` offers the listed choices plus a free-text Other and waits up to an hour; a result whose `status` is `answered` records the decision. A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
+| A Hermes Director receives broker records through a completion-notified finite `wait` (§ Hermes native Director reception). A notification that arrives mid-turn is delivered at the next turn boundary, so a long turn defers reception until it ends. | [Director wake](../roles/director.md#director-wake) |
+| Default mode `smart` (class `auto`): commands outside Hermes's dangerous-command patterns run unreviewed; the guardian model reviews the rest and may open an ESCALATE prompt or, after a guardian DENY, an owner-override prompt offering once/deny. The member waits while the Director answers allow-once or deny through the runtime procedure; an unanswered prompt fails closed at `approvals.timeout` (default 300 s) with a BLOCKED result, which the member routes like any refusal. Hardline floors, the sudo guard and `approvals.deny` block before review and route like any refusal. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [runtime procedure](../roles/director.md#consume-observed-interactions) |
+| `cafleet setup --coding-agent hermes` merges six Director-only `approvals.deny` globs (`cafleet member prompt *`, `cafleet member exec *`, `cafleet member press *`, `cafleet member recover *`, `cafleet permission respond *`, `cafleet input reconcile *`) into the file `hermes config path` reports, and `member create` refuses a configuration that lacks a glob, naming the setup command. A matching member command is blocked before review, including a leading-assignment or absolute-path form, with the tool result `BLOCKED: this command matches the user-defined deny rule '<glob>' …`; report the block to the Director instead of rewording the command. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); setup; member spawn |
+| Each pane runs `hermes chat --cli --source tool --in <cwd>` with optional `--model` and `--reasoning`, then `-q <prompt>` as a fresh conversation. `member create` forwards a set `HERMES_HOME`, so the member uses the configuration setup merged into and the preflight checked. | `{permission_flags}`; member spawn |
+| One Hermes gateway per Hermes home runs every session's terminal tools. Setup merges CAFleet's member variables into `terminal.client_env_passthrough`, so each member's tools see its own `CAFLEET_DATABASE_URL` and pane variables. | setup; member spawn |
+| Background terminal commands run through a login shell that rebuilds `PATH`; invoke `cafleet` by its absolute path in a background command. | Member startup; [native reception](../roles/director.md#director-wake) |
+| Hermes can rewrite an installed skill during a session. Rerun `cafleet setup --coding-agent hermes` to restore the embedded copies. | setup |
+| A Hermes session can keep accepted work and background processes running after its pane's client exits. `member delete` stops that session's work and its registered background processes before deregistration (a 20-second settlement budget per member), and exits 1 with the member kept when it cannot verify the stop on a live client; retry the deletion after inspecting the cause. When the client had already exited, deletion completes with `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway`; that session's in-flight turn runs to completion. To stop its background processes, find the session with `hermes sessions list --source tool`, resume it with `hermes chat --cli --resume <session id> --in <cwd>` and run `/stop`. CAFleet never stops a Hermes gateway or touches sessions it does not own. | [Member Delete](../roles/director.md#member-delete); [Shutdown](../roles/director.md#shutdown) |
+| Leading-`!` input runs a native shell command in the classic REPL. The Director authorizes routed native input under its host rules. | [Native dispatch](../roles/director.md#director-side-dispatch) |
+
+#### Hermes native Director reception
+
+After registration, start one receiver with the `terminal` tool, `background=true` and `notify=true`, running `<absolute cafleet path> message wait <director-id> --timeout 300` with the literal ID. Background commands run in a login shell that rebuilds `PATH`, so use the absolute path of the cafleet executable your own shell resolves. Retain the returned process `session_id`, the Director ID and unfinished actions.
+
+Each exit of the receiver injects one completion notification. On it, read the process output, run `cafleet message poll <director-id> --json`, reconcile replayed and known IDs, record deferred actions and ACK consumption. Then start one new receiver while delegated work remains. Hermes delivers a notification that arrives during a turn at that turn's end, and an idle session starts a turn for it without user input.
+
+Retire the receiver with `process_manage`, `action=kill` on the retained `session_id`, and verify that it exited. Preserve the process `session_id` and unfinished actions across compaction. When the background facility is unavailable or denied, disclose that limit and use manual `poll` or a foreground finite `wait`.
+
+Preserve goal activation, pause, completion and gate/wait authority. Reception uses process output and broker reads and makes no goal lifecycle calls or pane input.
+
+### Role eligibility
+
+| Role | Eligible | Evidence |
+|---|---|---|
+| Director | `yes` | Goal lifecycle: native `/goal` lifecycle controls in installed source and in-session `/help goal`, 2026.9.24, checked 2026-11-02. Background execution: CAFleet stream probe with `terminal` `background=true`, `notify=true` finite `wait` renewed per completion, consumed at turn boundaries without user input, 2026.9.24, checked 2026-11-02. |
+| Member | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |

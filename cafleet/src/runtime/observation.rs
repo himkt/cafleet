@@ -6702,6 +6702,10 @@ pub(crate) mod native_capture {
                         "Use Bash to attempt exactly {} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
                         helper.display()
                     ),
+                    (Some(argument), CodingAgent::Hermes) => format!(
+                        "Use the terminal tool to run exactly {} {argument} as one foreground command. Preserve any native approval request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
+                        helper.display()
+                    ),
                     (None, _) => DRIVER_TOOL_FREE_PROMPT.into(),
                 }
             }
@@ -7211,6 +7215,7 @@ pub(crate) mod native_capture {
             let mut argv = approved.backend.build_spawn_argv_with_policy(
                 &prompt,
                 &approved.member_name(),
+                &case.cwd,
                 None,
                 None,
                 &policy,

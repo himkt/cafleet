@@ -127,4 +127,4 @@ Fleet deletion retains history and leaves the Director's own pane open. When it 
 
 ## Backend variations
 
-Use explicit member backend/model flags to create a mixed team. Resolve role defaults and models through [model choice](concepts/coding-agents.md#model-choice). OpenCode members perform assignments through their selected provider/model, workspace tools, broker and native shell path. Each member receives its own installed role/core paths, shared BASE and host prerequisites.
+Use explicit member backend/model flags to create a mixed team. Resolve role defaults and models through [model choice](concepts/coding-agents.md#model-choice). OpenCode members perform assignments through their selected provider/model, workspace tools, broker and native shell path. Hermes members use your configured default Hermes model unless you name one, and need the [Hermes setup](quickstart.md#hermes) before their first spawn. Each member receives its own installed role/core paths, shared BASE and host prerequisites.

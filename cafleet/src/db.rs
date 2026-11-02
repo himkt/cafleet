@@ -809,9 +809,8 @@ mod tests {
     }
 
     #[test]
-    fn baseline_is_the_single_head_migration_with_the_v9_identity_and_shape() {
-        assert_eq!(migration_chain(), vec![(1, "baseline".to_owned())]);
-        assert_eq!(head_version(), 1);
+    fn baseline_is_the_first_migration_with_the_v9_identity_and_shape() {
+        assert_eq!(migration_chain()[0], (1, "baseline".to_owned()));
         assert_eq!(APPLICATION_ID, 0x4341_4639, "ASCII CAF9");
         let conn = at_version(1);
         assert_eq!(
@@ -879,7 +878,7 @@ mod tests {
             1,
             "the baseline initializes the singleton instance identity"
         );
-        require_current(&conn).unwrap();
+        assert!(schema_matches_version(&conn, 1).unwrap());
     }
 
     #[test]
@@ -893,9 +892,9 @@ mod tests {
             migrate_to_head(&mut conn).unwrap();
             conn.pragma_update(None, "application_id", V8_APPLICATION_ID)
                 .unwrap();
-            conn.execute(
-                "UPDATE refinery_schema_history SET version=8, name='uncertain_cause'",
-                [],
+            conn.execute_batch(
+                "DELETE FROM refinery_schema_history WHERE version > 1;
+                 UPDATE refinery_schema_history SET version=8, name='uncertain_cause';",
             )
             .unwrap();
         }
@@ -1080,6 +1079,471 @@ mod tests {
         assert_eq!(chain.first(), Some(&(1, "baseline".into())));
         assert!(chain.iter().all(|(_, name)| !name.is_empty()));
     }
+
+    mod hermes_backend_successor {
+        use rusqlite::Connection;
+        use rusqlite::params;
+        use rusqlite::types::Value;
+
+        use crate::db::test_support::TableSnapshot;
+        use crate::db::test_support::table_snapshot;
+        use crate::db::tests::*;
+
+        const V1_RUN_COLUMNS: &str = "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status";
+
+        const RUN_REFERENCES: [&str; 3] = [
+            "member_interactions",
+            "member_runtime_events",
+            "member_input_operations",
+        ];
+
+        fn insert_run(
+            conn: &Connection,
+            member: i64,
+            backend: &str,
+            status: &str,
+            native_session_json: Option<&str>,
+        ) -> rusqlite::Result<i64> {
+            let columns = if native_session_json.is_some() {
+                ",native_session_json"
+            } else {
+                ""
+            };
+            let value = if native_session_json.is_some() {
+                ",?6"
+            } else {
+                ""
+            };
+            let sql = format!(
+                "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,
+                 database_identity_json,launch_nonce,runtime_path,requested_mode,resolved_mode,
+                 mode_source,permission_argv_json,event_evidence,coverage,status,created_at,
+                 native_version,effective_policy_json,owner_epoch,owner_kind,owner_pid,
+                 owner_start_identity,reachability,cleanup_state,event_seq_reserved_through,
+                 observation_gap_count,runtime_dir_identity_json,child_pid,child_start_identity,
+                 exit_code,cleanup_diagnostics_json{columns})
+                 VALUES(?1,1,1,?2,'{{\"canonical_path\":\"/fixture/broker.db\"}}',?3,
+                 '/fixture/runtime',NULL,?4,'default','[]','metadata','tested',?5,
+                 'created','9.9.9','{{\"policy\":true}}',3,'runner',4321,'owner-identity',
+                 'reachable','complete',7,1,'{{\"inode\":5}}',8765,'child-identity',0,
+                 '[\"diagnostic\"]'{value})"
+            );
+            let nonce = format!("{member:x}").repeat(64)[..64].to_owned();
+            match native_session_json {
+                Some(session) => conn.execute(
+                    &sql,
+                    params![member, backend, nonce, "fixture-mode", status, session],
+                ),
+                None => conn.execute(
+                    &sql,
+                    params![member, backend, nonce, "fixture-mode", status],
+                ),
+            }?;
+            Ok(conn.last_insert_rowid())
+        }
+
+        fn populated_v1() -> Connection {
+            let conn = at_version(1);
+            conn.execute_batch(
+                "INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'successor', 'created');
+                 INSERT INTO members(member_id, fleet_id, name, description, status, registered_at, deregistered_at) VALUES
+                    (1, 1, 'Director', 'director', 'active', 'registered', NULL),
+                    (2, 1, 'claude-worker', 'claude', 'active', 'registered', NULL),
+                    (3, 1, 'codex-worker', 'codex', 'active', 'registered', NULL),
+                    (4, 1, 'opencode-worker', 'opencode', 'deregistered', 'registered', 'departed');
+                 INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) VALUES
+                    (1, 'main', '@1', '%0', 'tmux', 'claude', 'placed'),
+                    (2, 'main', '@1', '%1', 'tmux', 'claude', 'placed'),
+                    (3, 'main', '@1', '%2', 'herdr', 'codex', 'placed'),
+                    (4, 'main', '@1', NULL, 'tmux', 'opencode', 'placed');
+                 UPDATE fleets SET director_member_id=1 WHERE fleet_id=1;",
+            )
+            .unwrap();
+            let claude = insert_run(&conn, 2, "claude", "running", None).unwrap();
+            insert_run(&conn, 2, "claude", "exited", None).unwrap();
+            let codex = insert_run(&conn, 3, "codex", "prepared", None).unwrap();
+            insert_run(&conn, 4, "opencode", "lost", None).unwrap();
+            conn.execute(
+                "INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json)
+                 VALUES(?1,1,'permission_request',?2,'opened','{}')",
+                params![claude, "c".repeat(64)],
+            )
+            .unwrap();
+            let interaction = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,
+                 payload_json,notification_state,archive_reason)
+                 VALUES(?1,1,?2,'interaction_opened','observed','committed','{\"schema_version\":2}',
+                 'archived','member_inactive')",
+                params![claude, interaction],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at)
+                 VALUES(?1,'prompt-1','prompt',?2,'in_progress','created','updated')",
+                params![codex, "d".repeat(64)],
+            )
+            .unwrap();
+            conn
+        }
+
+        fn v1_run_rows(conn: &Connection) -> Vec<Vec<Value>> {
+            rows(
+                conn,
+                &format!(
+                    "SELECT {} FROM member_runs ORDER BY run_id",
+                    V1_RUN_COLUMNS
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
+            )
+        }
+
+        fn ddl(conn: &Connection, name: &str) -> Option<String> {
+            conn.query_row(
+                "SELECT sql FROM sqlite_schema WHERE name=?1",
+                [name],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()
+        }
+
+        fn foreign_keys(conn: &Connection, table: &str) -> Vec<Vec<Value>> {
+            rows(
+                conn,
+                &format!(
+                    "SELECT \"table\", \"from\", \"to\", on_update, on_delete, \"match\" FROM pragma_foreign_key_list('{table}') ORDER BY \"from\""
+                ),
+            )
+        }
+
+        /// A migrated database and an unmigrated V1 twin that serves as the schema reference.
+        fn migrated() -> (Connection, Connection) {
+            let before = populated_v1();
+            let mut after = populated_v1();
+            migrate_to_head(&mut after).unwrap();
+            (before, after)
+        }
+
+        struct V1Rows {
+            runs: Vec<Vec<Value>>,
+            tables: Vec<TableSnapshot>,
+            sequences: Vec<Vec<Value>>,
+        }
+
+        const SEQUENCES: &str = "SELECT name, seq FROM sqlite_sequence ORDER BY name";
+
+        fn unchanged_table(name: &str) -> bool {
+            !matches!(
+                name,
+                "member_runs" | "refinery_schema_history" | "sqlite_sequence"
+            )
+        }
+
+        /// One populated V1 database, its rows captured before it migrates in place.
+        fn migrated_in_place() -> (V1Rows, Connection) {
+            let mut conn = populated_v1();
+            let before = V1Rows {
+                runs: v1_run_rows(&conn),
+                tables: table_snapshot(&conn, unchanged_table),
+                sequences: rows(&conn, SEQUENCES),
+            };
+            migrate_to_head(&mut conn).unwrap();
+            (before, conn)
+        }
+
+        #[test]
+        fn the_chain_is_the_baseline_then_the_hermes_backend_successor() {
+            assert_eq!(
+                migration_chain(),
+                vec![(1, "baseline".to_owned()), (2, "hermes_backend".to_owned())]
+            );
+            assert_eq!(head_version(), 2);
+        }
+
+        #[test]
+        fn successor_migrates_a_populated_v1_database_to_the_current_head() {
+            let (_, after) = migrated();
+            require_current(&after).unwrap();
+            assert!(schema_matches_version(&after, 2).unwrap());
+            assert_eq!(
+                rows(
+                    &after,
+                    "SELECT version, name FROM refinery_schema_history ORDER BY version"
+                ),
+                vec![
+                    vec![Value::Integer(1), Value::Text("baseline".into())],
+                    vec![Value::Integer(2), Value::Text("hermes_backend".into())],
+                ]
+            );
+            assert_eq!(
+                after
+                    .query_row("PRAGMA application_id", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                APPLICATION_ID
+            );
+            assert_eq!(
+                after
+                    .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                1,
+                "the connection keeps foreign-key enforcement after the rebuild"
+            );
+            assert!(rows(&after, "PRAGMA foreign_key_check").is_empty());
+            assert_eq!(
+                rows(&after, "PRAGMA integrity_check"),
+                vec![vec![Value::Text("ok".into())]]
+            );
+        }
+
+        #[test]
+        fn successor_preserves_every_member_run_and_every_other_table_row() {
+            let (before, after) = migrated_in_place();
+            assert_eq!(v1_run_rows(&after), before.runs);
+            assert_eq!(before.runs.len(), 4);
+            assert!(
+                rows(&after, "SELECT native_session_json FROM member_runs")
+                    .iter()
+                    .all(|row| row == &vec![Value::Null]),
+                "existing runs carry no native session"
+            );
+            assert_eq!(
+                table_snapshot(&after, unchanged_table),
+                before.tables,
+                "other tables and the instance identity are preserved"
+            );
+            assert!(
+                before
+                    .tables
+                    .iter()
+                    .any(|table| table.name == "runtime_database_identity" && table.rows.len() == 1),
+                "the snapshot covers the instance identity"
+            );
+            assert_eq!(rows(&after, SEQUENCES), before.sequences);
+        }
+
+        #[test]
+        fn successor_keeps_the_v1_columns_in_order_and_appends_the_native_session_column() {
+            let (before, after) = migrated();
+            let mut expected = V1_RUN_COLUMNS.split_whitespace().collect::<Vec<_>>();
+            expected.push("native_session_json");
+            assert_eq!(column_names(&after, "member_runs"), expected);
+            assert_eq!(
+                rows(
+                    &after,
+                    "SELECT type, \"notnull\", dflt_value, pk FROM pragma_table_info('member_runs') WHERE name='native_session_json'"
+                ),
+                vec![vec![
+                    Value::Text("TEXT".into()),
+                    Value::Integer(0),
+                    Value::Null,
+                    Value::Integer(0)
+                ]]
+            );
+            assert_eq!(
+                rows(
+                    &after,
+                    "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('member_runs') WHERE name != 'native_session_json' ORDER BY cid"
+                ),
+                rows(
+                    &before,
+                    "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('member_runs') ORDER BY cid"
+                ),
+            );
+        }
+
+        #[test]
+        fn successor_preserves_the_run_index_and_every_foreign_key_to_and_from_member_runs() {
+            let (before, after) = migrated();
+            assert_eq!(
+                ddl(&after, "idx_member_runs_active"),
+                ddl(&before, "idx_member_runs_active")
+            );
+            assert!(ddl(&after, "idx_member_runs_active").is_some());
+            assert_eq!(
+                rows(
+                    &after,
+                    "SELECT name, \"unique\", partial FROM pragma_index_list('member_runs') WHERE origin='c' ORDER BY name"
+                ),
+                rows(
+                    &before,
+                    "SELECT name, \"unique\", partial FROM pragma_index_list('member_runs') WHERE origin='c' ORDER BY name"
+                ),
+            );
+            assert_eq!(
+                foreign_keys(&after, "member_runs"),
+                foreign_keys(&before, "member_runs")
+            );
+            for table in RUN_REFERENCES {
+                assert_eq!(
+                    foreign_keys(&after, table),
+                    foreign_keys(&before, table),
+                    "{table}"
+                );
+                assert_eq!(ddl(&after, table), ddl(&before, table), "{table}");
+            }
+            assert_eq!(
+                rows(
+                    &after,
+                    "SELECT name FROM sqlite_schema WHERE name LIKE '%member_runs%' ORDER BY name"
+                ),
+                vec![
+                    vec![Value::Text("idx_member_runs_active".into())],
+                    vec![Value::Text("member_runs".into())],
+                ],
+                "no rebuild scratch table remains"
+            );
+        }
+
+        #[test]
+        fn successor_enforces_the_active_run_index_and_the_preserved_foreign_keys() {
+            let (_, after) = migrated();
+            assert!(
+                insert_run(&after, 2, "claude", "running", None).is_err(),
+                "one live run per member"
+            );
+            insert_run(&after, 2, "claude", "failed", None).unwrap();
+            assert!(insert_run(&after, 404, "claude", "exited", None).is_err());
+            assert!(
+                after
+                    .execute(
+                        "INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json)
+                         VALUES(404,1,'question',?1,'opened','{}')",
+                        [ "c".repeat(64) ],
+                    )
+                    .is_err(),
+                "a child row must reference an existing run"
+            );
+            assert!(
+                after
+                    .execute("DELETE FROM member_runs WHERE run_id=1", [])
+                    .is_err(),
+                "a referenced run is retained"
+            );
+        }
+
+        #[test]
+        fn successor_continues_run_ids_after_the_preserved_autoincrement_sequence() {
+            let (before, after) = migrated_in_place();
+            let sequence = |conn: &Connection| {
+                conn.query_row(
+                    "SELECT seq FROM sqlite_sequence WHERE name='member_runs'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+            };
+            assert_eq!(rows(&after, SEQUENCES), before.sequences);
+            assert_eq!(sequence(&after), 4);
+            after
+                .execute("DELETE FROM member_runs WHERE run_id=4", [])
+                .unwrap();
+            let next = insert_run(&after, 4, "opencode", "exited", None).unwrap();
+            assert_eq!(next, 5, "a deleted run id is not reused");
+        }
+
+        #[test]
+        fn successor_backend_check_accepts_hermes_and_every_existing_backend_only() {
+            let (before, after) = migrated();
+            for (member, backend) in [(2, "hermes"), (3, "claude"), (3, "codex"), (4, "opencode")] {
+                insert_run(&after, member, backend, "exited", None)
+                    .unwrap_or_else(|error| panic!("{backend}: {error}"));
+            }
+            for backend in ["gemini", "Hermes", "", "hermes "] {
+                assert!(
+                    insert_run(&after, 2, backend, "exited", None).is_err(),
+                    "{backend:?}"
+                );
+            }
+            assert!(
+                insert_run(&before, 2, "hermes", "exited", None).is_err(),
+                "the baseline still refuses hermes"
+            );
+        }
+
+        #[test]
+        fn successor_native_session_column_accepts_only_null_or_a_json_object() {
+            let (_, after) = migrated();
+            for session in ["{}", "{\"session_key\":\"tool:abc\",\"pid\":12}"] {
+                insert_run(&after, 2, "hermes", "exited", Some(session))
+                    .unwrap_or_else(|error| panic!("{session}: {error}"));
+            }
+            for session in ["[]", "\"session\"", "1", "null", "not json", "{", ""] {
+                assert!(
+                    insert_run(&after, 2, "hermes", "exited", Some(session)).is_err(),
+                    "{session:?}"
+                );
+            }
+            after
+                .execute(
+                    "UPDATE member_runs SET native_session_json='{\"session_key\":\"k\"}' WHERE run_id=1",
+                    [],
+                )
+                .unwrap();
+            assert!(
+                after
+                    .execute(
+                        "UPDATE member_runs SET native_session_json='[1]' WHERE run_id=1",
+                        []
+                    )
+                    .is_err()
+            );
+        }
+
+        #[test]
+        fn successor_preserves_the_v1_run_check_constraints() {
+            let (_, after) = migrated();
+            let id = insert_run(&after, 3, "codex", "exited", None).unwrap();
+            for damage in [
+                "mode_source='bogus'",
+                "coverage='partial'",
+                "status='paused'",
+                "event_evidence='full'",
+                "owner_epoch=0",
+                "owner_kind='other'",
+                "reachability='gone'",
+                "cleanup_state='half'",
+                "launch_nonce='short'",
+                "runtime_path='  '",
+                "resolved_mode=''",
+                "database_identity_json='[]'",
+                "permission_argv_json='{}'",
+                "effective_policy_json='[]'",
+                "cleanup_diagnostics_json='{}'",
+                "child_pid=0",
+                "recovery_origin_status='paused'",
+                "requested_mode='explicit-without-source'",
+                "mode_source='explicit'",
+            ] {
+                assert!(
+                    after
+                        .execute(
+                            &format!("UPDATE member_runs SET {damage} WHERE run_id=?1"),
+                            [id]
+                        )
+                        .is_err(),
+                    "{damage}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_fresh_database_and_a_migrated_v1_database_share_the_head_run_shape() {
+            let (_, after) = migrated();
+            let fresh = at_version(head_version());
+            assert_eq!(ddl(&after, "member_runs"), ddl(&fresh, "member_runs"));
+            assert_eq!(
+                ddl(&after, "idx_member_runs_active"),
+                ddl(&fresh, "idx_member_runs_active")
+            );
+            assert_eq!(
+                column_names(&after, "member_runs"),
+                column_names(&fresh, "member_runs")
+            );
+        }
+    }
     mod runtime_tests {
         use rusqlite::Connection;
         use rusqlite::params;
@@ -1214,7 +1678,7 @@ mod tests {
             for (table, expected) in [
                 (
                     "member_runs",
-                    "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status",
+                    "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status native_session_json",
                 ),
                 (
                     "member_interactions",

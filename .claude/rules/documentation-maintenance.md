@@ -148,7 +148,7 @@ Write CAFleet base instructions so they read the same on every backend: family `
 `skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained backend section contains these five subsections in order:
 
 1. **Runtime bindings**: the five runtime placeholders for decision surface, permission flags, pane title, skill loader, and effort levels.
-2. **Role defaults**: the concrete model and effort assignments for reviewers and other members; models come from the backend catalog and effort matches its runtime capability.
+2. **Role defaults**: the concrete model and effort assignments for reviewers and other members; models come from the backend catalog (or are `—` when the backend has no maintained catalog) and effort matches its runtime capability.
 3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
 5. **Role eligibility**: per-role `yes`/`no` verdicts for Director and Member, each with checked native version, source and date.
@@ -161,9 +161,9 @@ Each reader entry point places its runtime overlay first in its Required-reading
 
 State shared operational facts in each home for its audience.
 
-### OpenCode Director verdict changes
+### Director verdict changes
 
-To change the Director verdict, a maintainer establishes, for an installed OpenCode version, native goal lifecycle controls, such as a goal command, from official documentation or installed help, and background execution while supervision continues from a CAFleet stream probe. Record the version, source and date in the backend's Role eligibility table, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
+To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version: native goal lifecycle controls from official documentation or installed help, and background execution while supervision continues from the CAFleet stream probe defined there. Record the version, source and date in `SPEC.md` § Role eligibility and the backend's Role eligibility table, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
 
 ### Template
 
@@ -171,19 +171,19 @@ Add a `## <name>` backend with every subsection below. Fill every value, keep ru
 
 #### Runtime bindings
 
-Supply all five tokens: `{decision_surface}` (recorded user-reaction surface; members relay), `{permission_flags}` (omitted launch-policy flags and explicit-selection behavior), `{pane_title}` (title mechanism or no analog), `{skill_loader}` (supported loader or complete absolute-path reads), and `{effort_levels}` (accepted values/flag or unsupported).
+Supply all five tokens: `{decision_surface}` (recorded user-reaction surface; members relay), `{permission_flags}` (omitted launch-policy flags, the default mode and its `auto`/`manual` class, and explicit-selection behavior), `{pane_title}` (title mechanism or no analog), `{skill_loader}` (supported loader or complete absolute-path reads), and `{effort_levels}` (accepted values/flag or unsupported).
 
 #### Role defaults
 
-Set `{reviewer_model}` and `{other_model}` to catalog tokens or aliases. Set their matching effort placeholders to a supported level or `—` when the backend does not support effort.
+Set `{reviewer_model}` and `{other_model}` to catalog tokens or aliases. A backend without a maintained catalog sets them to `—`, meaning omit `--model` so the operator's configured default applies. Set their matching effort placeholders to a supported level, or to `—` when the backend does not support effort or has no maintained catalog.
 
 #### Model catalog
 
-List exact spawn tokens, valid aliases, reviewed most-to-least capability ordering, classes, and standard provider USD/MTok input/output prices. Include relevant context windows and availability constraints, required prefixes and official pricing/availability/configuration sources. Follow the freshness contract and [Director policy](../../skills/cafleet/roles/director.md#model-selection).
+List exact spawn tokens, valid aliases, reviewed most-to-least capability ordering, classes, and standard provider USD/MTok input/output prices. Include relevant context windows and availability constraints, required prefixes and official pricing/availability/configuration sources. Follow the freshness contract and [Director policy](../../skills/cafleet/roles/director.md#model-selection). A backend without a maintained catalog states "No maintained catalog", its `--model` pass-through rule and the source of the operator's configured default instead.
 
 #### Note → applies at
 
-Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, member-routing, Director-dispatch and supervision instructions that point at it.
+Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — and classifying every launch mode `auto` or `manual`, to the member command-execution, member-routing, Director-dispatch and supervision instructions that point at it.
 
 #### Role eligibility
 

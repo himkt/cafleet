@@ -16,7 +16,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUser
 
 This skill is the umbrella for the full design-document lifecycle: the standardized **format spec** plus the CAFleet-native **orchestration workflows** linked in Dispatch. It is a dispatcher — consult a reference page for the format, or route to the matching workflow body to run a team.
 
-**Assigned teammates** load this skill through the executing backend's supported loader. Codex/OpenCode use absolute paths for this core, CAFleet core, their own backend section and required role references. Continue the existing assigned workflow; loading this umbrella as a member creates no second team. Main-session user requests follow Dispatch below.
+**Assigned teammates** load this skill through the executing backend's supported loader. Backends without a native skill loader use absolute paths for this core, CAFleet core, their own backend section and required role references. Continue the existing assigned workflow; loading this umbrella as a member creates no second team. Main-session user requests follow Dispatch below.
 
 ## Required reading
 
@@ -60,4 +60,4 @@ Every design-doc team member opens its authoritative role first. Use an availabl
 | 4 | This core and [guidelines](reference/guidelines.md) | Load the assigned workflow's format and role references before document work; retain your role's scope. |
 | 5 | [Coordination](reference/coordination.md) | Before payloads, markers and work/status messages. |
 
-Load the listed skills through your executing backend's supported loader; Codex/OpenCode load the cores, own backend and required references by absolute path. Continue the existing assigned workflow without creating a second team. Read [command routing](../cafleet/roles/member.md#reconsider-then-route) before routing a command your harness denied. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.
+Load the listed skills through your executing backend's supported loader; backends without a native skill loader load the cores, own backend and required references by absolute path. Continue the existing assigned workflow without creating a second team. Read [command routing](../cafleet/roles/member.md#reconsider-then-route) before routing a command your harness denied. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.

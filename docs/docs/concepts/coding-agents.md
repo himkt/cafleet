@@ -8,6 +8,7 @@ placement's `coding_agent` column.
 | `claude` | Claude Code | Loads the Claude Code skills directly |
 | `codex` | OpenAI Codex CLI | Reads the cafleet skill files by absolute path |
 | `opencode` | opencode.ai | Reads the cafleet skill files by absolute path |
+| `hermes` | Hermes Agent | Reads the cafleet skill files by absolute path |
 
 Plain `cafleet setup` installs assets for every supported backend
 in one run; `--coding-agent` narrows the selection. [Quickstart](../quickstart.md#configure)
@@ -25,7 +26,18 @@ The flag means slightly different things per command:
 
 Run the root Director on a backend whose Director verdict is `yes`, and spawn members on backends whose Member verdict is `yes`. [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records each backend's verdicts with their evidence; a backend whose Director verdict is `no` runs only as a member.
 
-New members run through the CAFleet PTY runner with a declared detection-coverage state. Omitting `--permission-mode` selects the backend's default policy, its native automatic review where the backend has one; pass the flag only for another native mode the user asks for. Interactive native policies are available as explicit choices on every backend — OpenCode's through its `cafleet-ask` agent preset — with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Each bundled runner profile covers its backend from a minimum native version onward. Detector, composer and answer coverage are independent; without a measured submission plan, generated input uses Escape-first delivery fallback. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](members.md#member-permission-events) explains the workflow, and the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
+New members run through the CAFleet PTY runner with a declared detection-coverage state. Every launch mode is classified `auto` or `manual`. An `auto` mode is native automatic review or a fixed allow/deny policy, and a `manual` mode asks a human on the native surface for operations its rules do not settle. Omitting `--permission-mode` selects the backend's default mode, which is an `auto` mode on every backend:
+
+| Backend | Default mode | Other `auto` modes | `manual` modes |
+|---|---|---|---|
+| `claude` | `auto` | `dontAsk`, `bypassPermissions` | `default`, `manual`, `acceptEdits`, `plan` |
+| `codex` | `approve-for-me` | `never` | `on-request` |
+| `opencode` | `cafleet` | — | `cafleet-ask` |
+| `hermes` | `smart` | — | `manual` |
+
+Hermes has no launch flag for its mode: CAFleet records the `smart` or `manual` choice, and the `approvals.mode` of your Hermes configuration governs the session. [Quickstart](../quickstart.md#hermes) covers the configuration.
+
+Pass `--permission-mode` only for another native mode the user asks for. An `auto` mode can still show an approval prompt when its reviewer escalates, and a `manual` mode shows one for each unsettled operation. When the member's bundled runner profile recognizes the prompt, the Director receives a runtime event and answers it allow-once or deny on the member's behalf, relaying the decision to the user when the Director session's mode requires it. A prompt the profile does not recognize, such as one in a pane narrower than the profile's captured layouts, is answered manually on the member's native surface. A Member-eligible backend's profile recognizes every approval prompt its default mode can show, outside its recorded layout limits ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements)). Each bundled runner profile covers its backend from a minimum native version onward. Detector, composer and answer coverage are independent; without a measured submission plan, generated input uses Escape-first delivery fallback. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](members.md#member-permission-events) explains the workflow, and the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
 
 ## cafleet usage from a member pane
 
@@ -78,6 +90,13 @@ Console form as is.
 
 Use the selected backend’s role defaults and catalog as the source of truth. OpenCode omits unsupported effort.
 
+Hermes has no maintained model catalog. The Director selects `hermes` only when
+you name the backend or the fleet's Director runs on Hermes, never from a model
+name. A Hermes member omits `--model` and `--effort` by default, so your
+configured default model and provider apply; a model you name passes through
+verbatim, provider-prefixed ids included. Cost efficiency mode has no catalog
+prices to compare for Hermes, so the Director asks you to choose.
+
 Only the exact phrase `cost efficiency mode` in the originating user request
 activates cheapest-capable selection for ordinary members. The Director
 chooses a backend first and compares models within that backend. On OpenCode,
@@ -99,8 +118,8 @@ model. The installed Director policy owns evidence, handoff and selection;
 a user-pinned model requires an operator decision before replacement.
 
 `cafleet member create --model <string>` forwards the value to the backend's
-own model flag; omission uses that binary's default. Claude and Codex pass any
-value through and let the binary reject unknown models, so a newly released
+own model flag; omission uses that binary's default. Claude, Codex and Hermes
+pass any value through and let the binary reject unknown models, so a newly released
 model needs no CAFleet release. OpenCode requires the `<provider-id>/<model-id>`
 form, checked when the member is created. The
 [model selection contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#model-selection)
@@ -112,7 +131,8 @@ has the exact format and error.
 the spawned backend binary. Unlike `--model`, the accepted level set is
 validated per backend at create time, before any registration or multiplexer
 side effect; omit the flag and the binary uses its own default. OpenCode has no
-reasoning-effort control, so omit the flag for OpenCode members. The
+reasoning-effort control, so omit the flag for OpenCode members. Hermes
+forwards the level as its own reasoning flag. The
 [reasoning effort contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#reasoning-effort)
 lists each backend's levels and forwarding form.
 
@@ -122,6 +142,12 @@ The backends differ in reasoning effort, pane titles and sandbox isolation;
 the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities)
 compares them. Because only claude panes display the member name, use the
 `pane_id` column of `cafleet member list` to locate a member's pane.
+
+A Hermes member's session can keep accepted work and background processes
+running after its pane's client exits. `cafleet member delete` stops that
+session's work and the background processes it registered, and keeps the
+member when it cannot verify the stop; CAFleet never touches your Hermes
+gateway or sessions it does not own.
 
 ## Complete member prompts
 

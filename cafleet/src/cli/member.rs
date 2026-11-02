@@ -74,7 +74,7 @@ pub(crate) struct CreateArgs {
     /// Model passed to the backend binary.
     #[arg(long)]
     pub(super) model: Option<String>,
-    /// Reasoning-effort level (claude, codex only).
+    /// Reasoning-effort level (claude, codex, hermes).
     #[arg(long)]
     pub(super) effort: Option<String>,
     #[arg(long, value_name = "MODE", help = CodingAgent::permission_mode_help())]
@@ -402,6 +402,17 @@ fn create(
     use std::time::Duration;
     use std::time::Instant;
     let deadline = Instant::now() + Duration::from_secs(10);
+    let hermes_home = (backend == crate::coding_agent::CodingAgent::Hermes)
+        .then(|| {
+            let base =
+                backend.config_dir(&|name| SystemProbe.env_var(name), &SystemProbe.home_dir())?;
+            crate::coding_agent::hermes_settlement::effective_home(
+                &executable,
+                &base,
+                deadline.min(Instant::now() + Duration::from_secs(2)),
+            )
+        })
+        .transpose()?;
     let probe = backend.probe_native_version(
         &executable,
         deadline.min(Instant::now() + Duration::from_secs(2)),
@@ -468,6 +479,16 @@ fn create(
         |conn, pending| {
             let artifacts =
                 runner::RunArtifacts::create_with_deadline(conn, pending.run.run_id, deadline)?;
+            if let Some(hermes_home) = &hermes_home {
+                broker::runtime::set_native_session(
+                    conn,
+                    pending.run.run_id,
+                    &crate::coding_agent::hermes_settlement::NativeSession {
+                        hermes_home: hermes_home.clone(),
+                        session_id: None,
+                    },
+                )?;
+            }
             let prompt = substitute_spawn_placeholders(
                 &prompt_body,
                 fleet_id,
@@ -475,7 +496,8 @@ fn create(
                 director_id,
                 agent_name,
             )?;
-            let argv = backend.launch_argv(&executable, &prompt, name, model, effort, &policy)?;
+            let argv =
+                backend.launch_argv(&executable, &prompt, name, &cwd, model, effort, &policy)?;
             let spawn = runner::SpawnSpec {
                 argv,
                 cwd,
@@ -602,7 +624,7 @@ fn close_member(
     member_id: i64,
     locked: &mut crate::pane_lock::LockedDeletion<MemberRecord, DeleteAction>,
     mux: &AnyMultiplexer,
-    deadline: crate::time::Deadline,
+    mut deadline: crate::time::Deadline,
 ) -> Result<String, CafleetError> {
     assert!(
         matches!(locked.value, DeleteAction::Close),
@@ -621,7 +643,7 @@ fn close_member(
         snapshot,
         held,
         &mut crate::cli::fleet::MultiplexerDeletionHost(mux),
-        deadline,
+        &mut deadline,
         &mut |_| Ok(()),
     )
 }
@@ -994,6 +1016,76 @@ mod tests {
         use std::process::Stdio;
 
         #[test]
+        fn hermes_member_deletion_waits_for_busy_pane_input_only_within_the_command_deadline() {
+            let _dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&_dir);
+            let settings =
+                Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux"));
+            let (fleet, director) = create_fleet_fixture(&mut conn, "hermes-busy");
+            let worker = register(&mut conn, fleet, "worker", Some("%9"));
+            crate::broker::members::test_support::update_placement_pane_id(&mut conn, worker, "%9")
+                .unwrap();
+            let identity = storage::database_identity(&conn).unwrap();
+            let process = ProcessIdentity::current().unwrap();
+            storage::create_run(
+                &mut conn,
+                &NewRun {
+                    member_id: worker,
+                    fleet_id: fleet,
+                    director_member_id: director,
+                    backend: "hermes".into(),
+                    database_identity_json: identity.clone(),
+                    launch_nonce: "a".repeat(64),
+                    runtime_path: RuntimePaths::for_run(&identity, 1)
+                        .unwrap()
+                        .run_dir
+                        .to_str()
+                        .unwrap()
+                        .into(),
+                    requested_mode: None,
+                    resolved_mode: "smart".into(),
+                    mode_source: ModeSource::Default,
+                    permission_argv_json: json!([]),
+                    event_evidence: EventEvidence::Metadata,
+                    native_version: None,
+                    coverage: Coverage::Unknown,
+                    owner_pid: process.pid,
+                    owner_start_identity: process.start_identity,
+                },
+            )
+            .unwrap();
+            let placement = load_member(&conn, worker, true).unwrap().placement.unwrap();
+            let _busy = PaneLock::try_acquire(&settings.database_url, &placement)
+                .unwrap()
+                .expect("the test holds the pane input");
+            let started = Instant::now();
+            let failure = delete(
+                &mut conn,
+                &settings,
+                worker,
+                false,
+                Deadline::until(started + Duration::from_millis(300)),
+            )
+            .unwrap_err();
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "{:?}",
+                started.elapsed()
+            );
+            assert_eq!(
+                failure.message(),
+                format!(
+                    "member {worker}'s pane input remained busy for 5 seconds; member was not deleted."
+                )
+            );
+            assert!(
+                broker::active_member_fleet(&conn, worker)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+
+        #[test]
         fn runner_recovery_member_deletion_terminal_no_work_finishes_under_the_original_guard() {
             run_case("terminal");
         }
@@ -1216,6 +1308,68 @@ mod tests {
             .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn hermes_member_create_fails_before_registration_when_the_hermes_home_cannot_be_resolved() {
+        let approvals =
+            json!({ "deny": crate::coding_agent::HERMES_DIRECTOR_ONLY_DENIES }).to_string();
+        for (config_path, expected) in [
+            (
+                "printf 'config.yaml\\n'",
+                "Error: cannot read hermes configuration through 'hermes config path': printed no absolute file path: config.yaml\n",
+            ),
+            (
+                "echo 'no profile' >&2\n    exit 4",
+                "Error: cannot read hermes configuration through 'hermes config path': exited with exit status: 4: no profile\n",
+            ),
+        ] {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "hermes-home");
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+            let members = |conn: &Connection| {
+                conn.query_row("SELECT COUNT(*) FROM members", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+            };
+            let before = members(&conn);
+            let hermes = format!(
+                "case \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config get --json approvals') printf '%s\\n' '{approvals}' ;;\n  'config path')\n    {config_path} ;;\n  *) exit 3 ;;\nesac"
+            );
+            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' display-message '*) printf 'main|@1|%%1\\n' ;; esac";
+            let fleet = fleet.to_string();
+            let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+                &settings,
+                &[
+                    "member",
+                    "create",
+                    "--fleet-id",
+                    &fleet,
+                    "--name",
+                    "worker",
+                    "--description",
+                    "hermes home fixture",
+                    "--coding-agent",
+                    "hermes",
+                    "literal assignment",
+                ],
+                &[("tmux", tmux), ("hermes", &hermes)],
+                &[
+                    ("TMUX_PANE", "%1"),
+                    ("HERMES_HOME", dir.path().to_str().unwrap()),
+                ],
+            );
+            assert_eq!(
+                String::from_utf8(output.stderr).unwrap(),
+                expected,
+                "{config_path}"
+            );
+            assert_eq!(output.status.code(), Some(1));
+            assert!(!pane_calls.contains("split-window"), "{pane_calls}");
+            assert_eq!(members(&conn), before);
+        }
     }
 
     #[test]
@@ -2067,6 +2221,8 @@ mod tests {
                 ("codex", "on-request"),
                 ("opencode", "cafleet"),
                 ("opencode", "cafleet-ask"),
+                ("hermes", "smart"),
+                ("hermes", "manual"),
             ] {
                 let mut arguments = create_arguments();
                 arguments.extend([
@@ -2141,6 +2297,23 @@ mod tests {
                     assert!(failure.message().contains(&choice));
                 }
             }
+        }
+
+        #[test]
+        fn hermes_invalid_effort_and_policy_fail_with_usage_errors_before_creation_effects() {
+            assert_eq!(
+                invalid_creation(CodingAgent::Hermes, &["--effort".into(), "turbo".into()])
+                    .message(),
+                "--effort for the hermes backend must be one of none, minimal, low, medium, high, xhigh, max, ultra (got 'turbo')."
+            );
+            assert_eq!(
+                invalid_creation(
+                    CodingAgent::Hermes,
+                    &["--permission-mode".into(), "off".into()]
+                )
+                .message(),
+                "--permission-mode for hermes must be one of smart, manual (got 'off')"
+            );
         }
 
         #[test]

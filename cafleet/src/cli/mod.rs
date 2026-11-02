@@ -288,27 +288,41 @@ pub(crate) mod test_support {
         settings: &crate::config::Settings,
         args: &[&str],
     ) -> (std::process::Output, String) {
+        isolated_cli_with(
+            settings,
+            args,
+            &[(
+                "tmux",
+                "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"",
+            )],
+            &[],
+        )
+    }
+
+    /// Runs the CLI with only `executables` (name, shell body) on PATH and `environment` added.
+    pub(super) fn isolated_cli_with(
+        settings: &crate::config::Settings,
+        args: &[&str],
+        executables: &[(&str, &str)],
+        environment: &[(&str, &str)],
+    ) -> (std::process::Output, String) {
         use crate::runtime::system::test_support::TestChild;
-        use std::os::unix::fs::PermissionsExt;
         use std::process::Command;
         use std::process::Stdio;
         use std::time::Duration;
         use std::time::Instant;
 
         let dir = tempfile::tempdir().unwrap();
-        let mux = dir.path().join("tmux");
         let pane_log = dir.path().join("pane.log");
-        std::fs::write(
-            &mux,
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&mux, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for (name, body) in executables {
+            crate::coding_agent::test_support::executable_stub(dir.path(), name, body);
+        }
         let stdout_path = dir.path().join("stdout");
         let stderr_path = dir.path().join("stderr");
         let started = Instant::now();
         let mut child = TestChild::new(
             Command::new(std::env::current_exe().unwrap())
+                .envs(environment.iter().copied())
                 .args([
                     "--exact",
                     crate::cli::tests::isolated_cli_child_path(),
