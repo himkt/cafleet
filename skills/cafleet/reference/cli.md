@@ -190,7 +190,7 @@ Registers and spawns, resolving the acting Director from the fleet. Omitted back
 
 Evidence defaults to `metadata`; `redacted` requires an absolute readable UTF-8 redaction file. Invalid policy/configuration combinations exit 2 before registration. `--file -` reads stdin.
 
-Permission choices: `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet)`. Invalid selection: `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, exit 2.
+Permission choices: `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet)`. Invalid selection: `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, exit 2. Mode classes (documentation only; argv and run records are unchanged): `auto` (native automatic review or a fixed allow/deny policy) is claude `auto`, `dontAsk`, `bypassPermissions`; codex `approve-for-me`, `never`; opencode `cafleet`. `manual` (native interactive approval) is claude `default`, `manual`, `acceptEdits`, `plan`; codex `on-request`; opencode `cafleet-ask`. Every default is `auto`.
 
 Effort validation precedes side effects:
 

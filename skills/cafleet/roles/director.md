@@ -75,17 +75,17 @@ The per-backend `--permission-mode`, `--model` and `--effort` rules are in [`cli
 
 ### Member launch policy
 
-Spawn every member with the omitted `--permission-mode`, which selects the backend's automatic approval mode for Claude and Codex and the `cafleet` preset for OpenCode. Pass `--permission-mode` only when the user explicitly requests that mode for that member:
+Spawn every member with the omitted `--permission-mode`, which selects the backend's default `auto` mode. Pass `--permission-mode` only when the user explicitly requests that mode for that member. An `auto` mode is native automatic review or a fixed allow/deny policy; a `manual` mode asks a human on the native surface for operations its rules do not settle:
 
-| Backend | Omitted default | Explicit choice on the user's request |
+| Backend | `auto` mode (default) | `manual` mode(s) |
 |---|---|---|
-| Claude | `auto` | A non-automatic native value, such as `default` or `dontAsk` |
-| Codex | `approve-for-me` | `on-request` or `never` |
+| Claude | `auto`; also `dontAsk`, `bypassPermissions` on the user's request | `default`, `manual`, `acceptEdits`, `plan` |
+| Codex | `approve-for-me`; also `never` on the user's request | `on-request` |
 | OpenCode | `cafleet` | `cafleet-ask` |
 
 Claude Code 2.1.302 in `auto` can show `Teach auto mode about your environment?` once per native configuration. It arrives as an `interaction_opened` event with classification `question` and has no answer plan: ask the user to answer it on the member's native surface, and send no answer yourself. Codex 0.163.0 `approve-for-me` shows no startup dialog. Any other first-launch dialog the native host shows, such as a folder-trust prompt, follows the existing held-interaction procedure.
 
-An `interaction_opened` permission request in automatic mode follows the [runtime procedure](#consume-observed-interactions), and the automatic review events follow its [event table](#consume-automatic-review-events). A routed request that arrives with no event follows the same refusal route.
+An `interaction_opened` permission request in an `auto` or `manual` mode follows the [runtime procedure](#consume-observed-interactions), and the automatic review events follow its [event table](#consume-automatic-review-events). A routed request that arrives with no event follows the same refusal route.
 
 ### Model-name-to-backend inference
 

@@ -8,7 +8,7 @@ Model data is refreshed at least every 30 days (last refreshed: 2026-10-25). Pri
 
 ## Role requirements
 
-A role verdict is `yes` only when evidence establishes every Eligible-tier requirement: native goal lifecycle and concurrent background execution for Directors; runner-compatible PTY, explicit detection coverage and non-interactive omitted launch policy (native automatic review when available, otherwise fixed spawn-compatible allow/deny) for Members. Otherwise record `no` with the missing evidence/failure. Bundled support leaves verdicts unchanged. Evidence carries forward until re-check; eligible Directors without verified reception use manual `poll`/finite `wait`, preserving goal/decision authority.
+A role verdict is `yes` only when evidence establishes every Eligible-tier requirement; otherwise record `no` with the missing evidence/failure. Directors need native goal lifecycle controls and background execution while supervision continues, established by a CAFleet stream probe: the candidate starts `cafleet message listen` or a finite `cafleet message wait` through its native background facility, keeps working on unrelated tasks, and consumes another member's broker records without user input, streamed or as a completion-notified finite receive renewed after each completion. Members need a runner-compatible PTY, an explicit detection-coverage declaration and a classified default launch mode (`auto` — native automatic review or a fixed allow/deny policy — whenever the backend offers one; otherwise `manual`, native interactive approval) whose bundled profile detects every approval form the mode renders and declares request-bound allow and deny answers, outside the profile's recorded layout limits. An approval form is a native permission request that blocks the member until answered; question, trust, update and startup dialogs are outside it. A recorded layout limit is a profile-documented rendering no request rule matches (narrower than `W_min`, wrapped or clipped operation, uncaptured geometry), answered manually on the native surface. A default mode with no approval form meets the bar without request rules. Approval-prompt coverage counts toward the Member verdict; other bundled support leaves verdicts unchanged, and a failed probe or unselected profile still launches with `coverage=unknown`. Evidence carries forward until re-check; eligible Directors without verified reception use manual `poll`/finite `wait`, preserving goal/decision authority.
 
 ## claude
 
@@ -17,7 +17,7 @@ A role verdict is `yes` only when evidence establishes every Eligible-tier requi
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
-| `{permission_flags}` | `--permission-mode auto` |
+| `{permission_flags}` | `--permission-mode auto` (default mode `auto`, class `auto`) |
 | `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
 | `{skill_loader}` | the Skill tool |
 | `{effort_levels}` | `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`) |
@@ -59,7 +59,7 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Per-record reception follows the native recipe below. | [Director wake](../roles/director.md#director-wake) |
 | Receive Director records through one owned Monitor task using the native recipe below. Preserve the supplied `/goal` state and pending user decisions across events and renewal. | [Director wake](../roles/director.md#director-wake); [native reception](#claude-native-director-reception) |
 | Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](../roles/director.md#director-side-dispatch) |
-| Omitted `auto` runs spawn-allowed broker tools and matching host allows; its classifier reviews other calls while native rules, hooks and managed policy remain authoritative. Route refused calls; explicit interactive policies wait for a request-bound Director/user answer or manual input, and protected edits retain host boundaries. Outside-workspace file access is a native permission request; CAFleet uses only its single-request choices. | `{permission_flags}`; [routing](../roles/member.md#reconsider-then-route); [runtime handling](../roles/director.md#runtime-events) |
+| Default mode `auto` (class `auto`; explicit `dontAsk` and `bypassPermissions` are also `auto`, while `default`, `manual`, `acceptEdits` and `plan` are `manual`) runs spawn-allowed broker tools and matching host allows; its classifier reviews other calls while native rules, hooks and managed policy remain authoritative. Route refused calls; explicit interactive policies wait for a request-bound Director/user answer or manual input, and protected edits retain host boundaries. Outside-workspace file access is a native permission request; CAFleet uses only its single-request choices. | `{permission_flags}`; [routing](../roles/member.md#reconsider-then-route); [runtime handling](../roles/director.md#runtime-events) |
 
 #### Claude native Director reception
 
@@ -89,7 +89,7 @@ Retire through verified native cancellation with observed child cleanup, or stop
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{permission_flags}` | `--approve-for-me` |
+| `{permission_flags}` | `--approve-for-me` (default mode `approve-for-me`, class `auto`) |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | `minimal`, `low`, `medium`, `high`, `xhigh` (spawn flag `--effort <level>`, forwarded as `--config=model_reasoning_effort=<level>`) |
@@ -124,7 +124,7 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 | The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting. Retain native session handles and explicitly read the owned receiver while delegated work remains, preserving goal activation, pause, completion and budget authority. | [Director wake](../roles/director.md#director-wake); [native reception](#codex-native-director-reception) |
 | Native shell input displayed command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the effective TUI boundary and protocol path were not established. | [Native authorization](../roles/director.md#director-side-dispatch) |
 | The Director authorizes routed native input under its host rules; harmless command visibility establishes no second member-tool permission check. Inspect output before explicit continuation. | [Dispatch and continuation](../roles/director.md#director-side-dispatch) |
-| Run host-permitted workspace commands directly; automatic review decides escalations, and a necessary refused or denied command routes to the Director. Explicit interactive approval uses the original native surface and runtime-event procedure; the workspace sandbox and managed policy remain authoritative. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
+| Default mode `approve-for-me` (class `auto`; explicit `never` is also `auto`, explicit `on-request` is `manual`): run host-permitted workspace commands directly; automatic review decides escalations, and a necessary refused or denied command routes to the Director. Explicit interactive approval uses the original native surface and runtime-event procedure; the workspace sandbox and managed policy remain authoritative. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
 
 #### Codex native Director reception
 
@@ -152,7 +152,7 @@ Preserve goal activation, pause, completion, budget and pending-decision authori
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{permission_flags}` | `--agent cafleet`; `--agent cafleet-ask` when `--permission-mode cafleet-ask` is selected |
+| `{permission_flags}` | `--agent cafleet` (default mode `cafleet`, class `auto`); `--agent cafleet-ask` (class `manual`) when `--permission-mode cafleet-ask` is selected |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | unsupported — omit `--effort` |
@@ -312,8 +312,8 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 | Each pane runs `opencode mini --standalone --agent <mode>` with `--prompt`, optional model selection and a private server; `<mode>` is `cafleet` or the selected `cafleet-ask`, and spawn requires only that mode's installed preset. | `{permission_flags}`; member spawn |
 | Mini receives pushed notifications and direct prompts as submitted user turns. Captures can expose only the status bar; inspect retained session records for omitted input/output and broker poll/ACK for message consumption. | [Push notifications](cli.md#push-notifications); [prompt dispatch](cli.md#pane-input-and-previews) |
 | Leading-`!` input runs a native shell command in `mini`. Preserve Director authorization and member-tool permissions because the native path's effective boundary and any second permission check remain unestablished. | [Native dispatch](../roles/director.md#director-side-dispatch) |
-| The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup under `cafleet` is an issue to capture and relay. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
-| The `cafleet-ask` preset keeps the same allowlist and Director-only denies and asks for every other shell command. Its native permission form is a runtime decision: the member waits while the Director answers it through the [runtime procedure](../roles/director.md#runtime-events), then continues from the result OpenCode returns. | `{permission_flags}`; [runtime procedure](../roles/director.md#consume-observed-interactions) |
+| The default `cafleet` preset (class `auto`) allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup under `cafleet` is an issue to capture and relay. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
+| The explicit `cafleet-ask` preset (class `manual`) keeps the same allowlist and Director-only denies and asks for every other shell command. Its native permission form is a runtime decision: the member waits while the Director answers it through the [runtime procedure](../roles/director.md#runtime-events), then continues from the result OpenCode returns. | `{permission_flags}`; [runtime procedure](../roles/director.md#consume-observed-interactions) |
 | On OpenCode a deny submits an empty rejection reason and ends the member's turn with `Step interrupted`; after verifying that nothing ran, continue the member with a Director message, which its runner delivers into the idle composer. The bundled OpenCode profile detects the form at every pane width of at least `W_min` = 36 columns: rule `opencode-shell-permission` covers the wide (77 and above) and split (56–76) layouts, and `opencode-shell-permission-compact` covers the compact layout (36–55), with the same allow and deny stages; its rejection-reason dialog is `opencode-reject-reason-compact`. A narrower pane, where the choices no longer fit on one row, and a command clipped by the form's command box open no `interaction_opened` event and are answered manually on the native surface, as is a reason to give. A wrapped command that the box shows in full is detected, with `operation_rows` above 1; native fixtures back the layouts at 120, 57, 55 and 36 columns. | [Runtime procedure](../roles/director.md#consume-observed-interactions) step 7 |
 
 ### Role eligibility
