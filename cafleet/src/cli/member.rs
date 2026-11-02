@@ -2067,6 +2067,7 @@ mod tests {
                 ("codex", "on-request"),
                 ("opencode", "cafleet"),
                 ("opencode", "cafleet-ask"),
+                ("hermes", "smart"),
             ] {
                 let mut arguments = create_arguments();
                 arguments.extend([
@@ -2141,6 +2142,23 @@ mod tests {
                     assert!(failure.message().contains(&choice));
                 }
             }
+        }
+
+        #[test]
+        fn hermes_invalid_effort_and_policy_fail_with_usage_errors_before_creation_effects() {
+            assert_eq!(
+                invalid_creation(CodingAgent::Hermes, &["--effort".into(), "turbo".into()])
+                    .message(),
+                "--effort for the hermes backend must be one of none, minimal, low, medium, high, xhigh, max, ultra (got 'turbo')."
+            );
+            assert_eq!(
+                invalid_creation(
+                    CodingAgent::Hermes,
+                    &["--permission-mode".into(), "manual".into()]
+                )
+                .message(),
+                "--permission-mode for hermes must be one of smart (got 'manual')"
+            );
         }
 
         #[test]

@@ -924,6 +924,35 @@ mod tests {
     use crate::runtime::*;
     use crate::time::Deadline;
 
+    #[test]
+    fn fleet_create_accepts_every_registered_backend_including_hermes() {
+        use clap::Parser;
+        for &agent in crate::coding_agent::CodingAgent::all() {
+            let parsed = crate::cli::CliArgs::try_parse_from([
+                "cafleet",
+                "fleet",
+                "create",
+                "--name",
+                "fixture",
+                "--coding-agent",
+                agent.name(),
+            ]);
+            assert!(parsed.is_ok(), "{agent:?}");
+        }
+        assert!(
+            crate::cli::CliArgs::try_parse_from([
+                "cafleet",
+                "fleet",
+                "create",
+                "--name",
+                "fixture",
+                "--coding-agent",
+                "hermes",
+            ])
+            .is_ok()
+        );
+    }
+
     mod fleet {
         use crate::broker::Placement;
         use crate::cli::fleet::delete_fleet_with_host;

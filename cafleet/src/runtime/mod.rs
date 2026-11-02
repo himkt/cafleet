@@ -318,6 +318,7 @@ pub(crate) mod test_support {
                     "CAFLEET_DATABASE_URL".into(),
                     format!("sqlite:///{}", self.conn.path().unwrap()),
                 )],
+                environment_removals: Vec::new(),
                 evidence_policy: json!({"mode":"metadata"}),
                 size: TerminalSize { rows: 24, cols: 80 },
             }

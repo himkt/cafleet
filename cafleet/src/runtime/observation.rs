@@ -3160,6 +3160,7 @@ pub(crate) mod native_capture {
                     argv: vec!["/bin/cat".into()],
                     cwd: std::path::PathBuf::from("/"),
                     environment: Vec::new(),
+                    environment_removals: Vec::new(),
                     evidence_policy: policy,
                     size: TerminalSize { rows: 24, cols: 80 },
                 }
@@ -7211,6 +7212,7 @@ pub(crate) mod native_capture {
             let mut argv = approved.backend.build_spawn_argv_with_policy(
                 &prompt,
                 &approved.member_name(),
+                &case.cwd,
                 None,
                 None,
                 &policy,
@@ -7244,6 +7246,12 @@ pub(crate) mod native_capture {
                 ))
                 .chain(approved.child_environment())
                 .collect(),
+                environment_removals: approved
+                    .backend
+                    .spawn_environment_removals()
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect(),
                 evidence_policy: json!({"mode":"redacted","config":config}),
                 size: approved.size,
             };
