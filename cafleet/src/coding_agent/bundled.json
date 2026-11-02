@@ -1140,6 +1140,366 @@
       "cols": 120,
       "source_ref": "native/claude.json",
       "sha256": "7612b2b6764ce45bd6aad104bae3af08644a3c7b1a044a01207a386cfe6b89fc"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "466e2cc298bbdd2efc309f0697735bcb552f1c3ab060bc2d6eed7c7142cb0d66"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-allow-continuation-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "dd378ca322effa014761ecdbe22b7f394a60c47bc67cf259a862cb13dc84dc44"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-empty-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "35baa69b96d1a94f3fe04f56840b0cbaabcda4749e7c7164c7710c96fda5d4fb"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-prompt-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "3708b4a09bcfe2a24ccd51dc634e981c865e58e273e51dea5a09c5f24d9ef3fc"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-prompt-submitted-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "599a7bd55e56126ea597b5612c2ef6faea860ce513c3d8b6a4b3d7e8cf923a64"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-exec-literal-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "9c82a38748e6008c8282f7dba5903b7480abaa7e99dd4d6efdf5ea1b979ceaa9"
+    },
+    {
+      "id": "hermes-2026.9.24-composer-exec-submitted-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "e42244e50c2cf3dd4808437a0c409af2a8a999ef8be9d0fc6af3f4bf0c45780d"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-tmux-080-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 80,
+      "source_ref": "native/hermes.json",
+      "sha256": "f8d5557965c01d8fef2ca8ae2ec17b94f78193ff78257b7457e1fc6a4f5c0915"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-deny-continuation-tmux-080-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 80,
+      "source_ref": "native/hermes.json",
+      "sha256": "25fc4139afd833e0b39cc2a0fed1c8e3200c1bdedca1bc67c6d859b59300ff2f"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-tmux-057-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/hermes.json",
+      "sha256": "1a919bceb191c70d797cfadd04c538beeb24490970430af1501c5e02102b528f"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-deny-focus-tmux-057-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/hermes.json",
+      "sha256": "31f6c342f5b00501fccb0862782046f713de1c4bd2b432ca83d7f08ae3e89641"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-deny-enter-continuation-tmux-057-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/hermes.json",
+      "sha256": "9a1f72e9abcfe564413f632e8cbb5144344bc110601341ec995c1ea63d4b43ee"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-tmux-040-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 40,
+      "source_ref": "native/hermes.json",
+      "sha256": "1c6e919e3daf01fd31fa6166c06c0b1fa5f7d9a2d185e59c7c63f900b12e36ec"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-allow-continuation-tmux-040-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 40,
+      "source_ref": "native/hermes.json",
+      "sha256": "400e0f808180bf13e0ae6485c060b9db8d81b348c88926641828ecbf6c7563b8"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-min-tmux-037-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 37,
+      "source_ref": "native/hermes.json",
+      "sha256": "cfaa5a916769d1e519ef5cfb23e3d72d2f257b70dd02c5af6f45e47c5ec54eb6"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-survey-tmux-036-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 36,
+      "source_ref": "native/hermes.json",
+      "sha256": "5b234b417b3e5c8a54520d32b875cceac1676e5f1b41cfecf42d64f072f1d111"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-timeout-closure-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "b81ebabe5b9d7f8aafef1c25abb0f62261b3b7cb6792d40fd6bd78241da22815"
+    },
+    {
+      "id": "hermes-2026.9.24-override-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "7fbf40165011bc8069658243a810227cef4b02012652402b61d90d37c2352568"
+    },
+    {
+      "id": "hermes-2026.9.24-override-allow-continuation-tmux-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "99ae58fb4fd2785628f0d117be5d2369bde51a6f37b00dd75633408064486dc7"
+    },
+    {
+      "id": "hermes-2026.9.24-override-tmux-080-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 80,
+      "source_ref": "native/hermes.json",
+      "sha256": "34d01e9f8d95ef2fc64e89f7e3d369625b0fd8231684b92249cb2d611ea3c2db"
+    },
+    {
+      "id": "hermes-2026.9.24-override-deny-continuation-tmux-080-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 80,
+      "source_ref": "native/hermes.json",
+      "sha256": "df6f1fa81c7df8f21091f185bfe081c094e1f1a91246109d9a9b4abadf138433"
+    },
+    {
+      "id": "hermes-2026.9.24-override-tmux-057-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/hermes.json",
+      "sha256": "da11ba0fe9f9c414300baf52a5344796ad149caeeb0fe307a7880c459211fc72"
+    },
+    {
+      "id": "hermes-2026.9.24-override-deny-focus-tmux-057-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/hermes.json",
+      "sha256": "de7a778a7e2c2b2b552d174b86cfe6aaef395525a0d26ebb0eb22ad86748dc74"
+    },
+    {
+      "id": "hermes-2026.9.24-override-deny-enter-continuation-tmux-057-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/hermes.json",
+      "sha256": "1ddba0891cc7597136d396d70478b9f385982f464fa377f1a6eb62d1e0c63b7e"
+    },
+    {
+      "id": "hermes-2026.9.24-override-tmux-040-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 40,
+      "source_ref": "native/hermes.json",
+      "sha256": "fdf4fbf77bb539239afee28dcec0f51e420f7b0e69d4513f4cd48c6f32ff0918"
+    },
+    {
+      "id": "hermes-2026.9.24-override-allow-enter-continuation-tmux-040-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 40,
+      "source_ref": "native/hermes.json",
+      "sha256": "43af6dddd205fcd8dd27a6d05fb50828a03bd44e835b18d3deee8e5b196813c3"
+    },
+    {
+      "id": "hermes-2026.9.24-override-survey-tmux-028-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 28,
+      "source_ref": "native/hermes.json",
+      "sha256": "4ec67363b2d18884a762271798f9961982c50eefacd6410b7c6f95a4ff965fa8"
+    },
+    {
+      "id": "hermes-2026.9.24-override-survey-tmux-027-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 27,
+      "source_ref": "native/hermes.json",
+      "sha256": "7791cf71f1797d9613c7f4f1a5169a681d310fefb19b81aa288b0f06838c7fdc"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-herdr-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "b7941ada9172e13940960615f184c8a843087d824a86ad140ffcbcf34b241b58"
+    },
+    {
+      "id": "hermes-2026.9.24-override-herdr-120-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/hermes.json",
+      "sha256": "f77985380b1f7ca95cd28da81053bcb6b7d4cf0f7c109451fe74179e32225c8a"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-herdr-080-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 80,
+      "source_ref": "native/hermes.json",
+      "sha256": "68e22e61489779b4a82846f8d0731341873fc3e15b7b14cb002c78e705c1872d"
+    },
+    {
+      "id": "hermes-2026.9.24-override-herdr-080-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 80,
+      "source_ref": "native/hermes.json",
+      "sha256": "a4360d83dfe9fde7b3b91a4d3d9779b0d0ac8377c5e6e4181c603fea9ec1803b"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-herdr-057-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/hermes.json",
+      "sha256": "185b1e65db0e4a054d1f414178e7d9e514c78715a4f589a7eadf1d82cdd9d69e"
+    },
+    {
+      "id": "hermes-2026.9.24-override-herdr-057-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 57,
+      "source_ref": "native/hermes.json",
+      "sha256": "8f97494a3ff732ab106d2a78fdcf836e7e24590ec4820400d15df66cd93f5d13"
+    },
+    {
+      "id": "hermes-2026.9.24-escalate-herdr-040-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 40,
+      "source_ref": "native/hermes.json",
+      "sha256": "fa2e41b2c4316cb4d8c8cbaae4ee8d901a2346934f92fe08018cc97612bb33e8"
+    },
+    {
+      "id": "hermes-2026.9.24-override-herdr-040-1",
+      "kind": "native",
+      "backend": "hermes",
+      "native_version": "2026.9.24",
+      "rows": 36,
+      "cols": 40,
+      "source_ref": "native/hermes.json",
+      "sha256": "f0356b529d812c694328b1c2b5756556fcf1d47cf18a50eb879cd83d4c21f179"
     }
   ],
   "profiles": [

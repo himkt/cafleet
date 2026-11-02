@@ -1,7 +1,7 @@
 # Hermes Coding-Agent Backend Support
 
 **Status**: Approved
-**Progress**: 43/73 tasks complete
+**Progress**: 57/73 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -441,19 +441,19 @@ Paid calls use the operator's configured default model. Secrets and account iden
 
 ### Step 6: Member live evidence and captures
 
-- [ ] Launch a Hermes member under the runner on tmux and on herdr; record literal first-turn delivery, ready, poll/show/ACK and a second assignment after the first answer <!-- completed: -->
-- [ ] Establish which process evaluates approvals and runs terminal tools for a member session (pane `hermes` process or a gateway), and whether a serving gateway's `HERMES_HOME` and environment can be read. Apply the matching outcome from § Hermes launch contract, Effective configuration owner, including the gateway check or a Member `no`. <!-- completed: -->
-- [ ] Verify that the member's terminal tool sees its own `CAFLEET_DATABASE_URL`, multiplexer variables and intended cwd through `terminal.client_env_passthrough`, with two concurrent members under one Hermes home <!-- completed: -->
-- [ ] Verify that the six deny globs block, under `smart`, a plain `cafleet member prompt …`, a leading-assignment `CAFLEET_DATABASE_URL=… cafleet member press …` and the other four commands. Record how each refusal renders in the pane and tool result for routing, and extend the glob set or record Member `no` per § User decisions. <!-- completed: -->
-- [ ] Capture the guardian ESCALATE prompt (command gate) at 120, 80, 57 and 40 columns on tmux and herdr, plus each choice's continuation <!-- completed: -->
-- [ ] Capture the guardian-DENY owner-override prompt at the same widths on both multiplexers, plus each choice's continuation <!-- completed: -->
-- [ ] Capture the `execute_code` and action/protected-write gate prompts that `smart` reaches, and record which gates share a form <!-- completed: -->
-- [ ] Capture the `approvals.timeout` closure (with a short test timeout in an isolated `HERMES_HOME` copy of the operator configuration), plus the guardian-unavailable fallback when reachable <!-- completed: -->
-- [ ] Capture every other native form observed at startup or during work (setup wizard, hook consent, update or trust notice, `clarify`) <!-- completed: -->
-- [ ] Capture the empty composer, a typed literal and the post-submit screen for prompt and for `! ` native exec, with separate literal and submit stages; verify local `!` execution with zero model turns <!-- completed: -->
-- [ ] Measure the allow-once and deny key stages per form (typed choice and submit, or focus keys), including human-input and output races at the observed-state boundary <!-- completed: -->
-- [ ] Determine the member's Hermes session identity source and the session-scoped stop control; verify on an active turn and on running `notify=true` background processes that settlement leaves no running `processes.json` entry and no active turn for the key <!-- completed: -->
-- [ ] Find the narrowest width at which each prompt's menu fits one row (`W_min`), and record the layout breaks and limits <!-- completed: -->
+- [x] Launch a Hermes member under the runner on tmux and on herdr; record literal first-turn delivery, ready, poll/show/ACK and a second assignment after the first answer <!-- completed: 2026-11-02T11:26 -->
+- [x] Establish which process evaluates approvals and runs terminal tools for a member session (pane `hermes` process or a gateway), and whether a serving gateway's `HERMES_HOME` and environment can be read. Apply the matching outcome from § Hermes launch contract, Effective configuration owner, including the gateway check or a Member `no`. <!-- completed: 2026-11-02T11:26 -->
+- [x] Verify that the member's terminal tool sees its own `CAFLEET_DATABASE_URL`, multiplexer variables and intended cwd through `terminal.client_env_passthrough`, with two concurrent members under one Hermes home <!-- completed: 2026-11-02T11:26 -->
+- [x] Verify that the six deny globs block, under `smart`, a plain `cafleet member prompt …`, a leading-assignment `CAFLEET_DATABASE_URL=… cafleet member press …` and the other four commands. Record how each refusal renders in the pane and tool result for routing, and extend the glob set or record Member `no` per § User decisions. <!-- completed: 2026-11-02T11:26 -->
+- [x] Capture the guardian ESCALATE prompt (command gate) at 120, 80, 57 and 40 columns on tmux and herdr, plus each choice's continuation <!-- completed: 2026-11-02T11:26 -->
+- [x] Capture the guardian-DENY owner-override prompt at the same widths on both multiplexers, plus each choice's continuation <!-- completed: 2026-11-02T11:26 -->
+- [x] Capture the `execute_code` and action/protected-write gate prompts that `smart` reaches, and record which gates share a form <!-- completed: 2026-11-02T11:26 -->
+- [x] Capture the `approvals.timeout` closure (with a short test timeout in an isolated `HERMES_HOME` copy of the operator configuration), plus the guardian-unavailable fallback when reachable <!-- completed: 2026-11-02T11:26 -->
+- [x] Capture every other native form observed at startup or during work (setup wizard, hook consent, update or trust notice, `clarify`) <!-- completed: 2026-11-02T11:26 -->
+- [x] Capture the empty composer, a typed literal and the post-submit screen for prompt and for `! ` native exec, with separate literal and submit stages; verify local `!` execution with zero model turns <!-- completed: 2026-11-02T11:26 -->
+- [x] Measure the allow-once and deny key stages per form (typed choice and submit, or focus keys), including human-input and output races at the observed-state boundary <!-- completed: 2026-11-02T11:26 -->
+- [x] Determine the member's Hermes session identity source and the session-scoped stop control; verify on an active turn and on running `notify=true` background processes that settlement leaves no running `processes.json` entry and no active turn for the key <!-- completed: 2026-11-02T11:26 -->
+- [x] Find the narrowest width at which each prompt's menu fits one row (`W_min`), and record the layout breaks and limits <!-- completed: 2026-11-02T11:26 -->
 
 ### Step 6a: Apply the Step 6 revisions
 
@@ -464,7 +464,7 @@ Paid calls use the operator's configured default model. Secrets and account iden
 
 ### Step 7: Hermes bundled profile, deletion settlement and Member acceptance
 
-- [ ] Convert accepted captures into `cafleet/src/coding_agent/native/hermes.json` and `bundled.json` fixture entries with reviewed masks and digests <!-- completed: -->
+- [x] Convert accepted captures into `cafleet/src/coding_agent/native/hermes.json` and `bundled.json` fixture entries with reviewed masks and digests <!-- completed: 2026-11-02T11:26 -->
 - [ ] Add the Hermes profile from `2026.9.24` with request rules for ESCALATE, override and each distinct gate form, interaction rules for other observed forms, continuation rules and the timeout closure <!-- completed: -->
 - [ ] Add allow-once and deny answer plans with gates, plus empty-composer, prompt and native-exec plans from the measured stages <!-- completed: -->
 - [ ] Add positive and adversarial replay tests covering every row of § Hermes bundled profile Replay fixtures <!-- completed: -->

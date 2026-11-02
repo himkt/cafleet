@@ -1,0 +1,2859 @@
+{
+  "schema_version": 1,
+  "backend": "hermes",
+  "provenance": "native",
+  "screens": {
+    "hermes-2026.9.24-escalate-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 33,
+      "cursor_col": 4,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe escalate' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "╭────────────────────────────────────────────────────────╮                                                              ",
+        "│ ⚠️  Dangerous Command                                  │  ",
+        "│                                                        │                                                              ",
+        "│ bash -c '/tmp/chp/forms/permission-probe escalate'     │                                                              ",
+        "│                                                        │  ",
+        "│ ❯ 1. Allow once                                        │  ",
+        "│   2. Allow for this session                            │  ",
+        "│   3. Add to permanent allowlist                        │  ",
+        "│   4. Deny                                              │  ",
+        "│                                                        │  ",
+        "│ shell command via -c/-lc flag                          │  ",
+        "╰────────────────────────────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (273s)                   ",
+        "── ⠙ 💻 bash -c '/tmp/chp/forms/permission-probe escalate' · 32s · ↓ 31 tok ────────────────────────────────────────────",
+        "⚠ ❯                           ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-allow-continuation-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 2,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe escalate' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe escalate' → allowed once                                           ",
+        "",
+        "💻 $ bash -c '/tmp/chp/forms/permission-probe escalate'  45.4s                                                          ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle tool-progress display modes (all -> new -> off -> verbose). Thi",
+        "s tip only shows once.        ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "Native approval was granted. The command exited with code 0.                                                            ",
+        "",
+        "Output: permission-probe escalate executed                  ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 52.2s · ran 1 command · 10:57 AM                          ",
+        "───────────────────────────────────────────────────────────────── Run permission-probe escalation and report result #2 ─",
+        "❯ Turn these notes into a to-do list                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-composer-empty-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 3,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe escalate' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe escalate' → allowed once                                           ",
+        "",
+        "💻 $ bash -c '/tmp/chp/forms/permission-probe escalate'  45.4s                                                          ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle tool-progress display modes (all -> new -> off -> verbose). Thi",
+        "s tip only shows once.        ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "Native approval was granted. The command exited with code 0.                                                            ",
+        "",
+        "Output: permission-probe escalate executed                  ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 52.2s · ran 1 command · 10:57 AM                          ",
+        "───────────────────────────────────────────────────────────────── Run permission-probe escalation and report result #2 ─",
+        "❯ Turn these notes into a to-do list                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-composer-prompt-literal-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 4,
+      "cursor_row": 33,
+      "cursor_col": 32,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe escalate' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe escalate' → allowed once                                           ",
+        "",
+        "💻 $ bash -c '/tmp/chp/forms/permission-probe escalate'  45.4s                                                          ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle tool-progress display modes (all -> new -> off -> verbose). Thi",
+        "s tip only shows once.        ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "Native approval was granted. The command exited with code 0.                                                            ",
+        "",
+        "Output: permission-probe escalate executed                  ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 52.2s · ran 1 command · 10:57 AM                          ",
+        "───────────────────────────────────────────────────────────────── Run permission-probe escalation and report result #2 ─",
+        "❯ Reply with the single word ok.                            ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-composer-prompt-submitted-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 5,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe escalate' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe escalate' → allowed once                                           ",
+        "",
+        "💻 $ bash -c '/tmp/chp/forms/permission-probe escalate'  45.4s                                                          ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle tool-progress display modes (all -> new -> off -> verbose). Thi",
+        "s tip only shows once.        ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "Native approval was granted. The command exited with code 0.                                                            ",
+        "",
+        "Output: permission-probe escalate executed                  ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 52.2s · ran 1 command · 10:57 AM                          ",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Reply with the single word ok.                            ",
+        "────────────────────────────────────────                    ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "ok                            ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 2.6s · 10:59 AM             ",
+        "───────────────────────────────────────────────────────────────── Run permission-probe escalation and report result #2 ─",
+        "❯ Turn these notes into a to-do list                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-composer-exec-literal-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 6,
+      "cursor_row": 33,
+      "cursor_col": 28,
+      "lines": [
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe escalate' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe escalate' → allowed once                                           ",
+        "",
+        "💻 $ bash -c '/tmp/chp/forms/permission-probe escalate'  45.4s                                                          ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle tool-progress display modes (all -> new -> off -> verbose). Thi",
+        "s tip only shows once.        ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "Native approval was granted. The command exited with code 0.                                                            ",
+        "",
+        "Output: permission-probe escalate executed                  ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 52.2s · ran 1 command · 10:57 AM                          ",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Reply with the single word ok.                            ",
+        "────────────────────────────────────────                    ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "ok                            ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 2.6s · 10:59 AM             ",
+        "───────────────────────────────────────────────────────────────── Run permission-probe escalation and report result #2 ─",
+        "❯ ! echo cafleet-native-exec                                ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-composer-exec-submitted-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 7,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe escalate' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe escalate' → allowed once                                           ",
+        "",
+        "💻 $ bash -c '/tmp/chp/forms/permission-probe escalate'  45.4s                                                          ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle tool-progress display modes (all -> new -> off -> verbose). Thi",
+        "s tip only shows once.        ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "Native approval was granted. The command exited with code 0.                                                            ",
+        "",
+        "Output: permission-probe escalate executed                  ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 52.2s · ran 1 command · 10:57 AM                          ",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Reply with the single word ok.                            ",
+        "────────────────────────────────────────                    ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "ok                            ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 2.6s · 10:59 AM             ",
+        "cafleet-native-exec           ",
+        "───────────────────────────────────────────────────────────────── Run permission-probe escalation and report result #2 ─",
+        "❯ Turn these notes into a to-do list                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-tmux-080-1": {
+      "rows": 36,
+      "cols": 80,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 33,
+      "cursor_col": 4,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe ",
+        "escalate' as one foreground command. Preserve any native approval request for th",
+        "e operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────────────────────────╮                      ",
+        "│ ⚠️  Dangerous Command                                  │                      ",
+        "│                                                        │                      ",
+        "│ bash -c '/tmp/chp/forms/permission-probe escalate'     │                      ",
+        "│                                                        │                      ",
+        "│ ❯ 1. Allow once                                        │                      ",
+        "│   2. Allow for this session                            │                      ",
+        "│   3. Add to permanent allowlist                        │                      ",
+        "│   4. Deny                                              │                      ",
+        "│                                                        │                      ",
+        "│ shell command via -c/-lc flag                          │                      ",
+        "╰────────────────────────────────────────────────────────╯                      ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (267s)                                       ",
+        "── ⠙ 💻 bash -c '/tmp/chp/forms/permission-probe escalate' · 38s · ↓ 35 tok ────",
+        "⚠ ❯                 ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-deny-continuation-tmux-080-1": {
+      "rows": 36,
+      "cols": 80,
+      "alternate_screen": false,
+      "screen_seq": 2,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe ",
+        "escalate' as one foreground command. Preserve any native approval request for th",
+        "e operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe escalate' → denied         ",
+        "",
+        "✗ $ bash -c '/tmp/chp/forms/permission-probe escalate'  44.5s [You denied this c",
+        "ommand — it did not run.]               ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle tool-progress display m",
+        "odes (all -> new -> off -> verbose). This tip only shows once.                  ",
+        "",
+        "────────────────────────────────────────",
+        "☤ Hermes            ",
+        "The operator denied the native approval request. The command did not run; the to",
+        "ol returned status “blocked” and exit code -1.                                  ",
+        "────────────────────────────────────────",
+        "",
+        "─ 51.7s · 10:57 AM  ",
+        "─────────────────────────────────────── Run permission probe and report result ─",
+        "❯ Research this topic and write me a brief                                      ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-tmux-057-1": {
+      "rows": 36,
+      "cols": 57,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                 ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/",
+        "forms/permission-probe escalate' as one foreground comman",
+        "d. Preserve any native approval request for the operator.",
+        " After the native decision, report the actual result and ",
+        "stop.         ",
+        "────────────────────────────────────────                 ",
+        "╭─────────────────────────────────────────────────────╮  ",
+        "│ ⚠️  Dangerous Command                               │  ",
+        "│                                                     │  ",
+        "│ bash -c '/tmp/chp/forms/permission-probe escalate'  │  ",
+        "│                                                     │  ",
+        "│ ❯ 1. Allow once                                     │  ",
+        "│   2. Allow for this session                         │  ",
+        "│   3. Add to permanent allowlist                     │  ",
+        "│   4. Deny                                           │  ",
+        "│                                                     │  ",
+        "│ shell command via -c/-lc flag                       │  ",
+        "╰─────────────────────────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (269s)                ",
+        "── ⠙ 💻 bash -c '/tmp/chp/forms/permission-probe escal...",
+        "⚠             ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-deny-focus-tmux-057-1": {
+      "rows": 36,
+      "cols": 57,
+      "alternate_screen": false,
+      "screen_seq": 2,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                 ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/",
+        "forms/permission-probe escalate' as one foreground comman",
+        "d. Preserve any native approval request for the operator.",
+        " After the native decision, report the actual result and ",
+        "stop.         ",
+        "────────────────────────────────────────                 ",
+        "╭─────────────────────────────────────────────────────╮  ",
+        "│ ⚠️  Dangerous Command                               │  ",
+        "│                                                     │  ",
+        "│ bash -c '/tmp/chp/forms/permission-probe escalate'  │  ",
+        "│                                                     │  ",
+        "│   1. Allow once                                     │  ",
+        "│   2. Allow for this session                         │  ",
+        "│   3. Add to permanent allowlist                     │  ",
+        "│ ❯ 4. Deny                                           │  ",
+        "│                                                     │  ",
+        "│ shell command via -c/-lc flag                       │  ",
+        "╰─────────────────────────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (241s)                ",
+        "── ⠋ 💻 bash -c '/tmp/chp/forms/permission-probe escal...",
+        "⚠             ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-deny-enter-continuation-tmux-057-1": {
+      "rows": 36,
+      "cols": 57,
+      "alternate_screen": false,
+      "screen_seq": 3,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                 ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/",
+        "forms/permission-probe escalate' as one foreground comman",
+        "d. Preserve any native approval request for the operator.",
+        " After the native decision, report the actual result and ",
+        "stop.         ",
+        "────────────────────────────────────────                 ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe esca",
+        "late' → denied",
+        "",
+        "✗ $ bash -c '/tmp/chp/forms/permission-probe escalate'  6",
+        "1.2s [You denied this command — it did not run.]         ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle ",
+        "tool-progress display modes (all -> new -> off -> verbose",
+        "). This tip only shows once.                             ",
+        "",
+        "────────────────────────────────────────                 ",
+        "☤ Hermes      ",
+        "The native approval was denied. The command did not run (",
+        "status: blocked, exit code: -1).                         ",
+        "────────────────────────────────────────                 ",
+        "",
+        "─ 1m08s · 10:57 AM          ",
+        "─────────────────────────────────────────────────────────",
+        "❯ Set a reminder or schedule a recurring task            ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-tmux-040-1": {
+      "rows": 36,
+      "cols": 40,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly b",
+        "ash -c '/tmp/chp/forms/permission-probe ",
+        "escalate' as one foreground command. Pre",
+        "serve any native approval request for th",
+        "e operator. After the native decision, r",
+        "eport the actual result and stop.       ",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────╮  ",
+        "│ ⚠️  Dangerous Command              │  ",
+        "│                                    │  ",
+        "│ bash -c                            │  ",
+        "│ '/tmp/chp/forms/permission-probe   │  ",
+        "│ escalate'                          │  ",
+        "│                                    │  ",
+        "│ ❯ 1. Allow once                    │  ",
+        "│   2. Allow for this session        │  ",
+        "│   3. Add to permanent allowlist    │  ",
+        "│   4. Deny                          │  ",
+        "│                                    │  ",
+        "│ shell command via -c/-lc flag      │  ",
+        "╰────────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (269s",
+        "── ⠼ 💻 bash -c '/tmp/chp/forms/permi...",
+        "⚠         ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-allow-continuation-tmux-040-1": {
+      "rows": 36,
+      "cols": 40,
+      "alternate_screen": false,
+      "screen_seq": 2,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly b",
+        "ash -c '/tmp/chp/forms/permission-probe ",
+        "escalate' as one foreground command. Pre",
+        "serve any native approval request for th",
+        "e operator. After the native decision, r",
+        "eport the actual result and stop.       ",
+        "────────────────────────────────────────",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/perm",
+        "ission-probe escalate' → allowed once   ",
+        "",
+        "💻 $ bash -c '/tmp/chp/forms/permission-",
+        "probe escalate'  42.7s                  ",
+        "  (tip) That tool ran for a while. Use /",
+        "verbose to cycle tool-progress display m",
+        "odes (all -> new -> off -> verbose). Thi",
+        "s tip only shows once.                  ",
+        "",
+        "────────────────────────────────────────",
+        "☤ Hermes  ",
+        "Native approval was granted. The command",
+        " exited with code 0.                    ",
+        "",
+        "Output: permission-probe escalate execut",
+        "ed        ",
+        "────────────────────────────────────────",
+        "",
+        "─ 48.8s · ran 1 command · 10:57 AM      ",
+        "────────────────────────────────────────",
+        "❯ Type / to browse commands, or Ctrl+P f",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-min-tmux-037-1": {
+      "rows": 36,
+      "cols": 37,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "─────────────────────────────────────",
+        "───      ",
+        "❯ Use the terminal tool to run exactl",
+        "y bash -c '/tmp/chp/forms/permission-",
+        "probe escalate' as one foreground com",
+        "mand. Preserve any native approval re",
+        "quest for the operator. After the nat",
+        "ive decision, report the actual resul",
+        "t and stop.       ",
+        "─────────────────────────────────────",
+        "───      ",
+        "╭─────────────────────────────────╮  ",
+        "│ ⚠️  Dangerous Command           │  ",
+        "│                                 │  ",
+        "│ bash -c                         │  ",
+        "│ '/tmp/chp/forms/permission-     │  ",
+        "│ probe escalate'                 │  ",
+        "│                                 │  ",
+        "│ ❯ 1. Allow once                 │  ",
+        "│   2. Allow for this session     │  ",
+        "│   3. Add to permanent allowlist │  ",
+        "│   4. Deny                       │  ",
+        "│                                 │  ",
+        "│ shell command via -c/-lc flag   │  ",
+        "╰─────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (2",
+        "── ⠦ 💻 bash -c '/tmp/chp/forms/pe...",
+        "⚠        ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-survey-tmux-036-1": {
+      "rows": 36,
+      "cols": 36,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────",
+        "────     ",
+        "❯ Use the terminal tool to run exact",
+        "ly bash -c '/tmp/chp/forms/permissio",
+        "n-probe escalate' as one foreground ",
+        "command. Preserve any native approva",
+        "l request for the operator. After th",
+        "e native decision, report the actual",
+        " result and stop. ",
+        "────────────────────────────────────",
+        "────     ",
+        "╭────────────────────────────────╮  ",
+        "│ ⚠️  Dangerous Command          │  ",
+        "│                                │  ",
+        "│ bash -c                        │  ",
+        "│ '/tmp/chp/forms/permission-    │  ",
+        "│ probe escalate'                │  ",
+        "│                                │  ",
+        "│ ❯ 1. Allow once                │  ",
+        "│   2. Allow for this session    │  ",
+        "│   3. Add to permanent          │  ",
+        "│     allowlist                  │  ",
+        "│   4. Deny                      │  ",
+        "│                                │  ",
+        "│ shell command via -c/-lc flag  │  ",
+        "╰────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (",
+        "── ⠴ 💻 bash -c '/tmp/chp/forms/p...",
+        "⚠        ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-timeout-closure-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe escalate' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "",
+        "  ⏱ Timeout — denying command ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe escalate' → timed out (no response)                                ",
+        "",
+        "✗ $ bash -c '/tmp/chp/forms/permission-probe escalate'  22.9s [No answer within 20 seconds — the command did not run.]  ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "The native approval request timed out after 20 seconds without a response. The command was blocked and did not run. No r",
+        "etry was attempted.           ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 28.1s · 10:59 AM            ",
+        "─────────────────────────────────────────────────────────────────── Run permission-probe escalate with native approval ─",
+        "❯ Summarize what's in this folder                           ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 33,
+      "cursor_col": 4,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe override' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "╭────────────────────────────────────────────────────────╮                                                              ",
+        "│ ⚠️  Dangerous Command                                  │  ",
+        "│                                                        │                                                              ",
+        "│ bash -c '/tmp/chp/forms/permission-probe override'     │                                                              ",
+        "│                                                        │  ",
+        "│ ❯ 1. Allow once                                        │  ",
+        "│   2. Deny                                              │  ",
+        "│                                                        │  ",
+        "│ shell command via -c/-lc flag                          │  ",
+        "╰────────────────────────────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (231s)                   ",
+        "── ⠏ 💻 bash -c '/tmp/chp/forms/permission-probe override' · 1m · ↓ 35 tok ─────────────────────────────────────────────",
+        "⚠ ❯                           ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-allow-continuation-tmux-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 2,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                    ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe override' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────                    ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe override' → allowed once                                           ",
+        "",
+        "💻 $ bash -c '/tmp/chp/forms/permission-probe override'  83.1s                                                          ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle tool-progress display modes (all -> new -> off -> verbose). Thi",
+        "s tip only shows once.        ",
+        "",
+        "────────────────────────────────────────                    ",
+        "☤ Hermes                      ",
+        "Native approval was granted. The command exited with code 0.                                                            ",
+        "",
+        "Output: permission-probe override executed                  ",
+        "────────────────────────────────────────                    ",
+        "",
+        "─ 1m31s · ran 1 command · 10:57 AM                          ",
+        "────────────────────────────────────────────────────────────────────── Run permission-probe override and report result ─",
+        "❯ Plan a feature, then build it step by step                ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-tmux-080-1": {
+      "rows": 36,
+      "cols": 80,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 33,
+      "cursor_col": 4,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe ",
+        "override' as one foreground command. Preserve any native approval request for th",
+        "e operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────────────────────────╮                      ",
+        "│ ⚠️  Dangerous Command                                  │                      ",
+        "│                                                        │                      ",
+        "│ bash -c '/tmp/chp/forms/permission-probe override'     │                      ",
+        "│                                                        │                      ",
+        "│ ❯ 1. Allow once                                        │                      ",
+        "│   2. Deny                                              │                      ",
+        "│                                                        │                      ",
+        "│ shell command via -c/-lc flag                          │                      ",
+        "╰────────────────────────────────────────────────────────╯                      ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (232s)                                       ",
+        "── ⠇ 💻 bash -c '/tmp/chp/forms/permission-probe override' · 1m · ↓ 35 tok ─────",
+        "⚠ ❯                 ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-deny-continuation-tmux-080-1": {
+      "rows": 36,
+      "cols": 80,
+      "alternate_screen": false,
+      "screen_seq": 2,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe ",
+        "override' as one foreground command. Preserve any native approval request for th",
+        "e operator. After the native decision, report the actual result and stop.       ",
+        "────────────────────────────────────────",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe override' → denied         ",
+        "",
+        "✗ $ bash -c '/tmp/chp/forms/permission-probe override'  83.4s [You denied this c",
+        "ommand — it did not run.]               ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle tool-progress display m",
+        "odes (all -> new -> off -> verbose). This tip only shows once.                  ",
+        "",
+        "────────────────────────────────────────",
+        "☤ Hermes            ",
+        "The operator denied the native approval request. The command did not run (status",
+        ": blocked, exit code: -1).              ",
+        "────────────────────────────────────────",
+        "",
+        "─ 1m29s · 10:57 AM  ",
+        "───────────────────── Run permission-probe override preserving native approval ─",
+        "❯ Summarize what's in this folder       ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-tmux-057-1": {
+      "rows": 36,
+      "cols": 57,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                 ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/",
+        "forms/permission-probe override' as one foreground comman",
+        "d. Preserve any native approval request for the operator.",
+        " After the native decision, report the actual result and ",
+        "stop.         ",
+        "────────────────────────────────────────                 ",
+        "╭─────────────────────────────────────────────────────╮  ",
+        "│ ⚠️  Dangerous Command                               │  ",
+        "│                                                     │  ",
+        "│ bash -c '/tmp/chp/forms/permission-probe override'  │  ",
+        "│                                                     │  ",
+        "│ ❯ 1. Allow once                                     │  ",
+        "│   2. Deny                                           │  ",
+        "│                                                     │  ",
+        "│ shell command via -c/-lc flag                       │  ",
+        "╰─────────────────────────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (233s)                ",
+        "── ⠏ 💻 bash -c '/tmp/chp/forms/permission-probe overr...",
+        "⚠             ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-deny-focus-tmux-057-1": {
+      "rows": 36,
+      "cols": 57,
+      "alternate_screen": false,
+      "screen_seq": 2,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                 ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/",
+        "forms/permission-probe override' as one foreground comman",
+        "d. Preserve any native approval request for the operator.",
+        " After the native decision, report the actual result and ",
+        "stop.         ",
+        "────────────────────────────────────────                 ",
+        "╭─────────────────────────────────────────────────────╮  ",
+        "│ ⚠️  Dangerous Command                               │  ",
+        "│                                                     │  ",
+        "│ bash -c '/tmp/chp/forms/permission-probe override'  │  ",
+        "│                                                     │  ",
+        "│   1. Allow once                                     │  ",
+        "│ ❯ 2. Deny                                           │  ",
+        "│                                                     │  ",
+        "│ shell command via -c/-lc flag                       │  ",
+        "╰─────────────────────────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (217s)                ",
+        "── ⠴ 💻 bash -c '/tmp/chp/forms/permission-probe overr...",
+        "⚠             ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-deny-enter-continuation-tmux-057-1": {
+      "rows": 36,
+      "cols": 57,
+      "alternate_screen": false,
+      "screen_seq": 3,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────                 ",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/",
+        "forms/permission-probe override' as one foreground comman",
+        "d. Preserve any native approval request for the operator.",
+        " After the native decision, report the actual result and ",
+        "stop.         ",
+        "────────────────────────────────────────                 ",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/permission-probe over",
+        "ride' → denied",
+        "",
+        "✗ $ bash -c '/tmp/chp/forms/permission-probe override'  9",
+        "2.1s [You denied this command — it did not run.]         ",
+        "  (tip) That tool ran for a while. Use /verbose to cycle ",
+        "tool-progress display modes (all -> new -> off -> verbose",
+        "). This tip only shows once.                             ",
+        "",
+        "────────────────────────────────────────                 ",
+        "☤ Hermes      ",
+        "The operator denied the native approval request. The comm",
+        "and did not run (status: blocked, exit code: -1).        ",
+        "────────────────────────────────────────                 ",
+        "",
+        "─ 1m38s · 10:58 AM          ",
+        "─────────────────────────────────────────────────────────",
+        "❯ Plan a feature, then build it step by step             ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-tmux-040-1": {
+      "rows": 36,
+      "cols": 40,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly b",
+        "ash -c '/tmp/chp/forms/permission-probe ",
+        "override' as one foreground command. Pre",
+        "serve any native approval request for th",
+        "e operator. After the native decision, r",
+        "eport the actual result and stop.       ",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────╮  ",
+        "│ ⚠️  Dangerous Command              │  ",
+        "│                                    │  ",
+        "│ bash -c                            │  ",
+        "│ '/tmp/chp/forms/permission-probe   │  ",
+        "│ override'                          │  ",
+        "│                                    │  ",
+        "│ ❯ 1. Allow once                    │  ",
+        "│   2. Deny                          │  ",
+        "│                                    │  ",
+        "│ shell command via -c/-lc flag      │  ",
+        "╰────────────────────────────────────╯  ",
+        "",
+        "  ↑/↓ to select, Enter to confirm  (234s",
+        "── ⠙ 💻 bash -c '/tmp/chp/forms/permi...",
+        "⚠         ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-allow-enter-continuation-tmux-040-1": {
+      "rows": 36,
+      "cols": 40,
+      "alternate_screen": false,
+      "screen_seq": 2,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly b",
+        "ash -c '/tmp/chp/forms/permission-probe ",
+        "override' as one foreground command. Pre",
+        "serve any native approval request for th",
+        "e operator. After the native decision, r",
+        "eport the actual result and stop.       ",
+        "────────────────────────────────────────",
+        "",
+        "⚠ Approval: bash -c '/tmp/chp/forms/perm",
+        "ission-probe override' → allowed once   ",
+        "",
+        "💻 $ bash -c '/tmp/chp/forms/permission-",
+        "probe override'  81.7s                  ",
+        "  (tip) That tool ran for a while. Use /",
+        "verbose to cycle tool-progress display m",
+        "odes (all -> new -> off -> verbose). Thi",
+        "s tip only shows once.                  ",
+        "",
+        "────────────────────────────────────────",
+        "☤ Hermes  ",
+        "Native approval was granted. The command",
+        " exited with code 0.                    ",
+        "",
+        "Output: permission-probe override execut",
+        "ed        ",
+        "────────────────────────────────────────",
+        "",
+        "─ 1m31s · ran 1 command · 10:58 AM      ",
+        "────────────────────────────────────────",
+        "❯ Explain this error and how to fix it  ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-survey-tmux-028-1": {
+      "rows": 36,
+      "cols": 28,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────",
+        "────────────  ",
+        "❯ Use the terminal tool to r",
+        "un exactly bash -c '/tmp/chp",
+        "/forms/permission-probe over",
+        "ride' as one foreground comm",
+        "and. Preserve any native app",
+        "roval request for the operat",
+        "or. After the native decisio",
+        "n, report the actual result ",
+        "and stop.     ",
+        "────────────────────────────",
+        "────────────  ",
+        "╭──────────────────────────╮",
+        "│ ⚠️  Dangerous Command     ",
+        "│                          │",
+        "│ bash -c '/tmp/chp/forms/ │",
+        "│ permission-probe         │",
+        "│ override'                │",
+        "│                          │",
+        "│ ❯ 1. Allow once          │",
+        "│   2. Deny                │",
+        "│                          │",
+        "│ shell command via -c/-lc │",
+        "│  flag                    │",
+        "╰──────────────────────────╯",
+        "",
+        "  ↑/↓ to select, Enter to co",
+        "── ⠦ 💻 bash -c '/tmp/chp...",
+        "⚠      ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-survey-tmux-027-1": {
+      "rows": 36,
+      "cols": 27,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "───────────────────────────",
+        "─────────────",
+        "╭──────────────────────────",
+        "╮                          ",
+        "│ ⚠️  Dangerous Command   │",
+        "│                          ",
+        "│     ",
+        "│ bash -c '/tmp/chp/forms/ ",
+        "│     ",
+        "│ permission-probe         ",
+        "│     ",
+        "│ override'                ",
+        "│     ",
+        "│                          ",
+        "│     ",
+        "│ ❯ 1. Allow once          ",
+        "│     ",
+        "│   2. Deny                ",
+        "│     ",
+        "│                          ",
+        "│     ",
+        "│ shell command via -c/-lc ",
+        "│     ",
+        "│  flag                    ",
+        "│     ",
+        "╰──────────────────────────",
+        "╯     ",
+        "",
+        "  ↑/↓ to select, Enter to c",
+        "── ⠦ 💻 bash -c '/tmp/ch...",
+        "⚠     ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 33,
+      "cursor_col": 4,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe escalate' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────────────────────────╮",
+        "│ ⚠️  Dangerous Command                                  │",
+        "│                                                        │",
+        "│ bash -c '/tmp/chp/forms/permission-probe escalate'     │",
+        "│                                                        │",
+        "│ ❯ 1. Allow once                                        │",
+        "│   2. Allow for this session                            │",
+        "│   3. Add to permanent allowlist                        │",
+        "│   4. Deny                                              │",
+        "│                                                        │",
+        "│ shell command via -c/-lc flag                          │",
+        "╰────────────────────────────────────────────────────────╯",
+        " ",
+        "  ↑/↓ to select, Enter to confirm  (285s)",
+        "── ⠼ 💻 bash -c '/tmp/chp/forms/permission-probe escalate' · 20s · ↓ 35 tok ────────────────────────────────────────────",
+        "⚠ ❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-herdr-120-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 33,
+      "cursor_col": 4,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe override' as one foreground command. Pre",
+        "serve any native approval request for the operator. After the native decision, report the actual result and stop.",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────────────────────────╮",
+        "│ ⚠️  Dangerous Command                                  │",
+        "│                                                        │",
+        "│ bash -c '/tmp/chp/forms/permission-probe override'     │",
+        "│                                                        │",
+        "│ ❯ 1. Allow once                                        │",
+        "│   2. Deny                                              │",
+        "│                                                        │",
+        "│ shell command via -c/-lc flag                          │",
+        "╰────────────────────────────────────────────────────────╯",
+        " ",
+        "  ↑/↓ to select, Enter to confirm  (284s)",
+        "── ⠴ 💻 bash -c '/tmp/chp/forms/permission-probe override' · 20s · ↓ 35 tok ────────────────────────────────────────────",
+        "⚠ ❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 12,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-herdr-080-1": {
+      "rows": 36,
+      "cols": 80,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 33,
+      "cursor_col": 4,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe ",
+        "escalate' as one foreground command. Preserve any native approval request for th",
+        "e operator. After the native decision, report the actual result and stop.",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────────────────────────╮",
+        "│ ⚠️  Dangerous Command                                  │",
+        "│                                                        │",
+        "│ bash -c '/tmp/chp/forms/permission-probe escalate'     │",
+        "│                                                        │",
+        "│ ❯ 1. Allow once                                        │",
+        "│   2. Allow for this session                            │",
+        "│   3. Add to permanent allowlist                        │",
+        "│   4. Deny                                              │",
+        "│                                                        │",
+        "│ shell command via -c/-lc flag                          │",
+        "╰────────────────────────────────────────────────────────╯",
+        " ",
+        "  ↑/↓ to select, Enter to confirm  (279s)",
+        "── ⠙ 💻 bash -c '/tmp/chp/forms/permission-probe escalate' · 25s · ↓ 35 tok ────",
+        "⚠ ❯ ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-herdr-080-1": {
+      "rows": 36,
+      "cols": 80,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 33,
+      "cursor_col": 4,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/forms/permission-probe ",
+        "override' as one foreground command. Preserve any native approval request for th",
+        "e operator. After the native decision, report the actual result and stop.",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────────────────────────╮",
+        "│ ⚠️  Dangerous Command                                  │",
+        "│                                                        │",
+        "│ bash -c '/tmp/chp/forms/permission-probe override'     │",
+        "│                                                        │",
+        "│ ❯ 1. Allow once                                        │",
+        "│   2. Deny                                              │",
+        "│                                                        │",
+        "│ shell command via -c/-lc flag                          │",
+        "╰────────────────────────────────────────────────────────╯",
+        " ",
+        "  ↑/↓ to select, Enter to confirm  (279s)",
+        "── ⠙ 💻 bash -c '/tmp/chp/forms/permission-probe override' · 25s · ↓ 35 tok ────",
+        "⚠ ❯ ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-herdr-057-1": {
+      "rows": 36,
+      "cols": 57,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/",
+        "forms/permission-probe escalate' as one foreground comman",
+        "d. Preserve any native approval request for the operator.",
+        " After the native decision, report the actual result and ",
+        "stop.",
+        "────────────────────────────────────────",
+        "╭─────────────────────────────────────────────────────╮",
+        "│ ⚠️  Dangerous Command                               │",
+        "│                                                     │",
+        "│ bash -c '/tmp/chp/forms/permission-probe escalate'  │",
+        "│                                                     │",
+        "│ ❯ 1. Allow once                                     │",
+        "│   2. Allow for this session                         │",
+        "│   3. Add to permanent allowlist                     │",
+        "│   4. Deny                                           │",
+        "│                                                     │",
+        "│ shell command via -c/-lc flag                       │",
+        "╰─────────────────────────────────────────────────────╯",
+        " ",
+        "  ↑/↓ to select, Enter to confirm  (285s)",
+        "── ⠏ 💻 bash -c '/tmp/chp/forms/permission-probe escal...",
+        "⚠ ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-herdr-057-1": {
+      "rows": 36,
+      "cols": 57,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly bash -c '/tmp/chp/",
+        "forms/permission-probe override' as one foreground comman",
+        "d. Preserve any native approval request for the operator.",
+        " After the native decision, report the actual result and ",
+        "stop.",
+        "────────────────────────────────────────",
+        "╭─────────────────────────────────────────────────────╮",
+        "│ ⚠️  Dangerous Command                               │",
+        "│                                                     │",
+        "│ bash -c '/tmp/chp/forms/permission-probe override'  │",
+        "│                                                     │",
+        "│ ❯ 1. Allow once                                     │",
+        "│   2. Deny                                           │",
+        "│                                                     │",
+        "│ shell command via -c/-lc flag                       │",
+        "╰─────────────────────────────────────────────────────╯",
+        " ",
+        "  ↑/↓ to select, Enter to confirm  (288s)",
+        "── ⠋ 💻 bash -c '/tmp/chp/forms/permission-probe overr...",
+        "⚠ ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-escalate-herdr-040-1": {
+      "rows": 36,
+      "cols": 40,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly b",
+        "ash -c '/tmp/chp/forms/permission-probe ",
+        "escalate' as one foreground command. Pre",
+        "serve any native approval request for th",
+        "e operator. After the native decision, r",
+        "eport the actual result and stop.",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────╮",
+        "│ ⚠️  Dangerous Command              │",
+        "│                                    │",
+        "│ bash -c                            │",
+        "│ '/tmp/chp/forms/permission-probe   │",
+        "│ escalate'                          │",
+        "│                                    │",
+        "│ ❯ 1. Allow once                    │",
+        "│   2. Allow for this session        │",
+        "│   3. Add to permanent allowlist    │",
+        "│   4. Deny                          │",
+        "│                                    │",
+        "│ shell command via -c/-lc flag      │",
+        "╰────────────────────────────────────╯",
+        " ",
+        "  ↑/↓ to select, Enter to confirm  (284s",
+        "── ⠼ 💻 bash -c '/tmp/chp/forms/permi...",
+        "⚠ ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "hermes-2026.9.24-override-herdr-040-1": {
+      "rows": 36,
+      "cols": 40,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────",
+        "❯ Use the terminal tool to run exactly b",
+        "ash -c '/tmp/chp/forms/permission-probe ",
+        "override' as one foreground command. Pre",
+        "serve any native approval request for th",
+        "e operator. After the native decision, r",
+        "eport the actual result and stop.",
+        "────────────────────────────────────────",
+        "╭────────────────────────────────────╮",
+        "│ ⚠️  Dangerous Command              │",
+        "│                                    │",
+        "│ bash -c                            │",
+        "│ '/tmp/chp/forms/permission-probe   │",
+        "│ override'                          │",
+        "│                                    │",
+        "│ ❯ 1. Allow once                    │",
+        "│   2. Deny                          │",
+        "│                                    │",
+        "│ shell command via -c/-lc flag      │",
+        "╰────────────────────────────────────╯",
+        " ",
+        "  ↑/↓ to select, Enter to confirm  (283s",
+        "── ⠴ 💻 bash -c '/tmp/chp/forms/permi...",
+        "⚠ ",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 35,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    }
+  }
+}

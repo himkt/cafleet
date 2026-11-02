@@ -950,10 +950,12 @@ const BUNDLED_DEFINITIONS: &str = include_str!("bundled.json");
 const CLAUDE_FIXTURES: &[u8] = include_bytes!("native/claude.json");
 const CODEX_FIXTURES: &[u8] = include_bytes!("native/codex.json");
 const OPENCODE_FIXTURES: &[u8] = include_bytes!("native/opencode.json");
+const HERMES_FIXTURES: &[u8] = include_bytes!("native/hermes.json");
 const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
     ("native/claude.json", CLAUDE_FIXTURES),
     ("native/codex.json", CODEX_FIXTURES),
     ("native/opencode.json", OPENCODE_FIXTURES),
+    ("native/hermes.json", HERMES_FIXTURES),
 ];
 
 fn verify_bundled_fixtures(entries: &[Value], embedded: &[(&str, &[u8])]) -> Result<()> {
