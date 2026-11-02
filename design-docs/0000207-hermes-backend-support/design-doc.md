@@ -1,7 +1,7 @@
 # Hermes Coding-Agent Backend Support
 
 **Status**: Approved
-**Progress**: 71/73 tasks complete
+**Progress**: 72/73 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -476,7 +476,7 @@ Paid calls use the operator's configured default model. Secrets and account iden
 
 - [x] Run `mise //cafleet:test` and `mise //cafleet:lint` <!-- completed: 2026-11-02T12:40 -->
 - [x] Run `mise //docs:build` <!-- completed: 2026-11-02T12:40 -->
-- [ ] Check that every rendered table cell containing a literal `|` uses the `<code>&#124;</code>` form, by inspecting the built HTML <!-- completed: -->
+- [x] Check that every rendered table cell containing a literal `|` uses the `<code>&#124;</code>` form, by inspecting the built HTML <!-- completed: 2026-11-02T12:42 -->
 
 ### Step 9: Verdict gate and shipping
 
