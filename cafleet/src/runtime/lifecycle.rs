@@ -488,6 +488,18 @@ pub(crate) trait LaunchHost {
     ) -> Result<Started>;
     fn shutdown_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome>;
     fn close_pane(&mut self, pane_id: &str, deadline: Instant) -> Result<()>;
+    fn settle_hermes(
+        &mut self,
+        _conn: &Connection,
+        run: &RunRecord,
+        _pane_id: &str,
+        _deadline: Instant,
+    ) -> Result<()> {
+        Err(error(format!(
+            "hermes settlement of run {} requires the member's multiplexer",
+            run.run_id
+        )))
+    }
 }
 pub(crate) struct LaunchOutcome {
     pub(crate) member: RegisteredMember,
@@ -723,6 +735,13 @@ fn launch_registered(
     let mut notes = Vec::new();
     match storage::get_run(guard.conn, pending.run.run_id) {
         Ok(current) if current.owner_kind == OwnerKind::Runner => {
+            if current.backend == crate::coding_agent::CodingAgent::Hermes.name()
+                && let Some(pane_id) = pane.as_deref()
+                && let Err(cause) =
+                    host.settle_hermes(guard.conn, &current, pane_id, clock.storage_deadline())
+            {
+                notes.push(cause.message().into_owned());
+            }
             let cleanup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 host.shutdown_owned(&current, clock)
             }));
@@ -823,6 +842,21 @@ impl LaunchHost for NativeLaunchHost<'_> {
             deadline,
         )?;
         serde_json::from_value(value).map_err(io_error)
+    }
+    fn settle_hermes(
+        &mut self,
+        conn: &Connection,
+        run: &RunRecord,
+        pane_id: &str,
+        deadline: Instant,
+    ) -> Result<()> {
+        crate::coding_agent::hermes_settlement::settle_run(
+            conn,
+            self.mux,
+            run,
+            pane_id,
+            crate::time::Deadline::until(deadline),
+        )
     }
     fn shutdown_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome> {
         if let Ok(value) = request(run, "shutdown", clock.storage_deadline()) {

@@ -357,7 +357,7 @@ A failed command, output that is not a JSON array of strings, or a glob missing 
 
 Hermes writes through its own ruamel round-trip writer and replaces the file atomically, writing through a symlinked `config.yaml` to its target. Comments, key order, quoting and untouched nodes are preserved; existing deny entries keep their comments and quoting, and appended entries are written unquoted. A rerun after a successful merge finds nothing missing and writes nothing.
 
-Setup then merges CAFleet's member names into `terminal.client_env_passthrough` with the same steps 2–6 on the same `<config path>`. Its names, in order, are `CAFLEET_DATABASE_URL`, `TMUX`, `TMUX_PANE`, `HERDR_ENV`, `HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_SOCKET_PATH` and `HERDR_BIN_PATH`. One Hermes gateway per Hermes home runs the terminal tools of every session with its own launch environment. A session's tools see that session's own value only for a name in this list, and a listed name the session does not export is unset. Its lines are:
+Setup then merges CAFleet's member names into `terminal.client_env_passthrough` with the same steps 2–6 on the same `<config path>`. Its names, in order, are `CAFLEET_DATABASE_URL`, `TMUX`, `TMUX_PANE`, `HERDR_ENV`, `HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH` and `HERDR_SESSION`. One Hermes gateway per Hermes home runs the terminal tools of every session with its own launch environment. A session's tools see that session's own value only for a name in this list, and a listed name the session does not export is unset. Its lines are:
 
 ```
 hermes: terminal.client_env_passthrough already holds CAFleet's member names -> <config path>
@@ -1983,10 +1983,12 @@ a `hermes` run stop that work and verify the stop:
 
 | Requirement | Mechanism |
 |---|---|
-| Session identity | The member's Hermes session key, captured after launch from a Hermes-owned source and stored in `member_runs.native_session_json` |
-| In-flight session work | A session-scoped Hermes control that interrupts or closes the session with that key |
-| Registered background processes | `<HERMES_HOME>/processes.json` entries whose `session_key` matches: revalidate `pid` plus `host_start_time`, send SIGTERM, escalate to SIGKILL after one second, and verify exit |
-| Verification | No running `processes.json` entry for the key and no active turn for the session |
+| Session identity | `member create` stores `{"hermes_home": <effective Hermes home>}` in `member_runs.native_session_json`, the directory of the file `hermes config path` names under the member's `HERMES_HOME`; settlement adds `session_id`, the full `local-<hex>` ID from the exit summary `Session: <id>` that `/exit` prints |
+| In-flight session work | While the client runs, settlement sends native input to the member's pane under the deletion's pane lock. It sends `Ctrl+C` only when the pane shows a running turn (`type to redirect this turn`) or an open form (`↑/↓ to select`), because `Ctrl+C` on an idle composer ends the client without stopping its session. Then for `/stop` and then `/exit`: Escape and backspaces clear the composer, the command is typed, Escape closes its completion menu, and Enter is pressed until the command takes effect, at most three times, one second apart, never after the client exits |
+| Registered background processes | `/stop` stops the session's registered processes; settlement waits for its report (`Stopped N process(es).` or `No running background processes.`) |
+| Verification | The client printed its exit summary and the run's native child exited; no `<home>/processes.json` entry whose `owner_task_id` is the session ID has a live `pid` with its `host_start_time` (the `/proc/<pid>/stat` start field), where `<home>` is the directory of `hermes config path` under the stored base. On a platform without a comparable start time, a live `pid` counts as running. |
+
+Deletion runs settlement for a `hermes` run before the runner shutdown. `member delete` of a member whose run is `hermes`, and `fleet delete` of a fleet with a `hermes` run, use a 20-second deadline; other deletions keep the 5-second command deadline. A step that does not complete before the deadline, or a running registered process, fails with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` and keeps the member row. A retry after a recorded session ID and an exited client re-runs only the verification. When the client had already exited before settlement recorded a session ID, deletion prints `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway` to stderr and completes. Creation compensation runs the same settlement for a started `hermes` run, and a failure becomes a compensation diagnostic.
 
 CAFleet never stops or restarts a Hermes gateway, kills by process name or
 touches a session it does not own.
@@ -2354,13 +2356,15 @@ The Hermes profile from `2026.9.24` applies to `hermes chat --cli` under `smart`
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `unknown` | Request rule `hermes-approval-escalate` for the guardian ESCALATE prompt (command gate) and `hermes-approval-override` for the guardian-DENY owner-override prompt, which offers once/deny only; one request rule per further distinct form of the `execute_code` and action/protected-write gates, a gate that shares a form reusing its rule. Other native forms (first-run setup, hook consent, update or trust notices, `clarify` questions) get `hermes-<form>` rules with their own interaction class and no answer plan |
-| Allow answer | `unknown` | Gated stages that select "once" only, as `allow-once` |
-| Deny answer | `unknown` | Gated stages that select "deny" only, as `deny-once` |
-| Empty-composer observation | `unknown` | The idle classic REPL prompt line with the terminal cursor immediately after its prefix |
-| Prompt submission | `unknown` | Empty prefix and the measured native submit key, as separate literal and submit stages |
-| Native-exec submission | `unknown` | Prefix `! ` and the measured native submit key, as separate literal and submit stages |
-| Annotations | `unknown` | Declared only for a stable guardian refusal or review-unavailable notice |
+| Detection | `tested` | Request rule `hermes-approval-escalate` for the guardian ESCALATE form (choices `1. Allow once`, `2. Allow for this session`, `3. Add to permanent allowlist`, `4. Deny`) and `hermes-approval-override` for the guardian-DENY owner-override form (`1. Allow once`, `2. Deny`), on the primary screen from the box's `╭` row to the `↑/↓ to select` footer. The operation is the box's command rows. `smart` reached no `execute_code` or action gate and no other native form in the captures. |
+| Allow answer | `tested` | One stage `1` (`31`) on both forms, as `allow-once` |
+| Deny answer | `tested` | One stage `4` (`34`) on the ESCALATE form and `2` (`32`) on the override form, as `deny-once` |
+| Empty-composer observation | `tested` | `hermes-idle-composer`: the classic REPL row `❯ ` with the terminal cursor immediately after it; the rotating placeholder text follows the cursor |
+| Prompt submission | `tested` | Empty prefix and submit `0d`, as separate literal and submit stages |
+| Native-exec submission | `tested` | Prefix `! ` (`2120`) and submit `0d`, as separate literal and submit stages |
+| Annotations | `unknown` | None declared |
+
+A digit selects and confirms its choice whatever the focus, so the answer stages have no focus gate. The focused choice carries the `❯ ` marker, and choices carry no background colour. Recorded layout limits: the ESCALATE form is detected at 37 columns and above, below which `3. Add to permanent allowlist` wraps; the override form is detected at 28 columns and above, below which the box border wraps. A command too long for the box adds `5. Show full command` and is answered manually.
 
 The Director answers single-request choices only: allow once or deny, on both the ESCALATE and the override prompt. The session and always choices have no choice entry or answer plan, so a focus on them satisfies no gate. When the guardian model is unavailable, Hermes shows the same human prompt, detected by the same rule. An unanswered prompt fails closed after `approvals.timeout` (default 300 seconds): Hermes prints its timeout notice and returns a BLOCKED result to the model, the form disappears, and the runner closes the episode with the `not_visible` close reason. A later bound response then fails request-token revalidation. The timeout notice is decision evidence for the Director's continuation check, not a bundled rule.
 

@@ -1,7 +1,7 @@
 # Hermes Coding-Agent Backend Support
 
 **Status**: Approved
-**Progress**: 57/73 tasks complete
+**Progress**: 61/73 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -262,12 +262,12 @@ Step 6 established that the member's turn and background processes run in the ga
 
 | Requirement | Mechanism |
 |---|---|
-| Durable identity of the member's Hermes session | The runner reads the launch banner `Session: <short id>` and resolves it to the unique full `local-<hex>` ID through `hermes sessions list --source tool`. The identity is stored in `member_runs.native_session_json`; no unique match fails the launch. |
+| Durable identity of the member's Hermes session | `member create` stores the resolved Hermes base in `member_runs.native_session_json`. Settlement reads the full `local-<hex>` session ID from the exit summary that `/exit` prints and stores it there. |
 | Stop of in-flight session work | While the client is alive, the runner submits Ctrl-C, then `/stop`, then `/exit` with the measured submit stages, before runner shutdown |
 | Stop of registered background processes | `/stop` stops the session's registered processes |
 | Verification | No `processes.json` entry whose owner is the session ID has a live PID with the recorded start time (`/proc/<pid>/stat` field 22 against `host_start_time`), and the client exited after printing `Session: <id>` |
 
-Deletion order extends SPEC §6.3 `member delete` for `hermes` runs. Before runner shutdown, run the Hermes settlement within the existing deletion deadline. When the client is already gone, or verification fails, exit 1 with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.`, retain the runner's cleanup records and the member row, and let retry re-run settlement. The `hermes` notes document manual recovery for a dead client and that its in-flight turn runs to completion. Creation compensation (SPEC §6.3 Creation failure compensation) runs the same settlement when a run started.
+Deletion order extends SPEC §6.3 `member delete` for `hermes` runs. Before runner shutdown, run the Hermes settlement within a 20-second deletion deadline for `hermes` runs (other backends keep 5 seconds). When verification fails, exit 1 with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.`, retain the runner's cleanup records and the member row, and let retry re-run settlement. When the client has already exited, print `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway` and complete the deletion. The `hermes` notes document manual recovery for that case and that its in-flight turn runs to completion. Creation compensation (SPEC §6.3 Creation failure compensation) runs the same settlement when a run started.
 
 ### Director support
 
@@ -306,7 +306,7 @@ Step 5 adds `cafleet/migrations/V2__hermes_backend.sql` on the feature branch, a
 | U1 | Missing Director-only deny globs block launch, and setup installs them. `cafleet setup --coding-agent hermes` appends only the missing globs through `hermes config set`, preserving existing entries, their order and the rest of the file. It is idempotent and reports what it added. `member create` and doctor fail or report when any glob is missing from the effective configuration, and name the corrective command. | § Hermes launch contract, Director-only deny rules, Setup and Availability preflight |
 | U2 | Classify launch modes by definition: Claude `dontAsk` and `bypassPermissions` and Codex `never` are `auto`; Claude `acceptEdits` and `plan` are `manual` | § Member launch-mode classification |
 | U3 | The CAFleet stream probe passes when records sent during the unrelated work are consumed without user input, during that work or at the session's next turn boundary | § CAFleet stream probe |
-| U4 | Deletion stops a Hermes member through native input to its live client (Ctrl-C, `/stop`, `/exit`) and verifies the stop; a dead client makes `member delete` exit 1 with the row kept | § Member work ownership and deletion |
+| U4 | Deletion stops a Hermes member through native input to its live client (Ctrl-C, `/stop`, `/exit`) and verifies the stop; an unverified stop exits 1 with the row kept; an already-exited client is deleted with a warning; `hermes` runs get a 20-second deletion deadline | § Member work ownership and deletion |
 | U5 | Hermes launch modes are `smart` (default) and `manual`, recorded without a configuration check (no `approvals.mode` preflight or doctor row); setup merges `terminal.client_env_passthrough`; skill self-edits are a documented note restored by setup | § Hermes launch contract |
 
 The deny globs' effectiveness under `smart` is verified live, not assumed. Step 6 checks the following and records the outcome:
@@ -465,10 +465,10 @@ Paid calls use the operator's configured default model. Secrets and account iden
 ### Step 7: Hermes bundled profile, deletion settlement and Member acceptance
 
 - [x] Convert accepted captures into `cafleet/src/coding_agent/native/hermes.json` and `bundled.json` fixture entries with reviewed masks and digests <!-- completed: 2026-11-02T11:26 -->
-- [ ] Add the Hermes profile from `2026.9.24` with request rules for ESCALATE, override and each distinct gate form, interaction rules for other observed forms, continuation rules and the timeout closure <!-- completed: -->
-- [ ] Add allow-once and deny answer plans with gates, plus empty-composer, prompt and native-exec plans from the measured stages <!-- completed: -->
-- [ ] Add positive and adversarial replay tests covering every row of § Hermes bundled profile Replay fixtures <!-- completed: -->
-- [ ] Implement session-identity capture into `native_session_json` and the Hermes settlement in `member delete` and creation compensation, with unit tests for success, unverifiable stop, stale PID identity and retry <!-- completed: -->
+- [x] Add the Hermes profile from `2026.9.24` with request rules for ESCALATE, override and each distinct gate form, interaction rules for other observed forms, continuation rules and the timeout closure <!-- completed: 2026-11-02T12:01 -->
+- [x] Add allow-once and deny answer plans with gates, plus empty-composer, prompt and native-exec plans from the measured stages <!-- completed: 2026-11-02T12:01 -->
+- [x] Add positive and adversarial replay tests covering every row of § Hermes bundled profile Replay fixtures <!-- completed: 2026-11-02T12:01 -->
+- [x] Implement session-identity capture into `native_session_json` and the Hermes settlement in `member delete` and creation compensation, with unit tests for success, unverifiable stop, stale PID identity and retry <!-- completed: 2026-11-02T12:01 -->
 - [ ] Run live runner acceptance on tmux and herdr. Cases: default launch, a non-dangerous command, ESCALATE answered allow and deny via `permission respond`, override answered allow and deny, timeout closure as `not_visible`, prompt and native-exec submission, deletion with a running background process, a Director-only command (plain and leading-assignment forms) blocked by the deny globs and routed, and `member create` refused for a missing glob. <!-- completed: -->
 - [ ] Update § Role evaluation Member row with the recorded evidence and verdict <!-- completed: -->
 

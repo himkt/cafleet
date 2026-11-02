@@ -3071,7 +3071,7 @@ mod tests {
     fn bundled_claude_and_codex_operations_declare_neither_row_option() {
         let definitions = bundled_definitions();
         for profile in definitions["profiles"].as_array().unwrap() {
-            if profile["backend"] == "opencode" {
+            if profile["backend"] != "claude" && profile["backend"] != "codex" {
                 continue;
             }
             for rule in profile["rules"].as_array().unwrap() {

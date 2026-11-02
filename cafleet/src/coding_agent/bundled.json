@@ -2965,6 +2965,370 @@
           }
         ]
       }
+    },
+    {
+      "backend": "hermes",
+      "min_version": "2026.9.24",
+      "rules": [
+        {
+          "id": "hermes-approval-escalate",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^╭─+╮ *$",
+            "end_pattern": "^  ↑/↓ to select",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^│ \\S+ +Dangerous Command\\b"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^│ \\S+ +Dangerous Command *│? *\\n│ +│ *\\n(?P<operation>│ \\S[^\\n]*(?:\\n│ \\S[^\\n]*)*)\\n│ +│ *\\n│ [❯ ] 1\\. "
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^│ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^│ [❯ ] 1\\. (?P<label>Allow once) +│"
+            },
+            {
+              "id": "session",
+              "scope": "line",
+              "pattern": "^│ [❯ ] 2\\. Allow for this session +│"
+            },
+            {
+              "id": "permanent",
+              "scope": "line",
+              "pattern": "^│ [❯ ] 3\\. Add to permanent allowlist +│"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^│ [❯ ] 4\\. (?P<label>Deny) +│"
+            },
+            {
+              "id": "complete",
+              "scope": "region",
+              "pattern": "(?m)^│ [❯ ] 4\\. Deny +│ *\\n│ +│ *\\n│ \\S[^\\n]*│ *(?:\\n│ [^\\n]*│ *)*\\n╰─+╯"
+            },
+            {
+              "id": "footer",
+              "scope": "line",
+              "pattern": "^  ↑/↓ to select"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": "│ ",
+              "row_trailer": "│"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "hermes-approval-override",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^╭─+╮ *$",
+            "end_pattern": "^  ↑/↓ to select",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^│ \\S+ +Dangerous Command\\b"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^│ \\S+ +Dangerous Command *│? *\\n│ +│ *\\n(?P<operation>│ \\S[^\\n]*(?:\\n│ \\S[^\\n]*)*)\\n│ +│ *\\n│ [❯ ] 1\\. "
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^│ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^│ [❯ ] 1\\. (?P<label>Allow once) +│"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^│ [❯ ] 2\\. (?P<label>Deny) +│"
+            },
+            {
+              "id": "complete",
+              "scope": "region",
+              "pattern": "(?m)^│ [❯ ] 2\\. Deny +│ *\\n│ +│ *\\n│ \\S[^\\n]*│ *(?:\\n│ [^\\n]*│ *)*\\n╰─+╯"
+            },
+            {
+              "id": "footer",
+              "scope": "line",
+              "pattern": "^  ↑/↓ to select"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": "│ ",
+              "row_trailer": "│"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "hermes-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^❯ ",
+            "end_pattern": "^❯ ",
+            "max_rows": 3,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {
+              "id": "prompt",
+              "scope": "line",
+              "pattern": "^❯ "
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "annotations": null,
+        "detection": {
+          "rule_ids": [
+            "hermes-approval-escalate",
+            "hermes-approval-override"
+          ],
+          "fixture_ids": [
+            "hermes-2026.9.24-escalate-tmux-120-1",
+            "hermes-2026.9.24-escalate-tmux-080-1",
+            "hermes-2026.9.24-escalate-tmux-057-1",
+            "hermes-2026.9.24-escalate-tmux-040-1",
+            "hermes-2026.9.24-escalate-herdr-120-1",
+            "hermes-2026.9.24-escalate-herdr-080-1",
+            "hermes-2026.9.24-escalate-herdr-057-1",
+            "hermes-2026.9.24-escalate-herdr-040-1",
+            "hermes-2026.9.24-escalate-min-tmux-037-1",
+            "hermes-2026.9.24-override-tmux-120-1",
+            "hermes-2026.9.24-override-tmux-080-1",
+            "hermes-2026.9.24-override-tmux-057-1",
+            "hermes-2026.9.24-override-tmux-040-1",
+            "hermes-2026.9.24-override-herdr-120-1",
+            "hermes-2026.9.24-override-herdr-080-1",
+            "hermes-2026.9.24-override-herdr-057-1",
+            "hermes-2026.9.24-override-herdr-040-1",
+            "hermes-2026.9.24-override-survey-tmux-028-1"
+          ]
+        },
+        "composer": {
+          "rule_ids": [
+            "hermes-idle-composer"
+          ],
+          "fixture_ids": [
+            "hermes-2026.9.24-composer-empty-tmux-120-1",
+            "hermes-2026.9.24-escalate-allow-continuation-tmux-120-1",
+            "hermes-2026.9.24-override-allow-continuation-tmux-120-1",
+            "hermes-2026.9.24-escalate-deny-continuation-tmux-080-1",
+            "hermes-2026.9.24-override-deny-continuation-tmux-080-1",
+            "hermes-2026.9.24-escalate-timeout-closure-tmux-120-1"
+          ],
+          "submission": {
+            "prompt": {
+              "prefix_hex": "",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "hermes-2026.9.24-composer-empty-tmux-120-1",
+                "hermes-2026.9.24-composer-prompt-literal-tmux-120-1",
+                "hermes-2026.9.24-composer-prompt-submitted-tmux-120-1"
+              ]
+            },
+            "exec": {
+              "prefix_hex": "2120",
+              "submit_hex": "0d",
+              "fixture_ids": [
+                "hermes-2026.9.24-composer-empty-tmux-120-1",
+                "hermes-2026.9.24-composer-exec-literal-tmux-120-1",
+                "hermes-2026.9.24-composer-exec-submitted-tmux-120-1"
+              ]
+            }
+          }
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "hermes-approval-escalate",
+            "answer_rule_id": "hermes-escalate-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "hermes-approval-escalate",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "hermes-2026.9.24-escalate-tmux-120-1",
+              "hermes-2026.9.24-escalate-tmux-080-1",
+              "hermes-2026.9.24-escalate-tmux-057-1",
+              "hermes-2026.9.24-escalate-tmux-040-1",
+              "hermes-2026.9.24-escalate-herdr-120-1",
+              "hermes-2026.9.24-escalate-herdr-080-1",
+              "hermes-2026.9.24-escalate-herdr-057-1",
+              "hermes-2026.9.24-escalate-herdr-040-1",
+              "hermes-2026.9.24-escalate-min-tmux-037-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "hermes-approval-escalate",
+            "answer_rule_id": "hermes-escalate-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "34",
+                "required_rule_id": "hermes-approval-escalate",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "hermes-2026.9.24-escalate-tmux-120-1",
+              "hermes-2026.9.24-escalate-tmux-080-1",
+              "hermes-2026.9.24-escalate-tmux-057-1",
+              "hermes-2026.9.24-escalate-tmux-040-1",
+              "hermes-2026.9.24-escalate-herdr-120-1",
+              "hermes-2026.9.24-escalate-herdr-080-1",
+              "hermes-2026.9.24-escalate-herdr-057-1",
+              "hermes-2026.9.24-escalate-herdr-040-1",
+              "hermes-2026.9.24-escalate-min-tmux-037-1",
+              "hermes-2026.9.24-escalate-deny-focus-tmux-057-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "hermes-approval-override",
+            "answer_rule_id": "hermes-override-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "hermes-approval-override",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "hermes-2026.9.24-override-tmux-120-1",
+              "hermes-2026.9.24-override-tmux-080-1",
+              "hermes-2026.9.24-override-tmux-057-1",
+              "hermes-2026.9.24-override-tmux-040-1",
+              "hermes-2026.9.24-override-herdr-120-1",
+              "hermes-2026.9.24-override-herdr-080-1",
+              "hermes-2026.9.24-override-herdr-057-1",
+              "hermes-2026.9.24-override-herdr-040-1",
+              "hermes-2026.9.24-override-survey-tmux-028-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "hermes-approval-override",
+            "answer_rule_id": "hermes-override-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "32",
+                "required_rule_id": "hermes-approval-override",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "hermes-2026.9.24-override-tmux-120-1",
+              "hermes-2026.9.24-override-tmux-080-1",
+              "hermes-2026.9.24-override-tmux-057-1",
+              "hermes-2026.9.24-override-tmux-040-1",
+              "hermes-2026.9.24-override-herdr-120-1",
+              "hermes-2026.9.24-override-herdr-080-1",
+              "hermes-2026.9.24-override-herdr-057-1",
+              "hermes-2026.9.24-override-herdr-040-1",
+              "hermes-2026.9.24-override-survey-tmux-028-1",
+              "hermes-2026.9.24-override-deny-focus-tmux-057-1"
+            ]
+          }
+        ]
+      }
     }
   ]
 }

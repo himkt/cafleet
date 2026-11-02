@@ -1,5 +1,6 @@
 pub(crate) mod catalog;
 pub(crate) mod detector;
+pub(crate) mod hermes_settlement;
 
 use crate::broker::runtime::Coverage;
 use crate::broker::runtime::ModeSource;
@@ -67,7 +68,7 @@ pub(crate) const HERMES_DIRECTOR_ONLY_DENIES: [&str; 6] = [
     "cafleet input reconcile *",
 ];
 
-pub(crate) const HERMES_CLIENT_ENV_PASSTHROUGH: [&str; 9] = [
+pub(crate) const HERMES_CLIENT_ENV_PASSTHROUGH: [&str; 10] = [
     "CAFLEET_DATABASE_URL",
     "TMUX",
     "TMUX_PANE",
@@ -77,6 +78,7 @@ pub(crate) const HERMES_CLIENT_ENV_PASSTHROUGH: [&str; 9] = [
     "HERDR_WORKSPACE_ID",
     "HERDR_SOCKET_PATH",
     "HERDR_BIN_PATH",
+    "HERDR_SESSION",
 ];
 
 impl CodingAgent {
@@ -2349,6 +2351,7 @@ mod tests {
                     "HERDR_WORKSPACE_ID",
                     "HERDR_SOCKET_PATH",
                     "HERDR_BIN_PATH",
+                    "HERDR_SESSION",
                 ]
             );
         }

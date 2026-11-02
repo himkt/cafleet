@@ -74,7 +74,7 @@ pub(crate) struct CreateArgs {
     /// Model passed to the backend binary.
     #[arg(long)]
     pub(super) model: Option<String>,
-    /// Reasoning-effort level (claude, codex only).
+    /// Reasoning-effort level (claude, codex, hermes).
     #[arg(long)]
     pub(super) effort: Option<String>,
     #[arg(long, value_name = "MODE", help = CodingAgent::permission_mode_help())]
@@ -402,6 +402,17 @@ fn create(
     use std::time::Duration;
     use std::time::Instant;
     let deadline = Instant::now() + Duration::from_secs(10);
+    let hermes_home = (backend == crate::coding_agent::CodingAgent::Hermes)
+        .then(|| {
+            let base =
+                backend.config_dir(&|name| SystemProbe.env_var(name), &SystemProbe.home_dir())?;
+            crate::coding_agent::hermes_settlement::effective_home(
+                &executable,
+                &base,
+                deadline.min(Instant::now() + Duration::from_secs(2)),
+            )
+        })
+        .transpose()?;
     let probe = backend.probe_native_version(
         &executable,
         deadline.min(Instant::now() + Duration::from_secs(2)),
@@ -468,6 +479,16 @@ fn create(
         |conn, pending| {
             let artifacts =
                 runner::RunArtifacts::create_with_deadline(conn, pending.run.run_id, deadline)?;
+            if let Some(hermes_home) = &hermes_home {
+                broker::runtime::set_native_session(
+                    conn,
+                    pending.run.run_id,
+                    &crate::coding_agent::hermes_settlement::NativeSession {
+                        hermes_home: hermes_home.clone(),
+                        session_id: None,
+                    },
+                )?;
+            }
             let prompt = substitute_spawn_placeholders(
                 &prompt_body,
                 fleet_id,
@@ -580,6 +601,12 @@ fn delete(
     json: bool,
     deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
+    let deadline = match broker::runtime::member_runtime(conn, member_id)? {
+        Some(runtime) if runtime.run.backend == crate::coding_agent::CodingAgent::Hermes.name() => {
+            crate::coding_agent::hermes_settlement::deletion_deadline(&runtime.run.backend)
+        }
+        _ => deadline,
+    };
     let mut locked = lock_member_deletion(conn, settings, member_id, deadline)?;
     let pane_status = match &locked.value {
         DeleteAction::Deregistered(status) => status.to_string(),
