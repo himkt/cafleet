@@ -1,6 +1,6 @@
 # Rust package at the repository root
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 27/27 tasks complete
 **Last Updated**: 2026-11-02
 
@@ -10,14 +10,14 @@ Move the CAFleet Rust package from `cafleet/` to the repository root, because th
 
 ## Success Criteria
 
-- [ ] `Cargo.toml`, `Cargo.lock`, `build.rs`, `src/` and `migrations/` exist at the repository root, `git mv` history is preserved (`git log --follow src/main.rs` reaches commits before the move), and the `cafleet/` directory no longer exists in the working tree.
-- [ ] `build.rs` contains no `../` path; it embeds `skills/` and `presets/` from beside the manifest.
-- [ ] The root `mise.toml` defines `test`, `lint`, `format`, `typecheck`, `install` and `build`; `monorepo.config_roots` is `["docs"]`; `mise tasks --all` lists those tasks as `//:<task>` and lists no `//cafleet:` task.
-- [ ] `mise //:test`, `mise //:lint`, `mise //:typecheck` and `mise //docs:build` pass.
-- [ ] `cargo build --release` run at the repository root produces `target/release/cafleet`.
-- [ ] ``git grep -n -E 'mise //cafleet|`cafleet/`|cafleet/(src|target|Cargo|migrations|build\.rs|mise\.toml|tests)|working-directory: cafleet' -- ':!design-docs/**'`` returns nothing. On the pre-change tree this pattern matches every surface listed in the Specification and nothing else (`skills/cafleet/…`, `himkt.github.io/cafleet/`, `https://cafleet-probe-one.invalid/…` in the embedded Claude profile and `["cafleet", …]` stay unmatched).
-- [ ] `git grep -n '\.\./' -- build.rs` returns nothing.
-- [ ] Design documents `0000001`–`0000207` are byte-identical to their pre-change content.
+- [x] `Cargo.toml`, `Cargo.lock`, `build.rs`, `src/` and `migrations/` exist at the repository root, `git mv` history is preserved (`git log --follow src/main.rs` reaches commits before the move), and the `cafleet/` directory no longer exists in the working tree.
+- [x] `build.rs` contains no `../` path; it embeds `skills/` and `presets/` from beside the manifest.
+- [x] The root `mise.toml` defines `test`, `lint`, `format`, `typecheck`, `install` and `build`; `monorepo.config_roots` is `["docs"]`; `mise tasks --all` lists those tasks as `//:<task>` and lists no `//cafleet:` task.
+- [x] `mise //:test`, `mise //:lint`, `mise //:typecheck` and `mise //docs:build` pass.
+- [x] `cargo build --release` run at the repository root produces `target/release/cafleet`.
+- [x] ``git grep -n -E 'mise //cafleet|`cafleet/`|cafleet/(src|target|Cargo|migrations|build\.rs|mise\.toml|tests)|working-directory: cafleet' -- ':!design-docs/**'`` returns nothing. On the pre-change tree this pattern matches every surface listed in the Specification and nothing else (`skills/cafleet/…`, `himkt.github.io/cafleet/`, `https://cafleet-probe-one.invalid/…` in the embedded Claude profile and `["cafleet", …]` stay unmatched).
+- [x] `git grep -n '\.\./' -- build.rs` returns nothing.
+- [x] Design documents `0000001`–`0000207` are byte-identical to their pre-change content.
 
 ---
 
