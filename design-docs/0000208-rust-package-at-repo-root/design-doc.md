@@ -1,7 +1,7 @@
 # Rust package at the repository root
 
 **Status**: Approved
-**Progress**: 21/27 tasks complete
+**Progress**: 27/27 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -233,9 +233,9 @@ Installed runtime assets of the executing fleet are preserved during implementat
 
 ### Step 6: Verification
 
-- [ ] `mise tasks --all` lists `//:test`, `//:lint`, `//:format`, `//:typecheck`, `//:install`, `//:build` and no `//cafleet:` task <!-- completed: -->
-- [ ] `mise //:test` and `mise //:lint` pass <!-- completed: -->
-- [ ] `mise //:typecheck` and `mise //docs:build` pass <!-- completed: -->
-- [ ] `cargo build --release` at the root produces `target/release/cafleet` <!-- completed: -->
-- [ ] The Success Criteria stale-reference `git grep` (`mise //cafleet|`…) and the `build.rs` `../` `git grep` both return nothing <!-- completed: -->
-- [ ] `git diff --stat main -- design-docs` shows only `design-docs/0000208-rust-package-at-repo-root/design-doc.md`, and `git log --follow src/main.rs` reaches pre-move history <!-- completed: -->
+- [x] `mise tasks --all` lists `//:test`, `//:lint`, `//:format`, `//:typecheck`, `//:install`, `//:build` and no `//cafleet:` task <!-- completed: 2026-11-02T14:36 -->
+- [x] `mise //:test` and `mise //:lint` pass <!-- completed: 2026-11-02T14:36 -->
+- [x] `mise //:typecheck` and `mise //docs:build` pass <!-- completed: 2026-11-02T14:36 -->
+- [x] `cargo build --release` at the root produces `target/release/cafleet` <!-- completed: 2026-11-02T14:36 -->
+- [x] The Success Criteria stale-reference `git grep` (`mise //cafleet|`…) and the `build.rs` `../` `git grep` both return nothing <!-- completed: 2026-11-02T14:36 -->
+- [x] `git diff --stat main -- design-docs` shows only `design-docs/0000208-rust-package-at-repo-root/design-doc.md`, and `git log --follow src/main.rs` reaches pre-move history <!-- completed: 2026-11-02T14:36 -->
