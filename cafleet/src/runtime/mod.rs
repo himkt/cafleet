@@ -141,10 +141,6 @@ pub(crate) struct SpawnSpec {
     pub(crate) argv: Vec<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) environment: Vec<(String, String)>,
-    /// Variables removed from the native child's environment before exec.
-    /// Descriptors written before removals existed carry none.
-    #[serde(default)]
-    pub(crate) environment_removals: Vec<String>,
     pub(crate) evidence_policy: Value,
     pub(crate) size: TerminalSize,
 }
@@ -166,11 +162,7 @@ impl SpawnSpec {
         ensure(
             self.environment
                 .iter()
-                .all(|(k, v)| !k.is_empty() && !k.contains(['=', '\0']) && !v.contains('\0'))
-                && self
-                    .environment_removals
-                    .iter()
-                    .all(|name| !name.is_empty() && !name.contains(['=', '\0'])),
+                .all(|(k, v)| !k.is_empty() && !k.contains(['=', '\0']) && !v.contains('\0')),
             "invalid native environment override",
         )?;
         ensure(
@@ -326,7 +318,6 @@ pub(crate) mod test_support {
                     "CAFLEET_DATABASE_URL".into(),
                     format!("sqlite:///{}", self.conn.path().unwrap()),
                 )],
-                environment_removals: Vec::new(),
                 evidence_policy: json!({"mode":"metadata"}),
                 size: TerminalSize { rows: 24, cols: 80 },
             }

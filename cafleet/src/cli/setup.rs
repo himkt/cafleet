@@ -376,12 +376,12 @@ fn hermes_approval_checks(
     probe: &dyn SpawnProbe,
     paths: &Result<PathBuf, CafleetError>,
 ) -> [Check; 2] {
-    const MODE: &str = "hermes.approvals.mode";
     const DENY: &str = "hermes.approvals.deny";
+    const CLIENT_ENV: &str = "hermes.client_env_passthrough";
     let both = |status: &'static str, detail: String| {
         [
-            Check::new(MODE, status, detail.clone()),
-            Check::new(DENY, status, detail),
+            Check::new(DENY, status, detail.clone()),
+            Check::new(CLIENT_ENV, status, detail),
         ]
     };
     let base = match paths {
@@ -396,25 +396,24 @@ fn hermes_approval_checks(
     let Some(executable) = probe.resolve_binary(CodingAgent::Hermes.name()) else {
         return both("info", "unavailable: executable is absent".into());
     };
-    let approvals =
-        match crate::coding_agent::hermes_approvals(probe.hermes_approvals(&executable, base)) {
-            Ok(approvals) => approvals,
-            Err(cause) => return both("error", cause.message().into_owned()),
-        };
     let row = |name: &'static str, result: Result<(), CafleetError>, ok: &str| match result {
         Ok(()) => Check::new(name, "ok", ok),
         Err(cause) => Check::new(name, "error", cause.message()),
     };
     [
         row(
-            MODE,
-            crate::coding_agent::hermes_approval_mode(&approvals),
-            "smart",
+            DENY,
+            crate::coding_agent::hermes_approvals_preflight(
+                probe.hermes_approvals(&executable, base),
+            ),
+            "holds CAFleet's Director-only rules",
         ),
         row(
-            DENY,
-            crate::coding_agent::hermes_approval_denies(&approvals),
-            "holds CAFleet's Director-only rules",
+            CLIENT_ENV,
+            crate::coding_agent::hermes_client_env_names(
+                probe.hermes_client_env_passthrough(&executable, base),
+            ),
+            "holds CAFleet's member names",
         ),
     ]
 }
@@ -455,6 +454,7 @@ mod tests {
     use crate::cli::Command;
     use crate::cli::setup::*;
     use crate::cli::test_support::assert_error;
+    use crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH;
     use crate::coding_agent::HERMES_DIRECTOR_ONLY_DENIES;
     use clap::Parser;
     use clap::error::ErrorKind;
@@ -626,6 +626,8 @@ mod tests {
         invalid: Option<&'static str>,
         approvals: Result<String, String>,
         approval_reads: RefCell<Vec<(PathBuf, PathBuf)>>,
+        passthrough: Result<String, String>,
+        passthrough_reads: RefCell<Vec<(PathBuf, PathBuf)>>,
     }
     impl Probe {
         fn new(home: &Path, executable: bool, invalid: Option<&'static str>) -> Self {
@@ -639,6 +641,8 @@ mod tests {
                 })
                 .to_string()),
                 approval_reads: RefCell::new(Vec::new()),
+                passthrough: Ok(serde_json::json!(HERMES_CLIENT_ENV_PASSTHROUGH).to_string()),
+                passthrough_reads: RefCell::new(Vec::new()),
             }
         }
     }
@@ -652,6 +656,16 @@ mod tests {
                 .borrow_mut()
                 .push((executable.into(), config_base.into()));
             self.approvals.clone().map_err(CafleetError::App)
+        }
+        fn hermes_client_env_passthrough(
+            &self,
+            executable: &Path,
+            config_base: &Path,
+        ) -> Result<String, CafleetError> {
+            self.passthrough_reads
+                .borrow_mut()
+                .push((executable.into(), config_base.into()));
+            self.passthrough.clone().map_err(CafleetError::App)
         }
         fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
             assert!(crate::coding_agent::coding_agent(name).is_some());
@@ -962,8 +976,8 @@ mod tests {
             assert_eq!(
                 names[position + 1..position + 4],
                 [
-                    "hermes.approvals.mode",
                     "hermes.approvals.deny",
+                    "hermes.client_env_passthrough",
                     "hermes.installation"
                 ]
             );
@@ -974,38 +988,46 @@ mod tests {
                 .collect()
         }
 
+        const DENY_OK: (&str, &str) = ("ok", "holds CAFleet's Director-only rules");
+        const PASSTHROUGH_OK: (&str, &str) = ("ok", "holds CAFleet's member names");
+
         fn rows(
-            mode: (&'static str, &str),
             deny: (&'static str, &str),
+            passthrough: (&'static str, &str),
         ) -> Vec<(String, &'static str, String)> {
             vec![
-                ("hermes.approvals.mode".into(), mode.0, mode.1.into()),
                 ("hermes.approvals.deny".into(), deny.0, deny.1.into()),
+                (
+                    "hermes.client_env_passthrough".into(),
+                    passthrough.0,
+                    passthrough.1.into(),
+                ),
             ]
         }
 
         #[test]
-        fn doctor_reports_a_healthy_hermes_configuration_from_one_read_of_the_resolved_home() {
+        fn doctor_reports_a_healthy_hermes_configuration_from_one_read_each_of_the_resolved_home() {
             let home = tempfile::tempdir().unwrap();
-            let probe = Probe::new(home.path(), true, None);
+            let mut probe = Probe::new(home.path(), true, None);
+            probe.approvals = Ok(serde_json::json!({
+                "mode": "manual",
+                "deny": HERMES_DIRECTOR_ONLY_DENIES,
+            })
+            .to_string());
             assert_eq!(
                 hermes_rows(&probe, home.path()),
-                rows(
-                    ("ok", "smart"),
-                    ("ok", "holds CAFleet's Director-only rules")
-                )
+                rows(DENY_OK, PASSTHROUGH_OK)
             );
-            assert_eq!(
-                *probe.approval_reads.borrow(),
-                [(
-                    PathBuf::from("/fixture/bin/hermes"),
-                    home.path().join(".hermes")
-                )]
-            );
+            let read = [(
+                PathBuf::from("/fixture/bin/hermes"),
+                home.path().join(".hermes"),
+            )];
+            assert_eq!(*probe.approval_reads.borrow(), read);
+            assert_eq!(*probe.passthrough_reads.borrow(), read);
         }
 
         #[test]
-        fn doctor_marks_the_approval_rows_unavailable_without_the_executable() {
+        fn doctor_marks_the_hermes_configuration_rows_unavailable_without_the_executable() {
             let home = tempfile::tempdir().unwrap();
             let probe = Probe::new(home.path(), false, None);
             let absent = "unavailable: executable is absent";
@@ -1014,10 +1036,11 @@ mod tests {
                 rows(("info", absent), ("info", absent))
             );
             assert!(probe.approval_reads.borrow().is_empty());
+            assert!(probe.passthrough_reads.borrow().is_empty());
         }
 
         #[test]
-        fn doctor_marks_the_approval_rows_unavailable_for_an_invalid_hermes_home() {
+        fn doctor_marks_the_hermes_configuration_rows_unavailable_for_an_invalid_hermes_home() {
             let home = tempfile::tempdir().unwrap();
             let probe = Probe::new(home.path(), true, Some("HERMES_HOME"));
             for (_, status, detail) in hermes_rows(&probe, home.path()) {
@@ -1028,27 +1051,13 @@ mod tests {
                 );
             }
             assert!(probe.approval_reads.borrow().is_empty());
+            assert!(probe.passthrough_reads.borrow().is_empty());
         }
 
         #[test]
-        fn doctor_reports_each_hermes_approval_problem_on_its_own_row() {
+        fn doctor_reports_each_missing_hermes_entry_on_its_own_row() {
             let home = tempfile::tempdir().unwrap();
             let mut probe = Probe::new(home.path(), true, None);
-            probe.approvals = Ok(serde_json::json!({
-                "mode": "manual",
-                "deny": HERMES_DIRECTOR_ONLY_DENIES,
-            })
-            .to_string());
-            assert_eq!(
-                hermes_rows(&probe, home.path()),
-                rows(
-                    (
-                        "error",
-                        "hermes approvals.mode is 'manual'; CAFleet members require 'smart'"
-                    ),
-                    ("ok", "holds CAFleet's Director-only rules")
-                )
-            );
             probe.approvals = Ok(serde_json::json!({
                 "mode": "smart",
                 "deny": &HERMES_DIRECTOR_ONLY_DENIES[..5],
@@ -1057,24 +1066,46 @@ mod tests {
             assert_eq!(
                 hermes_rows(&probe, home.path()),
                 rows(
-                    ("ok", "smart"),
                     (
                         "error",
                         "hermes approvals.deny lacks CAFleet's Director-only rules: cafleet input reconcile *; run 'cafleet setup --coding-agent hermes'"
+                    ),
+                    PASSTHROUGH_OK
+                )
+            );
+            let mut probe = Probe::new(home.path(), true, None);
+            probe.passthrough =
+                Ok(serde_json::json!(["PATH", "CAFLEET_DATABASE_URL", "TMUX"]).to_string());
+            assert_eq!(
+                hermes_rows(&probe, home.path()),
+                rows(
+                    DENY_OK,
+                    (
+                        "error",
+                        &format!(
+                            "hermes terminal.client_env_passthrough lacks CAFleet's member names: {}; run 'cafleet setup --coding-agent hermes'",
+                            HERMES_CLIENT_ENV_PASSTHROUGH[2..].join(", ")
+                        )
                     )
                 )
             );
         }
 
         #[test]
-        fn doctor_reports_an_unreadable_hermes_configuration_on_both_rows() {
+        fn doctor_reports_an_unreadable_hermes_configuration_on_the_row_it_feeds() {
             let home = tempfile::tempdir().unwrap();
+            let unreadable = "cannot read hermes configuration through 'hermes config get': did not finish within its deadline";
             let mut probe = Probe::new(home.path(), true, None);
             probe.approvals = Err("did not finish within its deadline".into());
-            let unreadable = "cannot read hermes configuration through 'hermes config get': did not finish within its deadline";
             assert_eq!(
                 hermes_rows(&probe, home.path()),
-                rows(("error", unreadable), ("error", unreadable))
+                rows(("error", unreadable), PASSTHROUGH_OK)
+            );
+            let mut probe = Probe::new(home.path(), true, None);
+            probe.passthrough = Err("did not finish within its deadline".into());
+            assert_eq!(
+                hermes_rows(&probe, home.path()),
+                rows(DENY_OK, ("error", unreadable))
             );
         }
     }

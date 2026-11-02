@@ -33,9 +33,9 @@ New members run through the CAFleet PTY runner with a declared detection-coverag
 | `claude` | `auto` | `dontAsk`, `bypassPermissions` | `default`, `manual`, `acceptEdits`, `plan` |
 | `codex` | `approve-for-me` | `never` | `on-request` |
 | `opencode` | `cafleet` | — | `cafleet-ask` |
-| `hermes` | `smart` | — | — |
+| `hermes` | `smart` | — | `manual` |
 
-Hermes's mode is the `approvals.mode` of your Hermes configuration rather than a launch flag, so `smart` is its only choice; [Quickstart](../quickstart.md#hermes) covers the configuration.
+Hermes has no launch flag for its mode: CAFleet records the `smart` or `manual` choice, and the `approvals.mode` of your Hermes configuration governs the session. [Quickstart](../quickstart.md#hermes) covers the configuration.
 
 Pass `--permission-mode` only for another native mode the user asks for. An `auto` mode can still show an approval prompt when its reviewer escalates, and a `manual` mode shows one for each unsettled operation. When the member's bundled runner profile recognizes the prompt, the Director receives a runtime event and answers it allow-once or deny on the member's behalf, relaying the decision to the user when the Director session's mode requires it. A prompt the profile does not recognize, such as one in a pane narrower than the profile's captured layouts, is answered manually on the member's native surface. A Member-eligible backend's profile recognizes every approval prompt its default mode can show, outside its recorded layout limits ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements)). Each bundled runner profile covers its backend from a minimum native version onward. Detector, composer and answer coverage are independent; without a measured submission plan, generated input uses Escape-first delivery fallback. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](members.md#member-permission-events) explains the workflow, and the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
 

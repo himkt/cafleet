@@ -1062,36 +1062,6 @@ mod tests {
     }
 
     #[test]
-    fn runner_descriptor_records_each_backends_environment_removals_by_name() {
-        let mut fixture = Fixture::new();
-        let artifacts = fixture.artifacts();
-        let mut spec = fixture.spec();
-        for &agent in crate::coding_agent::CodingAgent::all() {
-            spec.environment_removals = agent
-                .spawn_environment_removals()
-                .iter()
-                .map(|name| (*name).to_owned())
-                .collect();
-            let descriptor = LaunchDescriptor::new(&fixture.run, spec.clone()).unwrap();
-            artifacts.write_descriptor(&descriptor).unwrap();
-            let raw: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(&artifacts.paths.descriptor).unwrap())
-                    .unwrap();
-            let read = load_descriptor(&fixture.conn, &artifacts.paths.descriptor).unwrap();
-            let expected: Vec<String> = match agent {
-                crate::coding_agent::CodingAgent::Hermes => vec!["HERMES_YOLO_MODE".into()],
-                _ => vec![],
-            };
-            assert_eq!(read.spawn.environment_removals, expected, "{agent:?}");
-            assert!(
-                raw.to_string().contains("\"environment_removals\""),
-                "the descriptor names the removals: {raw}"
-            );
-            artifacts.remove_descriptor().unwrap();
-        }
-    }
-
-    #[test]
     fn runner_descriptor_load_rejects_malformed_or_identity_mismatched_input() {
         for damage in ["json", "nonce", "epoch", "run", "database"] {
             let mut fixture = Fixture::new();

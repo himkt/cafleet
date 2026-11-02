@@ -42,6 +42,11 @@ pub(crate) trait SpawnProbe {
         executable: &Path,
         config_base: &Path,
     ) -> Result<String, CafleetError>;
+    fn hermes_client_env_passthrough(
+        &self,
+        executable: &Path,
+        config_base: &Path,
+    ) -> Result<String, CafleetError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -60,6 +65,18 @@ pub(crate) const HERMES_DIRECTOR_ONLY_DENIES: [&str; 6] = [
     "cafleet member recover *",
     "cafleet permission respond *",
     "cafleet input reconcile *",
+];
+
+pub(crate) const HERMES_CLIENT_ENV_PASSTHROUGH: [&str; 9] = [
+    "CAFLEET_DATABASE_URL",
+    "TMUX",
+    "TMUX_PANE",
+    "HERDR_ENV",
+    "HERDR_PANE_ID",
+    "HERDR_TAB_ID",
+    "HERDR_WORKSPACE_ID",
+    "HERDR_SOCKET_PATH",
+    "HERDR_BIN_PATH",
 ];
 
 impl CodingAgent {
@@ -97,13 +114,6 @@ impl CodingAgent {
             Self::Hermes => home.join(".hermes"),
         };
         crate::config::resolve(self.config_variable(), env, default)
-    }
-
-    pub(crate) fn spawn_environment_removals(self) -> &'static [&'static str] {
-        match self {
-            Self::Hermes => &["HERMES_YOLO_MODE"],
-            Self::Claude | Self::Codex | Self::Opencode => &[],
-        }
     }
 
     pub(crate) fn spawn_environment(
@@ -262,7 +272,7 @@ impl CodingAgent {
             ],
             (Self::Codex, None | Some("0.163.0")) => &["on-request", "never", "approve-for-me"],
             (Self::Opencode, _) => &["cafleet", "cafleet-ask"],
-            (Self::Hermes, _) => &["smart"],
+            (Self::Hermes, _) => &["smart", "manual"],
             _ => &[],
         };
         choices.iter().map(|value| (*value).into()).collect()
@@ -633,9 +643,7 @@ fn hermes_version(line: &str) -> Result<&str, &'static str> {
 pub(crate) fn hermes_approvals_preflight(
     output: Result<String, CafleetError>,
 ) -> Result<(), CafleetError> {
-    let approvals = hermes_approvals(output)?;
-    hermes_approval_mode(&approvals)?;
-    hermes_approval_denies(&approvals)
+    hermes_approval_denies(&hermes_approvals(output)?)
 }
 
 pub(crate) fn hermes_approvals(
@@ -652,23 +660,6 @@ pub(crate) fn hermes_approvals(
         Ok(other) => Err(unreadable(format!("expected a JSON object, got {other}"))),
         Err(cause) => Err(unreadable(format!("invalid JSON: {cause}"))),
     }
-}
-
-pub(crate) fn hermes_approval_mode(
-    approvals: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(), CafleetError> {
-    match approvals.get("mode") {
-        Some(serde_json::Value::String(mode)) if mode == "smart" => Ok(()),
-        Some(serde_json::Value::String(mode)) => Err(hermes_mode_error(mode)),
-        Some(other) => Err(hermes_mode_error(&other.to_string())),
-        None => Err(hermes_mode_error("null")),
-    }
-}
-
-fn hermes_mode_error(mode: &str) -> CafleetError {
-    CafleetError::App(format!(
-        "hermes approvals.mode is '{mode}'; CAFleet members require 'smart'"
-    ))
 }
 
 pub(crate) fn hermes_approval_denies(
@@ -691,6 +682,34 @@ pub(crate) fn hermes_approval_denies(
     } else {
         Err(CafleetError::App(format!(
             "hermes approvals.deny lacks CAFleet's Director-only rules: {}; run 'cafleet setup --coding-agent hermes'",
+            missing.join(", ")
+        )))
+    }
+}
+
+pub(crate) fn hermes_client_env_names(
+    output: Result<String, CafleetError>,
+) -> Result<(), CafleetError> {
+    let text = output.map_err(|cause| {
+        CafleetError::App(format!(
+            "cannot read hermes configuration through 'hermes config get': {}",
+            cause.message()
+        ))
+    })?;
+    let present = serde_json::from_str::<Vec<String>>(&text).map_err(|cause| {
+        CafleetError::App(format!(
+            "cannot read hermes configuration through 'hermes config get': terminal.client_env_passthrough is not a JSON array of strings: {cause}"
+        ))
+    })?;
+    let missing = HERMES_CLIENT_ENV_PASSTHROUGH
+        .into_iter()
+        .filter(|name| !present.iter().any(|entry| entry == name))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(CafleetError::App(format!(
+            "hermes terminal.client_env_passthrough lacks CAFleet's member names: {}; run 'cafleet setup --coding-agent hermes'",
             missing.join(", ")
         )))
     }
@@ -744,6 +763,13 @@ mod tests {
                 "smart",
                 &HERMES_DIRECTOR_ONLY_DENIES,
             ))
+        }
+        fn hermes_client_env_passthrough(
+            &self,
+            _: &Path,
+            _: &Path,
+        ) -> Result<String, CafleetError> {
+            unreachable!("availability reads no terminal.client_env_passthrough")
         }
     }
 
@@ -1239,6 +1265,13 @@ mod tests {
             }
             fn hermes_approvals(&self, _: &Path, _: &Path) -> Result<String, CafleetError> {
                 unreachable!("only the hermes preflight reads its approvals")
+            }
+            fn hermes_client_env_passthrough(
+                &self,
+                _: &Path,
+                _: &Path,
+            ) -> Result<String, CafleetError> {
+                unreachable!("availability reads no terminal.client_env_passthrough")
             }
         }
         let backend = CodingAgent::Claude;
@@ -1758,7 +1791,7 @@ mod tests {
     fn runtime_policy_help_lists_every_catalog_with_the_automatic_defaults() {
         assert_eq!(
             CodingAgent::permission_mode_help(),
-            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart (default smart)"
+            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart)"
         );
     }
 
@@ -1815,8 +1848,6 @@ mod tests {
         const HERMES_EFFORTS: [&str; 8] = [
             "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
         ];
-        const FORBIDDEN_FLAGS: [&str; 4] =
-            ["--yolo", "--resume", "--continue", "--create-if-missing"];
 
         pub(crate) fn approvals_json(mode: &str, deny: &[&str]) -> String {
             json!({"mode": mode, "timeout": 300, "deny": deny}).to_string()
@@ -1916,39 +1947,8 @@ mod tests {
         }
 
         #[test]
-        fn hermes_argv_never_bypasses_approvals_or_resumes_a_session() {
-            let explicit = CodingAgent::Hermes
-                .resolve_policy(Some("2026.9.24"), Some("smart"))
-                .unwrap();
-            for policy in [smart(), explicit] {
-                for model in [None, Some("openai/gpt-6-astra"), Some("plain-model")] {
-                    for effort in std::iter::once(None).chain(HERMES_EFFORTS.map(Some)) {
-                        let argv = CodingAgent::Hermes
-                            .build_spawn_argv_with_policy(
-                                "assignment",
-                                "worker",
-                                cwd(),
-                                model,
-                                effort,
-                                &policy,
-                            )
-                            .unwrap();
-                        for flag in FORBIDDEN_FLAGS {
-                            assert!(
-                                !argv.iter().any(|token| token == flag),
-                                "{flag} in {argv:?}"
-                            );
-                        }
-                        assert!(!argv.iter().any(|token| token == "--provider"), "{argv:?}");
-                        assert!(!argv.iter().any(|token| token == "--name"), "{argv:?}");
-                    }
-                }
-            }
-        }
-
-        #[test]
         fn hermes_argv_keeps_a_flag_like_prompt_and_spaced_cwd_as_single_values() {
-            let prompt = "--yolo --resume 'x' \n{member_id}";
+            let prompt = "--resume 'x' \n{member_id}";
             let argv = CodingAgent::Hermes
                 .build_spawn_argv_with_policy(prompt, "worker", cwd(), None, None, &smart())
                 .unwrap();
@@ -1958,7 +1958,7 @@ mod tests {
         }
 
         #[test]
-        fn hermes_capture_argv_validation_accepts_the_built_argv_and_rejects_an_added_bypass() {
+        fn hermes_capture_argv_validation_accepts_the_built_argv_and_rejects_an_added_flag() {
             let built = CodingAgent::Hermes
                 .launch_argv(
                     Path::new("/opt/hermes/bin/hermes"),
@@ -1973,11 +1973,11 @@ mod tests {
             CodingAgent::Hermes
                 .validate_spawn_policy_argv(&built, &smart())
                 .unwrap();
-            let mut bypass = built.clone();
-            bypass.insert(1, "--yolo".into());
+            let mut added = built.clone();
+            added.insert(1, "--resume".into());
             assert!(
                 CodingAgent::Hermes
-                    .validate_spawn_policy_argv(&bypass, &smart())
+                    .validate_spawn_policy_argv(&added, &smart())
                     .is_err()
             );
         }
@@ -2233,11 +2233,11 @@ mod tests {
         }
 
         #[test]
-        fn hermes_launch_policy_is_smart_only_at_every_version_with_no_permission_argv() {
+        fn hermes_launch_policy_is_smart_or_manual_at_every_version_with_no_permission_argv() {
             for native_version in [None, Some("2026.9.24"), Some("2026.10.1"), Some("1.0.0")] {
                 assert_eq!(
                     CodingAgent::Hermes.policy_choices(native_version),
-                    ["smart"],
+                    ["smart", "manual"],
                     "{native_version:?}"
                 );
                 let omitted = CodingAgent::Hermes
@@ -2251,29 +2251,31 @@ mod tests {
                     serde_json::to_value(&omitted.permission_argv).unwrap(),
                     json!([])
                 );
-                let explicit = CodingAgent::Hermes
-                    .resolve_policy(native_version, Some("smart"))
-                    .unwrap();
-                assert_eq!(explicit.requested_mode.as_deref(), Some("smart"));
-                assert_eq!(explicit.resolved_mode, "smart");
-                assert_eq!(explicit.mode_source, ModeSource::Explicit);
-                assert!(explicit.permission_argv.is_empty());
+                for mode in ["smart", "manual"] {
+                    let explicit = CodingAgent::Hermes
+                        .resolve_policy(native_version, Some(mode))
+                        .unwrap();
+                    assert_eq!(explicit.requested_mode.as_deref(), Some(mode));
+                    assert_eq!(explicit.resolved_mode, mode);
+                    assert_eq!(explicit.mode_source, ModeSource::Explicit);
+                    assert!(explicit.permission_argv.is_empty());
+                }
             }
         }
 
         #[test]
         fn hermes_launch_policy_rejects_every_other_mode_with_the_exact_usage_error() {
             for native_version in [None, Some("2026.9.24")] {
-                for value in ["manual", "off", "yolo", "", "Smart", "auto"] {
+                for value in ["off", "", "Smart", "Manual", "auto"] {
                     let failure = CodingAgent::Hermes
                         .resolve_policy(native_version, Some(value))
-                        .expect_err("only smart is a hermes launch policy");
+                        .expect_err("only smart and manual are hermes launch policies");
                     assert!(matches!(failure, CafleetError::Usage(_)));
                     assert_eq!(failure.exit_code(), 2);
                     assert_eq!(
                         failure.message(),
                         format!(
-                            "--permission-mode for hermes must be one of smart (got '{value}')"
+                            "--permission-mode for hermes must be one of smart, manual (got '{value}')"
                         )
                     );
                 }
@@ -2281,28 +2283,8 @@ mod tests {
         }
 
         #[test]
-        fn only_hermes_removes_the_approval_bypass_variable_from_the_spawn_environment() {
-            for &backend in CodingAgent::all() {
-                let expected: &[&str] = if backend == CodingAgent::Hermes {
-                    &["HERMES_YOLO_MODE"]
-                } else {
-                    &[]
-                };
-                assert_eq!(
-                    backend.spawn_environment_removals(),
-                    expected,
-                    "{backend:?}"
-                );
-            }
-        }
-
-        #[test]
-        fn hermes_spawn_environment_forwards_hermes_home_and_never_the_bypass_variable() {
-            let lookup = |name: &str| match name {
-                "HERMES_HOME" => Some("/srv/hermes".to_string()),
-                "HERMES_YOLO_MODE" => Some("1".to_string()),
-                _ => None,
-            };
+        fn hermes_spawn_environment_forwards_hermes_home() {
+            let lookup = |name: &str| (name == "HERMES_HOME").then(|| "/srv/hermes".to_string());
             assert_eq!(
                 CodingAgent::Hermes
                     .spawn_environment(DATABASE_URL, &lookup)
@@ -2353,6 +2335,24 @@ mod tests {
             );
         }
 
+        #[test]
+        fn hermes_client_env_passthrough_names_the_member_database_and_multiplexer_variables() {
+            assert_eq!(
+                HERMES_CLIENT_ENV_PASSTHROUGH,
+                [
+                    "CAFLEET_DATABASE_URL",
+                    "TMUX",
+                    "TMUX_PANE",
+                    "HERDR_ENV",
+                    "HERDR_PANE_ID",
+                    "HERDR_TAB_ID",
+                    "HERDR_WORKSPACE_ID",
+                    "HERDR_SOCKET_PATH",
+                    "HERDR_BIN_PATH",
+                ]
+            );
+        }
+
         fn preflight(output: Result<String, CafleetError>) -> Result<(), CafleetError> {
             hermes_approvals_preflight(output)
         }
@@ -2369,8 +2369,9 @@ mod tests {
         }
 
         #[test]
-        fn hermes_preflight_accepts_smart_with_every_director_only_deny_among_others() {
+        fn hermes_preflight_accepts_every_director_only_deny_among_others_in_any_mode() {
             preflight(Ok(approvals_json("smart", &HERMES_DIRECTOR_ONLY_DENIES))).unwrap();
+            preflight(Ok(approvals_json("manual", &HERMES_DIRECTOR_ONLY_DENIES))).unwrap();
             let mut deny = vec!["rm -rf /*", "git push *"];
             deny.extend(HERMES_DIRECTOR_ONLY_DENIES.iter().rev());
             preflight(Ok(approvals_json("smart", &deny))).unwrap();
@@ -2405,32 +2406,6 @@ mod tests {
                     .to_owned();
                 assert!(!cause.is_empty(), "{output:?}");
             }
-        }
-
-        #[test]
-        fn hermes_preflight_requires_the_smart_approval_mode() {
-            for (mode, rendered) in [
-                (json!("manual"), "manual"),
-                (json!("off"), "off"),
-                (json!("Smart"), "Smart"),
-                (json!(false), "false"),
-            ] {
-                let output = json!({"mode": mode, "deny": HERMES_DIRECTOR_ONLY_DENIES}).to_string();
-                assert_app_error(
-                    preflight(Ok(output)),
-                    &format!(
-                        "hermes approvals.mode is '{rendered}'; CAFleet members require 'smart'"
-                    ),
-                );
-            }
-        }
-
-        #[test]
-        fn hermes_preflight_checks_the_mode_before_the_deny_globs() {
-            assert_app_error(
-                preflight(Ok(approvals_json("manual", &[]))),
-                "hermes approvals.mode is 'manual'; CAFleet members require 'smart'",
-            );
         }
 
         #[test]
@@ -2494,6 +2469,13 @@ mod tests {
                     .push((executable.into(), config_base.into()));
                 self.approvals.clone().map_err(CafleetError::App)
             }
+            fn hermes_client_env_passthrough(
+                &self,
+                _: &Path,
+                _: &Path,
+            ) -> Result<String, CafleetError> {
+                unreachable!("availability reads no terminal.client_env_passthrough")
+            }
         }
 
         fn hermes_probe(approvals: Result<String, String>) -> HermesProbe {
@@ -2525,7 +2507,7 @@ mod tests {
             probe.config = Some("/srv/hermes".into());
             probe.calls.borrow_mut().clear();
             CodingAgent::Hermes
-                .ensure_available(&probe, "smart")
+                .ensure_available(&probe, "manual")
                 .unwrap();
             assert_eq!(
                 *probe.calls.borrow(),
@@ -2565,10 +2547,6 @@ mod tests {
                 (
                     Err("exited with exit status: 1".to_owned()),
                     "cannot read hermes configuration through 'hermes config get': exited with exit status: 1".to_owned(),
-                ),
-                (
-                    Ok(approvals_json("manual", &HERMES_DIRECTOR_ONLY_DENIES)),
-                    "hermes approvals.mode is 'manual'; CAFleet members require 'smart'".to_owned(),
                 ),
                 (
                     Ok(approvals_json("smart", &HERMES_DIRECTOR_ONLY_DENIES[1..])),

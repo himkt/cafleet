@@ -69,7 +69,7 @@ cafleet member create --fleet-id <fleet-id> \
 | positional `PROMPT` | one of | Inline spawn prompt. Exactly one of the positional and `--file` is required. |
 | `--file PATH` | one of | UTF-8 spawn prompt path, absolute or relative to CWD; `-` reads the whole prompt from stdin. Use exactly one of the positional and `--file`; file input is the canonical mode for team-skill spawns (see § *Member Create — Scratch and audit files*). |
 
-An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing or unreadable preset for the selected OpenCode policy exits 1 with `cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first`. A Hermes configuration that fails the availability preflight exits 1 before registration, naming its cause (unreadable configuration, an `approvals.mode` other than `smart`, or missing Director-only deny globs with `run 'cafleet setup --coding-agent hermes'`). Path/file errors are catalogued in [`cli.md`](../reference/cli.md#error-messages).
+An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing or unreadable preset for the selected OpenCode policy exits 1 with `cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first`. A Hermes configuration that fails the availability preflight exits 1 before registration, naming its cause (unreadable configuration, or missing Director-only deny globs with `run 'cafleet setup --coding-agent hermes'`). Path/file errors are catalogued in [`cli.md`](../reference/cli.md#error-messages).
 
 The per-backend `--permission-mode`, `--model` and `--effort` rules are in [`cli.md`](../reference/cli.md#member-create). A runner-observed permission request follows your own session’s mode-dependent decision and bound response under the [runtime procedure](#runtime-events). Returned denials and automatic refusals route per [Director-side dispatch](#director-side-dispatch). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode) / [`hermes`](../reference/coding-agents.md#hermes).
 
@@ -82,7 +82,7 @@ Spawn every member with the omitted `--permission-mode`, which selects the backe
 | Claude | `auto`; also `dontAsk`, `bypassPermissions` on the user's request | `default`, `manual`, `acceptEdits`, `plan` |
 | Codex | `approve-for-me`; also `never` on the user's request | `on-request` |
 | OpenCode | `cafleet` | `cafleet-ask` |
-| Hermes | `smart`, from the operator's Hermes configuration | — |
+| Hermes | `smart` | `manual` |
 
 Claude Code 2.1.302 in `auto` can show `Teach auto mode about your environment?` once per native configuration. It arrives as an `interaction_opened` event with classification `question` and has no answer plan: ask the user to answer it on the member's native surface, and send no answer yourself. Codex 0.163.0 `approve-for-me` shows no startup dialog. Any other first-launch dialog the native host shows, such as a folder-trust prompt, follows the existing held-interaction procedure.
 

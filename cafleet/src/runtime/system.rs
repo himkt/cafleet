@@ -450,14 +450,30 @@ impl SpawnProbe for SystemProbe {
         executable: &Path,
         config_base: &Path,
     ) -> Result<String, CafleetError> {
-        crate::coding_agent::run_bounded(
-            executable,
-            &["config", "get", "--json", "approvals"],
-            &[("HERMES_HOME", config_base)],
-            Instant::now() + Duration::from_secs(2),
-        )
-        .map_err(CafleetError::App)
+        hermes_config_get(executable, config_base, "approvals")
     }
+
+    fn hermes_client_env_passthrough(
+        &self,
+        executable: &Path,
+        config_base: &Path,
+    ) -> Result<String, CafleetError> {
+        hermes_config_get(executable, config_base, "terminal.client_env_passthrough")
+    }
+}
+
+fn hermes_config_get(
+    executable: &Path,
+    config_base: &Path,
+    key: &str,
+) -> Result<String, CafleetError> {
+    crate::coding_agent::run_bounded(
+        executable,
+        &["config", "get", "--json", key],
+        &[("HERMES_HOME", config_base)],
+        Instant::now() + Duration::from_secs(2),
+    )
+    .map_err(CafleetError::App)
 }
 
 /// Read stdin to EOF as raw bytes.

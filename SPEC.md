@@ -162,7 +162,7 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 | `permission respond --decision`, `--decision-source`, `--director-mode` | Their possible values | The stored enum values of the permission response storage (§6.9 Permission response storage) |
 | `input reconcile --disposition`, `member create --event-evidence` | Their possible values | Their command enums |
 
-An invalid value for an option with possible values exits 2 with a usage error that lists those values. `member create` resolves its backend at run time, so a `--permission-mode` value outside that backend's catalog keeps its run-time usage error `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, also with exit 2. Help reads `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart (default smart)`. For codex the error reads `--permission-mode for codex must be one of on-request, never, approve-for-me (got 'VALUE')`, for opencode `--permission-mode for opencode must be one of cafleet, cafleet-ask (got 'VALUE')`, and for hermes `--permission-mode for hermes must be one of smart (got 'VALUE')`.
+An invalid value for an option with possible values exits 2 with a usage error that lists those values. `member create` resolves its backend at run time, so a `--permission-mode` value outside that backend's catalog keeps its run-time usage error `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, also with exit 2. Help reads `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart)`. For codex the error reads `--permission-mode for codex must be one of on-request, never, approve-for-me (got 'VALUE')`, for opencode `--permission-mode for opencode must be one of cafleet, cafleet-ask (got 'VALUE')`, and for hermes `--permission-mode for hermes must be one of smart, manual (got 'VALUE')`.
 
 #### Output shapes
 
@@ -310,8 +310,8 @@ any preset fails setup and records no installation.
 The command prints each success line after that operation completes, then
 records the installed version after all operations succeed: the skills line,
 then one preset line per installed preset target in install order. Claude
-prints only the skills line, and Hermes prints the skills line followed by one
-approval-rules line (§ Hermes approval rules):
+prints only the skills line, and Hermes prints the skills line followed by an
+approval-rules line and a member-names line (§ Hermes approval rules):
 
 ```
 <agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
@@ -357,10 +357,19 @@ A failed command, output that is not a JSON array of strings, or a glob missing 
 
 Hermes writes through its own ruamel round-trip writer and replaces the file atomically, writing through a symlinked `config.yaml` to its target. Comments, key order, quoting and untouched nodes are preserved; existing deny entries keep their comments and quoting, and appended entries are written unquoted. A rerun after a successful merge finds nothing missing and writes nothing.
 
-Setup runs only the local binary and stays offline. `cafleet setup --coding-agent hermes` requires `hermes` on `PATH`; its absence fails with the cause `binary hermes not found on PATH`. Plain `cafleet setup` (no `--coding-agent`) with `hermes` absent from `PATH` installs the Hermes skills, records the `asset_installs` row, skips the merge and prints:
+Setup then merges CAFleet's member names into `terminal.client_env_passthrough` with the same steps 2–6 on the same `<config path>`. Its names, in order, are `CAFLEET_DATABASE_URL`, `TMUX`, `TMUX_PANE`, `HERDR_ENV`, `HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_SOCKET_PATH` and `HERDR_BIN_PATH`. One Hermes gateway per Hermes home runs the terminal tools of every session with its own launch environment. A session's tools see that session's own value only for a name in this list, and a listed name the session does not export is unset. Its lines are:
 
 ```
-hermes: skipped approvals.deny rules (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes
+hermes: terminal.client_env_passthrough already holds CAFleet's member names -> <config path>
+hermes: added terminal.client_env_passthrough names -> <config path>: <name>, <name>, …
+```
+
+Its failure is `failed to install hermes terminal.client_env_passthrough names into <config path>: <cause>`, with the same consequence.
+
+Setup runs only the local binary and stays offline. `cafleet setup --coding-agent hermes` requires `hermes` on `PATH`; its absence fails with the cause `binary hermes not found on PATH`. Plain `cafleet setup` (no `--coding-agent`) with `hermes` absent from `PATH` installs the Hermes skills, records the `asset_installs` row, skips both merges and prints:
+
+```
+hermes: skipped approvals.deny rules and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes
 ```
 
 
@@ -428,7 +437,7 @@ one-line `detail`. Checks run in this order:
 | `<agent>.configuration` | The resolved config path (§ Config-dir resolution) | — | The config-path validation error, or `HOME is not set` |
 | `<agent>.executable` | `<binary> is on PATH` | `<binary> is optional and absent from PATH` | — |
 | `opencode.preset[.<mode>]` | § OpenCode preset checks | § OpenCode preset checks | § OpenCode preset checks |
-| `hermes.approvals.mode`, `hermes.approvals.deny` | § Hermes approval checks | § Hermes approval checks | § Hermes approval checks |
+| `hermes.approvals.deny`, `hermes.client_env_passthrough` | § Hermes approval checks | § Hermes approval checks | § Hermes approval checks |
 | `<agent>.installation` | `recorded <version> at <installed_at>` when the version at the resolved path equals the CLI version | `recorded <version> at <installed_at>; run 'cafleet setup --coding-agent <agent>'` for another version; `no installation recorded at <path>; run 'cafleet setup --coding-agent <agent>'`; `unavailable: configuration failed: <cause>`; `unavailable: <database error>` for a database not at head | `installation query failed: <cause>` |
 | `member_runtime.<run_id>` | — | § Member runtime checks | § Member runtime checks |
 
@@ -483,17 +492,17 @@ files at the other base in place.
 
 ###### Hermes approval checks
 
-`doctor` runs the availability preflight's `hermes config get --json approvals` command (§6.7 Hermes availability preflight) once, read-only, and reports two rows after `hermes.executable`. `hermes.configuration` stays the config-dir row.
+`doctor` reports two rows after `hermes.executable`, read-only. `hermes.approvals.deny` runs the availability preflight's `hermes config get --json approvals` command (§6.7 Hermes availability preflight); `hermes.client_env_passthrough` runs `hermes config get --json terminal.client_env_passthrough` with the same bounds. `hermes.configuration` stays the config-dir row.
 
-| State | `hermes.approvals.mode` | `hermes.approvals.deny` |
+| State | `hermes.approvals.deny` | `hermes.client_env_passthrough` |
 |---|---|---|
 | The `hermes` executable is absent from `PATH` | `info`, `unavailable: executable is absent` | `info`, `unavailable: executable is absent` |
 | The hermes configuration failed | `info`, `unavailable: configuration failed: <cause>` | `info`, `unavailable: configuration failed: <cause>` |
-| The command fails, times out or prints no JSON object | `error`, `cannot read hermes configuration through 'hermes config get': <cause>` | `error`, the same detail |
-| `mode` is `smart` | `ok`, `smart` | — |
-| `mode` is another value | `error`, `hermes approvals.mode is '<value>'; CAFleet members require 'smart'` | — |
-| `deny` holds every CAFleet glob | — | `ok`, `holds CAFleet's Director-only rules` |
-| `deny` lacks a CAFleet glob, is absent or is not an array of strings | — | `error`, `hermes approvals.deny lacks CAFleet's Director-only rules: <glob>, …; run 'cafleet setup --coding-agent hermes'` |
+| The row's command fails, times out or prints unexpected JSON | `error`, `cannot read hermes configuration through 'hermes config get': <cause>` | `error`, the same form |
+| The list holds every CAFleet entry | `ok`, `holds CAFleet's Director-only rules` | `ok`, `holds CAFleet's member names` |
+| The list lacks a CAFleet entry | `error`, `hermes approvals.deny lacks CAFleet's Director-only rules: <glob>, …; run 'cafleet setup --coding-agent hermes'` | `error`, `hermes terminal.client_env_passthrough lacks CAFleet's member names: <name>, …; run 'cafleet setup --coding-agent hermes'` |
+
+For `hermes.approvals.deny`, an absent `deny` or one that is not an array of strings counts as lacking every glob. For `hermes.client_env_passthrough`, a value that is not an array of strings is unreadable.
 
 ##### Member runtime checks
 
@@ -637,7 +646,7 @@ one root Director by construction, so no override flag exists.
 | `--description` | yes | One-sentence purpose. |
 | `--coding-agent` | no | A backend registry token; when omitted, the member inherits the spawning Director's placement backend. Availability failures exit 1 (below). |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in §6.7 Model selection. |
-| `--permission-mode MODE` | no | Launch-only selection from the resolved backend’s policy catalog (§6.9 Launch policy and capability registry); omission selects the backend's default `auto` mode (claude `auto`, codex `approve-for-me`, opencode `cafleet`, hermes `smart`). Pass it only for another mode, such as claude `dontAsk`, codex `on-request` or `never`, or opencode `cafleet-ask`. |
+| `--permission-mode MODE` | no | Launch-only selection from the resolved backend’s policy catalog (§6.9 Launch policy and capability registry); omission selects the backend's default `auto` mode (claude `auto`, codex `approve-for-me`, opencode `cafleet`, hermes `smart`). Pass it only for another mode, such as claude `dontAsk`, codex `on-request` or `never`, opencode `cafleet-ask` or hermes `manual`. |
 | `--event-evidence POLICY` | no | `metadata` by default, or explicit `redacted` evidence under the privacy contract (§6.9 Persistence, notification and read interfaces). |
 | `--event-redaction-file PATH` | for redacted | Absolute readable UTF-8 redaction configuration; invalid combinations/configuration fail with usage exit 2 before registration. |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in §6.7 Reasoning effort. |
@@ -675,18 +684,9 @@ base. An invalid value fails `member create` before registration with the
 pinned validation error. The launch descriptor and launch evidence record the
 spawn environment; config locations are paths, not secrets.
 
-The spawn environment can also carry removals: variable names the runner
-removes from the native child's environment before exec. The runner applies
-them to the child it spawns, so they hold on every multiplexer even when the
-multiplexer server's environment or the pane's shell sets the variable. The
-launch descriptor records each removal by name.
-
-| Backend | Removed variables |
-|---|---|
-| claude | — |
-| codex | — |
-| opencode | — |
-| hermes | `HERMES_YOLO_MODE`, which would bypass Hermes's approval layer |
+A Hermes member's terminal tools run in the Hermes gateway, which applies the
+member's own values only for the names setup merges into
+`terminal.client_env_passthrough` (§ Hermes approval rules).
 
 ###### Spawn-prompt substitution
 
@@ -1010,9 +1010,10 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 |---|---|---|---|---|
 | (any surface resolving a config dir) | A set config-path variable holds a non-absolute value (empty string and relative paths included) | §6.3 Config-dir resolution validation | 1 | `doctor` reports it as the agent's configuration check instead |
 | (any non-setup command) | A missing, empty, behind, ahead or incompatible database | §6.3 Schema-version guard | 1 | — |
-| `member create` | `--coding-agent hermes` with an unreadable configuration, an `approvals.mode` other than `smart`, or missing Director-only deny globs | §6.7 Hermes availability preflight | 1 | Fires before registration or multiplexer effects |
+| `member create` | `--coding-agent hermes` with an unreadable configuration or missing Director-only deny globs | §6.7 Hermes availability preflight | 1 | Fires before registration or multiplexer effects |
 | `member delete` | A `hermes` run whose work settlement cannot be verified | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 | The member row and runner cleanup records are kept |
 | `setup` | The Hermes `approvals.deny` merge fails | `failed to install hermes approval rules into <config path>: <cause>` | 1 | No `asset_installs` row for `hermes` (§6.3 Hermes approval rules) |
+| `setup` | The Hermes `terminal.client_env_passthrough` merge fails | `failed to install hermes terminal.client_env_passthrough names into <config path>: <cause>` | 1 | No `asset_installs` row for `hermes` (§6.3 Hermes approval rules) |
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error; fires before registration or multiplexer effects |
 | (any subject-taking command) | Missing positional subject id | The parser's native missing-required-argument error naming the positional | 2 | — |
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
@@ -1721,10 +1722,9 @@ preflight. `display_name` is ignored; Hermes has no `--name` analog.
   (+ ["-q", <prompt>])                               # prompt via flag — TWO tokens
 ```
 
-The argv carries no permission tokens: the launch policy is the effective
-configuration's `approvals.mode`, which the preflight requires to be `smart`.
-It never contains `--yolo`, which bypasses Hermes's approval layer, and never
-contains `--provider`; the operator's configuration selects the provider.
+The argv carries no permission tokens: the operator configuration's
+`approvals.mode` governs the native session. It never contains `--provider`;
+the operator's configuration selects the provider.
 Every spawn starts a fresh conversation: the argv never contains `--resume`,
 `--continue` or `--create-if-missing`. `--source tool` keeps member sessions
 out of the operator's default session lists, and `-q` on a terminal seeds the
@@ -1763,7 +1763,7 @@ the model tokens, before the prompt. Omitted, no effort tokens are emitted.
 | `claude` | None | Yes, via `--name <member-name>` | Runs its spawn-time allow rules and every command matching `permissions.allow`; auto mode's classifier reviews the rest, and a refused command routes to the Director | A Claude Code permission profile; a permission posture, not a spawn dependency |
 | `codex` | Kernel-enforced workspace-write sandbox | No; `member list` `pane_id` locates the pane | Runs commands its workspace/host rules permit; automatic review decides escalations, and a refused required command routes to the Director | `<codex home>/rules/cafleet.rules`, the `config.toml` settings below and a trusted working directory; a permission posture, not a spawn dependency |
 | `opencode` | None | No; `member list` `pane_id` locates the pane | `cafleet`: deny-by-default allowlist; `cafleet-ask`: the same allowlist, with every other command opening a native permission form | The selected policy's preset `<preset base>/agents/<mode>.md`; a spawn precondition |
-| `hermes` | None | No; `member list` `pane_id` locates the pane | `smart`: commands outside Hermes's dangerous-command patterns run unreviewed; the guardian model reviews the rest and may open an approval prompt. Hardline floors, the sudo guard and `approvals.deny` block before any review | Effective `approvals.mode: smart` and the Director-only `approvals.deny` globs (§6.3 Hermes approval rules); a spawn precondition |
+| `hermes` | None | No; `member list` `pane_id` locates the pane | `smart`: commands outside Hermes's dangerous-command patterns run unreviewed; the guardian model reviews the rest and may open an approval prompt. `manual`: every pattern-detected command opens an approval prompt. Hardline floors, the sudo guard and `approvals.deny` block before any review | The operator configuration's `approvals.mode` and the Director-only `approvals.deny` globs (§6.3 Hermes approval rules); the globs are a spawn precondition |
 
 The omitted claude and codex policies are each backend's native automatic
 approval mode: an automatic reviewer decides each operation that no native rule
@@ -1969,12 +1969,11 @@ member's Hermes will enforce. Each failure exits 1 before registration:
 | Condition | Error |
 |---|---|
 | The command cannot start, times out, exits nonzero or prints anything other than a JSON object | `Error: cannot read hermes configuration through 'hermes config get': <cause>` |
-| `mode` is not the string `smart` | `Error: hermes approvals.mode is '<value>'; CAFleet members require 'smart'` |
 | `deny` is absent, is not an array of strings, or lacks a CAFleet Director-only glob (§6.3 Hermes approval rules) | `Error: hermes approvals.deny lacks CAFleet's Director-only rules: <glob>, …; run 'cafleet setup --coding-agent hermes'` |
 
-The checks run in table order. A non-string `mode` renders as compact JSON in
-`<value>`, and the missing globs are listed in their canonical order. `doctor`
-runs the same command read-only (§6.3 Hermes approval checks).
+The checks run in table order, and the missing globs are listed in their
+canonical order. `doctor` runs the same command read-only (§6.3 Hermes
+approval checks).
 
 #### Hermes work settlement
 
@@ -2005,8 +2004,6 @@ The availability errors are:
   '{value}')` (§6.3 *Config-dir resolution*)
 - hermes configuration unreadable: `cannot read hermes configuration through
   'hermes config get': {cause}`
-- hermes approval mode: `hermes approvals.mode is '{value}'; CAFleet members
-  require 'smart'`
 - hermes deny globs: `hermes approvals.deny lacks CAFleet's Director-only
   rules: {globs}; run 'cafleet setup --coding-agent hermes'`
 
@@ -2031,7 +2028,7 @@ A native shell probe displayed the actual command, exit code, duration and outpu
 
 ### 6.8 Configuration
 
-Settings retain the selected SQLite URL, nonnegative text limit and optional multiplexer override. The process reads only the explicitly named environment variables in §6.3. Spawned members receive `CAFLEET_DATABASE_URL` and, when the creator sets it, the selected backend's config-location variable, minus the backend's removed variables (§ *Member environment*); identity is rendered into prompt literals.
+Settings retain the selected SQLite URL, nonnegative text limit and optional multiplexer override. The process reads only the explicitly named environment variables in §6.3. Spawned members receive `CAFLEET_DATABASE_URL` and, when the creator sets it, the selected backend's config-location variable (§ *Member environment*); identity is rendered into prompt literals.
 
 ### 6.9 Member PTY runtime
 
@@ -2044,7 +2041,7 @@ Settings retain the selected SQLite URL, nonnegative text limit and optional mul
 | Claude | `auto` | Use the native permission-mode value through `--permission-mode`; retain broker-tool allowance, prompt suggestions, name and model/effort boundaries. |
 | Codex | `approve-for-me` | Map `on-request` and `never` to `--ask-for-approval <mode> --sandbox workspace-write` and `approve-for-me` to the single `--approve-for-me` flag, which selects the workspace-write sandbox itself. |
 | OpenCode | `cafleet` preset | Map `cafleet` and `cafleet-ask` to `--agent <mode>`, selecting the agent preset of that name; explicit `cafleet` records `mode_source=explicit`. |
-| Hermes | `smart` | `smart` is the only choice for every native version and emits no permission argv; explicit `smart` records `mode_source=explicit`. The effective configuration's `approvals.mode` is the policy, checked by the availability preflight (§6.7 Hermes availability preflight). |
+| Hermes | `smart` | `smart` and `manual` are the choices for every native version, and neither emits permission argv. The choice is recorded only: the operator configuration's `approvals.mode` governs the native session. |
 
 Every launch mode carries an `auto` or `manual` class. The class is a documentation and catalog property: `--permission-mode` values stay backend-native, and the class changes no argv, run-record field or CLI contract.
 
@@ -2060,13 +2057,13 @@ Each backend has one default (omitted) mode, and a backend that offers an `auto`
 | Claude | `auto` (default), `dontAsk`, `bypassPermissions` | `default`, `manual`, `acceptEdits`, `plan` |
 | Codex | `approve-for-me` (default), `never` | `on-request` |
 | OpenCode | `cafleet` (default) | `cafleet-ask` |
-| Hermes | `smart` (default) | — |
+| Hermes | `smart` (default) | `manual` |
 
-Hermes's native `manual` approval mode is operator configuration with no per-launch flag, so CAFleet offers no `manual` launch choice for it. Claude `dontAsk` denies tools that are not pre-approved without prompting, Claude `bypassPermissions` allows without prompting, and Codex `never` returns failures without asking, so each is a fixed policy. Claude `acceptEdits` and `plan` still prompt. When an approval prompt that the run's bundled profile covers appears in a member pane, the runner reports it as `interaction_opened`, and the Director answers it with a single-request allow or deny through the permission commands (§6.3 Permission commands).
+Claude `dontAsk` denies tools that are not pre-approved without prompting, Claude `bypassPermissions` allows without prompting, and Codex `never` returns failures without asking, so each is a fixed policy. Claude `acceptEdits` and `plan` still prompt. When an approval prompt that the run's bundled profile covers appears in a member pane, the runner reports it as `interaction_opened`, and the Director answers it with a single-request allow or deny through the permission commands (§6.3 Permission commands).
 
 The omitted Claude and Codex selections are each backend's native automatic approval mode: an automatic reviewer decides the operations that no native rule settles, and the runner reports its observable refusals and unavailability as automatic review events (§ Automatic review events). Every other choice applies only through an explicit `--permission-mode`. An omitted selection is not validated against the version catalog, so a member whose probed version is newer than every profile boundary still launches with the default; a native version that rejects `auto` or `--approve-for-me` exits immediately and produces `runner_exited` as described below.
 
-The bundled backend policy catalog is the single source of truth for each backend's launch-policy catalog, default, exact argv mapping, native-version eligibility and detector/composer/answer profiles. Help and usage errors report choices from that catalog. Claude accepts native `--permission-mode` values verified from installed help and parser evidence, including documented aliases, recorded by its version-qualified adapter. Claude Code 2.1.302 accepts canonical `default` and its `manual` alias; help displays `manual`, while the [official permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents both. Preserve the explicitly requested spelling in argv and launch intent. Codex accepts the native `--ask-for-approval` values `on-request` and `never` and the `approve-for-me` choice, read from the installed `codex --help` and recorded the same way; the `approve-for-me` token names its native `--approve-for-me` flag, which routes approval requests through automatic review. The explicit `on-request` and `never` choices inherit the user's Codex configuration, including an `approvals_reviewer` setting that can answer escalations without a native form. OpenCode accepts `cafleet` and `cafleet-ask` for every native version, because both select an agent preset rather than a native permission flag; every other explicit token fails with usage exit `2`. The `cafleet` preset resolves every shell check to `allow` or `deny`; the `cafleet-ask` preset asks for every shell command outside its allowlist and its Director-only denies, so OpenCode opens a native permission form. Hermes accepts only `smart` for every native version, because no Hermes launch flag selects an approval mode; every other explicit token fails with usage exit `2`.
+The bundled backend policy catalog is the single source of truth for each backend's launch-policy catalog, default, exact argv mapping, native-version eligibility and detector/composer/answer profiles. Help and usage errors report choices from that catalog. Claude accepts native `--permission-mode` values verified from installed help and parser evidence, including documented aliases, recorded by its version-qualified adapter. Claude Code 2.1.302 accepts canonical `default` and its `manual` alias; help displays `manual`, while the [official permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents both. Preserve the explicitly requested spelling in argv and launch intent. Codex accepts the native `--ask-for-approval` values `on-request` and `never` and the `approve-for-me` choice, read from the installed `codex --help` and recorded the same way; the `approve-for-me` token names its native `--approve-for-me` flag, which routes approval requests through automatic review. The explicit `on-request` and `never` choices inherit the user's Codex configuration, including an `approvals_reviewer` setting that can answer escalations without a native form. OpenCode accepts `cafleet` and `cafleet-ask` for every native version, because both select an agent preset rather than a native permission flag; every other explicit token fails with usage exit `2`. The `cafleet` preset resolves every shell check to `allow` or `deny`; the `cafleet-ask` preset asks for every shell command outside its allowlist and its Director-only denies, so OpenCode opens a native permission form. Hermes accepts `smart` and `manual` for every native version and records the choice without emitting argv, because no Hermes launch flag selects an approval mode; every other explicit token fails with usage exit `2`.
 
 Creation success establishes that the child was spawned, not that its native policy was accepted. A fast native exit after spawning, including policy rejection, produces `runner_exited` with the actual code/signal and a Director inbox event; the runner preserves the chosen mode rather than retrying with another one. An error from the spawn operation itself still fails creation and follows compensation. There is no post-spawn liveness window.
 
@@ -2078,6 +2075,7 @@ Record `requested_mode` as nullable text, `resolved_mode` as required text, `mod
 | Omitted Codex | `null` | `approve-for-me` | `default` | `["--approve-for-me"]` |
 | Explicit Codex `never` | `never` | `never` | `explicit` | `["--ask-for-approval","never","--sandbox","workspace-write"]` |
 | Omitted Hermes | `null` | `smart` | `default` | `[]` |
+| Explicit Hermes `manual` | `manual` | `manual` | `explicit` | `[]` |
 
 `effective_policy_json` remains null unless a tested native observation supplies it (§ Effective policy record); an installed version, argv or selected profile alone proves no effective authorization decision.
 

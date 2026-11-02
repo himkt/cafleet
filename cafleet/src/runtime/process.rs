@@ -366,9 +366,6 @@ impl PtySession {
         for (key, value) in &spec.environment {
             command.env(key, value);
         }
-        for name in &spec.environment_removals {
-            command.env_remove(name);
-        }
         let child = self
             .slave
             .as_ref()
@@ -725,7 +722,6 @@ mod tests {
                 ],
                 cwd: PathBuf::from("/"),
                 environment: Vec::new(),
-                environment_removals: Vec::new(),
                 evidence_policy: serde_json::json!({"mode":"metadata"}),
                 size: TerminalSize { rows: 24, cols: 80 },
             };
@@ -894,83 +890,6 @@ mod tests {
                 "{text:?}"
             );
             assert_eq!(status, ChildExit::Code(0));
-        }
-
-        fn removal_probe(session_removals: Vec<String>) -> String {
-            let fixture = Fixture::new();
-            let mut spec = fixture.spec();
-            spec.environment_removals = session_removals;
-            spec.argv = vec![
-                "/bin/sh".into(),
-                "-c".into(),
-                "printf 'yolo=%s\\n' \"${HERMES_YOLO_MODE-unset}\"".into(),
-            ];
-            let mut owned = OwnedPty::prepare(spec.size);
-            owned.session.spawn(&spec).unwrap();
-            let (output, status) = collect(&mut owned.session);
-            assert_eq!(owned.stop().cleanup_state, CleanupState::Complete);
-            assert_eq!(status, ChildExit::Code(0));
-            String::from_utf8(output).unwrap()
-        }
-
-        #[test]
-        #[ignore = "re-executed with HERMES_YOLO_MODE set in the runner environment"]
-        fn runner_real_pty_environment_removal_child() {
-            assert_eq!(
-                std::env::var("HERMES_YOLO_MODE").as_deref(),
-                Ok("1"),
-                "the launcher sets the bypass variable in the runner environment"
-            );
-            let inherited = removal_probe(Vec::new());
-            assert!(inherited.contains("yolo=1"), "{inherited:?}");
-            let removed = removal_probe(
-                crate::coding_agent::CodingAgent::Hermes
-                    .spawn_environment_removals()
-                    .iter()
-                    .map(|name| (*name).to_owned())
-                    .collect(),
-            );
-            assert!(removed.contains("yolo=unset"), "{removed:?}");
-        }
-
-        #[test]
-        fn runner_real_pty_removes_the_hermes_approval_bypass_from_the_native_child() {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    test_path!(runner_real_pty_environment_removal_child),
-                    "--ignored",
-                    "--nocapture",
-                    "--test-threads=1",
-                ])
-                .env("HERMES_YOLO_MODE", "1")
-                .stdin(std::process::Stdio::null())
-                .output()
-                .unwrap();
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(
-                output.status.success() && stdout.contains("1 passed"),
-                "stdout: {stdout}\nstderr: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        #[test]
-        fn runner_spawn_spec_rejects_an_invalid_environment_removal_name() {
-            let fixture = Fixture::new();
-            for name in ["", "A=B", "A\0B"] {
-                let mut spec = fixture.spec();
-                spec.environment_removals = vec![name.into()];
-                let failure = spec.validate().expect_err("an invalid removal name fails");
-                assert_eq!(
-                    failure.message(),
-                    "invalid native environment override",
-                    "{name:?}"
-                );
-            }
-            let mut spec = fixture.spec();
-            spec.environment_removals = vec!["HERMES_YOLO_MODE".into()];
-            spec.validate().unwrap();
         }
 
         #[test]

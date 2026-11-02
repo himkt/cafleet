@@ -481,11 +481,6 @@ fn create(
                 argv,
                 cwd,
                 environment: environment.clone(),
-                environment_removals: backend
-                    .spawn_environment_removals()
-                    .iter()
-                    .map(|name| (*name).to_owned())
-                    .collect(),
                 evidence_policy,
                 size,
             };
@@ -2074,6 +2069,7 @@ mod tests {
                 ("opencode", "cafleet"),
                 ("opencode", "cafleet-ask"),
                 ("hermes", "smart"),
+                ("hermes", "manual"),
             ] {
                 let mut arguments = create_arguments();
                 arguments.extend([
@@ -2160,10 +2156,10 @@ mod tests {
             assert_eq!(
                 invalid_creation(
                     CodingAgent::Hermes,
-                    &["--permission-mode".into(), "manual".into()]
+                    &["--permission-mode".into(), "off".into()]
                 )
                 .message(),
-                "--permission-mode for hermes must be one of smart (got 'manual')"
+                "--permission-mode for hermes must be one of smart, manual (got 'off')"
             );
         }
 

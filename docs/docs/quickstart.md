@@ -30,7 +30,7 @@ system:
 | `claude` (Claude Code) | `~/.claude/settings.json` | The permission profile below that matches the Director's mode | The skills | The sub-section below |
 | `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | The Codex sub-section below |
 | `opencode` | none | none required | The skills, plus the `cafleet` and `cafleet-ask` agent presets at `~/.config/opencode/agents/cafleet.md` and `~/.config/opencode/agents/cafleet-ask.md` | The OpenCode sub-section below |
-| `hermes` (Hermes Agent) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills, plus six Director-only globs merged into `approvals.deny` | The Hermes sub-section below |
+| `hermes` (Hermes Agent) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills, six Director-only globs merged into `approvals.deny` and CAFleet's member variables merged into `terminal.client_env_passthrough` | The Hermes sub-section below |
 
 The paths above are defaults. `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
 `HERMES_HOME` relocate their backend's installed assets. `OPENCODE_CONFIG_DIR` relocates only the OpenCode
@@ -238,15 +238,18 @@ before any approval review. Rerunning setup adds only missing globs. A plain
 `cafleet setup` on a host without `hermes` installs the skills and skips this
 merge; run `cafleet setup --coding-agent hermes` after installing Hermes.
 
-Keep `approvals.mode` at `smart`, its default. `cafleet member create` reads
-your effective Hermes configuration and refuses to start a member when the mode
-is not `smart` or a glob is missing; `cafleet doctor` reports both as
-`hermes.approvals.mode` and `hermes.approvals.deny`. Under `smart`, commands
-Hermes does not consider dangerous run without review, and its guardian model
-reviews the rest. A guardian escalation shows an approval prompt in the
-member's pane, which the Director answers. CAFleet removes `HERMES_YOLO_MODE`
-from each member's environment, so an exported approval bypass never reaches a
-member.
+Setup also adds CAFleet's member variables (`CAFLEET_DATABASE_URL` and the
+tmux and herdr pane variables) to `terminal.client_env_passthrough`. Hermes
+runs every session's terminal tools in one shared gateway, and this list lets
+each member's tools see that member's own values.
+
+`cafleet member create` reads your effective Hermes configuration and refuses
+to start a member when a glob is missing. `cafleet doctor` reports the two lists
+as `hermes.approvals.deny` and `hermes.client_env_passthrough`. Under
+`approvals.mode: smart`, the default, commands Hermes does not consider
+dangerous run without review, and its guardian model reviews the rest. A
+guardian escalation shows an approval prompt in the member's pane, which the
+Director answers.
 
 ### Trust the working directory
 
