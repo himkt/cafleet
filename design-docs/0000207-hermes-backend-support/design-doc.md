@@ -1,7 +1,7 @@
 # Hermes Coding-Agent Backend Support
 
 **Status**: Approved
-**Progress**: 61/73 tasks complete
+**Progress**: 71/73 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -15,7 +15,7 @@ Add Hermes Agent (`hermes`) as a CAFleet coding-agent backend, evaluated indepen
 - [ ] This document's `## Role evaluation` table records, per requirement group, the Hermes native version `2026.9.24`, source and check date, and each verdict is `yes` only when the recorded evidence establishes every Eligible-tier requirement.
 - [ ] When at least one role reaches `yes`, the Hermes backend ships: registry entry, `--coding-agent` choices, setup/doctor support, the `hermes` section in `coding-agents.md`, the SPEC Role eligibility rows and the matching docs. Both verdicts are recorded there. A Director `no` follows the OpenCode precedent: `fleet create` accepts `hermes`, and the Director role's ineligible-backend rule governs. A Member `no` ships no member launch path. Each failure is recorded here.
 - [ ] When Member is `yes`: `cafleet member create --coding-agent hermes` launches `hermes chat --cli --source tool --in <cwd> -q <prompt>` under the CAFleet PTY runner with native `smart` approvals; the Hermes profile from `2026.9.24` detects the guardian ESCALATE and guardian-DENY owner-override prompts on tmux and herdr, and `permission respond` answers them with single-request allow/deny.
-- [ ] When Member is `yes`: `cafleet member delete` verifies that the member's Hermes session work and every background process it registered have stopped before deregistration, and exits 1 with the member row retained when that stop cannot be verified.
+- [ ] When Member is `yes`: `cafleet member delete` verifies that the member's Hermes session work and every background process it registered have stopped before deregistration, exits 1 with the member row retained when a live client's stop cannot be verified, and deletes with a warning when the client has already exited.
 - [ ] Every claimed Hermes detector, composer and answer capability is backed by real native PTY captures on tmux and herdr across the measured pane widths, plus positive and adversarial replay fixtures; `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` pass.
 
 ---
@@ -49,7 +49,7 @@ None of the live evidence (stream probes, runner acceptance on tmux and herdr, p
 | Role | Eligible | Evidence |
 |---|---|---|
 | Director | `yes` | Goal lifecycle: native `/goal` lifecycle controls in installed source and in-session `/help goal`, 2026.9.24, checked 2026-11-02. Background execution: CAFleet stream probe with `terminal` `background=true`, `notify=true` finite `wait` renewed per completion, consumed at turn boundaries without user input (runtime-evidence.md § 4.4 runs 2–3), 2026.9.24, checked 2026-11-02. |
-| Member | `no` | PTY lifecycle, coverage declaration and coverage of the default `smart` mode's approval prompts: not established for 2026.9.24, checked 2026-11-02. |
+| Member | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |
 
 Step 4 and Step 7 replace these rows with the recorded evidence. Each Evidence cell keeps the shape of SPEC § Role eligibility: source, native version and `checked YYYY-MM-DD` per requirement group, in at most two sentences. A Member `yes` names its bundled profile ("the Hermes profile from `2026.9.24`").
 
@@ -469,24 +469,24 @@ Paid calls use the operator's configured default model. Secrets and account iden
 - [x] Add allow-once and deny answer plans with gates, plus empty-composer, prompt and native-exec plans from the measured stages <!-- completed: 2026-11-02T12:01 -->
 - [x] Add positive and adversarial replay tests covering every row of § Hermes bundled profile Replay fixtures <!-- completed: 2026-11-02T12:01 -->
 - [x] Implement session-identity capture into `native_session_json` and the Hermes settlement in `member delete` and creation compensation, with unit tests for success, unverifiable stop, stale PID identity and retry <!-- completed: 2026-11-02T12:01 -->
-- [ ] Run live runner acceptance on tmux and herdr. Cases: default launch, a non-dangerous command, ESCALATE answered allow and deny via `permission respond`, override answered allow and deny, timeout closure as `not_visible`, prompt and native-exec submission, deletion with a running background process, a Director-only command (plain and leading-assignment forms) blocked by the deny globs and routed, and `member create` refused for a missing glob. <!-- completed: -->
-- [ ] Update § Role evaluation Member row with the recorded evidence and verdict <!-- completed: -->
+- [x] Run live runner acceptance on tmux and herdr. Cases: default launch, a non-dangerous command, ESCALATE answered allow and deny via `permission respond`, override answered allow and deny, timeout closure as `not_visible`, prompt and native-exec submission, deletion with a running background process, a Director-only command (plain and leading-assignment forms) blocked by the deny globs and routed, and `member create` refused for a missing glob. <!-- completed: 2026-11-02T12:35 -->
+- [x] Update § Role evaluation Member row with the recorded evidence and verdict <!-- completed: 2026-11-02T12:35 -->
 
 ### Step 8: Validation
 
-- [ ] Run `mise //cafleet:test` and `mise //cafleet:lint` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
+- [x] Run `mise //cafleet:test` and `mise //cafleet:lint` <!-- completed: 2026-11-02T12:40 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-02T12:40 -->
 - [ ] Check that every rendered table cell containing a literal `|` uses the `<code>&#124;</code>` form, by inspecting the built HTML <!-- completed: -->
 
 ### Step 9: Verdict gate and shipping
 
-- [ ] Copy the final verdicts into `SPEC.md` § Role eligibility and the `hermes` Role eligibility subsection <!-- completed: -->
-- [ ] Update the shipped surfaces from `runtime-evidence.md` per § Evidence-driven documentation updates <!-- completed: -->
-- [ ] Director `yes`: add `#### Hermes native Director reception` from the Step 4 probe; Director `no`: record the failure in § Role evaluation and keep the ineligible-backend note <!-- completed: -->
-- [ ] Member `no`: remove the Hermes member launch path, profile, fixtures, settlement, setup deny-glob merge and `V2` migration from the branch and their documentation, recording the failure here. With Director `yes`, add the `Error: hermes is not Member-eligible; see Role eligibility` refusal to `member create` (explicit and fleet-inherited backend) with unit tests. Document it in SPEC §6.7 Contract error strings and the `skills/cafleet/reference/cli.md` errors. Add the § Model selection step 3 rule in `skills/cafleet/roles/director.md`: skip a Member-`no` fleet backend and relay an operator choice of a Member-eligible backend via `{decision_surface}` before spawning. <!-- completed: -->
-- [ ] Both `no`: remove every Hermes surface (registry entry, CLI choices, setup/doctor, docs, skills, SPEC rows) from the branch, keeping Step 2 and this document's record <!-- completed: -->
+- [x] Copy the final verdicts into `SPEC.md` § Role eligibility and the `hermes` Role eligibility subsection <!-- completed: 2026-11-02T12:40 -->
+- [x] Update the shipped surfaces from `runtime-evidence.md` per § Evidence-driven documentation updates <!-- completed: 2026-11-02T12:40 -->
+- [x] Director `yes`: add `#### Hermes native Director reception` from the Step 4 probe; Director `no`: record the failure in § Role evaluation and keep the ineligible-backend note <!-- completed: 2026-11-02T12:40 -->
+- [x] Member `no`: remove the Hermes member launch path, profile, fixtures, settlement, setup deny-glob merge and `V2` migration from the branch and their documentation, recording the failure here. With Director `yes`, add the `Error: hermes is not Member-eligible; see Role eligibility` refusal to `member create` (explicit and fleet-inherited backend) with unit tests. Document it in SPEC §6.7 Contract error strings and the `skills/cafleet/reference/cli.md` errors. Add the § Model selection step 3 rule in `skills/cafleet/roles/director.md`: skip a Member-`no` fleet backend and relay an operator choice of a Member-eligible backend via `{decision_surface}` before spawning. (not applicable: both verdicts are `yes`) <!-- completed: 2026-11-02T12:40 -->
+- [x] Both `no`: remove every Hermes surface (registry entry, CLI choices, setup/doctor, docs, skills, SPEC rows) from the branch, keeping Step 2 and this document's record (not applicable: both verdicts are `yes`) <!-- completed: 2026-11-02T12:40 -->
 - [ ] Reinstall the CLI with `mise //cafleet:install` and run `cafleet setup --coding-agent hermes` plus `cafleet doctor` for each shipped role <!-- completed: -->
-- [ ] Re-run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` after the gate edits <!-- completed: -->
+- [x] Re-run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //docs:build` after the gate edits <!-- completed: 2026-11-02T12:40 -->
 
 ---
 

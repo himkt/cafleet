@@ -329,7 +329,7 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 
 | Placeholder | Value |
 |---|---|
-| `{decision_surface}` | a Director-relayed operator message |
+| `{decision_surface}` | the `clarify` tool with one single-select question; its result records the chosen `user_response` (members relay) |
 | `{permission_flags}` | no permission argv; the recorded mode is `smart` (default, class `auto`) or `manual` (class `manual`), and the operator configuration's `approvals.mode` governs the session, with hardline floors, the sudo guard and `approvals.deny` enforced |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
@@ -352,10 +352,10 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 
 | Note | Applies at |
 |---|---|
-| A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
-| Hermes's Director verdict is `no` (Role eligibility below), so a Hermes session follows the Director role's ineligible-backend rule. | [Director wake](../roles/director.md#director-wake) |
+| `clarify` offers the listed choices plus a free-text Other and waits up to an hour; a result whose `status` is `answered` records the decision. A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
+| A Hermes Director receives broker records through a completion-notified finite `wait` (§ Hermes native Director reception). A notification that arrives mid-turn is delivered at the next turn boundary, so a long turn defers reception until it ends. | [Director wake](../roles/director.md#director-wake) |
 | Default mode `smart` (class `auto`): commands outside Hermes's dangerous-command patterns run unreviewed; the guardian model reviews the rest and may open an ESCALATE prompt or, after a guardian DENY, an owner-override prompt offering once/deny. The member waits while the Director answers allow-once or deny through the runtime procedure; an unanswered prompt fails closed at `approvals.timeout` (default 300 s) with a BLOCKED result, which the member routes like any refusal. Hardline floors, the sudo guard and `approvals.deny` block before review and route like any refusal. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [runtime procedure](../roles/director.md#consume-observed-interactions) |
-| `cafleet setup --coding-agent hermes` merges six Director-only `approvals.deny` globs (`cafleet member prompt *`, `cafleet member exec *`, `cafleet member press *`, `cafleet member recover *`, `cafleet permission respond *`, `cafleet input reconcile *`) into the file `hermes config path` reports, and `member create` refuses a configuration that lacks a glob, naming the setup command. A matching member command is blocked before review; route it to the Director. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); setup; member spawn |
+| `cafleet setup --coding-agent hermes` merges six Director-only `approvals.deny` globs (`cafleet member prompt *`, `cafleet member exec *`, `cafleet member press *`, `cafleet member recover *`, `cafleet permission respond *`, `cafleet input reconcile *`) into the file `hermes config path` reports, and `member create` refuses a configuration that lacks a glob, naming the setup command. A matching member command is blocked before review, including a leading-assignment or absolute-path form, with the tool result `BLOCKED: this command matches the user-defined deny rule '<glob>' …`; report the block to the Director instead of rewording the command. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); setup; member spawn |
 | Each pane runs `hermes chat --cli --source tool --in <cwd>` with optional `--model` and `--reasoning`, then `-q <prompt>` as a fresh conversation. `member create` forwards a set `HERMES_HOME`, so the member uses the configuration setup merged into and the preflight checked. | `{permission_flags}`; member spawn |
 | One Hermes gateway per Hermes home runs every session's terminal tools. Setup merges CAFleet's member variables into `terminal.client_env_passthrough`, so each member's tools see its own `CAFLEET_DATABASE_URL` and pane variables. | setup; member spawn |
 | Background terminal commands run through a login shell that rebuilds `PATH`; invoke `cafleet` by its absolute path in a background command. | Member startup; [native reception](../roles/director.md#director-wake) |
@@ -363,9 +363,19 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 | A Hermes session can keep accepted work and background processes running after its pane's client exits. `member delete` stops that session's work and its registered background processes before deregistration (20-second deadline), and exits 1 with the member kept when it cannot verify the stop on a live client; retry the deletion after inspecting the cause. When the client had already exited, deletion completes with `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway`; that session's in-flight turn runs to completion. To stop its background processes, find the session with `hermes sessions list --source tool`, resume it with `hermes chat --cli --resume <session id> --in <cwd>` and run `/stop`. CAFleet never stops a Hermes gateway or touches sessions it does not own. | [Member Delete](../roles/director.md#member-delete); [Shutdown](../roles/director.md#shutdown) |
 | Leading-`!` input runs a native shell command in the classic REPL. The Director authorizes routed native input under its host rules. | [Native dispatch](../roles/director.md#director-side-dispatch) |
 
+#### Hermes native Director reception
+
+After registration, start one receiver with the `terminal` tool, `background=true` and `notify=true`, running `<absolute cafleet path> message wait <director-id> --timeout 300` with the literal ID. Background commands run in a login shell that rebuilds `PATH`, so use the absolute path of the cafleet executable your own shell resolves. Retain the returned process `session_id`, the Director ID and unfinished actions.
+
+Each exit of the receiver injects one completion notification. On it, read the process output, run `cafleet message poll <director-id> --json`, reconcile replayed and known IDs, record deferred actions and ACK consumption. Then start one new receiver while delegated work remains. Hermes delivers a notification that arrives during a turn at that turn's end, and an idle session starts a turn for it without user input.
+
+Retire the receiver with `process_manage`, `action=kill` on the retained `session_id`, and verify that it exited. Preserve the process `session_id` and unfinished actions across compaction. When the background facility is unavailable or denied, disclose that limit and use manual `poll` or a foreground finite `wait`.
+
+Preserve goal activation, pause, completion and gate/wait authority. Reception uses process output and broker reads and makes no goal lifecycle calls or pane input.
+
 ### Role eligibility
 
 | Role | Eligible | Evidence |
 |---|---|---|
-| Director | `no` | Goal lifecycle: native `/goal` lifecycle controls in installed source for 2026.9.24, checked 2026-11-02; an in-session `/goal` help capture is not established yet. Background execution while supervision continues: CAFleet stream probe not established for 2026.9.24, checked 2026-11-02. |
-| Member | `no` | PTY lifecycle, coverage declaration and coverage of the default `smart` mode's approval prompts: not established for 2026.9.24, checked 2026-11-02. |
+| Director | `yes` | Goal lifecycle: native `/goal` lifecycle controls in installed source and in-session `/help goal`, 2026.9.24, checked 2026-11-02. Background execution: CAFleet stream probe with `terminal` `background=true`, `notify=true` finite `wait` renewed per completion, consumed at turn boundaries without user input, 2026.9.24, checked 2026-11-02. |
+| Member | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |
