@@ -1,7 +1,7 @@
 # Rust package at the repository root
 
 **Status**: Approved
-**Progress**: 9/27 tasks complete
+**Progress**: 14/27 tasks complete
 **Last Updated**: 2026-11-02
 
 ## Overview
@@ -212,11 +212,11 @@ Installed runtime assets of the executing fleet are preserved during implementat
 
 ### Step 3: Move the package
 
-- [ ] Run `git mv cafleet/Cargo.toml cafleet/Cargo.lock cafleet/build.rs cafleet/src cafleet/migrations .` from the repository root <!-- completed: -->
-- [ ] Edit `build.rs` to drop every `../` (rerun-if-changed and asset roots) <!-- completed: -->
-- [ ] Merge the Rust tasks into the root `mise.toml`, set `config_roots = ["docs"]`, point `all-install` at `//:install`, update the `build` description; `git rm cafleet/mise.toml` <!-- completed: -->
-- [ ] Change `.gitignore` `/cafleet/target/` to `/target/` <!-- completed: -->
-- [ ] Delete the local ignored `cafleet/target/` so the `cafleet/` directory no longer exists <!-- completed: -->
+- [x] Run `git mv cafleet/Cargo.toml cafleet/Cargo.lock cafleet/build.rs cafleet/src cafleet/migrations .` from the repository root <!-- completed: 2026-11-02T14:30 -->
+- [x] Edit `build.rs` to drop every `../` (rerun-if-changed and asset roots) <!-- completed: 2026-11-02T14:30 -->
+- [x] Merge the Rust tasks into the root `mise.toml`, set `config_roots = ["docs"]`, point `all-install` at `//:install`, update the `build` description; `git rm cafleet/mise.toml` <!-- completed: 2026-11-02T14:30 -->
+- [x] Change `.gitignore` `/cafleet/target/` to `/target/` <!-- completed: 2026-11-02T14:30 -->
+- [x] Delete the local ignored `cafleet/target/` so the `cafleet/` directory no longer exists <!-- completed: 2026-11-02T14:30 -->
 - [ ] Director commits the move as one commit, once `mise //:test` passes on the moved tree, so rename detection keeps history <!-- completed: -->
 
 ### Step 4: Permission surfaces
