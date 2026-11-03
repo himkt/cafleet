@@ -22,7 +22,7 @@ The commands that write into a member's live native session or runtime record �
 
 ## Inspection and recovery
 
-Use `member list` and `member capture` to check roster and pane evidence. `member capture` returns the last 20 lines by default; use `--lines` for more when that is insufficient. An empty composer does not mean the task is complete — judge completion from messages and artifacts. A timeout alone establishes neither failure nor completion. Replace an unusable member only under the existing authorization, carrying its assignment, messages and artifacts into the replacement prompt.
+Use `member list` and `member capture` to check roster and pane evidence. `member capture` returns the last 20 lines by default; use `--lines` for more when that is insufficient. An empty composer does not mean the task is complete — judge completion from messages and artifacts. A timeout alone establishes neither failure nor completion. Replace an unusable member only when its replacement is authorized, carrying its assignment, messages and artifacts into the replacement prompt.
 
 `cafleet doctor` summarizes the environment in one line per component. Its `members` lines group members by state with compact ID ranges, such as `warn members: 20 lost runtime: 1-6, 9-22 — run 'cafleet member recover ID' or 'cafleet member delete ID'`, and each actionable state names the command to run next. `--verbose` prints one row per check, including each member run's probe observations, and `--json` prints both the summary and the checks. The [doctor contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#cafleet-doctor--environment-diagnosis) defines the states, statuses and exit rule.
 
@@ -32,7 +32,7 @@ The [member runtime contract](https://github.com/himkt/cafleet/blob/main/SPEC.md
 
 ## Teardown
 
-Runner-managed deletion coordinates shutdown and event recovery under the existing pane locks, retaining unconfirmed child cleanup and recoverable artifacts explicitly. Member deletion kills its owned pane and deregisters it. Fleet deletion ends every remaining ordinary member the same way, reporting each pane outcome, then deregisters the root Director and the fleet while leaving the Director's pane open; a member that cannot be ended stops it with the fleet still registered, and a rerun resumes. Both serialize placement changes with pane input and fail without registry changes if lock contention lasts five seconds. The root Director is protected from individual member deletion.
+Runner-managed deletion coordinates shutdown and event recovery under each member's pane-input lock, retaining unconfirmed child cleanup and recoverable artifacts explicitly. Member deletion kills its owned pane and deregisters it. Fleet deletion ends every remaining ordinary member the same way, reporting each pane outcome, then deregisters the root Director and the fleet while leaving the Director's pane open; a member that cannot be ended stops it with the fleet still registered, and a rerun resumes. Both serialize placement changes with pane input and fail without registry changes if lock contention lasts five seconds. The root Director is protected from individual member deletion.
 
 ## Member permission events
 
