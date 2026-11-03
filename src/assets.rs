@@ -1,6 +1,5 @@
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH;
-use crate::coding_agent::HERMES_DIRECTOR_ONLY_DENIES;
 use crate::config::EnvLookup;
 use crate::config::opencode_skills_base;
 use crate::error::CafleetError;
@@ -125,102 +124,71 @@ pub(crate) fn install_agent(
                 let config = runner
                     .run(&hermes_args(&["config", "path"]))
                     .map(|stdout| stdout.trim().to_owned())
-                    .map_err(|cause| {
-                        HERMES_DENY_LIST.failure(&paths.identity, &cause.message())
-                    })?;
-                for list in [&HERMES_DENY_LIST, &HERMES_CLIENT_ENV_LIST] {
-                    report(list.merge(runner, &config)?)?;
-                }
+                    .map_err(|cause| passthrough_failure(&paths.identity, &cause.message()))?;
+                report(merge_client_env_passthrough(runner, &config)?)?;
             }
-            None => report("hermes: skipped approvals.deny rules and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
+            None => report("hermes: skipped terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
         }
     }
     crate::broker::record_asset_install(conn, agent.name(), &paths.identity, version)?;
     Ok(())
 }
 
-/// A Hermes configuration list that setup extends with CAFleet's required entries.
-struct HermesList {
-    key: &'static str,
-    required: &'static [&'static str],
-    already: &'static str,
-    added: &'static str,
-    failure: &'static str,
+const PASSTHROUGH_KEY: &str = "terminal.client_env_passthrough";
+
+/// Appends each missing CAFleet member name after the existing entries and
+/// returns the setup line describing the result.
+fn merge_client_env_passthrough(
+    runner: &mut dyn HermesConfigRunner,
+    config: &str,
+) -> Result<String, CafleetError> {
+    let fail = |cause: String| passthrough_failure(config, &cause);
+    let existing = read_passthrough(runner).map_err(fail)?;
+    let missing = missing_member_names(&existing);
+    if missing.is_empty() {
+        return Ok(format!(
+            "hermes: {PASSTHROUGH_KEY} already holds CAFleet's member names -> {config}"
+        ));
+    }
+    let mut merged = existing;
+    merged.extend(missing.iter().map(|name| (*name).to_owned()));
+    let value = serde_json::to_string(&merged).expect("a list of strings serializes as JSON");
+    runner
+        .run(&hermes_args(&["config", "set", PASSTHROUGH_KEY, &value]))
+        .map_err(|cause| fail(cause.message().into_owned()))?;
+    let absent = missing_member_names(&read_passthrough(runner).map_err(fail)?);
+    if !absent.is_empty() {
+        return Err(fail(format!(
+            "{PASSTHROUGH_KEY} still lacks {} after the write",
+            absent.join(", ")
+        )));
+    }
+    Ok(format!(
+        "hermes: added {PASSTHROUGH_KEY} names -> {config}: {}",
+        missing.join(", ")
+    ))
 }
 
-const HERMES_DENY_LIST: HermesList = HermesList {
-    key: "approvals.deny",
-    required: &HERMES_DIRECTOR_ONLY_DENIES,
-    already: "approvals.deny already holds CAFleet's Director-only rules",
-    added: "added approvals.deny rules",
-    failure: "approval rules",
-};
+fn read_passthrough(runner: &mut dyn HermesConfigRunner) -> Result<Vec<String>, String> {
+    let stdout = runner
+        .run(&hermes_args(&["config", "get", "--json", PASSTHROUGH_KEY]))
+        .map_err(|cause| cause.message().into_owned())?;
+    serde_json::from_str::<Vec<String>>(&stdout)
+        .map_err(|cause| format!("{PASSTHROUGH_KEY} is not a JSON array of strings: {cause}"))
+}
 
-const HERMES_CLIENT_ENV_LIST: HermesList = HermesList {
-    key: "terminal.client_env_passthrough",
-    required: &HERMES_CLIENT_ENV_PASSTHROUGH,
-    already: "terminal.client_env_passthrough already holds CAFleet's member names",
-    added: "added terminal.client_env_passthrough names",
-    failure: "terminal.client_env_passthrough names",
-};
+fn missing_member_names(present: &[String]) -> Vec<&'static str> {
+    HERMES_CLIENT_ENV_PASSTHROUGH
+        .iter()
+        .copied()
+        .filter(|name| !present.iter().any(|value| value == name))
+        .collect()
+}
 
-impl HermesList {
-    /// Appends each missing required entry after the existing entries and
-    /// returns the setup line describing the result.
-    fn merge(
-        &self,
-        runner: &mut dyn HermesConfigRunner,
-        config: &str,
-    ) -> Result<String, CafleetError> {
-        let fail = |cause: String| self.failure(config, &cause);
-        let existing = self.read(runner).map_err(fail)?;
-        let missing = self.missing(&existing);
-        if missing.is_empty() {
-            return Ok(format!("hermes: {} -> {config}", self.already));
-        }
-        let mut merged = existing;
-        merged.extend(missing.iter().map(|entry| (*entry).to_owned()));
-        let value = serde_json::to_string(&merged).expect("a list of strings serializes as JSON");
-        runner
-            .run(&hermes_args(&["config", "set", self.key, &value]))
-            .map_err(|cause| fail(cause.message().into_owned()))?;
-        let absent = self.missing(&self.read(runner).map_err(fail)?);
-        if !absent.is_empty() {
-            return Err(fail(format!(
-                "{} still lacks {} after the write",
-                self.key,
-                absent.join(", ")
-            )));
-        }
-        Ok(format!(
-            "hermes: {} -> {config}: {}",
-            self.added,
-            missing.join(", ")
-        ))
-    }
-
-    fn read(&self, runner: &mut dyn HermesConfigRunner) -> Result<Vec<String>, String> {
-        let stdout = runner
-            .run(&hermes_args(&["config", "get", "--json", self.key]))
-            .map_err(|cause| cause.message().into_owned())?;
-        serde_json::from_str::<Vec<String>>(&stdout)
-            .map_err(|cause| format!("{} is not a JSON array of strings: {cause}", self.key))
-    }
-
-    fn missing(&self, present: &[String]) -> Vec<&'static str> {
-        self.required
-            .iter()
-            .copied()
-            .filter(|entry| !present.iter().any(|value| value == entry))
-            .collect()
-    }
-
-    fn failure(&self, config: &str, cause: &str) -> CafleetError {
-        CafleetError::App(format!(
-            "failed to install hermes {} into {config}: {cause}",
-            self.failure
-        ))
-    }
+fn passthrough_failure(config: &str, cause: &str) -> CafleetError {
+    CafleetError::App(format!(
+        "failed to install hermes {PASSTHROUGH_KEY} names into {config}: {cause}"
+    ))
 }
 
 fn hermes_args(args: &[&str]) -> Vec<String> {
@@ -666,6 +634,43 @@ mod tests {
         assert_eq!(recorded, [base.display().to_string()]);
     }
 
+    const OPENCODE_PRESETS: [&str; 2] = ["opencode/cafleet.md", "opencode/cafleet-ask.md"];
+
+    fn key_order(value: &serde_json::Value) -> Vec<String> {
+        value.as_object().unwrap().keys().cloned().collect()
+    }
+
+    #[test]
+    fn codex_rules_preset_is_the_single_broad_cafleet_allow() {
+        assert_eq!(
+            std::str::from_utf8(lookup(PRESETS, "codex/cafleet.rules").unwrap()).unwrap(),
+            "prefix_rule(pattern = [\"cafleet\"], decision = \"allow\")\n"
+        );
+    }
+
+    #[test]
+    fn opencode_shell_maps_end_with_the_broad_cafleet_allow_and_hold_no_director_only_entry() {
+        for preset in OPENCODE_PRESETS {
+            let (frontmatter, _) = frontmatter_and_body(preset);
+            let shell = &frontmatter["permission"]["shell"];
+            let keys = key_order(shell);
+            assert_eq!(keys.first().map(String::as_str), Some("*"), "{preset}");
+            assert_eq!(keys.last().map(String::as_str), Some("cafleet *"), "{preset}");
+            assert_eq!(shell["cafleet *"], "allow", "{preset}");
+            for key in &keys {
+                assert!(
+                    !["cafleet member", "cafleet permission", "cafleet input"]
+                        .iter()
+                        .any(|prefix| key.starts_with(prefix)),
+                    "{preset}: {key}"
+                );
+                if key != "*" {
+                    assert_eq!(shell[key], "allow", "{preset}: {key}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn cafleet_ask_preset_frontmatter_differs_only_in_description_and_shell_base() {
         let (default, _) = frontmatter_and_body("opencode/cafleet.md");
@@ -676,32 +681,10 @@ mod tests {
         );
         assert_eq!(ask["permission"]["shell"]["*"], "ask");
         assert_eq!(default["permission"]["shell"]["*"], "deny");
-        let key_order = |value: &serde_json::Value| {
-            value
-                .as_object()
-                .unwrap()
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        let shell_keys = key_order(&ask["permission"]["shell"]);
-        assert_eq!(shell_keys, key_order(&default["permission"]["shell"]));
-        assert_eq!(shell_keys.first().map(String::as_str), Some("*"));
-        let director_only = [
-            "cafleet member prompt *",
-            "cafleet member exec *",
-            "cafleet member press *",
-            "cafleet member recover *",
-            "cafleet permission respond *",
-            "cafleet input reconcile *",
-        ];
         assert_eq!(
-            shell_keys[shell_keys.len() - director_only.len()..],
-            director_only
+            key_order(&ask["permission"]["shell"]),
+            key_order(&default["permission"]["shell"])
         );
-        for key in director_only {
-            assert_eq!(ask["permission"]["shell"][key], "deny", "{key}");
-        }
         assert_eq!(key_order(&ask), key_order(&default));
         assert_eq!(
             key_order(&ask["permission"]),
@@ -711,6 +694,41 @@ mod tests {
         normalized["description"] = default["description"].clone();
         normalized["permission"]["shell"]["*"] = "deny".into();
         assert_eq!(normalized, default);
+    }
+
+    #[test]
+    fn opencode_preset_bodies_hold_three_unwrapped_paragraphs_and_one_trailing_newline() {
+        for preset in OPENCODE_PRESETS {
+            let (_, body) = frontmatter_and_body(preset);
+            assert!(
+                body.ends_with('\n') && !body.ends_with("\n\n"),
+                "{preset}: {body:?}"
+            );
+            let blocks = paragraphs(&body);
+            assert_eq!(blocks[0], "# CAFleet member agent", "{preset}");
+            assert_eq!(blocks.len(), 4, "{preset}: {blocks:?}");
+            for paragraph in &blocks[1..] {
+                assert!(!paragraph.contains('\n'), "{preset}: {paragraph:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn opencode_preset_authority_paragraph_routes_director_only_needs_to_the_director() {
+        let sentence = "Your role and assignment, not the broad `cafleet *` pattern, decide which CAFleet commands you run; Director-only commands refuse inside a member and you send those needs to the Director.";
+        for preset in OPENCODE_PRESETS {
+            let (_, body) = frontmatter_and_body(preset);
+            let authority = &paragraphs(&body)[2];
+            assert!(authority.contains(sentence), "{preset}: {authority}");
+            assert!(
+                authority.contains("Git write authority"),
+                "{preset} keeps the Git-write authority clause: {authority}"
+            );
+            assert!(
+                !body.contains("Broad tool patterns do not grant Director-only actions"),
+                "{preset}: {body}"
+            );
+        }
     }
 
     #[test]
@@ -726,7 +744,7 @@ mod tests {
             .expect("the cafleet preset has a permission paragraph");
         assert_eq!(
             ask[permission],
-            "You are a CAFleet member spawned by the Director. The frontmatter is the literal tool-permission map: Shell allows its listed patterns, including `cafleet *`, the listed Git commands, inspection utilities and CAFleet mise tasks, denies the Director-owned CAFleet commands, and asks for every other command. An asked command opens a native permission form; CAFleet notifies the Director, who answers it, and you continue from the result OpenCode returns. Read/edit permit their listed paths with `.env` exclusions; external-directory access and the other named tools retain their declared denials."
+            "You are a CAFleet member spawned by the Director. The frontmatter is the literal tool-permission map: Shell allows its listed patterns, including `cafleet *`, the listed Git commands, inspection utilities and CAFleet mise tasks, and asks for every other command. An asked command opens a native permission form; CAFleet notifies the Director, who answers it, and you continue from the result OpenCode returns. Read/edit permit their listed paths with `.env` exclusions; external-directory access and the other named tools retain their declared denials."
         );
         for (index, (actual, expected)) in ask.iter().zip(&default).enumerate() {
             if index != permission {

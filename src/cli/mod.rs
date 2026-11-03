@@ -8,6 +8,7 @@ use crate::runtime::system::read_stdin;
 use clap::Parser;
 use clap::Subcommand;
 use serde_json::Value;
+use std::ffi::OsString;
 
 mod fleet;
 mod member;
@@ -60,9 +61,41 @@ enum Command {
 }
 
 pub fn run() -> Result<(), CafleetError> {
-    let args = CliArgs::parse();
+    run_args(std::env::args_os())
+}
+
+fn run_args(args: impl IntoIterator<Item = OsString>) -> Result<(), CafleetError> {
+    let args = CliArgs::parse_from(args);
+    refuse_director_only(&args.command, std::env::var_os("CAFLEET_MEMBER_ID"))?;
     let settings = Settings::from_env()?;
     dispatch(&settings, args.command)
+}
+
+fn director_only_name(command: &Command) -> Option<&'static str> {
+    match command {
+        Command::Member(member::MemberCommand::Prompt { .. }) => Some("member prompt"),
+        Command::Member(member::MemberCommand::Exec { .. }) => Some("member exec"),
+        Command::Member(member::MemberCommand::Press { .. }) => Some("member press"),
+        Command::Member(member::MemberCommand::Recover { .. }) => Some("member recover"),
+        Command::Permission(runtime::PermissionCommand::Respond { .. }) => {
+            Some("permission respond")
+        }
+        Command::Input(runtime::InputCommand::Reconcile { .. }) => Some("input reconcile"),
+        _ => None,
+    }
+}
+
+fn refuse_director_only(
+    command: &Command,
+    member_id: Option<OsString>,
+) -> Result<(), CafleetError> {
+    match (director_only_name(command), member_id) {
+        (Some(name), Some(member_id)) => Err(CafleetError::App(format!(
+            "'cafleet {name}' is a Director-only command and this process runs inside CAFleet member {} (CAFLEET_MEMBER_ID is set); send the request to your Director.",
+            member_id.to_string_lossy()
+        ))),
+        _ => Ok(()),
+    }
 }
 
 fn invocation_connection(

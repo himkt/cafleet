@@ -38,11 +38,6 @@ pub(crate) trait SpawnProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf>;
     fn home_dir(&self) -> PathBuf;
     fn env_var(&self, name: &str) -> Option<String>;
-    fn hermes_approvals(
-        &self,
-        executable: &Path,
-        config_base: &Path,
-    ) -> Result<String, CafleetError>;
     fn hermes_client_env_passthrough(
         &self,
         executable: &Path,
@@ -59,17 +54,9 @@ pub(crate) enum CodingAgent {
     Hermes,
 }
 
-pub(crate) const HERMES_DIRECTOR_ONLY_DENIES: [&str; 6] = [
-    "cafleet member prompt *",
-    "cafleet member exec *",
-    "cafleet member press *",
-    "cafleet member recover *",
-    "cafleet permission respond *",
-    "cafleet input reconcile *",
-];
-
-pub(crate) const HERMES_CLIENT_ENV_PASSTHROUGH: [&str; 10] = [
+pub(crate) const HERMES_CLIENT_ENV_PASSTHROUGH: [&str; 11] = [
     "CAFLEET_DATABASE_URL",
+    "CAFLEET_MEMBER_ID",
     "TMUX",
     "TMUX_PANE",
     "HERDR_ENV",
@@ -118,17 +105,30 @@ impl CodingAgent {
         crate::config::resolve(self.config_variable(), env, default)
     }
 
-    pub(crate) fn spawn_environment(
+    pub(crate) fn forwarded_config(
         self,
-        database_url: &str,
         env: EnvLookup<'_>,
-    ) -> Result<Vec<(String, String)>, CafleetError> {
-        let mut environment = vec![("CAFLEET_DATABASE_URL".to_owned(), database_url.to_owned())];
-        if let Some(value) = env(self.config_variable()) {
-            crate::config::require_absolute(self.config_variable(), &value)?;
-            environment.push((self.config_variable().to_owned(), value));
-        }
-        Ok(environment)
+    ) -> Result<Option<(String, String)>, CafleetError> {
+        env(self.config_variable())
+            .map(|value| {
+                crate::config::require_absolute(self.config_variable(), &value)?;
+                Ok((self.config_variable().to_owned(), value))
+            })
+            .transpose()
+    }
+
+    pub(crate) fn spawn_environment(
+        database_url: &str,
+        member_id: i64,
+        forwarded_config: Option<(String, String)>,
+    ) -> Vec<(String, String)> {
+        [
+            ("CAFLEET_DATABASE_URL".to_owned(), database_url.to_owned()),
+            ("CAFLEET_MEMBER_ID".to_owned(), member_id.to_string()),
+        ]
+        .into_iter()
+        .chain(forwarded_config)
+        .collect()
     }
 
     pub(crate) fn required_preset(self, config: &Path, mode: &str) -> Option<PathBuf> {
@@ -189,7 +189,7 @@ impl CodingAgent {
             )))?;
         }
         if self == Self::Hermes {
-            hermes_approvals_preflight(probe.hermes_approvals(&executable, &config))?;
+            hermes_client_env_names(probe.hermes_client_env_passthrough(&executable, &config))?;
         }
         Ok(executable)
     }
@@ -642,53 +642,6 @@ fn hermes_version(line: &str) -> Result<&str, &'static str> {
         .ok_or("printed a non-SemVer Hermes version")
 }
 
-pub(crate) fn hermes_approvals_preflight(
-    output: Result<String, CafleetError>,
-) -> Result<(), CafleetError> {
-    hermes_approval_denies(&hermes_approvals(output)?)
-}
-
-pub(crate) fn hermes_approvals(
-    output: Result<String, CafleetError>,
-) -> Result<serde_json::Map<String, serde_json::Value>, CafleetError> {
-    let unreadable = |cause: String| {
-        CafleetError::App(format!(
-            "cannot read hermes configuration through 'hermes config get': {cause}"
-        ))
-    };
-    let text = output.map_err(|cause| unreadable(cause.message().into_owned()))?;
-    match serde_json::from_str(&text) {
-        Ok(serde_json::Value::Object(approvals)) => Ok(approvals),
-        Ok(other) => Err(unreadable(format!("expected a JSON object, got {other}"))),
-        Err(cause) => Err(unreadable(format!("invalid JSON: {cause}"))),
-    }
-}
-
-pub(crate) fn hermes_approval_denies(
-    approvals: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(), CafleetError> {
-    let present = match approvals.get("deny") {
-        Some(serde_json::Value::Array(entries)) => entries
-            .iter()
-            .map(serde_json::Value::as_str)
-            .collect::<Option<Vec<_>>>()
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    };
-    let missing = HERMES_DIRECTOR_ONLY_DENIES
-        .into_iter()
-        .filter(|glob| !present.contains(glob))
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(CafleetError::App(format!(
-            "hermes approvals.deny lacks CAFleet's Director-only rules: {}; run 'cafleet setup --coding-agent hermes'",
-            missing.join(", ")
-        )))
-    }
-}
-
 pub(crate) fn hermes_client_env_names(
     output: Result<String, CafleetError>,
 ) -> Result<(), CafleetError> {
@@ -785,24 +738,14 @@ mod tests {
             assert_eq!(name, self.agent.config_variable());
             self.config.clone()
         }
-        fn hermes_approvals(
+        fn hermes_client_env_passthrough(
             &self,
             executable: &Path,
             _config_base: &Path,
         ) -> Result<String, CafleetError> {
             assert_eq!(self.agent, CodingAgent::Hermes);
             assert_eq!(executable, Path::new("/fixture/bin/hermes"));
-            Ok(hermes::approvals_json(
-                "smart",
-                &HERMES_DIRECTOR_ONLY_DENIES,
-            ))
-        }
-        fn hermes_client_env_passthrough(
-            &self,
-            _: &Path,
-            _: &Path,
-        ) -> Result<String, CafleetError> {
-            unreachable!("availability reads no terminal.client_env_passthrough")
+            Ok(serde_json::json!(HERMES_CLIENT_ENV_PASSTHROUGH).to_string())
         }
     }
 
@@ -1331,15 +1274,12 @@ mod tests {
                 assert_eq!(name, "CLAUDE_CONFIG_DIR");
                 Some(self.home.join("claude-config").display().to_string())
             }
-            fn hermes_approvals(&self, _: &Path, _: &Path) -> Result<String, CafleetError> {
-                unreachable!("only the hermes preflight reads its approvals")
-            }
             fn hermes_client_env_passthrough(
                 &self,
                 _: &Path,
                 _: &Path,
             ) -> Result<String, CafleetError> {
-                unreachable!("availability reads no terminal.client_env_passthrough")
+                unreachable!("only the hermes preflight reads terminal.client_env_passthrough")
             }
         }
         let backend = CodingAgent::Claude;
@@ -1914,10 +1854,6 @@ mod tests {
             "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
         ];
 
-        pub(crate) fn approvals_json(mode: &str, deny: &[&str]) -> String {
-            json!({"mode": mode, "timeout": 300, "deny": deny}).to_string()
-        }
-
         fn smart() -> LaunchPolicySelection {
             CodingAgent::Hermes.resolve_policy(None, None).unwrap()
         }
@@ -2360,45 +2296,6 @@ mod tests {
         }
 
         #[test]
-        fn hermes_director_only_denies_equal_the_opencode_preset_director_owned_denies() {
-            let text = std::str::from_utf8(
-                crate::assets::lookup(crate::assets::PRESETS, "opencode/cafleet.md")
-                    .expect("embedded opencode cafleet preset"),
-            )
-            .unwrap();
-            let frontmatter = text
-                .strip_prefix("---\n")
-                .and_then(|rest| rest.split_once("\n---\n"))
-                .map(|(frontmatter, _)| frontmatter)
-                .expect("preset frontmatter");
-            let preset: serde_json::Value = serde_json::from_str(frontmatter).unwrap();
-            let denied = preset["permission"]["shell"]
-                .as_object()
-                .expect("shell permission map")
-                .iter()
-                .filter(|(pattern, verdict)| *pattern != "*" && *verdict == "deny")
-                .map(|(pattern, _)| pattern.as_str())
-                .collect::<std::collections::BTreeSet<_>>();
-            assert_eq!(
-                denied,
-                HERMES_DIRECTOR_ONLY_DENIES
-                    .into_iter()
-                    .collect::<std::collections::BTreeSet<_>>()
-            );
-            assert_eq!(
-                HERMES_DIRECTOR_ONLY_DENIES,
-                [
-                    "cafleet member prompt *",
-                    "cafleet member exec *",
-                    "cafleet member press *",
-                    "cafleet member recover *",
-                    "cafleet permission respond *",
-                    "cafleet input reconcile *",
-                ]
-            );
-        }
-
-        #[test]
         fn hermes_client_env_passthrough_names_the_member_database_id_and_multiplexer_variables() {
             assert_eq!(
                 HERMES_CLIENT_ENV_PASSTHROUGH,
@@ -2418,97 +2315,21 @@ mod tests {
             );
         }
 
-        fn preflight(output: Result<String, CafleetError>) -> Result<(), CafleetError> {
-            hermes_approvals_preflight(output)
+        fn passthrough_json(names: &[&str]) -> String {
+            json!(names).to_string()
         }
 
-        fn assert_app_error(result: Result<(), CafleetError>, expected: &str) {
-            let failure = result.expect_err(expected);
-            assert!(
-                matches!(failure, CafleetError::App(_)),
-                "{}",
-                failure.message()
-            );
-            assert_eq!(failure.exit_code(), 1);
-            assert_eq!(failure.message(), expected);
-        }
-
-        #[test]
-        fn hermes_preflight_accepts_every_director_only_deny_among_others_in_any_mode() {
-            preflight(Ok(approvals_json("smart", &HERMES_DIRECTOR_ONLY_DENIES))).unwrap();
-            preflight(Ok(approvals_json("manual", &HERMES_DIRECTOR_ONLY_DENIES))).unwrap();
-            let mut deny = vec!["rm -rf /*", "git push *"];
-            deny.extend(HERMES_DIRECTOR_ONLY_DENIES.iter().rev());
-            preflight(Ok(approvals_json("smart", &deny))).unwrap();
-            preflight(Ok(format!(
-                "{}\n",
-                approvals_json("smart", &HERMES_DIRECTOR_ONLY_DENIES)
-            )))
-            .unwrap();
-        }
-
-        #[test]
-        fn hermes_preflight_reports_an_unreadable_configuration_with_its_cause() {
-            assert_app_error(
-                preflight(Err(CafleetError::App("hermes config get timed out".into()))),
-                "cannot read hermes configuration through 'hermes config get': hermes config get timed out",
-            );
-            for output in [
-                "",
-                "not json",
-                "[\"smart\"]",
-                "\"smart\"",
-                "null",
-                "{\"mode\":",
-            ] {
-                let failure = preflight(Ok(output.into()))
-                    .expect_err("output that is not a JSON object fails");
-                assert!(matches!(failure, CafleetError::App(_)), "{output:?}");
-                let cause = failure
-                    .message()
-                    .strip_prefix("cannot read hermes configuration through 'hermes config get': ")
-                    .unwrap_or_else(|| panic!("{output:?}: {}", failure.message()))
-                    .to_owned();
-                assert!(!cause.is_empty(), "{output:?}");
-            }
-        }
-
-        #[test]
-        fn hermes_preflight_names_every_missing_director_only_glob_in_constant_order() {
-            assert_app_error(
-                preflight(Ok(approvals_json(
-                    "smart",
-                    &["cafleet input reconcile *", "cafleet member exec *"],
-                ))),
-                "hermes approvals.deny lacks CAFleet's Director-only rules: cafleet member prompt *, cafleet member press *, cafleet member recover *, cafleet permission respond *; run 'cafleet setup --coding-agent hermes'",
-            );
-            let every = HERMES_DIRECTOR_ONLY_DENIES.join(", ");
-            for output in [
-                approvals_json("smart", &[]),
-                json!({"mode": "smart"}).to_string(),
-                json!({"mode": "smart", "deny": null}).to_string(),
-                json!({"mode": "smart", "deny": "cafleet member prompt *"}).to_string(),
-                json!({"mode": "smart", "deny": [1, 2]}).to_string(),
-                approvals_json("smart", &["cafleet member prompt", "cafleet member *"]),
-                approvals_json(
-                    "smart",
-                    &["Cafleet member prompt *", " cafleet member exec *"],
-                ),
-            ] {
-                assert_app_error(
-                    preflight(Ok(output)),
-                    &format!(
-                        "hermes approvals.deny lacks CAFleet's Director-only rules: {every}; run 'cafleet setup --coding-agent hermes'"
-                    ),
-                );
-            }
+        fn missing_names_error(names: &str) -> String {
+            format!(
+                "hermes terminal.client_env_passthrough lacks CAFleet's member names: {names}; run 'cafleet setup --coding-agent hermes'"
+            )
         }
 
         struct HermesProbe {
             home: PathBuf,
             config: Option<String>,
             available: bool,
-            approvals: Result<String, String>,
+            passthrough: Result<String, String>,
             calls: RefCell<Vec<(PathBuf, PathBuf)>>,
         }
 
@@ -2524,7 +2345,7 @@ mod tests {
                 assert_eq!(name, "HERMES_HOME");
                 self.config.clone()
             }
-            fn hermes_approvals(
+            fn hermes_client_env_passthrough(
                 &self,
                 executable: &Path,
                 config_base: &Path,
@@ -2532,30 +2353,29 @@ mod tests {
                 self.calls
                     .borrow_mut()
                     .push((executable.into(), config_base.into()));
-                self.approvals.clone().map_err(CafleetError::App)
-            }
-            fn hermes_client_env_passthrough(
-                &self,
-                _: &Path,
-                _: &Path,
-            ) -> Result<String, CafleetError> {
-                unreachable!("availability reads no terminal.client_env_passthrough")
+                self.passthrough.clone().map_err(CafleetError::App)
             }
         }
 
-        fn hermes_probe(approvals: Result<String, String>) -> HermesProbe {
+        fn hermes_probe(passthrough: Result<String, String>) -> HermesProbe {
             HermesProbe {
                 home: PathBuf::from("/home/tester"),
                 config: None,
                 available: true,
-                approvals,
+                passthrough,
                 calls: RefCell::new(Vec::new()),
             }
         }
 
+        fn availability_error(probe: &HermesProbe) -> CafleetError {
+            CodingAgent::Hermes
+                .ensure_available(probe, "smart")
+                .expect_err("the hermes preflight refuses the member")
+        }
+
         #[test]
-        fn hermes_availability_reads_the_effective_approvals_of_the_resolved_home_once() {
-            let mut probe = hermes_probe(Ok(approvals_json("smart", &HERMES_DIRECTOR_ONLY_DENIES)));
+        fn hermes_availability_reads_the_passthrough_of_the_resolved_home_once() {
+            let mut probe = hermes_probe(Ok(passthrough_json(&HERMES_CLIENT_ENV_PASSTHROUGH)));
             assert_eq!(
                 CodingAgent::Hermes
                     .ensure_available(&probe, "smart")
@@ -2584,46 +2404,101 @@ mod tests {
         }
 
         #[test]
-        fn hermes_availability_checks_the_home_then_the_binary_before_reading_approvals() {
-            let mut probe = hermes_probe(Ok(approvals_json("smart", &HERMES_DIRECTOR_ONLY_DENIES)));
-            probe.config = Some("relative".into());
-            assert_eq!(
+        fn hermes_availability_accepts_every_member_name_in_any_order_among_other_entries() {
+            let mut names = vec!["PATH", "LANG"];
+            names.extend(HERMES_CLIENT_ENV_PASSTHROUGH.iter().rev());
+            names.push("EDITOR");
+            for output in [
+                passthrough_json(&names),
+                format!("{}\n", passthrough_json(&HERMES_CLIENT_ENV_PASSTHROUGH)),
+            ] {
+                let probe = hermes_probe(Ok(output.clone()));
                 CodingAgent::Hermes
                     .ensure_available(&probe, "smart")
-                    .unwrap_err()
-                    .message(),
+                    .unwrap_or_else(|error| panic!("{output}: {error}"));
+            }
+        }
+
+        #[test]
+        fn hermes_availability_checks_the_home_then_the_binary_before_reading_the_passthrough() {
+            let mut probe = hermes_probe(Ok(passthrough_json(&HERMES_CLIENT_ENV_PASSTHROUGH)));
+            probe.config = Some("relative".into());
+            assert_eq!(
+                availability_error(&probe).message(),
                 "HERMES_HOME must be an absolute path (got 'relative')"
             );
             probe.config = None;
             probe.available = false;
             assert_eq!(
-                CodingAgent::Hermes
-                    .ensure_available(&probe, "smart")
-                    .unwrap_err()
-                    .message(),
+                availability_error(&probe).message(),
                 "binary hermes not found on PATH"
             );
             assert!(probe.calls.borrow().is_empty());
         }
 
         #[test]
-        fn hermes_availability_fails_with_each_preflight_error() {
-            for (approvals, expected) in [
+        fn hermes_availability_names_every_missing_member_name_in_canonical_order() {
+            let without_member_id = HERMES_CLIENT_ENV_PASSTHROUGH
+                .into_iter()
+                .filter(|name| *name != "CAFLEET_MEMBER_ID")
+                .collect::<Vec<_>>();
+            let cases = [
                 (
-                    Err("exited with exit status: 1".to_owned()),
-                    "cannot read hermes configuration through 'hermes config get': exited with exit status: 1".to_owned(),
+                    passthrough_json(&without_member_id),
+                    missing_names_error("CAFLEET_MEMBER_ID"),
                 ),
                 (
-                    Ok(approvals_json("smart", &HERMES_DIRECTOR_ONLY_DENIES[1..])),
-                    "hermes approvals.deny lacks CAFleet's Director-only rules: cafleet member prompt *; run 'cafleet setup --coding-agent hermes'".to_owned(),
+                    passthrough_json(&["HERDR_SESSION", "TMUX", "CAFLEET_DATABASE_URL"]),
+                    missing_names_error(
+                        "CAFLEET_MEMBER_ID, TMUX_PANE, HERDR_ENV, HERDR_PANE_ID, HERDR_TAB_ID, HERDR_WORKSPACE_ID, HERDR_SOCKET_PATH, HERDR_BIN_PATH",
+                    ),
                 ),
+                (
+                    passthrough_json(&[]),
+                    missing_names_error(&HERMES_CLIENT_ENV_PASSTHROUGH.join(", ")),
+                ),
+                (
+                    passthrough_json(&["cafleet_member_id", " CAFLEET_MEMBER_ID"]),
+                    missing_names_error(&HERMES_CLIENT_ENV_PASSTHROUGH.join(", ")),
+                ),
+            ];
+            for (output, expected) in cases {
+                let failure = availability_error(&hermes_probe(Ok(output.clone())));
+                assert!(matches!(failure, CafleetError::App(_)), "{output}");
+                assert_eq!(failure.exit_code(), 1, "{output}");
+                assert_eq!(failure.message(), expected, "{output}");
+            }
+        }
+
+        #[test]
+        fn hermes_availability_reports_an_unreadable_passthrough_with_its_cause() {
+            let prefix = "cannot read hermes configuration through 'hermes config get': ";
+            let failure = availability_error(&hermes_probe(Err(
+                "exited with exit status: 1".to_owned()
+            )));
+            assert_eq!(failure.exit_code(), 1);
+            assert_eq!(
+                failure.message(),
+                format!("{prefix}exited with exit status: 1")
+            );
+            for output in [
+                "",
+                "not json",
+                "\"CAFLEET_DATABASE_URL\"",
+                "null",
+                "{\"mode\":\"smart\"}",
+                "[1, 2]",
+                "[\"CAFLEET_DATABASE_URL\",",
             ] {
-                let probe = hermes_probe(approvals);
-                let failure = CodingAgent::Hermes
-                    .ensure_available(&probe, "smart")
-                    .expect_err(&expected);
-                assert_eq!(failure.exit_code(), 1);
-                assert_eq!(failure.message(), expected);
+                let failure = availability_error(&hermes_probe(Ok(output.into())));
+                assert!(matches!(failure, CafleetError::App(_)), "{output:?}");
+                assert_eq!(failure.exit_code(), 1, "{output:?}");
+                let cause = failure
+                    .message()
+                    .strip_prefix(prefix)
+                    .unwrap_or_else(|| panic!("{output:?}: {}", failure.message()))
+                    .to_owned();
+                assert!(!cause.is_empty(), "{output:?}");
             }
         }
     }
