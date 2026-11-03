@@ -29,12 +29,12 @@ CAFleet is designed to run inside a coding agent without per-command
 permission prompts. Each backend has a different config file and permission
 system:
 
-| Backend | Config file | Manual configuration | Installed by `cafleet setup` | Reference |
-|---|---|---|---|---|
-| `claude` (Claude Code) | `~/.claude/settings.json` | The permission profile below that matches the Director's mode | The skills | The sub-section below |
-| `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | The Codex sub-section below |
-| `opencode` | none | none required | The skills, plus the `cafleet` and `cafleet-ask` agent presets at `~/.config/opencode/agents/cafleet.md` and `~/.config/opencode/agents/cafleet-ask.md` | The OpenCode sub-section below |
-| `hermes` (Hermes Agent) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills, plus CAFleet's member variables merged into `terminal.client_env_passthrough` | The Hermes sub-section below |
+| Backend | Config file | Manual configuration | Installed by `cafleet setup` |
+|---|---|---|---|
+| [`claude` (Claude Code)](#claude-code) | `~/.claude/settings.json` | The permission profile below that matches the Director's mode | The skills |
+| [`codex` (OpenAI Codex CLI)](#codex) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` |
+| [`opencode`](#opencode) | — | — | The skills, plus the `cafleet` and `cafleet-ask` agent presets in `~/.config/opencode/agents/` |
+| [`hermes` (Hermes Agent)](#hermes) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills, plus CAFleet's member variables merged into `terminal.client_env_passthrough` |
 
 The paths above are defaults. `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
 `HERMES_HOME` relocate their backend's installed assets. `OPENCODE_CONFIG_DIR` relocates only the OpenCode
@@ -49,22 +49,17 @@ The sub-sections below give each backend's recommended starting point.
 
 ### Claude Code
 
-Add the profile below that matches the permission mode your Director session
-runs in to your user-level `~/.claude/settings.json`. Members start in
-`auto` mode whichever mode the Director uses, so auto mode must be available
-for your account and model. Both profiles pre-approve what members need beyond
-their broker commands, and auto mode's classifier reviews each other member
-call.
+Add one profile to your user-level `~/.claude/settings.json`: the
+[auto mode profile](#auto-mode-profile) when your Director session runs in
+`auto` mode, or the [other-modes profile](#other-modes-profile) for any other
+mode. Members start in `auto` mode whichever mode the Director uses, so auto
+mode must be available for your account and model. Both profiles pre-approve
+what members need beyond their broker commands, and auto mode's classifier
+reviews each other member call.
 
-| Behavior | Auto mode profile | Other-modes profile |
-|---|---|---|
-| Director session's permission mode | `auto` | Any other mode |
-| The Director's `cafleet` commands | Reviewed by the auto mode classifier | Pre-approved by `Bash(cafleet *)` |
-| A member's skill loads, skill-page reads, and file edits | Pre-approved by the entries both profiles share | Pre-approved by the entries both profiles share |
-| `cafleet member prompt`, `cafleet member exec` and `cafleet member press` | Prompt the operator through the optional `ask` entries | Prompt the operator through the optional `ask` entries |
-
-These three commands send explicit native input into a member's pane. The
-`ask` entries are optional: keep them when you want to confirm each of the
+`cafleet member prompt`, `cafleet member exec` and `cafleet member press` send
+explicit native input into a member's pane, and both profiles list them under
+optional `ask` entries: keep them when you want to confirm each of the
 Director's dispatches, or drop them to let the Director dispatch without a
 prompt. Inside a member process every Director-only command refuses, which
 catches a member's accidental invocation; this guard is not a security
@@ -105,9 +100,9 @@ work, such as `Bash(npm test *)`, so those commands run without routing.
 | `defaultMode: "auto"` has no effect | It is set in a project or local settings file, or auto mode is unavailable for the organization or model | Move it to `~/.claude/settings.json`; when auto mode is unavailable, use the other-modes profile |
 
 Claude Code 2.1.302 in auto mode can show a `Teach auto mode about your
-environment?` dialog once per configuration directory, after a member's turn.
-Answer it once in an interactive session of that version that uses the
-members' configuration directory; `Don't show again` keeps it from returning.
+environment?` dialog after a member's turn. Answer it with `Don't show again`
+in an interactive session of that version that uses the members'
+configuration directory; after that answer it does not return.
 
 #### Auto mode {#auto-mode-profile}
 
@@ -159,12 +154,9 @@ file cannot select it.
 ```
 
 `Bash(cafleet *)` covers every subcommand the Director runs, for every fleet,
-because IDs are literal integer arguments. The `ask` entries outrank it, so
-you still confirm each explicit pane-input dispatch of the Director; remove
-them if you do not want that confirmation. Members are covered separately:
-inside a member, every Director-only command refuses with a message that tells
-the member to ask its Director, an accident guard rather than a security
-boundary.
+because IDs are literal integer arguments. `ask` entries outrank allow
+entries, so the optional `ask` entries still confirm each explicit pane-input
+dispatch of the Director.
 
 ### Codex
 
@@ -177,8 +169,8 @@ writable_roots = ["/home/<you>/.local/share/cafleet"]
 `network_access = true` is required because tmux and herdr communicate over a
 local socket, which the Codex sandbox classifies as network access; without it
 cafleet commands fail with `Operation not permitted`. `writable_roots` grants
-write access to the directory of the selected database file, the default XDG
-location unless `CAFLEET_DATABASE_URL` selects another.
+write access to the directory of the selected database file, the default
+`~/.local/share/cafleet` unless `CAFLEET_DATABASE_URL` selects another.
 
 `cafleet setup` installs `~/.codex/rules/cafleet.rules`, which allows every
 `cafleet` command. Codex members need it to run their broker commands, and
@@ -224,9 +216,10 @@ with `hermes` on `PATH`. Besides the skills, it adds CAFleet's member variables
 variables) to `terminal.client_env_passthrough` in the file
 `hermes config path` reports, keeping your own entries, their order and the
 rest of the file. Hermes runs every session's terminal tools in one shared
-gateway, and this list lets each member's tools see that member's own values;
-`CAFLEET_MEMBER_ID` is what makes the Director-only commands refuse inside a
-member. Rerunning setup adds only missing names, after your existing entries.
+gateway, and this list lets each member's tools see that member's own values,
+including the `CAFLEET_MEMBER_ID` marker of the
+[Director-only command guard](concepts/members.md#command-routing). Rerunning
+setup adds only missing names, after your existing entries.
 A plain `cafleet setup` on a host without `hermes` installs the skills and
 skips this merge; run `cafleet setup --coding-agent hermes` after installing
 Hermes.
@@ -236,21 +229,11 @@ to start a member when a member variable is missing from the list.
 `cafleet doctor` reports the list on its `hermes` summary line, for example
 `error hermes: terminal.client_env_passthrough lacks CAFleet's member names: CAFLEET_MEMBER_ID — run 'cafleet setup --coding-agent hermes'`.
 
-CAFleet needs no `approvals.deny` entries. Hermes applies `approvals.deny` to
-every session, so a `cafleet …` glob there also blocks the matching command in
-a Hermes Director's own session, which Hermes reports as
-`BLOCKED: this command matches the user-defined deny rule '<glob>' …`. Keep
-these globs out of the list:
-
-```text
-cafleet member prompt *
-cafleet member exec *
-cafleet member press *
-cafleet member recover *
-cafleet permission respond *
-cafleet input reconcile *
-```
-
+CAFleet needs no `approvals.deny` entries; keep every `cafleet …` glob out of
+that list. Hermes applies `approvals.deny` to every session, so such a glob
+also blocks the matching command in a Hermes Director's own session, which
+Hermes reports as
+`BLOCKED: this command matches the user-defined deny rule '<glob>' …`.
 Inspect the list with `hermes config get --json approvals.deny`, then write it
 back without those globs with
 `hermes config set approvals.deny '<JSON list without them>'`. Under

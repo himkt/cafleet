@@ -6,7 +6,7 @@ Use one SQLite file for a fleet's registry and durable messages. The CLI accesse
 
 The default path is `~/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1`). Set `CAFLEET_DATABASE_URL` to a `sqlite:///<path>` URL to select another file. Resolve a relative file path against the invoking working directory, then canonicalize the selected database file for shared pane-lock identity. Spawned panes inherit that URL.
 
-Connections enforce foreign keys and normally use `PRAGMA busy_timeout=5000`. Bounded receiving caps database waits to its remaining operation budget. Fleet bootstrap writes its registry and current Director placement in one transaction; member creation preserves pending placement and compensation for failed pane creation.
+Connections enforce foreign keys and normally use `PRAGMA busy_timeout=5000`. Bounded receiving caps database waits to its remaining operation budget. Fleet creation writes its registry and current Director placement in one transaction, and a failed member creation rolls back or deregisters its pending member ([creation failure compensation](https://github.com/himkt/cafleet/blob/main/SPEC.md#creation-failure-compensation)).
 
 ## Relational model
 
@@ -18,11 +18,9 @@ A compatible file has CAFleet's application identity, a ledger holding only the 
 
 | Selected state | Setup behavior |
 |---|---|
-| Empty SQLite file with identity zero and no user tables | Apply the embedded baseline transactionally |
+| Missing file, or an empty SQLite file with identity zero and no user tables | Apply the embedded baseline transactionally |
 | Valid file of this version | Proceed idempotently |
 | Other populated/identified file, another version's file or malformed schema | Report incompatible format before writes |
-
-Schema checks run within a consistent read snapshot, and application identity and ledger contents are read on every validation, so a changed version or malformed definition fails at the boundary.
 
 Run `cafleet setup` after installation. The same classifier guards normal commands and feeds doctor's read-only diagnosis. Exact errors are in the [schema-version guard](https://github.com/himkt/cafleet/blob/main/SPEC.md#schema-version-guard).
 
@@ -46,6 +44,6 @@ Deregistration and fleet deletion retain message history while active query path
 
 ## Member runtime artifacts
 
-A private runtime namespace beside the canonical database separates each database file and instance. Replacement at the same pathname fences old runners; recorded identity and ownership govern every recovery attempt. Private descriptors are removed after launch/compensation, while event outboxes and settled input records retain their recovery roles. The [runner boundary contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#runner-boundary-and-creation-transaction) owns paths, permissions and validation.
+Member runners keep a private runtime namespace beside the canonical database, separate for each database file and instance; replacing the database file at the same pathname fences old runners. The [runner boundary contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#runner-boundary-and-creation-transaction) owns paths, permissions, validation and runtime-record recovery.
 
 Terminal transport continues independently of database contention. Events become durable at SQLite commit; a flushed outbox frame is recoverable pending delivery. Metadata evidence stores no screen-derived text or hidden-text hash; explicit redacted evidence applies the configured policy before every persisted field. The [storage pressure contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#storage-pressure-and-durability-boundary) defines bounded pressure and exclusive recovery.

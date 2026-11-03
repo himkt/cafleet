@@ -17,7 +17,7 @@ Develop changes through reviewed designs and the bundled CAFleet workflows. Run 
 
 Broker queries return typed records; CLI presenters construct wire output. Shared diagnosis validates database identity and schema. Keep durable storage separate from synchronous notification, finite receiving, input ownership and multiplexer I/O. Required state fails at its read boundary. Preserve process pipe draining, owned-child cleanup, pane ownership compensation and layout cleanup.
 
-Every Rust test is a unit test in a `#[cfg(test)] mod tests` block of the implementation file it exercises, and it asserts the behavior of the code under test rather than the text, keys, counts, ids or layout of embedded data files such as skills, presets, the profile catalog and the schema baseline. Shared test helpers live in a `#[cfg(test)] pub(crate) mod test_support` beside the type they build, and test inputs stay inline in the test module.
+Every Rust test is an in-file unit test; [Test placement](https://github.com/himkt/cafleet/blob/main/.claude/rules/code-quality.md#test-placement) owns the convention.
 
 ## Development
 
@@ -51,11 +51,11 @@ Follow the [design document workflow](concepts/overview.md#prompts). Preserve ro
 
 ## Documentation style
 
-Write human/operator behavior in the site and agent instructions in skills. State intended behavior directly. Link each shared enumeration to its owner; describe growing groups through their selecting property or registry. Use tables when parallel entries carry multiple shared attributes, with at least two data rows and at most two sentences per cell. Keep literal commands, flags, paths and errors in code spans.
+State intended behavior directly and describe growing groups through their selecting property or registry; [documentation maintenance](https://github.com/himkt/cafleet/blob/main/.claude/rules/documentation-maintenance.md) owns audiences, shared enumerations, tables and literal formatting.
 
 ## Extend a coding-agent backend
 
-Implement a typed permission adapter as the single source of truth for launch-policy choices/default, literal argv mapping, native-version eligibility and versioned detector/composer/answer profiles. Each profile declares a SemVer `min_version`; a backend's profiles form an ordered stack, and a new profile is added only when an observed native change requires different rules or plans, with `min_version` set to the first native version requiring it. Preserve omitted defaults, native/managed restrictions and sandbox boundaries. Launchability, permission detection, composer input and request-bound answers are separate capabilities; unknown coverage supports manual terminal work, and generated input without a measured submission plan uses delivery fallback.
+Implement a typed permission adapter as the single source of truth for launch-policy choices/default, literal argv mapping, native-version eligibility and versioned detector/composer/answer profiles. A new profile is added only when an observed native change requires different rules or plans, with `min_version` set to the first native version requiring it; [profile selection](https://github.com/himkt/cafleet/blob/main/SPEC.md#profile-selection-by-minimum-version) owns the profile stack, capability independence and coverage. Preserve omitted defaults, native/managed restrictions and sandbox boundaries.
 
 The following herdr references are pinned to commit `5608de0608918aba2f9d501e7793b984a0ca9cfa`. They provide implementation patterns; each CAFleet profile still requires its own native contract and acceptance evidence.
 
