@@ -89,12 +89,26 @@ Every claimed detector/composer/answer capability requires CAFleet-owned positiv
 
 ### Run a CAFleet stream probe
 
-The stream probe establishes a candidate Director's background execution while supervision continues. The candidate starts a CAFleet receiver (`cafleet message listen` or a finite `cafleet message wait`) through its native background-execution facility and keeps working on something unrelated in the same session. The probe passes when broker records another member sends during that work reach the Director and are consumed without user input, during the work or at the session's next turn boundary, either as streamed records or as a completion-notified finite receive that the Director renews after each completion. Passing establishes background execution only; per-record reception is a property of the backend's native reception recipe.
+The stream probe establishes a candidate Director's streamed background output while supervision continues. The candidate starts `cafleet message listen` through its native background-execution facility and keeps working on something unrelated in the same session. The probe passes when broker records another member sends at separate times during that work are each first observed in the listener's output delivered through that facility, then consumed without user input, while the same listener is still running, during the work or at the session's next turn boundary. The host may push the records or the Director may read the running process's output on demand. A record discovered through a foreground `poll`, `wait` or `show` invalidates the run. Output that reaches the session only when the process exits, such as a completion notification for a finite receive, fails the probe. Probe each native mechanism that can read a running background process separately. Passing establishes streamed background output; the backend's native reception recipe owns the concrete tool calls.
 
 1. Create an isolated database (`CAFLEET_DATABASE_URL=sqlite:///<task folder>/probe/director.db`) and run `cafleet setup` against it.
 2. In a tmux pane, start the candidate Director session and register it with `cafleet fleet create --coding-agent <backend>`.
 3. Have the Director spawn one probe member on any Member-eligible backend, with a spawn prompt that sends `ready` and then ends its turn without further broker traffic. The probe member's ID is the sender identity.
-4. After the Director consumes the ready, have it start the receiver through its native background facility, then give it an unrelated multi-step task, such as summarizing three named files.
+4. After the Director consumes the ready, have it start `cafleet message listen <director-id> --timeout 300` through the mechanism under test, then send the task prompt below the steps.
 5. From a separate shell, send three probe records at 20 s, 60 s and 120 s after the task prompt: `cafleet message send --from-member-id <probe-id> --to-member-id <director-id> "stream-probe 1"`, then `2` and `3`. Record each printed message ID and timestamp.
-6. The probe passes when the Director ACKs all three message IDs (`cafleet message show <message-id> --json` shows the `completed` state) during the unrelated task or at its next turn boundary, with no user input after the task prompt, and renews a finite receiver after each completion. Capture the Director pane and the three message records.
-7. Record the backend, native version, mechanism (tool call and flags), message IDs, send and ACK timestamps, and the result in the design doc's evidence record.
+6. Classify the run by the run classification below the steps. Capture the Director pane and retain the session records that show each record's first observation.
+7. Record the backend, native version, mechanism (tool call and flags), message IDs, send timestamps, each record's first observation (the tool result or injected event carrying its JSONL line, and its timestamp), ACK timestamps, the listener's exit timestamp, the task-turn end timestamp and the classification in the design doc's evidence record.
+
+The task prompt for step 4 sets `<mechanism instruction>` to "between steps, read your background listener with `<tool call>`" for a pull mechanism and "consume each record your background listener delivers" for a push mechanism:
+
+> Summarize the files `<file 1>`, `<file 2>`, … one at a time. `<mechanism instruction>`. Learn about broker records only from that listener's output; run no `cafleet message poll`, `wait` or `show`. When a `message` record appears there, ACK its message ID with `cafleet message ack <message-id>` and continue. Keep working until you have ACKed `stream-probe 3` or 240 seconds have passed since this prompt, then end your turn.
+
+Classify each run as follows; the 240-second turn bound leaves 60 seconds of the 300-second lease for turn-boundary delivery.
+
+| Classification | Condition |
+|---|---|
+| Invalid | The task turn ended before 240 s without the Director having ACKed `stream-probe 3`; the task turn was still running when the listener exited; a record was first observed through a foreground `poll`, `wait` or `show`; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
+| Pass | A valid run in which every record was first observed in the listener's output delivered through the mechanism under test and ACKed before the listener exited. |
+| Fail | A valid run in which any record was first observed only after the listener exited, or was never observed in the listener's output. |
+
+A mechanism with three invalid runs is recorded as "not established" with the invalidating cause.
