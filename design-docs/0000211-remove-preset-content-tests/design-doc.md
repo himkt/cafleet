@@ -361,8 +361,6 @@ Every Rust test is a unit test in a `#[cfg(test)] mod tests` block of the implem
 - [x] Confirm the incompatible-file criterion through the `src/db.rs` unit tests `another_versions_file_is_incompatible_and_left_byte_identical`, `a_ledger_row_beyond_the_baseline_is_incompatible` and `classification_preserves_missing_current_identity_and_sql_causes` <!-- completed: 2026-11-03T08:50 -->
 - [x] Search outside `design-docs/` for each removed name in Success Criteria and confirm none remains; confirm `git diff` touches no installation-behavior test in `src/assets.rs`, no file under `presets/` or `src/coding_agent/native/`, no `skills/` file other than `skills/cafleet/reference/cli.md`, and leaves `src/coding_agent/bundled.json` unchanged <!-- completed: 2026-11-03T08:50 -->
 
-COMMENT(verifier): test gap — the three-copy incompatible-format task was not run: preparing the copies needs `sqlite3`, which project `.claude/settings.json` `permissions.deny` (`Bash(sqlite3 *)`) refuses. The unmodified copies are staged under `/tmp/verifier-0000211.CPmPYr/copies`, and the exact commands are in `.verifier/sqlite-commands.md`. Every other Step 7 check passed; `mise //:test` showed 6 load-flaky failures in files this change does not touch, and each passes alone. Evidence: `.verifier/step-7-report.md`. Suggested tooling: a one-off `sqlite3` allow for the temp paths, or a user decision to accept the covering unit tests (`another_versions_file_is_incompatible_and_left_byte_identical`, `a_ledger_row_beyond_the_baseline_is_incompatible`, `required_schema_components_and_identity_are_refused`).
-
 ---
 
 ## Changelog

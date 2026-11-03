@@ -36,7 +36,7 @@ enum Command {
         #[arg(long, value_name = "ABSOLUTE_PATH")]
         descriptor: std::path::PathBuf,
     },
-    /// Migrate storage and install embedded coding-agent skills/presets.
+    /// Initialize the version's database and install embedded coding-agent skills/presets.
     Setup(setup::SetupArgs),
     /// Report independent environment, database and backend checks.
     Doctor(setup::DoctorArgs),

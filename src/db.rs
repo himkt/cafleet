@@ -847,8 +847,7 @@ mod tests {
             conn.pragma_update(None, "application_id", V8_APPLICATION_ID)
                 .unwrap();
             conn.execute_batch(
-                "DELETE FROM refinery_schema_history WHERE version > 1;
-                 UPDATE refinery_schema_history SET version=8, name='uncertain_cause';",
+                "UPDATE refinery_schema_history SET version=8, name='uncertain_cause'",
             )
             .unwrap();
         }

@@ -678,7 +678,7 @@ fn agent_checks(
             _ => {
                 let cause = schema
                     .require_current()
-                    .expect_err("a non-head schema is unavailable");
+                    .expect_err("a non-current schema is unavailable");
                 Check::new(install_name, "info", format!("unavailable: {cause}"))
                     .problem("assets unchecked (database unavailable)", false)
             }
@@ -927,6 +927,7 @@ mod tests {
             "PRAGMA application_id=1128351288",
             "UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
             "ALTER TABLE messages RENAME COLUMN text TO wrong",
+            "UPDATE cafleet_database SET cafleet_version='0.0.0'",
         ] {
             let home = tempfile::tempdir().unwrap();
             let settings = settings(home.path());
