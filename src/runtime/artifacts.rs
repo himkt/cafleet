@@ -1038,12 +1038,18 @@ mod tests {
         let artifacts = fixture.artifacts();
         let mut spec = fixture.spec();
         let database_url = spec.environment[0].1.clone();
+        let member_id = fixture.run.member_id;
         for &agent in crate::coding_agent::CodingAgent::all() {
-            spec.environment = agent
-                .spawn_environment(&database_url, &|name| {
+            let forwarded = agent
+                .forwarded_config(&|name| {
                     (name == agent.config_variable()).then(|| format!("/cfg/{}", agent.name()))
                 })
                 .unwrap();
+            spec.environment = crate::coding_agent::CodingAgent::spawn_environment(
+                &database_url,
+                member_id,
+                forwarded,
+            );
             let descriptor = LaunchDescriptor::new(&fixture.run, spec.clone()).unwrap();
             artifacts.write_descriptor(&descriptor).unwrap();
             let read = load_descriptor(&fixture.conn, &artifacts.paths.descriptor).unwrap();
@@ -1051,6 +1057,7 @@ mod tests {
                 read.spawn.environment,
                 vec![
                     ("CAFLEET_DATABASE_URL".to_owned(), database_url.clone()),
+                    ("CAFLEET_MEMBER_ID".to_owned(), member_id.to_string()),
                     (
                         agent.config_variable().to_owned(),
                         format!("/cfg/{}", agent.name())

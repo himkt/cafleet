@@ -18,9 +18,13 @@ A member runs commands its host permits and routes a required denied command to 
 
 The [native dispatch contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#member-exec) owns validation, lock and uncertainty errors. File-edit permission gaps need a matching host rule or a Director edit.
 
+The commands that write into a member's live native session or runtime record — explicit pane input, permission answers, input reconciliation and run recovery — are Director-only. The runner marks every member process with `CAFLEET_MEMBER_ID`, and a Director-only command run inside a member refuses before it touches the database or the multiplexer, with an error telling the member to send the request to its Director. This is an accident guard, not a security boundary: a member that unsets the variable bypasses it, so member authority still comes from the member role and the Director's assignment. A member routes a need for such a command to the Director like any denied command. The [Director-only command guard](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-only-command-guard) lists the commands and the exact error.
+
 ## Inspection and recovery
 
 Use `member list` and `member capture` to check roster and pane evidence. Capture about 20 lines with `member capture` (its default) and read the content directly; use `--lines` for more when it is insufficient. An empty composer does not mean the task is complete — judge completion from messages and artifacts. A timeout alone establishes neither failure nor completion. Replace an unusable member only under the existing authorization, carrying its assignment, messages and artifacts into the replacement prompt.
+
+`cafleet doctor` summarizes the environment in one line per component. Its `members` lines group members by state with compact ID ranges, such as `warn members: 20 lost runtime: 1-6, 9-22 — run 'cafleet member recover ID' or 'cafleet member delete ID'`, and each actionable state names the command to run next. `--verbose` prints one row per check, including each member run's probe observations, and `--json` prints both the summary and the checks. The [doctor contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#cafleet-doctor--environment-diagnosis) defines the states, statuses and exit rule.
 
 ## Teardown
 

@@ -1124,6 +1124,32 @@ pub(crate) mod test_support {
         }
     }
 
+    /// Registers a member and records its run at the run's own artifact directory.
+    pub(crate) fn register_member_run(
+        conn: &mut Connection,
+        fleet: i64,
+        director: i64,
+        name: &str,
+    ) -> RunRecord {
+        let member = register(conn, fleet, name, Some("%2"));
+        let next_run: i64 = conn
+            .query_row(
+                "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut spec = Fixture::spec(conn, fleet, director, member);
+        spec.runtime_path =
+            crate::runtime::RuntimePaths::for_run(&spec.database_identity_json, next_run)
+                .unwrap()
+                .run_dir
+                .to_str()
+                .unwrap()
+                .into();
+        storage::create_run(conn, &spec).unwrap()
+    }
+
     use crate::coding_agent::AnswerCapability;
     use crate::coding_agent::CodingAgent;
     use std::time::Duration;

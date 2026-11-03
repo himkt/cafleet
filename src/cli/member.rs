@@ -423,15 +423,13 @@ fn create(
     }
     substitute_spawn_placeholders(&prompt_body, fleet_id, 1, director_id, agent_name)?;
     let identity = broker::runtime::database_identity(conn)?;
-    let environment = backend.spawn_environment(
-        &format!(
-            "sqlite:///{}",
-            identity["canonical_path"]
-                .as_str()
-                .expect("canonical database path")
-        ),
-        &|name| SystemProbe.env_var(name),
-    )?;
+    let database_url = format!(
+        "sqlite:///{}",
+        identity["canonical_path"]
+            .as_str()
+            .expect("canonical database path")
+    );
+    let forwarded_config = backend.forwarded_config(&|name| SystemProbe.env_var(name))?;
     let next_run: i64 = conn.query_row(
         "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
         [],
@@ -501,7 +499,11 @@ fn create(
             let spawn = runner::SpawnSpec {
                 argv,
                 cwd,
-                environment: environment.clone(),
+                environment: CodingAgent::spawn_environment(
+                    &database_url,
+                    pending.member.member_id,
+                    forwarded_config.clone(),
+                ),
                 evidence_policy,
                 size,
             };
@@ -1312,8 +1314,7 @@ mod tests {
 
     #[test]
     fn hermes_member_create_fails_before_registration_when_the_hermes_home_cannot_be_resolved() {
-        let approvals =
-            json!({ "deny": crate::coding_agent::HERMES_DIRECTOR_ONLY_DENIES }).to_string();
+        let passthrough = json!(crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH).to_string();
         for (config_path, expected) in [
             (
                 "printf 'config.yaml\\n'",
@@ -1336,7 +1337,7 @@ mod tests {
             };
             let before = members(&conn);
             let hermes = format!(
-                "case \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config get --json approvals') printf '%s\\n' '{approvals}' ;;\n  'config path')\n    {config_path} ;;\n  *) exit 3 ;;\nesac"
+                "case \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config get --json terminal.client_env_passthrough') printf '%s\\n' '{passthrough}' ;;\n  'config path')\n    {config_path} ;;\n  *) exit 3 ;;\nesac"
             );
             let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' display-message '*) printf 'main|@1|%%1\\n' ;; esac";
             let fleet = fleet.to_string();
@@ -1370,6 +1371,145 @@ mod tests {
             assert!(!pane_calls.contains("split-window"), "{pane_calls}");
             assert_eq!(members(&conn), before);
         }
+    }
+
+    #[test]
+    fn hermes_member_create_fails_before_registration_when_the_passthrough_lacks_a_member_name() {
+        let without_member_id = crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH
+            .into_iter()
+            .filter(|name| *name != "CAFLEET_MEMBER_ID")
+            .collect::<Vec<_>>();
+        for (passthrough, expected) in [
+            (
+                format!("printf '%s\\n' '{}'", json!(without_member_id)),
+                "Error: hermes terminal.client_env_passthrough lacks CAFleet's member names: CAFLEET_MEMBER_ID; run 'cafleet setup --coding-agent hermes'\n".to_owned(),
+            ),
+            (
+                "echo 'profile locked' >&2\n    exit 5".to_owned(),
+                "Error: cannot read hermes configuration through 'hermes config get': exited with exit status: 5: profile locked\n".to_owned(),
+            ),
+        ] {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "hermes-passthrough");
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+            let members = |conn: &Connection| {
+                conn.query_row("SELECT COUNT(*) FROM members", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+            };
+            let before = members(&conn);
+            let hermes = format!(
+                "case \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config get --json terminal.client_env_passthrough')\n    {passthrough} ;;\n  'config path') printf '%s\\n' '{}/config.yaml' ;;\n  *) exit 3 ;;\nesac",
+                dir.path().display()
+            );
+            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' display-message '*) printf 'main|@1|%%1\\n' ;; esac";
+            let fleet = fleet.to_string();
+            let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+                &settings,
+                &[
+                    "member",
+                    "create",
+                    "--fleet-id",
+                    &fleet,
+                    "--name",
+                    "worker",
+                    "--description",
+                    "hermes passthrough fixture",
+                    "--coding-agent",
+                    "hermes",
+                    "literal assignment",
+                ],
+                &[("tmux", tmux), ("hermes", &hermes)],
+                &[
+                    ("TMUX_PANE", "%1"),
+                    ("HERMES_HOME", dir.path().to_str().unwrap()),
+                ],
+            );
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert_eq!(stderr, expected);
+            assert_eq!(output.status.code(), Some(1), "{stderr}");
+            assert!(!pane_calls.contains("split-window"), "{pane_calls}");
+            assert_eq!(members(&conn), before);
+        }
+    }
+
+    #[test]
+    fn member_create_hands_the_allocated_member_id_to_the_native_child_only() {
+        let dir = crate::runtime::test_support::short_tempdir();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, _) = create_fleet_fixture(&mut conn, "member-environment");
+        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+        let config = dir.path().join("claude config");
+        std::fs::create_dir(&config).unwrap();
+        let descriptor_copy = dir.path().join("descriptor-copy.json");
+        let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' display-message '*) printf 'main|@1|%%1\\n' ;;\n  *' split-window '*)\n    while [ $# -gt 0 ]; do\n      if [ \"$1\" = --descriptor ]; then\n        IFS= read -r line < \"$2\" || true\n        printf '%s' \"$line\" > \"$CAFLEET_TEST_DESCRIPTOR_COPY\"\n      fi\n      shift\n    done\n    exit 1 ;;\nesac";
+        let claude = "printf '2.1.302 (Claude Code)\\n'";
+        let fleet = fleet.to_string();
+        let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+            &settings,
+            &[
+                "member",
+                "create",
+                "--fleet-id",
+                &fleet,
+                "--name",
+                "worker",
+                "--description",
+                "member environment fixture",
+                "--coding-agent",
+                "claude",
+                "allocated member {member_id}",
+            ],
+            &[("tmux", tmux), ("claude", claude)],
+            &[
+                ("TMUX_PANE", "%1"),
+                ("CLAUDE_CONFIG_DIR", config.to_str().unwrap()),
+                (
+                    "CAFLEET_TEST_DESCRIPTOR_COPY",
+                    descriptor_copy.to_str().unwrap(),
+                ),
+            ],
+        );
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(output.status.code(), Some(1), "{stderr}");
+        assert!(stderr.contains("runner pane spawn failed"), "{stderr}");
+        let split = pane_calls
+            .lines()
+            .find(|line| line.starts_with("split-window "))
+            .unwrap_or_else(|| panic!("the runner pane was requested: {pane_calls}"));
+        assert!(!split.contains("CAFLEET_MEMBER_ID"), "{split}");
+        let descriptor: crate::runtime::LaunchDescriptor =
+            serde_json::from_slice(&std::fs::read(&descriptor_copy).unwrap()).unwrap();
+        let member_id = descriptor.member_id.to_string();
+        assert!(
+            descriptor
+                .spawn
+                .argv
+                .contains(&format!("allocated member {member_id}")),
+            "{:?}",
+            descriptor.spawn.argv
+        );
+        assert_eq!(
+            descriptor.spawn.environment,
+            vec![
+                (
+                    "CAFLEET_DATABASE_URL".to_owned(),
+                    format!(
+                        "sqlite:///{}",
+                        std::fs::canonicalize(conn.path().unwrap())
+                            .unwrap()
+                            .display()
+                    ),
+                ),
+                ("CAFLEET_MEMBER_ID".to_owned(), member_id),
+                (
+                    "CLAUDE_CONFIG_DIR".to_owned(),
+                    config.to_str().unwrap().to_owned()
+                ),
+            ]
+        );
     }
 
     #[test]

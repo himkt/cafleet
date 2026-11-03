@@ -1,6 +1,5 @@
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH;
-use crate::coding_agent::HERMES_DIRECTOR_ONLY_DENIES;
 use crate::config::EnvLookup;
 use crate::config::opencode_skills_base;
 use crate::error::CafleetError;
@@ -125,102 +124,71 @@ pub(crate) fn install_agent(
                 let config = runner
                     .run(&hermes_args(&["config", "path"]))
                     .map(|stdout| stdout.trim().to_owned())
-                    .map_err(|cause| {
-                        HERMES_DENY_LIST.failure(&paths.identity, &cause.message())
-                    })?;
-                for list in [&HERMES_DENY_LIST, &HERMES_CLIENT_ENV_LIST] {
-                    report(list.merge(runner, &config)?)?;
-                }
+                    .map_err(|cause| passthrough_failure(&paths.identity, &cause.message()))?;
+                report(merge_client_env_passthrough(runner, &config)?)?;
             }
-            None => report("hermes: skipped approvals.deny rules and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
+            None => report("hermes: skipped terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
         }
     }
     crate::broker::record_asset_install(conn, agent.name(), &paths.identity, version)?;
     Ok(())
 }
 
-/// A Hermes configuration list that setup extends with CAFleet's required entries.
-struct HermesList {
-    key: &'static str,
-    required: &'static [&'static str],
-    already: &'static str,
-    added: &'static str,
-    failure: &'static str,
+const PASSTHROUGH_KEY: &str = "terminal.client_env_passthrough";
+
+/// Appends each missing CAFleet member name after the existing entries and
+/// returns the setup line describing the result.
+fn merge_client_env_passthrough(
+    runner: &mut dyn HermesConfigRunner,
+    config: &str,
+) -> Result<String, CafleetError> {
+    let fail = |cause: String| passthrough_failure(config, &cause);
+    let existing = read_passthrough(runner).map_err(fail)?;
+    let missing = missing_member_names(&existing);
+    if missing.is_empty() {
+        return Ok(format!(
+            "hermes: {PASSTHROUGH_KEY} already holds CAFleet's member names -> {config}"
+        ));
+    }
+    let mut merged = existing;
+    merged.extend(missing.iter().map(|name| (*name).to_owned()));
+    let value = serde_json::to_string(&merged).expect("a list of strings serializes as JSON");
+    runner
+        .run(&hermes_args(&["config", "set", PASSTHROUGH_KEY, &value]))
+        .map_err(|cause| fail(cause.message().into_owned()))?;
+    let absent = missing_member_names(&read_passthrough(runner).map_err(fail)?);
+    if !absent.is_empty() {
+        return Err(fail(format!(
+            "{PASSTHROUGH_KEY} still lacks {} after the write",
+            absent.join(", ")
+        )));
+    }
+    Ok(format!(
+        "hermes: added {PASSTHROUGH_KEY} names -> {config}: {}",
+        missing.join(", ")
+    ))
 }
 
-const HERMES_DENY_LIST: HermesList = HermesList {
-    key: "approvals.deny",
-    required: &HERMES_DIRECTOR_ONLY_DENIES,
-    already: "approvals.deny already holds CAFleet's Director-only rules",
-    added: "added approvals.deny rules",
-    failure: "approval rules",
-};
+fn read_passthrough(runner: &mut dyn HermesConfigRunner) -> Result<Vec<String>, String> {
+    let stdout = runner
+        .run(&hermes_args(&["config", "get", "--json", PASSTHROUGH_KEY]))
+        .map_err(|cause| cause.message().into_owned())?;
+    serde_json::from_str::<Vec<String>>(&stdout)
+        .map_err(|cause| format!("{PASSTHROUGH_KEY} is not a JSON array of strings: {cause}"))
+}
 
-const HERMES_CLIENT_ENV_LIST: HermesList = HermesList {
-    key: "terminal.client_env_passthrough",
-    required: &HERMES_CLIENT_ENV_PASSTHROUGH,
-    already: "terminal.client_env_passthrough already holds CAFleet's member names",
-    added: "added terminal.client_env_passthrough names",
-    failure: "terminal.client_env_passthrough names",
-};
+fn missing_member_names(present: &[String]) -> Vec<&'static str> {
+    HERMES_CLIENT_ENV_PASSTHROUGH
+        .iter()
+        .copied()
+        .filter(|name| !present.iter().any(|value| value == name))
+        .collect()
+}
 
-impl HermesList {
-    /// Appends each missing required entry after the existing entries and
-    /// returns the setup line describing the result.
-    fn merge(
-        &self,
-        runner: &mut dyn HermesConfigRunner,
-        config: &str,
-    ) -> Result<String, CafleetError> {
-        let fail = |cause: String| self.failure(config, &cause);
-        let existing = self.read(runner).map_err(fail)?;
-        let missing = self.missing(&existing);
-        if missing.is_empty() {
-            return Ok(format!("hermes: {} -> {config}", self.already));
-        }
-        let mut merged = existing;
-        merged.extend(missing.iter().map(|entry| (*entry).to_owned()));
-        let value = serde_json::to_string(&merged).expect("a list of strings serializes as JSON");
-        runner
-            .run(&hermes_args(&["config", "set", self.key, &value]))
-            .map_err(|cause| fail(cause.message().into_owned()))?;
-        let absent = self.missing(&self.read(runner).map_err(fail)?);
-        if !absent.is_empty() {
-            return Err(fail(format!(
-                "{} still lacks {} after the write",
-                self.key,
-                absent.join(", ")
-            )));
-        }
-        Ok(format!(
-            "hermes: {} -> {config}: {}",
-            self.added,
-            missing.join(", ")
-        ))
-    }
-
-    fn read(&self, runner: &mut dyn HermesConfigRunner) -> Result<Vec<String>, String> {
-        let stdout = runner
-            .run(&hermes_args(&["config", "get", "--json", self.key]))
-            .map_err(|cause| cause.message().into_owned())?;
-        serde_json::from_str::<Vec<String>>(&stdout)
-            .map_err(|cause| format!("{} is not a JSON array of strings: {cause}", self.key))
-    }
-
-    fn missing(&self, present: &[String]) -> Vec<&'static str> {
-        self.required
-            .iter()
-            .copied()
-            .filter(|entry| !present.iter().any(|value| value == entry))
-            .collect()
-    }
-
-    fn failure(&self, config: &str, cause: &str) -> CafleetError {
-        CafleetError::App(format!(
-            "failed to install hermes {} into {config}: {cause}",
-            self.failure
-        ))
-    }
+fn passthrough_failure(config: &str, cause: &str) -> CafleetError {
+    CafleetError::App(format!(
+        "failed to install hermes {PASSTHROUGH_KEY} names into {config}: {cause}"
+    ))
 }
 
 fn hermes_args(args: &[&str]) -> Vec<String> {
@@ -257,9 +225,11 @@ pub(crate) mod test_support {
 
     pub(crate) const FAKE_CONFIG_PATH: &str = "/srv/hermes/profiles/work/config.yaml";
 
+    const PASSTHROUGH_KEY: &str = "terminal.client_env_passthrough";
+
+    /// Answers only `config path` and the passthrough get/set; any other command panics.
     pub(crate) struct FakeHermes {
         pub(crate) available: bool,
-        pub(crate) deny: Value,
         pub(crate) passthrough: Value,
         pub(crate) path_failure: Option<String>,
         pub(crate) get_failure: Option<String>,
@@ -269,14 +239,16 @@ pub(crate) mod test_support {
     }
 
     impl FakeHermes {
-        pub(crate) fn holding(deny: &[&str]) -> Self {
-            Self::with_deny(serde_json::json!(deny))
+        pub(crate) fn complete() -> Self {
+            Self::holding(&HERMES_CLIENT_ENV_PASSTHROUGH)
         }
-        pub(crate) fn with_deny(deny: Value) -> Self {
+        pub(crate) fn holding(names: &[&str]) -> Self {
+            Self::with_passthrough(serde_json::json!(names))
+        }
+        pub(crate) fn with_passthrough(passthrough: Value) -> Self {
             Self {
                 available: true,
-                deny,
-                passthrough: serde_json::json!(HERMES_CLIENT_ENV_PASSTHROUGH),
+                passthrough,
                 path_failure: None,
                 get_failure: None,
                 set_failure: None,
@@ -287,33 +259,20 @@ pub(crate) mod test_support {
         pub(crate) fn path_call() -> Vec<String> {
             vec!["config".into(), "path".into()]
         }
-        pub(crate) fn get_call() -> Vec<String> {
-            ["config", "get", "--json", "approvals.deny"]
-                .map(str::to_owned)
-                .to_vec()
-        }
-        pub(crate) fn set_call(deny: &[&str]) -> Vec<String> {
-            Self::set_key_call("approvals.deny", deny)
-        }
         pub(crate) fn passthrough_get_call() -> Vec<String> {
             ["config", "get", "--json", PASSTHROUGH_KEY]
                 .map(str::to_owned)
                 .to_vec()
         }
         pub(crate) fn passthrough_set_call(names: &[&str]) -> Vec<String> {
-            Self::set_key_call(PASSTHROUGH_KEY, names)
-        }
-        fn set_key_call(key: &str, entries: &[&str]) -> Vec<String> {
             vec![
                 "config".into(),
                 "set".into(),
-                key.into(),
-                serde_json::to_string(entries).unwrap(),
+                PASSTHROUGH_KEY.into(),
+                serde_json::to_string(names).unwrap(),
             ]
         }
     }
-
-    const PASSTHROUGH_KEY: &str = "terminal.client_env_passthrough";
 
     fn compact_list(value: &str) -> Value {
         assert!(
@@ -342,27 +301,20 @@ pub(crate) mod test_support {
                     Some(cause) => Err(CafleetError::App(cause.clone())),
                     None => Ok(format!("{FAKE_CONFIG_PATH}\n")),
                 },
-                ["config", "get", "--json", "approvals.deny"] => match &self.get_failure {
+                ["config", "get", "--json", PASSTHROUGH_KEY] => match &self.get_failure {
                     Some(cause) => Err(CafleetError::App(cause.clone())),
-                    None => Ok(format!("{}\n", self.deny)),
+                    None => Ok(format!("{}\n", self.passthrough)),
                 },
-                ["config", "set", "approvals.deny", value] => match &self.set_failure {
+                ["config", "set", PASSTHROUGH_KEY, value] => match &self.set_failure {
                     Some(cause) => Err(CafleetError::App(cause.clone())),
                     None => {
                         let parsed = compact_list(value);
                         if !self.ignore_set {
-                            self.deny = parsed;
+                            self.passthrough = parsed;
                         }
                         Ok(String::new())
                     }
                 },
-                ["config", "get", "--json", PASSTHROUGH_KEY] => {
-                    Ok(format!("{}\n", self.passthrough))
-                }
-                ["config", "set", PASSTHROUGH_KEY, value] => {
-                    self.passthrough = compact_list(value);
-                    Ok(String::new())
-                }
                 other => panic!("unexpected hermes command {other:?}"),
             }
         }
@@ -375,7 +327,6 @@ mod tests {
     use crate::assets::test_support::FakeHermes;
     use crate::assets::*;
     use crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH;
-    use crate::coding_agent::HERMES_DIRECTOR_ONLY_DENIES;
     use std::os::unix::fs::symlink;
 
     fn expected_presets(agent: CodingAgent, base: &Path) -> Vec<(&'static str, PathBuf)> {
@@ -463,7 +414,7 @@ mod tests {
                 std::fs::create_dir_all(target.parent().unwrap()).unwrap();
                 symlink(external.join("keep"), target).unwrap();
             }
-            let mut fake = FakeHermes::holding(&HERMES_DIRECTOR_ONLY_DENIES);
+            let mut fake = FakeHermes::complete();
             for _ in 0..2 {
                 install_agent(
                     &mut conn,
@@ -538,7 +489,7 @@ mod tests {
             )
             .unwrap();
             let mut output = Vec::new();
-            let mut fake = FakeHermes::holding(&HERMES_DIRECTOR_ONLY_DENIES);
+            let mut fake = FakeHermes::complete();
             install_agent(
                 &mut conn,
                 *agent,
@@ -553,15 +504,10 @@ mod tests {
             if *agent == CodingAgent::Hermes {
                 assert_eq!(
                     lines.split_off(1),
-                    [
-                        format!(
-                            "hermes: approvals.deny already holds CAFleet's Director-only rules -> {FAKE_CONFIG_PATH}"
-                        ),
-                        format!(
-                            "hermes: terminal.client_env_passthrough already holds CAFleet's member names -> {FAKE_CONFIG_PATH}"
-                        ),
-                    ],
-                    "the deny-rule then passthrough lines follow the skills line"
+                    [format!(
+                        "hermes: terminal.client_env_passthrough already holds CAFleet's member names -> {FAKE_CONFIG_PATH}"
+                    )],
+                    "the passthrough line alone follows the skills line"
                 );
             }
             assert_eq!(lines.len(), 1 + presets.len(), "{lines:?}");
@@ -688,6 +634,47 @@ mod tests {
         assert_eq!(recorded, [base.display().to_string()]);
     }
 
+    const OPENCODE_PRESETS: [&str; 2] = ["opencode/cafleet.md", "opencode/cafleet-ask.md"];
+
+    fn key_order(value: &serde_json::Value) -> Vec<String> {
+        value.as_object().unwrap().keys().cloned().collect()
+    }
+
+    #[test]
+    fn codex_rules_preset_is_the_single_broad_cafleet_allow() {
+        assert_eq!(
+            std::str::from_utf8(lookup(PRESETS, "codex/cafleet.rules").unwrap()).unwrap(),
+            "prefix_rule(pattern = [\"cafleet\"], decision = \"allow\")\n"
+        );
+    }
+
+    #[test]
+    fn opencode_shell_maps_end_with_the_broad_cafleet_allow_and_hold_no_director_only_entry() {
+        for preset in OPENCODE_PRESETS {
+            let (frontmatter, _) = frontmatter_and_body(preset);
+            let shell = &frontmatter["permission"]["shell"];
+            let keys = key_order(shell);
+            assert_eq!(keys.first().map(String::as_str), Some("*"), "{preset}");
+            assert_eq!(
+                keys.last().map(String::as_str),
+                Some("cafleet *"),
+                "{preset}"
+            );
+            assert_eq!(shell["cafleet *"], "allow", "{preset}");
+            for key in &keys {
+                assert!(
+                    !["cafleet member", "cafleet permission", "cafleet input"]
+                        .iter()
+                        .any(|prefix| key.starts_with(prefix)),
+                    "{preset}: {key}"
+                );
+                if key != "*" {
+                    assert_eq!(shell[key], "allow", "{preset}: {key}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn cafleet_ask_preset_frontmatter_differs_only_in_description_and_shell_base() {
         let (default, _) = frontmatter_and_body("opencode/cafleet.md");
@@ -698,32 +685,10 @@ mod tests {
         );
         assert_eq!(ask["permission"]["shell"]["*"], "ask");
         assert_eq!(default["permission"]["shell"]["*"], "deny");
-        let key_order = |value: &serde_json::Value| {
-            value
-                .as_object()
-                .unwrap()
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        let shell_keys = key_order(&ask["permission"]["shell"]);
-        assert_eq!(shell_keys, key_order(&default["permission"]["shell"]));
-        assert_eq!(shell_keys.first().map(String::as_str), Some("*"));
-        let director_only = [
-            "cafleet member prompt *",
-            "cafleet member exec *",
-            "cafleet member press *",
-            "cafleet member recover *",
-            "cafleet permission respond *",
-            "cafleet input reconcile *",
-        ];
         assert_eq!(
-            shell_keys[shell_keys.len() - director_only.len()..],
-            director_only
+            key_order(&ask["permission"]["shell"]),
+            key_order(&default["permission"]["shell"])
         );
-        for key in director_only {
-            assert_eq!(ask["permission"]["shell"][key], "deny", "{key}");
-        }
         assert_eq!(key_order(&ask), key_order(&default));
         assert_eq!(
             key_order(&ask["permission"]),
@@ -733,6 +698,41 @@ mod tests {
         normalized["description"] = default["description"].clone();
         normalized["permission"]["shell"]["*"] = "deny".into();
         assert_eq!(normalized, default);
+    }
+
+    #[test]
+    fn opencode_preset_bodies_hold_three_unwrapped_paragraphs_and_one_trailing_newline() {
+        for preset in OPENCODE_PRESETS {
+            let (_, body) = frontmatter_and_body(preset);
+            assert!(
+                body.ends_with('\n') && !body.ends_with("\n\n"),
+                "{preset}: {body:?}"
+            );
+            let blocks = paragraphs(&body);
+            assert_eq!(blocks[0], "# CAFleet member agent", "{preset}");
+            assert_eq!(blocks.len(), 4, "{preset}: {blocks:?}");
+            for paragraph in &blocks[1..] {
+                assert!(!paragraph.contains('\n'), "{preset}: {paragraph:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn opencode_preset_authority_paragraph_routes_director_only_needs_to_the_director() {
+        let sentence = "Your role and assignment, not the broad `cafleet *` pattern, decide which CAFleet commands you run; Director-only commands refuse inside a member and you send those needs to the Director.";
+        for preset in OPENCODE_PRESETS {
+            let (_, body) = frontmatter_and_body(preset);
+            let authority = &paragraphs(&body)[2];
+            assert!(authority.contains(sentence), "{preset}: {authority}");
+            assert!(
+                authority.contains("Git write authority"),
+                "{preset} keeps the Git-write authority clause: {authority}"
+            );
+            assert!(
+                !body.contains("Broad tool patterns do not grant Director-only actions"),
+                "{preset}: {body}"
+            );
+        }
     }
 
     #[test]
@@ -748,7 +748,7 @@ mod tests {
             .expect("the cafleet preset has a permission paragraph");
         assert_eq!(
             ask[permission],
-            "You are a CAFleet member spawned by the Director. The frontmatter is the literal tool-permission map: Shell allows its listed patterns, including `cafleet *`, the listed Git commands, inspection utilities and CAFleet mise tasks, denies the Director-owned CAFleet commands, and asks for every other command. An asked command opens a native permission form; CAFleet notifies the Director, who answers it, and you continue from the result OpenCode returns. Read/edit permit their listed paths with `.env` exclusions; external-directory access and the other named tools retain their declared denials."
+            "You are a CAFleet member spawned by the Director. The frontmatter is the literal tool-permission map: Shell allows its listed patterns, including `cafleet *`, the listed Git commands, inspection utilities and CAFleet mise tasks, and asks for every other command. An asked command opens a native permission form; CAFleet notifies the Director, who answers it, and you continue from the result OpenCode returns. Read/edit permit their listed paths with `.env` exclusions; external-directory access and the other named tools retain their declared denials."
         );
         for (index, (actual, expected)) in ask.iter().zip(&default).enumerate() {
             if index != permission {
@@ -830,6 +830,14 @@ mod tests {
             )
         }
 
+        fn passthrough_added_line(installed: &Installed, added: &[&str]) -> String {
+            format!(
+                "hermes: added terminal.client_env_passthrough names -> {}: {}",
+                installed.config.display(),
+                added.join(", ")
+            )
+        }
+
         fn assert_failed(installed: &Installed, cause: Option<&str>) {
             assert_failed_into(installed, &installed.config, cause);
         }
@@ -838,11 +846,11 @@ mod tests {
             let failure = installed
                 .result
                 .as_ref()
-                .expect_err("the deny-rule merge fails setup for hermes");
+                .expect_err("the passthrough merge fails setup for hermes");
             assert!(matches!(failure, CafleetError::App(_)));
             assert_eq!(failure.exit_code(), 1);
             let prefix = format!(
-                "failed to install hermes approval rules into {}: ",
+                "failed to install hermes terminal.client_env_passthrough names into {}: ",
                 target.display()
             );
             let actual = failure
@@ -858,7 +866,7 @@ mod tests {
                 installed.rows, 0,
                 "no asset_installs row for a failed merge"
             );
-            assert_eq!(installed.lines[0], skills_line(installed));
+            assert_eq!(installed.lines, [skills_line(installed)]);
         }
 
         #[test]
@@ -894,100 +902,38 @@ mod tests {
         }
 
         #[test]
-        fn hermes_setup_names_the_trimmed_config_path_hermes_reports() {
-            let mut fake = FakeHermes::holding(&HERMES_DIRECTOR_ONLY_DENIES);
+        fn hermes_setup_reads_only_the_config_path_and_the_passthrough() {
+            let mut fake = FakeHermes::complete();
             let installed = install(Some(&mut fake));
             installed.result.as_ref().unwrap();
-            assert_eq!(fake.calls[0], FakeHermes::path_call());
             assert_eq!(
-                installed.lines[1],
-                format!(
-                    "hermes: approvals.deny already holds CAFleet's Director-only rules -> {FAKE_CONFIG_PATH}"
-                )
+                fake.calls,
+                [FakeHermes::path_call(), FakeHermes::passthrough_get_call()],
+                "setup issues no approvals.deny command"
+            );
+            assert_eq!(
+                installed.lines,
+                [skills_line(&installed), passthrough_held_line(&installed)]
             );
             assert_ne!(installed.config, installed.base.join("config.yaml"));
-        }
-
-        #[test]
-        fn hermes_setup_appends_only_the_missing_globs_after_existing_entries_in_order() {
-            let mut fake = FakeHermes::holding(&["rm -rf /*", "cafleet member exec *"]);
-            let installed = install(Some(&mut fake));
-            installed.result.as_ref().unwrap();
-            let merged = [
-                "rm -rf /*",
-                "cafleet member exec *",
-                "cafleet member prompt *",
-                "cafleet member press *",
-                "cafleet member recover *",
-                "cafleet permission respond *",
-                "cafleet input reconcile *",
-            ];
-            assert_eq!(
-                after_path(&fake.calls),
-                [
-                    FakeHermes::get_call(),
-                    FakeHermes::set_call(&merged),
-                    FakeHermes::get_call(),
-                    FakeHermes::passthrough_get_call(),
-                ]
-            );
-            assert_eq!(fake.deny, json!(merged));
-            assert_eq!(
-                installed.lines,
-                [
-                    skills_line(&installed),
-                    format!(
-                        "hermes: added approvals.deny rules -> {}: cafleet member prompt *, cafleet member press *, cafleet member recover *, cafleet permission respond *, cafleet input reconcile *",
-                        installed.config.display()
-                    ),
-                    passthrough_held_line(&installed),
-                ]
-            );
-            assert_eq!(installed.rows, 1);
-        }
-
-        #[test]
-        fn hermes_setup_writes_nothing_when_every_glob_is_already_present() {
-            let mut existing = vec!["git push *"];
-            existing.extend(HERMES_DIRECTOR_ONLY_DENIES.iter().rev());
-            let mut fake = FakeHermes::holding(&existing);
-            let installed = install(Some(&mut fake));
-            installed.result.as_ref().unwrap();
-            assert_eq!(
-                after_path(&fake.calls),
-                [FakeHermes::get_call(), FakeHermes::passthrough_get_call()]
-            );
-            assert_eq!(fake.deny, json!(existing));
-            assert_eq!(
-                installed.lines,
-                [
-                    skills_line(&installed),
-                    format!(
-                        "hermes: approvals.deny already holds CAFleet's Director-only rules -> {}",
-                        installed.config.display()
-                    ),
-                    passthrough_held_line(&installed),
-                ]
-            );
             assert_eq!(installed.rows, 1);
         }
 
         #[test]
         fn hermes_setup_appends_only_the_missing_passthrough_names_after_existing_entries() {
-            let mut fake = FakeHermes::holding(&HERMES_DIRECTOR_ONLY_DENIES);
-            fake.passthrough = json!(["PATH", "TMUX", "CAFLEET_DATABASE_URL"]);
+            let mut fake = FakeHermes::holding(&["PATH", "TMUX", "CAFLEET_DATABASE_URL"]);
             let installed = install(Some(&mut fake));
             installed.result.as_ref().unwrap();
             let added = HERMES_CLIENT_ENV_PASSTHROUGH
                 .into_iter()
                 .filter(|name| !["TMUX", "CAFLEET_DATABASE_URL"].contains(name))
                 .collect::<Vec<_>>();
+            assert_eq!(added[0], "CAFLEET_MEMBER_ID");
             let mut merged = vec!["PATH", "TMUX", "CAFLEET_DATABASE_URL"];
             merged.extend(&added);
             assert_eq!(
                 after_path(&fake.calls),
                 [
-                    FakeHermes::get_call(),
                     FakeHermes::passthrough_get_call(),
                     FakeHermes::passthrough_set_call(&merged),
                     FakeHermes::passthrough_get_call(),
@@ -998,134 +944,144 @@ mod tests {
                 installed.lines,
                 [
                     skills_line(&installed),
-                    format!(
-                        "hermes: approvals.deny already holds CAFleet's Director-only rules -> {FAKE_CONFIG_PATH}"
-                    ),
-                    format!(
-                        "hermes: added terminal.client_env_passthrough names -> {FAKE_CONFIG_PATH}: {}",
-                        added.join(", ")
-                    ),
+                    passthrough_added_line(&installed, &added),
                 ]
             );
             assert_eq!(installed.rows, 1);
         }
 
         #[test]
+        fn hermes_setup_appends_the_member_id_to_an_existing_installation_list() {
+            let previous = HERMES_CLIENT_ENV_PASSTHROUGH
+                .into_iter()
+                .filter(|name| *name != "CAFLEET_MEMBER_ID")
+                .collect::<Vec<_>>();
+            let mut fake = FakeHermes::holding(&previous);
+            let installed = install(Some(&mut fake));
+            installed.result.as_ref().unwrap();
+            let mut merged = previous.clone();
+            merged.push("CAFLEET_MEMBER_ID");
+            assert_eq!(fake.passthrough, json!(merged));
+            assert_eq!(
+                installed.lines[1],
+                passthrough_added_line(&installed, &["CAFLEET_MEMBER_ID"])
+            );
+        }
+
+        #[test]
         fn hermes_setup_writes_no_passthrough_when_every_member_name_is_already_present() {
             let mut existing = vec!["PATH"];
             existing.extend(HERMES_CLIENT_ENV_PASSTHROUGH.iter().rev());
-            let mut fake = FakeHermes::holding(&HERMES_DIRECTOR_ONLY_DENIES);
-            fake.passthrough = json!(existing);
+            let mut fake = FakeHermes::holding(&existing);
             let installed = install(Some(&mut fake));
             installed.result.as_ref().unwrap();
             assert_eq!(
                 after_path(&fake.calls),
-                [FakeHermes::get_call(), FakeHermes::passthrough_get_call()]
+                [FakeHermes::passthrough_get_call()]
             );
             assert_eq!(fake.passthrough, json!(existing));
-            assert_eq!(installed.lines[2], passthrough_held_line(&installed));
+            assert_eq!(
+                installed.lines,
+                [skills_line(&installed), passthrough_held_line(&installed)]
+            );
             assert_eq!(installed.rows, 1);
         }
 
         #[test]
-        fn hermes_setup_is_idempotent_from_an_empty_deny_list() {
+        fn hermes_setup_is_idempotent_from_an_empty_passthrough_list() {
             let mut fake = FakeHermes::holding(&[]);
             let first = install(Some(&mut fake));
             first.result.as_ref().unwrap();
-            assert_eq!(fake.deny, json!(HERMES_DIRECTOR_ONLY_DENIES));
+            assert_eq!(fake.passthrough, json!(HERMES_CLIENT_ENV_PASSTHROUGH));
             assert_eq!(
                 first.lines[1],
-                format!(
-                    "hermes: added approvals.deny rules -> {}: {}",
-                    first.config.display(),
-                    HERMES_DIRECTOR_ONLY_DENIES.join(", ")
-                )
+                passthrough_added_line(&first, &HERMES_CLIENT_ENV_PASSTHROUGH)
             );
             fake.calls.clear();
             let second = install(Some(&mut fake));
             second.result.as_ref().unwrap();
             assert_eq!(
                 after_path(&fake.calls),
-                [FakeHermes::get_call(), FakeHermes::passthrough_get_call()]
+                [FakeHermes::passthrough_get_call()]
             );
-            assert_eq!(fake.deny, json!(HERMES_DIRECTOR_ONLY_DENIES));
-            assert!(second.lines[1].starts_with("hermes: approvals.deny already holds"));
+            assert_eq!(fake.passthrough, json!(HERMES_CLIENT_ENV_PASSTHROUGH));
+            assert_eq!(second.lines[1], passthrough_held_line(&second));
         }
 
         #[test]
-        fn hermes_setup_compares_globs_by_exact_string() {
-            let near = [
-                "cafleet member prompt",
-                "Cafleet member exec *",
-                " cafleet member press *",
-                "cafleet member recover * ",
-            ];
+        fn hermes_setup_compares_passthrough_names_by_exact_string() {
+            let near = ["cafleet_database_url", " TMUX", "TMUX_PANE ", "Herdr_Env"];
             let mut fake = FakeHermes::holding(&near);
             let installed = install(Some(&mut fake));
             installed.result.as_ref().unwrap();
             let mut merged = near.to_vec();
-            merged.extend(HERMES_DIRECTOR_ONLY_DENIES);
-            assert_eq!(after_path(&fake.calls)[1], FakeHermes::set_call(&merged));
-        }
-
-        #[test]
-        fn hermes_setup_fails_for_a_deny_value_that_is_not_an_array_of_strings() {
-            for deny in [
-                json!(null),
-                json!("cafleet member prompt *"),
-                json!({"0": "cafleet member prompt *"}),
-                json!([1, 2]),
-                json!(["cafleet member prompt *", null]),
-            ] {
-                let mut fake = FakeHermes::with_deny(deny.clone());
-                let installed = install(Some(&mut fake));
-                assert_failed(&installed, None);
-                assert_eq!(after_path(&fake.calls), [FakeHermes::get_call()], "{deny}");
-                assert_eq!(installed.lines.len(), 1, "{deny}: {:?}", installed.lines);
-            }
-        }
-
-        #[test]
-        fn hermes_setup_fails_when_the_deny_list_cannot_be_read() {
-            let mut fake = FakeHermes::holding(&[]);
-            fake.get_failure = Some("exited with exit status: 2".into());
-            let installed = install(Some(&mut fake));
-            assert_failed(&installed, Some("exited with exit status: 2"));
-            assert_eq!(after_path(&fake.calls), [FakeHermes::get_call()]);
-        }
-
-        #[test]
-        fn hermes_setup_fails_when_the_write_fails() {
-            let mut fake = FakeHermes::holding(&["git push *"]);
-            fake.set_failure = Some("managed key approvals.deny cannot be set".into());
-            let installed = install(Some(&mut fake));
-            assert_failed(&installed, Some("managed key approvals.deny cannot be set"));
-            assert_eq!(after_path(&fake.calls).len(), 2);
-            assert_eq!(fake.deny, json!(["git push *"]));
-            assert!(
-                !installed
-                    .lines
-                    .iter()
-                    .any(|line| line.contains("added approvals.deny")),
-                "{:?}",
-                installed.lines
+            merged.extend(HERMES_CLIENT_ENV_PASSTHROUGH);
+            assert_eq!(
+                after_path(&fake.calls)[1],
+                FakeHermes::passthrough_set_call(&merged)
             );
         }
 
         #[test]
-        fn hermes_setup_fails_when_the_rereaded_list_lacks_a_glob() {
-            let mut fake = FakeHermes::holding(&["git push *"]);
+        fn hermes_setup_fails_for_a_passthrough_value_that_is_not_an_array_of_strings() {
+            for passthrough in [
+                json!(null),
+                json!("CAFLEET_DATABASE_URL"),
+                json!({"0": "CAFLEET_DATABASE_URL"}),
+                json!([1, 2]),
+                json!(["CAFLEET_DATABASE_URL", null]),
+            ] {
+                let mut fake = FakeHermes::with_passthrough(passthrough.clone());
+                let installed = install(Some(&mut fake));
+                assert_failed(&installed, None);
+                assert_eq!(
+                    after_path(&fake.calls),
+                    [FakeHermes::passthrough_get_call()],
+                    "{passthrough}"
+                );
+            }
+        }
+
+        #[test]
+        fn hermes_setup_fails_when_the_passthrough_cannot_be_read() {
+            let mut fake = FakeHermes::holding(&[]);
+            fake.get_failure = Some("exited with exit status: 2".into());
+            let installed = install(Some(&mut fake));
+            assert_failed(&installed, Some("exited with exit status: 2"));
+            assert_eq!(
+                after_path(&fake.calls),
+                [FakeHermes::passthrough_get_call()]
+            );
+        }
+
+        #[test]
+        fn hermes_setup_fails_when_the_passthrough_write_fails() {
+            let mut fake = FakeHermes::holding(&["PATH"]);
+            fake.set_failure =
+                Some("managed key terminal.client_env_passthrough cannot be set".into());
+            let installed = install(Some(&mut fake));
+            assert_failed(
+                &installed,
+                Some("managed key terminal.client_env_passthrough cannot be set"),
+            );
+            assert_eq!(after_path(&fake.calls).len(), 2);
+            assert_eq!(fake.passthrough, json!(["PATH"]));
+        }
+
+        #[test]
+        fn hermes_setup_fails_when_the_reread_passthrough_lacks_a_name() {
+            let mut fake = FakeHermes::holding(&["PATH"]);
             fake.ignore_set = true;
             let installed = install(Some(&mut fake));
             assert_failed(&installed, None);
-            let mut merged = vec!["git push *"];
-            merged.extend(HERMES_DIRECTOR_ONLY_DENIES);
+            let mut merged = vec!["PATH"];
+            merged.extend(HERMES_CLIENT_ENV_PASSTHROUGH);
             assert_eq!(
                 after_path(&fake.calls),
                 [
-                    FakeHermes::get_call(),
-                    FakeHermes::set_call(&merged),
-                    FakeHermes::get_call()
+                    FakeHermes::passthrough_get_call(),
+                    FakeHermes::passthrough_set_call(&merged),
+                    FakeHermes::passthrough_get_call()
                 ]
             );
         }
@@ -1164,7 +1120,7 @@ mod tests {
                 installed.lines,
                 [
                     skills_line(&installed),
-                    "hermes: skipped approvals.deny rules and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".to_owned(),
+                    "hermes: skipped terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".to_owned(),
                 ]
             );
             assert_eq!(installed.rows, 1);

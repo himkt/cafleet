@@ -1330,7 +1330,174 @@ pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthS
     let reply = crate::runtime::control::request(run, "health", deadline)?;
     HealthSnapshot::decode(reply, run)
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemberState {
+    Running,
+    NotResponding,
+    LostRuntime,
+    InterruptedLaunch,
+    AgentExited,
+    DeletedWithLeftoverRuntime,
+    CheckFailed,
+    NotChecked,
+    Ended,
+}
+
+impl MemberState {
+    /// Summary order of the states doctor prints; `Ended` is hidden from the summary.
+    pub(crate) const SUMMARY_ORDER: [Self; 8] = [
+        Self::Running,
+        Self::NotResponding,
+        Self::LostRuntime,
+        Self::InterruptedLaunch,
+        Self::AgentExited,
+        Self::DeletedWithLeftoverRuntime,
+        Self::CheckFailed,
+        Self::NotChecked,
+    ];
+
+    pub(crate) fn token(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::NotResponding => "not_responding",
+            Self::LostRuntime => "lost_runtime",
+            Self::InterruptedLaunch => "interrupted_launch",
+            Self::AgentExited => "agent_exited",
+            Self::DeletedWithLeftoverRuntime => "deleted_with_leftover_runtime",
+            Self::CheckFailed => "check_failed",
+            Self::NotChecked => "not_checked",
+            Self::Ended => "ended",
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::NotResponding => "not responding",
+            Self::LostRuntime => "lost runtime",
+            Self::InterruptedLaunch => "interrupted launch",
+            Self::AgentExited => "agent exited",
+            Self::DeletedWithLeftoverRuntime => "deleted with leftover runtime",
+            Self::CheckFailed => "could not be checked",
+            Self::NotChecked => "not checked (time limit)",
+            Self::Ended => "ended",
+        }
+    }
+
+    pub(crate) fn status(self) -> &'static str {
+        match self {
+            Self::Running => "ok",
+            Self::NotChecked | Self::Ended => "info",
+            Self::CheckFailed => "error",
+            Self::NotResponding
+            | Self::LostRuntime
+            | Self::InterruptedLaunch
+            | Self::AgentExited
+            | Self::DeletedWithLeftoverRuntime => "warn",
+        }
+    }
+
+    /// Next commands with `ID` standing for the member ID.
+    pub(crate) fn next_commands(self) -> &'static [&'static str] {
+        match self {
+            Self::Running | Self::Ended => &[],
+            Self::NotResponding | Self::InterruptedLaunch | Self::DeletedWithLeftoverRuntime => {
+                &["cafleet member recover ID"]
+            }
+            Self::LostRuntime => &["cafleet member recover ID", "cafleet member delete ID"],
+            Self::AgentExited => &["cafleet member delete ID"],
+            Self::CheckFailed => &["cafleet doctor --verbose"],
+            Self::NotChecked => &["cafleet member show ID"],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum OwnerLockProbe {
+    Held,
+    Free,
+    Failed(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum HealthProbe {
+    Answered,
+    Skipped,
+    Failed(String),
+}
+
+pub(crate) enum RuntimeProbes {
+    InvalidPaths(String),
+    Observed {
+        descriptor_leftover: bool,
+        lock: OwnerLockProbe,
+        health: HealthProbe,
+    },
+}
+
+impl RuntimeProbes {
+    pub(crate) fn classify(self) -> RuntimeDiagnosis {
+        let (descriptor_leftover, lock, health) = match self {
+            Self::InvalidPaths(cause) => {
+                return RuntimeDiagnosis {
+                    state: MemberState::InterruptedLaunch,
+                    diagnostics: vec![format!("runtime files are invalid: {cause}")],
+                };
+            }
+            Self::Observed {
+                descriptor_leftover,
+                lock,
+                health,
+            } => (descriptor_leftover, lock, health),
+        };
+        let held = match lock {
+            OwnerLockProbe::Held => true,
+            OwnerLockProbe::Free => false,
+            OwnerLockProbe::Failed(cause) => {
+                return RuntimeDiagnosis {
+                    state: MemberState::CheckFailed,
+                    diagnostics: vec![cause],
+                };
+            }
+        };
+        let mut diagnostics = Vec::new();
+        if descriptor_leftover {
+            diagnostics.push("launch descriptor left over".to_owned());
+        }
+        diagnostics.push(
+            if held {
+                "owner lock is held"
+            } else {
+                "owner lock is free"
+            }
+            .to_owned(),
+        );
+        let health_state = match health {
+            HealthProbe::Answered => {
+                diagnostics.push("runtime answered the health probe".to_owned());
+                MemberState::Running
+            }
+            HealthProbe::Skipped => MemberState::NotChecked,
+            HealthProbe::Failed(cause) => {
+                diagnostics.push(format!("runtime did not answer the health probe: {cause}"));
+                if held {
+                    MemberState::NotResponding
+                } else {
+                    MemberState::LostRuntime
+                }
+            }
+        };
+        let state = if descriptor_leftover {
+            MemberState::InterruptedLaunch
+        } else {
+            health_state
+        };
+        RuntimeDiagnosis { state, diagnostics }
+    }
+}
+
 pub(crate) struct RuntimeDiagnosis {
+    pub(crate) state: MemberState,
     pub(crate) diagnostics: Vec<String>,
 }
 pub(crate) fn diagnose_runtime(
@@ -1353,32 +1520,31 @@ fn diagnose_runtime_observed(
 ) -> Result<RuntimeDiagnosis> {
     check_deadline(Instant::now(), deadline)?;
     let run = storage::get_run(conn, run_id)?;
-    let mut diagnostics = Vec::new();
-    match validate_run_paths(conn, &run) {
+    let probes = match validate_run_paths(conn, &run) {
         Ok(paths) => {
-            if paths.descriptor.try_exists().map_err(io_error)? {
-                diagnostics.push(
-                    "leftover launch descriptor; use member recover after ownership validation"
-                        .into(),
-                );
-            }
-            match RunLock::acquire(conn,&run.owner()){
-                Ok(Some(_))=>diagnostics.push("matching owner lock is currently available; explicit recovery establishes loss".into()),
-                Ok(None)=>diagnostics.push("matching owner lock held: live_or_unreachable".into()),
-                Err(cause)=>diagnostics.push(cause.message().into_owned()),
-            }
-            if Instant::now() < deadline {
+            let descriptor_leftover = paths.descriptor.try_exists().map_err(io_error)?;
+            let lock = match RunLock::acquire(conn, &run.owner()) {
+                Ok(Some(_)) => OwnerLockProbe::Free,
+                Ok(None) => OwnerLockProbe::Held,
+                Err(cause) => OwnerLockProbe::Failed(cause.message().into_owned()),
+            };
+            let health = if Instant::now() < deadline {
                 match probe_health(&run, deadline) {
-                    Ok(_) => diagnostics.push("matching runtime health reply observed".into()),
-                    Err(cause) => diagnostics.push(format!(
-                        "runtime endpoint unavailable: {cause}; inspect with member recover"
-                    )),
+                    Ok(_) => HealthProbe::Answered,
+                    Err(cause) => HealthProbe::Failed(cause.to_string()),
                 }
+            } else {
+                HealthProbe::Skipped
+            };
+            RuntimeProbes::Observed {
+                descriptor_leftover,
+                lock,
+                health,
             }
         }
-        Err(cause) => diagnostics.push(format!("{cause}; explicit member recover required")),
-    }
-    Ok(RuntimeDiagnosis { diagnostics })
+        Err(cause) => RuntimeProbes::InvalidPaths(cause.to_string()),
+    };
+    Ok(probes.classify())
 }
 
 #[cfg(test)]
@@ -2707,10 +2873,12 @@ mod tests {
             )
             .unwrap();
             assert!(started.elapsed() < Duration::from_millis(750));
+            assert_eq!(diagnosis.state, MemberState::InterruptedLaunch);
+            assert_eq!(
+                diagnosis.diagnostics[..2],
+                ["launch descriptor left over", expected_lock]
+            );
             let text = diagnosis.diagnostics.join("\n");
-            assert!(text.contains(expected_lock), "{text}");
-            assert!(text.contains("recover"), "{text}");
-            assert!(text.contains("descriptor"), "{text}");
             assert!(!text.contains(std::str::from_utf8(SPOOL_CANARY).unwrap()));
         }
 
@@ -2721,10 +2889,7 @@ mod tests {
             seed_owned_spool(&fixture, &artifacts, &held);
             let before_rows = registry_snapshot(&fixture.conn);
             let before_artifacts = owned_snapshot(&fixture, &artifacts, &held);
-            diagnose_without_content_effects(
-                &fixture,
-                "matching owner lock held: live_or_unreachable",
-            );
+            diagnose_without_content_effects(&fixture, "owner lock is held");
             assert_eq!(registry_snapshot(&fixture.conn), before_rows);
             assert_eq!(
                 owned_snapshot(&fixture, &artifacts, &held),
@@ -2740,10 +2905,7 @@ mod tests {
             let before_rows = registry_snapshot(&fixture.conn);
             let before_artifacts = owned_snapshot(&fixture, &artifacts, &held);
             drop(held);
-            diagnose_without_content_effects(
-                &fixture,
-                "matching owner lock is currently available",
-            );
+            diagnose_without_content_effects(&fixture, "owner lock is free");
             let held = RunLock::acquire_released(&fixture.conn, &fixture.run.owner())
                 .unwrap()
                 .expect("diagnosis releases its probe and preserves the original owner identity");
@@ -4140,6 +4302,138 @@ mod tests {
                         good["identity"]["database_identity_json"].clone(),
                         nonce,
                         "launch_nonce",
+                    );
+                }
+            }
+        }
+    }
+
+    mod runtime_diagnosis {
+        use crate::runtime::control::*;
+
+        fn observed(
+            descriptor_leftover: bool,
+            lock: OwnerLockProbe,
+            health: HealthProbe,
+        ) -> RuntimeDiagnosis {
+            RuntimeProbes::Observed {
+                descriptor_leftover,
+                lock,
+                health,
+            }
+            .classify()
+        }
+
+        fn refused() -> HealthProbe {
+            HealthProbe::Failed("member runtime: ECONNREFUSED: Connection refused".into())
+        }
+
+        fn assert_diagnosis(diagnosis: RuntimeDiagnosis, state: MemberState, phrases: &[&str]) {
+            assert_eq!(diagnosis.state, state, "{:?}", diagnosis.diagnostics);
+            assert_eq!(diagnosis.diagnostics, phrases);
+        }
+
+        #[test]
+        fn invalid_run_paths_are_an_interrupted_launch() {
+            assert_diagnosis(
+                RuntimeProbes::InvalidPaths("namespace manifest is missing".into()).classify(),
+                MemberState::InterruptedLaunch,
+                &["runtime files are invalid: namespace manifest is missing"],
+            );
+        }
+
+        #[test]
+        fn a_leftover_descriptor_is_an_interrupted_launch_before_any_health_outcome() {
+            for (held, lock_phrase) in [(true, "owner lock is held"), (false, "owner lock is free")]
+            {
+                let lock = || {
+                    if held {
+                        OwnerLockProbe::Held
+                    } else {
+                        OwnerLockProbe::Free
+                    }
+                };
+                assert_diagnosis(
+                    observed(true, lock(), HealthProbe::Answered),
+                    MemberState::InterruptedLaunch,
+                    &[
+                        "launch descriptor left over",
+                        lock_phrase,
+                        "runtime answered the health probe",
+                    ],
+                );
+                assert_diagnosis(
+                    observed(true, lock(), HealthProbe::Skipped),
+                    MemberState::InterruptedLaunch,
+                    &["launch descriptor left over", lock_phrase],
+                );
+            }
+        }
+
+        #[test]
+        fn a_health_reply_is_running_whatever_the_lock_state() {
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Held, HealthProbe::Answered),
+                MemberState::Running,
+                &["owner lock is held", "runtime answered the health probe"],
+            );
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Free, HealthProbe::Answered),
+                MemberState::Running,
+                &["owner lock is free", "runtime answered the health probe"],
+            );
+        }
+
+        #[test]
+        fn a_held_lock_without_a_health_reply_is_not_responding() {
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Held, refused()),
+                MemberState::NotResponding,
+                &[
+                    "owner lock is held",
+                    "runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused",
+                ],
+            );
+        }
+
+        #[test]
+        fn a_free_lock_without_a_health_reply_is_a_lost_runtime() {
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Free, refused()),
+                MemberState::LostRuntime,
+                &[
+                    "owner lock is free",
+                    "runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused",
+                ],
+            );
+        }
+
+        #[test]
+        fn a_health_probe_skipped_by_the_deadline_is_not_checked() {
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Held, HealthProbe::Skipped),
+                MemberState::NotChecked,
+                &["owner lock is held"],
+            );
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Free, HealthProbe::Skipped),
+                MemberState::NotChecked,
+                &["owner lock is free"],
+            );
+        }
+
+        #[test]
+        fn an_owner_lock_probe_failure_is_check_failed_with_only_its_cause() {
+            for descriptor_leftover in [false, true] {
+                for health in [HealthProbe::Answered, refused(), HealthProbe::Skipped] {
+                    assert_diagnosis(
+                        observed(
+                            descriptor_leftover,
+                            OwnerLockProbe::Failed("owner lock identity changed".into()),
+                            health,
+                        ),
+                        MemberState::CheckFailed,
+                        &["owner lock identity changed"],
                     );
                 }
             }
