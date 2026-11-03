@@ -20,7 +20,7 @@ Complete the [member startup](../../SKILL.md#member-startup) reads, opening this
 
 ## Review Process
 
-See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the marker format and placement rules. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
+See [coordination](../../reference/coordination.md) § *COMMENT(role) Marker* for the marker format and § *Pointer Forms* for placement. Reviewer-specific tag taxonomy (used inside each `COMMENT(reviewer)` marker body):
 
 | Tag | Meaning |
 |-----|---------|
