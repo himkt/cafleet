@@ -1,7 +1,7 @@
 # Simplification Follow-ups
 
 **Status**: Approved
-**Progress**: 19/28 tasks complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-11-03
 
 ## Overview
@@ -10,14 +10,14 @@ Resolve the three follow-ups of design 0000212 (§ Follow-ups F1-F3) and the res
 
 ## Success Criteria
 
-- [ ] `cafleet member create --fleet-id <unknown>` prints `Error: fleet '<fleet-id>' not found.` and exits 1, matching `fleet show`, `fleet delete` and `member list`. A unit test in `src/cli/member.rs` asserts it.
-- [ ] `SPEC.md` § Error Messages and `skills/cafleet/reference/cli.md` § Error messages carry one combined unknown-fleet row for the four commands, and no `Fleet '<fleet-id>' not found.` string remains in the repository outside `design-docs/` and `researches/`.
-- [ ] Every F1, F3 and X1-X7 row in § Specification is applied with the replacement text given there, and F2-a to F2-d are applied exactly as § F2 capture evidence establishes; the Reviewer confirms the diff contains only those edits.
-- [ ] `SPEC.md` §6.9 Native acceptance and coverage, §9 Testing strategy, the §6.7 opencode preset limits table, the §6.7 Claude permission posture profile lead and both paragraphs of §6.3 `permissions.allow` coverage state descriptive contract only, with every case, threshold, entry and table row preserved.
-- [ ] `SPEC.md` has no run of two or more blank lines outside fenced code blocks, and no unnumbered `(§ …)` pointer names a heading of another numbered section.
-- [ ] Step 7 records its native capture evidence in § F2 capture evidence and applies its documentation edits from that evidence, or records the capture limit and leaves the dialog sentences unchanged.
-- [ ] The user's real Claude Code configuration is unchanged by F2: the real-state check in § Isolation and credentials passes (auto-mode key snapshot of `~/.claude.json`, SHA-256 of `~/.claude/settings.json` and the names-only `~/.claude/` listing match before and after).
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass in Step 6 and again in Step 8.
+- [x] `cafleet member create --fleet-id <unknown>` prints `Error: fleet '<fleet-id>' not found.` and exits 1, matching `fleet show`, `fleet delete` and `member list`. A unit test in `src/cli/member.rs` asserts it.
+- [x] `SPEC.md` § Error Messages and `skills/cafleet/reference/cli.md` § Error messages carry one combined unknown-fleet row for the four commands, and no `Fleet '<fleet-id>' not found.` string remains in the repository outside `design-docs/` and `researches/`.
+- [x] Every F1, F3 and X1-X7 row in § Specification is applied with the replacement text given there, and F2-a to F2-d are applied exactly as § F2 capture evidence establishes; the Reviewer confirms the diff contains only those edits.
+- [x] `SPEC.md` §6.9 Native acceptance and coverage, §9 Testing strategy, the §6.7 opencode preset limits table, the §6.7 Claude permission posture profile lead and both paragraphs of §6.3 `permissions.allow` coverage state descriptive contract only, with every case, threshold, entry and table row preserved.
+- [x] `SPEC.md` has no run of two or more blank lines outside fenced code blocks, and no unnumbered `(§ …)` pointer names a heading of another numbered section.
+- [x] Step 7 records its native capture evidence in § F2 capture evidence and applies its documentation edits from that evidence, or records the capture limit and leaves the dialog sentences unchanged.
+- [x] The user's real Claude Code configuration is unchanged by F2: the real-state check in § Isolation and credentials passes (auto-mode key snapshot of `~/.claude.json`, SHA-256 of `~/.claude/settings.json` and the names-only `~/.claude/` listing match before and after).
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass in Step 6 and again in Step 8.
 - [ ] One branch `fix/0000213-simplification-follow-ups` and one PR. Commits: the Director-reviewed failing F1-b test commit precedes the F1-a fix commit, and the documentation lands in one commit per surface (SPEC, docs, skills, design doc).
 
 ---
@@ -275,7 +275,10 @@ The Director fills this table in Step 7 from the Verifier's markers and removes 
 
 | Case | Version | Date | Steps | Observed recurrence | Auto-mode key change |
 |---|---|---|---|---|---|
-| — | — | — | — | — | — |
+| Trigger (step 1) | 2.1.309 (session banner) | 2026-11-03 | One window of 12 trigger turns in one isolated `claude --permission-mode auto` session; turns 6 and 9-12 were classifier denials and in turns 7-8 the model declined without attempting the commands; three denials reached the native "3 consecutive actions were blocked" confirmation | Not reproduced: `Teach auto mode about your environment?` did not appear within the window | `autoModeEnvSetup` absent → `{"denials": 5}`, then unchanged by later denials |
+| Esc, `2. Not now`, `3. Don't show again` (steps 2-4) | — | — | Not run: step 1 established no appearance, so the procedure continued at step 5 | Not observed | — |
+
+Capture limit: the dialog did not appear on Claude Code 2.1.309 within one observation window, so no recurrence beyond the original fixtures is established and F2-a to F2-d make no edit. The real-state check passed (`.checks/real-state-before.md` matches the post-teardown snapshot).
 
 ### Verification
 
@@ -343,21 +346,21 @@ Order: documentation rows in rule order (`SPEC.md` → `docs/` → `skills/`), t
 
 ### Step 7: F2 native re-capture (final implementation step)
 
-- [ ] Director: spawn the Verifier, record the real-state snapshots and relay the user's login, onboarding and workspace-trust request through the decision surface once the Verifier has started the isolated session. <!-- completed: -->
-- [ ] Verifier: run § Procedure steps 1-5, writing captures under `<BASE>/.f2-capture/` and one `COMMENT(verifier)` marker per case at § F2 capture evidence, then tear down. <!-- completed: -->
-- [ ] Director: confirm the real-state check, fill § F2 capture evidence from the markers and remove them. <!-- completed: -->
-- [ ] Programmer: apply F2-a to F2-d from the evidence, or no edit when the evidence establishes nothing beyond `3. Don't show again`. <!-- completed: -->
+- [x] Director: spawn the Verifier, record the real-state snapshots and relay the user's login, onboarding and workspace-trust request through the decision surface once the Verifier has started the isolated session. <!-- completed: 2026-11-03T21:13 -->
+- [x] Verifier: run § Procedure steps 1-5, writing captures under `<BASE>/.f2-capture/` and one `COMMENT(verifier)` marker per case at § F2 capture evidence, then tear down. <!-- completed: 2026-11-03T21:13 -->
+- [x] Director: confirm the real-state check, fill § F2 capture evidence from the markers and remove them. <!-- completed: 2026-11-03T21:13 -->
+- [x] Programmer: apply F2-a to F2-d from the evidence, or no edit when the evidence establishes nothing beyond `3. Don't show again` (no edit: not reproduced). <!-- completed: 2026-11-03T21:13 -->
 
 ### Step 8: Checks after F2
 
-- [ ] Run `mise //:test`, `mise //:lint` and `mise //docs:build`. <!-- completed: -->
-- [ ] Run the rendered-pipe, string, blank-line/pointer, anchor and scope checks in § Verification. <!-- completed: -->
+- [x] Run `mise //:test`, `mise //:lint` and `mise //docs:build`. <!-- completed: 2026-11-03T21:20 -->
+- [x] Run the rendered-pipe, string, blank-line/pointer, anchor and scope checks in § Verification. <!-- completed: 2026-11-03T21:20 -->
 
 ### Step 9: Fresh review loop (execute Step 5)
 
-- [ ] Director: verify every implementation task and Success Criterion except the PR, then spawn a fresh Reviewer with this design doc, `git diff main` (committed test plus working tree) and the recorded check and capture evidence. <!-- completed: -->
-- [ ] Reviewer: compare the diff with § Specification (F1, F3, X1-X7 rows and the F2-a to F2-d edits against § F2 capture evidence), check each basis against code or the cited section, and run the scope check. <!-- completed: -->
-- [ ] Route every finding to its owner, rerun the affected checks and repeat fresh review until it approves. <!-- completed: -->
+- [x] Director: verify every implementation task and Success Criterion except the PR, then spawn a fresh Reviewer with this design doc, `git diff main` (committed test plus working tree) and the recorded check and capture evidence. <!-- completed: 2026-11-03T21:20 -->
+- [x] Reviewer: compare the diff with § Specification (F1, F3, X1-X7 rows and the F2-a to F2-d edits against § F2 capture evidence), check each basis against code or the cited section, and run the scope check. <!-- completed: 2026-11-03T21:27 -->
+- [x] Route every finding to its owner, rerun the affected checks and repeat fresh review until it approves. <!-- completed: 2026-11-03T21:27 -->
 
 ### Step 10: Commits
 
@@ -374,3 +377,4 @@ Order: documentation rows in rule order (`SPEC.md` → `docs/` → `skills/`), t
 |------|---------|
 | 2026-11-03 | Initial draft |
 | 2026-11-03 | Review round 1: Overview cap; F1-b pattern from `launch_policy`; F1-c keeps the check-order note; F3-b keeps "permitted"; F3-i for the first `permissions.allow` paragraph; X1-18/X1-26 replacements; observation windows and 3-hour cap; satisfiable real-state check; team per § Team composition with a Verifier for F2; F2 before one fresh review; separate test and fix commits |
+| 2026-11-03 | Step 7: F2 capture not reproduced on 2.1.309; F2-a to F2-d make no edit; real-state check passed; fresh review approved in round 2 |
