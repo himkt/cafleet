@@ -368,8 +368,7 @@ fn create(
     let body = &args.body;
     let json = args.json;
 
-    let fleet = broker::get_fleet(conn, fleet_id)?
-        .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
+    let fleet = broker::require_fleet(conn, fleet_id)?;
     if fleet.deleted_at.is_some() {
         return Err(CafleetError::App(format!("fleet {fleet_id} is deleted")));
     }
