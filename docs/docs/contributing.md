@@ -7,7 +7,7 @@ Develop changes through reviewed designs and the bundled CAFleet workflows. Run 
 | Entry | Responsibility |
 |---|---|
 | `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters; built by the root `Cargo.toml` and `build.rs`, which embeds `skills/` and `presets/` |
-| `migrations/` | Embedded SQL migration chain |
+| `migrations/` | Embedded SQL schema baseline |
 | `skills/` | Installed agent-facing skills, roles and references |
 | `presets/` | Backend permission/configuration assets |
 | `docs/` | Independent operator documentation and its Node/pnpm site tooling |
@@ -17,7 +17,7 @@ Develop changes through reviewed designs and the bundled CAFleet workflows. Run 
 
 Broker queries return typed records; CLI presenters construct wire output. Shared diagnosis validates database identity and schema. Keep durable storage separate from synchronous notification, finite receiving, input ownership and multiplexer I/O. Required state fails at its read boundary. Preserve process pipe draining, owned-child cleanup, pane ownership compensation and layout cleanup.
 
-Every Rust test is a unit test in a `#[cfg(test)] mod tests` block of the implementation file it exercises. Shared test helpers live in a `#[cfg(test)] pub(crate) mod test_support` beside the type they build, and test inputs stay inline in the test module.
+Every Rust test is a unit test in a `#[cfg(test)] mod tests` block of the implementation file it exercises, and it asserts the behavior of the code under test rather than the text, keys, counts, ids or layout of embedded data files such as skills, presets, the profile catalog and the schema baseline. Shared test helpers live in a `#[cfg(test)] pub(crate) mod test_support` beside the type they build, and test inputs stay inline in the test module.
 
 ## Development
 

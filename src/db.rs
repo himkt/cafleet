@@ -5,22 +5,15 @@ use rusqlite::OptionalExtension;
 use std::time::Duration;
 use std::time::Instant;
 
-mod embedded {
-    refinery::embed_migrations!("migrations");
-}
+const BASELINE_SQL: &str = include_str!("../migrations/V1__baseline.sql");
 
-pub(crate) fn migration_chain() -> Vec<(u32, String)> {
-    let mut chain: Vec<(u32, String)> = embedded::migrations::runner()
-        .get_migrations()
-        .iter()
-        .map(|migration| {
-            let version = u32::try_from(migration.version())
-                .expect("embedded migration versions are positive");
-            (version, migration.name().to_string())
-        })
-        .collect();
-    chain.sort();
-    chain
+fn baseline() -> refinery::Migration {
+    let sql = format!(
+        "{BASELINE_SQL}\nINSERT INTO cafleet_database(singleton_id, cafleet_version) VALUES(1, '{}');\n",
+        crate::cli::VERSION
+    );
+    refinery::Migration::unapplied("V1__baseline", &sql)
+        .expect("the embedded baseline has a valid migration name")
 }
 
 /// The file path a `sqlite:///<path>` database URL names.
@@ -73,22 +66,12 @@ fn connect_with_flags(
     Ok(conn)
 }
 
-/// Apply the embedded migration chain to head (idempotent) and return the
-/// head version.
-pub(crate) fn migrate_to_head(conn: &mut Connection) -> Result<u32, CafleetError> {
-    embedded::migrations::runner()
+pub(crate) fn initialize(conn: &mut Connection) -> Result<(), CafleetError> {
+    refinery::Runner::new(&[baseline()])
         .set_grouped(true)
         .run(conn)
-        .map_err(|e| CafleetError::App(format!("migration failed: {e}")))?;
-    Ok(head_version())
-}
-
-/// The embedded chain's head version.
-pub(crate) fn head_version() -> u32 {
-    migration_chain()
-        .last()
-        .expect("the embedded migration chain has at least the baseline")
-        .0
+        .map_err(|e| CafleetError::App(format!("database initialization failed: {e}")))?;
+    Ok(())
 }
 
 pub(crate) const APPLICATION_ID: i64 = 1128351289;
@@ -203,41 +186,20 @@ fn read_schema(conn: &Connection) -> Result<Vec<SchemaTable>, CafleetError> {
     Ok(schema)
 }
 
-fn reference_schema(version: u32) -> Result<Vec<SchemaTable>, CafleetError> {
+fn reference_schema() -> Result<Vec<SchemaTable>, CafleetError> {
     let mut expected = Connection::open_in_memory()?;
-    embedded::migrations::runner()
-        .set_grouped(true)
-        .set_target(refinery::Target::Version(
-            i32::try_from(version).expect("supported version fits i32"),
-        ))
-        .run(&mut expected)
-        .map_err(|error| CafleetError::App(format!("reference migration failed: {error}")))?;
+    initialize(&mut expected)?;
     read_schema(&expected)
 }
 
-pub(crate) fn schema_matches_version(
-    conn: &Connection,
-    version: u32,
-) -> Result<bool, CafleetError> {
-    if version == 0 {
-        return Ok(false);
-    }
-    let head = head_version();
-    let reference = reference_schema(version.min(head))?;
+pub(crate) fn schema_matches(conn: &Connection) -> Result<bool, CafleetError> {
+    let reference = reference_schema()?;
     let snapshot = if conn.is_autocommit() {
         Some(conn.unchecked_transaction()?)
     } else {
         None
     };
-    let matches = if version > head {
-        reference
-            .iter()
-            .find(|table| table.name == "refinery_schema_history")
-            .expect("refinery migrations create their ledger")
-            .matches(conn)?
-    } else {
-        all_match(&reference, conn)?
-    };
+    let matches = all_match(&reference, conn)?;
     if let Some(snapshot) = snapshot {
         snapshot.commit()?;
     }
@@ -247,23 +209,15 @@ pub(crate) fn schema_matches_version(
 #[derive(Debug)]
 pub(crate) enum SchemaState {
     Missing,
+    Current,
     Incompatible { path: String },
-    Behind { recorded: u32, head: u32 },
-    Head { version: u32 },
-    Ahead { recorded: u32, head: u32 },
     Unreachable { cause: CafleetError },
 }
 
 impl SchemaState {
     pub(crate) fn require_current(&self) -> Result<(), CafleetError> {
         match self {
-            SchemaState::Head { .. } => Ok(()),
-            SchemaState::Behind { recorded, head } => Err(CafleetError::App(format!(
-                "database schema is outdated (schema {recorded}, head {head}); run 'cafleet setup'"
-            ))),
-            SchemaState::Ahead { recorded, head } => Err(CafleetError::App(format!(
-                "database schema {recorded} is newer than this cafleet (head {head}); upgrade cafleet"
-            ))),
+            SchemaState::Current => Ok(()),
             SchemaState::Incompatible { path } => Err(crate::db::incompatible_format(path)),
             SchemaState::Missing => Err(CafleetError::App(
                 "no cafleet database; run 'cafleet setup'".into(),
@@ -273,20 +227,33 @@ impl SchemaState {
     }
 }
 
-fn recorded_version(conn: &Connection) -> Result<Option<u32>, CafleetError> {
+fn ledger_is_baseline(conn: &Connection) -> Result<bool, CafleetError> {
     let ledger_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='refinery_schema_history')",
         [], |row| row.get(0),
     )?;
     if !ledger_exists {
-        return Ok(None);
+        return Ok(false);
     }
-    conn.query_row(
-        "SELECT MAX(version) FROM refinery_schema_history",
-        [],
-        |row| row.get(0),
-    )
-    .map_err(crate::error::CafleetError::from)
+    let mut statement =
+        conn.prepare("SELECT version, name FROM refinery_schema_history ORDER BY version")?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows == [(1, "baseline".to_owned())])
+}
+
+fn records_running_version(conn: &Connection) -> Result<bool, CafleetError> {
+    let recorded: Option<String> = conn
+        .query_row(
+            "SELECT cafleet_version FROM cafleet_database WHERE singleton_id=1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(recorded.as_deref() == Some(crate::cli::VERSION))
 }
 
 pub(crate) fn incompatible_format(path: &str) -> CafleetError {
@@ -295,7 +262,7 @@ pub(crate) fn incompatible_format(path: &str) -> CafleetError {
     ))
 }
 
-pub(crate) fn classify_schema(conn: &Connection, head: u32) -> SchemaState {
+pub(crate) fn classify_schema(conn: &Connection) -> SchemaState {
     let incompatible = || SchemaState::Incompatible {
         path: conn.path().unwrap_or(":memory:").to_owned(),
     };
@@ -311,20 +278,10 @@ pub(crate) fn classify_schema(conn: &Connection, head: u32) -> SchemaState {
         if identity != crate::db::APPLICATION_ID {
             return Ok(incompatible());
         }
-        let Some(recorded) = recorded_version(conn)? else {
-            return Ok(incompatible());
-        };
-        if !crate::db::schema_matches_version(conn, recorded)? {
+        if !ledger_is_baseline(conn)? || !schema_matches(conn)? || !records_running_version(conn)? {
             return Ok(incompatible());
         }
-        if recorded > head {
-            return Ok(SchemaState::Ahead { recorded, head });
-        }
-        Ok(if recorded < head {
-            SchemaState::Behind { recorded, head }
-        } else {
-            SchemaState::Head { version: recorded }
-        })
+        Ok(SchemaState::Current)
     };
     match inspect() {
         Ok(state) => state,
@@ -332,12 +289,8 @@ pub(crate) fn classify_schema(conn: &Connection, head: u32) -> SchemaState {
     }
 }
 
-pub(crate) fn classify_selected_schema(
-    conn: &Connection,
-    head: u32,
-    database_url: &str,
-) -> SchemaState {
-    match classify_schema(conn, head) {
+pub(crate) fn classify_selected_schema(conn: &Connection, database_url: &str) -> SchemaState {
+    match classify_schema(conn) {
         SchemaState::Incompatible { .. } => match crate::db::database_path(database_url) {
             Ok(path) => SchemaState::Incompatible { path: path.into() },
             Err(cause) => SchemaState::Unreachable { cause },
@@ -588,16 +541,8 @@ pub(crate) mod test_support {
     pub(crate) fn migrated_conn(dir: &TempDir) -> Connection {
         let url = format!("sqlite:///{}", dir.path().join("broker.db").display());
         let mut conn = crate::db::connect(&url).unwrap();
-        crate::db::migrate_to_head(&mut conn).unwrap();
+        crate::db::initialize(&mut conn).unwrap();
         conn
-    }
-
-    pub(crate) fn migrate_to_version(conn: &mut Connection, version: u32) {
-        crate::db::embedded::migrations::runner()
-            .set_grouped(true)
-            .set_target(refinery::Target::Version(i32::try_from(version).unwrap()))
-            .run(conn)
-            .unwrap();
     }
 
     pub(crate) fn table_rows(conn: &Connection, sql: &str) -> Vec<Vec<Value>> {
@@ -649,7 +594,6 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use crate::db::test_support::migrate_to_version;
     use crate::db::test_support::table_rows as rows;
     use crate::db::*;
 
@@ -739,12 +683,12 @@ mod tests {
     }
 
     fn require_current(conn: &Connection) -> Result<(), CafleetError> {
-        crate::db::classify_schema(conn, head_version()).require_current()
+        crate::db::classify_schema(conn).require_current()
     }
 
-    fn at_version(version: u32) -> Connection {
+    fn initialized_conn() -> Connection {
         let mut conn = connect("sqlite:///:memory:").unwrap();
-        migrate_to_version(&mut conn, version);
+        initialize(&mut conn).unwrap();
         conn
     }
 
@@ -760,8 +704,8 @@ mod tests {
     }
 
     #[test]
-    fn repeated_migration_at_head_preserves_all_application_rows() {
-        let mut conn = at_version(head_version());
+    fn repeated_initialization_preserves_all_application_rows() {
+        let mut conn = initialized_conn();
         conn.execute_batch(
                 "INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'preserved', 'created');
                  INSERT INTO members(member_id, fleet_id, name, description, status, registered_at, deregistered_at) VALUES
@@ -778,7 +722,7 @@ mod tests {
                     (9, 2, 1, 'created-9', 'completed', 'status-9', 'completed', NULL);
                  INSERT INTO asset_installs VALUES('claude', '/preserved/config', '0.29.0', 'installed');"
             ).unwrap();
-        assert!(schema_matches_version(&conn, head_version()).unwrap());
+        assert!(schema_matches(&conn).unwrap());
         require_current(&conn).unwrap();
         let before = application_rows(&conn);
         let ledger = rows(
@@ -786,7 +730,7 @@ mod tests {
             "SELECT * FROM refinery_schema_history ORDER BY version",
         );
         for _ in 0..2 {
-            assert_eq!(migrate_to_head(&mut conn).unwrap(), head_version());
+            initialize(&mut conn).unwrap();
             assert_eq!(application_rows(&conn), before);
             assert_eq!(
                 rows(
@@ -809,10 +753,9 @@ mod tests {
     }
 
     #[test]
-    fn baseline_is_the_first_migration_with_the_v9_identity_and_shape() {
-        assert_eq!(migration_chain()[0], (1, "baseline".to_owned()));
+    fn baseline_initialization_records_the_identity_ledger_version_and_shape() {
         assert_eq!(APPLICATION_ID, 0x4341_4639, "ASCII CAF9");
-        let conn = at_version(1);
+        let conn = initialized_conn();
         assert_eq!(
             conn.query_row("PRAGMA application_id", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
@@ -837,6 +780,7 @@ mod tests {
         .collect::<Vec<_>>();
         for table in [
             "asset_installs",
+            "cafleet_database",
             "fleets",
             "member_input_operations",
             "member_interactions",
@@ -855,7 +799,7 @@ mod tests {
         for (table, columns) in [
             (
                 "member_runs",
-                "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status",
+                "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status native_session_json",
             ),
             (
                 "member_permission_responses",
@@ -878,7 +822,17 @@ mod tests {
             1,
             "the baseline initializes the singleton instance identity"
         );
-        assert!(schema_matches_version(&conn, 1).unwrap());
+        assert_eq!(
+            rows(
+                &conn,
+                "SELECT singleton_id, cafleet_version FROM cafleet_database"
+            ),
+            vec![vec![
+                rusqlite::types::Value::Integer(1),
+                rusqlite::types::Value::Text(crate::cli::VERSION.into())
+            ]]
+        );
+        assert!(schema_matches(&conn).unwrap());
     }
 
     #[test]
@@ -889,18 +843,17 @@ mod tests {
         let url = format!("sqlite:///{}", path.display());
         {
             let mut conn = connect(&url).unwrap();
-            migrate_to_head(&mut conn).unwrap();
+            initialize(&mut conn).unwrap();
             conn.pragma_update(None, "application_id", V8_APPLICATION_ID)
                 .unwrap();
             conn.execute_batch(
-                "DELETE FROM refinery_schema_history WHERE version > 1;
-                 UPDATE refinery_schema_history SET version=8, name='uncertain_cause';",
+                "UPDATE refinery_schema_history SET version=8, name='uncertain_cause'",
             )
             .unwrap();
         }
         let before = std::fs::read(&path).unwrap();
         let conn = connect_read_only(&url).unwrap();
-        let state = crate::db::classify_selected_schema(&conn, head_version(), &url);
+        let state = crate::db::classify_selected_schema(&conn, &url);
         assert!(
             matches!(&state, crate::db::SchemaState::Incompatible { path: shown } if shown == path.to_str().unwrap()),
             "{state:?}"
@@ -917,8 +870,52 @@ mod tests {
     }
 
     #[test]
+    fn another_versions_file_is_incompatible_and_left_byte_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cafleet_0.0.0.db");
+        let url = format!("sqlite:///{}", path.display());
+        {
+            let mut conn = connect(&url).unwrap();
+            initialize(&mut conn).unwrap();
+            conn.execute("UPDATE cafleet_database SET cafleet_version='0.0.0'", [])
+                .unwrap();
+        }
+        let before = std::fs::read(&path).unwrap();
+        let conn = connect_read_only(&url).unwrap();
+        let state = crate::db::classify_selected_schema(&conn, &url);
+        assert!(
+            matches!(&state, crate::db::SchemaState::Incompatible { path: shown } if shown == path.to_str().unwrap()),
+            "{state:?}"
+        );
+        assert_eq!(
+            state.require_current().unwrap_err().message(),
+            format!(
+                "database format is incompatible at '{}'; choose an empty database path and run 'cafleet setup'.",
+                path.display()
+            )
+        );
+        drop(conn);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn a_ledger_row_beyond_the_baseline_is_incompatible() {
+        let conn = initialized_conn();
+        require_current(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO refinery_schema_history(version, name, applied_on, checksum) VALUES(2, 'hermes_backend', 'applied', '0')",
+            [],
+        )
+        .unwrap();
+        assert!(matches!(
+            classify_schema(&conn),
+            SchemaState::Incompatible { .. }
+        ));
+    }
+
+    #[test]
     fn selected_reference_rechecks_ddl_and_accepts_auxiliary_objects() {
-        let conn = at_version(head_version());
+        let conn = initialized_conn();
         conn.execute_batch(
             "CREATE TABLE operator_data(value TEXT);
              CREATE INDEX operator_messages ON messages(text);
@@ -927,16 +924,16 @@ mod tests {
              END;",
         )
         .unwrap();
-        assert!(schema_matches_version(&conn, head_version()).unwrap());
+        assert!(schema_matches(&conn).unwrap());
         conn.execute_batch("ALTER TABLE messages RENAME COLUMN text TO broken")
             .unwrap();
-        assert!(!schema_matches_version(&conn, head_version()).unwrap());
+        assert!(!schema_matches(&conn).unwrap());
         conn.execute_batch("ALTER TABLE messages RENAME COLUMN broken TO text")
             .unwrap();
-        assert!(schema_matches_version(&conn, head_version()).unwrap());
+        assert!(schema_matches(&conn).unwrap());
         conn.execute_batch("CREATE TEMP TABLE messages(wrong TEXT)")
             .unwrap();
-        assert!(!schema_matches_version(&conn, head_version()).unwrap());
+        assert!(!schema_matches(&conn).unwrap());
     }
 
     #[test]
@@ -948,8 +945,10 @@ mod tests {
             "ALTER TABLE members RENAME COLUMN status TO wrong",
             "ALTER TABLE refinery_schema_history RENAME COLUMN checksum TO wrong",
             "PRAGMA application_id=1",
+            "DROP TABLE cafleet_database",
+            "DELETE FROM cafleet_database",
         ] {
-            let conn = at_version(head_version());
+            let conn = initialized_conn();
             conn.execute_batch(damage).unwrap();
             assert!(require_current(&conn).is_err(), "{damage}");
         }
@@ -968,7 +967,7 @@ mod tests {
             ("member_placements", "DEFAULT 'tmux'", "DEFAULT 'herdr'"),
             ("messages", "ON DELETE RESTRICT", "ON DELETE CASCADE"),
         ] {
-            let conn = at_version(head_version());
+            let conn = initialized_conn();
             let ddl: String = conn
                 .query_row(
                     "SELECT sql FROM sqlite_schema WHERE name=?1",
@@ -989,28 +988,8 @@ mod tests {
             conn.pragma_update(None, "schema_version", version + 1)
                 .unwrap();
             conn.execute_batch("PRAGMA writable_schema=OFF").unwrap();
-            assert!(
-                !schema_matches_version(&conn, head_version()).unwrap(),
-                "{table}: {original}"
-            );
+            assert!(!schema_matches(&conn).unwrap(), "{table}: {original}");
         }
-    }
-
-    #[test]
-    fn ahead_versions_validate_the_ledger_without_requiring_the_head_application_shape() {
-        let conn = at_version(head_version());
-        conn.execute_batch("ALTER TABLE messages ADD COLUMN future_value TEXT")
-            .unwrap();
-        conn.execute("UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [head_version() + 1]).unwrap();
-        assert!(schema_matches_version(&conn, head_version() + 1).unwrap());
-        assert!(matches!(
-            crate::db::classify_schema(&conn, head_version()),
-            crate::db::SchemaState::Ahead { .. }
-        ));
-        conn.execute_batch("ALTER TABLE refinery_schema_history RENAME COLUMN checksum TO wrong")
-            .unwrap();
-        assert!(!schema_matches_version(&conn, head_version() + 1).unwrap());
-        assert!(!schema_matches_version(&conn, 0).unwrap());
     }
 
     #[test]
@@ -1026,7 +1005,7 @@ mod tests {
                 .unwrap(),
             5000
         );
-        migrate_to_head(&mut conn).unwrap();
+        initialize(&mut conn).unwrap();
         assert_eq!(
             conn.query_row("PRAGMA application_id", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
@@ -1046,7 +1025,7 @@ mod tests {
     fn failed_baseline_initialization_rolls_back_identity_tables_and_ledger() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA max_page_count=1").unwrap();
-        assert!(migrate_to_head(&mut conn).is_err());
+        assert!(initialize(&mut conn).is_err());
         assert!(conn.is_autocommit());
         assert_eq!(
             conn.query_row("PRAGMA application_id", [], |row| row.get::<_, i64>(0))
@@ -1062,488 +1041,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn migration_chain_is_contiguous_from_one_with_a_single_baseline() {
-        let chain = migration_chain();
-        assert_eq!(
-            chain
-                .iter()
-                .map(|(version, _)| *version)
-                .collect::<Vec<_>>(),
-            (1..=u32::try_from(chain.len()).unwrap()).collect::<Vec<_>>()
-        );
-        assert_eq!(
-            chain.iter().filter(|(_, name)| name == "baseline").count(),
-            1
-        );
-        assert_eq!(chain.first(), Some(&(1, "baseline".into())));
-        assert!(chain.iter().all(|(_, name)| !name.is_empty()));
-    }
-
-    mod hermes_backend_successor {
-        use rusqlite::Connection;
-        use rusqlite::params;
-        use rusqlite::types::Value;
-
-        use crate::db::test_support::TableSnapshot;
-        use crate::db::test_support::table_snapshot;
-        use crate::db::tests::*;
-
-        const V1_RUN_COLUMNS: &str = "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status";
-
-        const RUN_REFERENCES: [&str; 3] = [
-            "member_interactions",
-            "member_runtime_events",
-            "member_input_operations",
-        ];
-
-        fn insert_run(
-            conn: &Connection,
-            member: i64,
-            backend: &str,
-            status: &str,
-            native_session_json: Option<&str>,
-        ) -> rusqlite::Result<i64> {
-            let columns = if native_session_json.is_some() {
-                ",native_session_json"
-            } else {
-                ""
-            };
-            let value = if native_session_json.is_some() {
-                ",?6"
-            } else {
-                ""
-            };
-            let sql = format!(
-                "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,
-                 database_identity_json,launch_nonce,runtime_path,requested_mode,resolved_mode,
-                 mode_source,permission_argv_json,event_evidence,coverage,status,created_at,
-                 native_version,effective_policy_json,owner_epoch,owner_kind,owner_pid,
-                 owner_start_identity,reachability,cleanup_state,event_seq_reserved_through,
-                 observation_gap_count,runtime_dir_identity_json,child_pid,child_start_identity,
-                 exit_code,cleanup_diagnostics_json{columns})
-                 VALUES(?1,1,1,?2,'{{\"canonical_path\":\"/fixture/broker.db\"}}',?3,
-                 '/fixture/runtime',NULL,?4,'default','[]','metadata','tested',?5,
-                 'created','9.9.9','{{\"policy\":true}}',3,'runner',4321,'owner-identity',
-                 'reachable','complete',7,1,'{{\"inode\":5}}',8765,'child-identity',0,
-                 '[\"diagnostic\"]'{value})"
-            );
-            let nonce = format!("{member:x}").repeat(64)[..64].to_owned();
-            match native_session_json {
-                Some(session) => conn.execute(
-                    &sql,
-                    params![member, backend, nonce, "fixture-mode", status, session],
-                ),
-                None => conn.execute(
-                    &sql,
-                    params![member, backend, nonce, "fixture-mode", status],
-                ),
-            }?;
-            Ok(conn.last_insert_rowid())
-        }
-
-        fn populated_v1() -> Connection {
-            let conn = at_version(1);
-            conn.execute_batch(
-                "INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'successor', 'created');
-                 INSERT INTO members(member_id, fleet_id, name, description, status, registered_at, deregistered_at) VALUES
-                    (1, 1, 'Director', 'director', 'active', 'registered', NULL),
-                    (2, 1, 'claude-worker', 'claude', 'active', 'registered', NULL),
-                    (3, 1, 'codex-worker', 'codex', 'active', 'registered', NULL),
-                    (4, 1, 'opencode-worker', 'opencode', 'deregistered', 'registered', 'departed');
-                 INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) VALUES
-                    (1, 'main', '@1', '%0', 'tmux', 'claude', 'placed'),
-                    (2, 'main', '@1', '%1', 'tmux', 'claude', 'placed'),
-                    (3, 'main', '@1', '%2', 'herdr', 'codex', 'placed'),
-                    (4, 'main', '@1', NULL, 'tmux', 'opencode', 'placed');
-                 UPDATE fleets SET director_member_id=1 WHERE fleet_id=1;",
-            )
-            .unwrap();
-            let claude = insert_run(&conn, 2, "claude", "running", None).unwrap();
-            insert_run(&conn, 2, "claude", "exited", None).unwrap();
-            let codex = insert_run(&conn, 3, "codex", "prepared", None).unwrap();
-            insert_run(&conn, 4, "opencode", "lost", None).unwrap();
-            conn.execute(
-                "INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json)
-                 VALUES(?1,1,'permission_request',?2,'opened','{}')",
-                params![claude, "c".repeat(64)],
-            )
-            .unwrap();
-            let interaction = conn.last_insert_rowid();
-            conn.execute(
-                "INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,
-                 payload_json,notification_state,archive_reason)
-                 VALUES(?1,1,?2,'interaction_opened','observed','committed','{\"schema_version\":2}',
-                 'archived','member_inactive')",
-                params![claude, interaction],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at)
-                 VALUES(?1,'prompt-1','prompt',?2,'in_progress','created','updated')",
-                params![codex, "d".repeat(64)],
-            )
-            .unwrap();
-            conn
-        }
-
-        fn v1_run_rows(conn: &Connection) -> Vec<Vec<Value>> {
-            rows(
-                conn,
-                &format!(
-                    "SELECT {} FROM member_runs ORDER BY run_id",
-                    V1_RUN_COLUMNS
-                        .split_whitespace()
-                        .collect::<Vec<_>>()
-                        .join(",")
-                ),
-            )
-        }
-
-        fn ddl(conn: &Connection, name: &str) -> Option<String> {
-            conn.query_row(
-                "SELECT sql FROM sqlite_schema WHERE name=?1",
-                [name],
-                |row| row.get(0),
-            )
-            .optional()
-            .unwrap()
-        }
-
-        fn foreign_keys(conn: &Connection, table: &str) -> Vec<Vec<Value>> {
-            rows(
-                conn,
-                &format!(
-                    "SELECT \"table\", \"from\", \"to\", on_update, on_delete, \"match\" FROM pragma_foreign_key_list('{table}') ORDER BY \"from\""
-                ),
-            )
-        }
-
-        /// A migrated database and an unmigrated V1 twin that serves as the schema reference.
-        fn migrated() -> (Connection, Connection) {
-            let before = populated_v1();
-            let mut after = populated_v1();
-            migrate_to_head(&mut after).unwrap();
-            (before, after)
-        }
-
-        struct V1Rows {
-            runs: Vec<Vec<Value>>,
-            tables: Vec<TableSnapshot>,
-            sequences: Vec<Vec<Value>>,
-        }
-
-        const SEQUENCES: &str = "SELECT name, seq FROM sqlite_sequence ORDER BY name";
-
-        fn unchanged_table(name: &str) -> bool {
-            !matches!(
-                name,
-                "member_runs" | "refinery_schema_history" | "sqlite_sequence"
-            )
-        }
-
-        /// One populated V1 database, its rows captured before it migrates in place.
-        fn migrated_in_place() -> (V1Rows, Connection) {
-            let mut conn = populated_v1();
-            let before = V1Rows {
-                runs: v1_run_rows(&conn),
-                tables: table_snapshot(&conn, unchanged_table),
-                sequences: rows(&conn, SEQUENCES),
-            };
-            migrate_to_head(&mut conn).unwrap();
-            (before, conn)
-        }
-
-        #[test]
-        fn the_chain_is_the_baseline_then_the_hermes_backend_successor() {
-            assert_eq!(
-                migration_chain(),
-                vec![(1, "baseline".to_owned()), (2, "hermes_backend".to_owned())]
-            );
-            assert_eq!(head_version(), 2);
-        }
-
-        #[test]
-        fn successor_migrates_a_populated_v1_database_to_the_current_head() {
-            let (_, after) = migrated();
-            require_current(&after).unwrap();
-            assert!(schema_matches_version(&after, 2).unwrap());
-            assert_eq!(
-                rows(
-                    &after,
-                    "SELECT version, name FROM refinery_schema_history ORDER BY version"
-                ),
-                vec![
-                    vec![Value::Integer(1), Value::Text("baseline".into())],
-                    vec![Value::Integer(2), Value::Text("hermes_backend".into())],
-                ]
-            );
-            assert_eq!(
-                after
-                    .query_row("PRAGMA application_id", [], |row| row.get::<_, i64>(0))
-                    .unwrap(),
-                APPLICATION_ID
-            );
-            assert_eq!(
-                after
-                    .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
-                    .unwrap(),
-                1,
-                "the connection keeps foreign-key enforcement after the rebuild"
-            );
-            assert!(rows(&after, "PRAGMA foreign_key_check").is_empty());
-            assert_eq!(
-                rows(&after, "PRAGMA integrity_check"),
-                vec![vec![Value::Text("ok".into())]]
-            );
-        }
-
-        #[test]
-        fn successor_preserves_every_member_run_and_every_other_table_row() {
-            let (before, after) = migrated_in_place();
-            assert_eq!(v1_run_rows(&after), before.runs);
-            assert_eq!(before.runs.len(), 4);
-            assert!(
-                rows(&after, "SELECT native_session_json FROM member_runs")
-                    .iter()
-                    .all(|row| row == &vec![Value::Null]),
-                "existing runs carry no native session"
-            );
-            assert_eq!(
-                table_snapshot(&after, unchanged_table),
-                before.tables,
-                "other tables and the instance identity are preserved"
-            );
-            assert!(
-                before
-                    .tables
-                    .iter()
-                    .any(|table| table.name == "runtime_database_identity" && table.rows.len() == 1),
-                "the snapshot covers the instance identity"
-            );
-            assert_eq!(rows(&after, SEQUENCES), before.sequences);
-        }
-
-        #[test]
-        fn successor_keeps_the_v1_columns_in_order_and_appends_the_native_session_column() {
-            let (before, after) = migrated();
-            let mut expected = V1_RUN_COLUMNS.split_whitespace().collect::<Vec<_>>();
-            expected.push("native_session_json");
-            assert_eq!(column_names(&after, "member_runs"), expected);
-            assert_eq!(
-                rows(
-                    &after,
-                    "SELECT type, \"notnull\", dflt_value, pk FROM pragma_table_info('member_runs') WHERE name='native_session_json'"
-                ),
-                vec![vec![
-                    Value::Text("TEXT".into()),
-                    Value::Integer(0),
-                    Value::Null,
-                    Value::Integer(0)
-                ]]
-            );
-            assert_eq!(
-                rows(
-                    &after,
-                    "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('member_runs') WHERE name != 'native_session_json' ORDER BY cid"
-                ),
-                rows(
-                    &before,
-                    "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('member_runs') ORDER BY cid"
-                ),
-            );
-        }
-
-        #[test]
-        fn successor_preserves_the_run_index_and_every_foreign_key_to_and_from_member_runs() {
-            let (before, after) = migrated();
-            assert_eq!(
-                ddl(&after, "idx_member_runs_active"),
-                ddl(&before, "idx_member_runs_active")
-            );
-            assert!(ddl(&after, "idx_member_runs_active").is_some());
-            assert_eq!(
-                rows(
-                    &after,
-                    "SELECT name, \"unique\", partial FROM pragma_index_list('member_runs') WHERE origin='c' ORDER BY name"
-                ),
-                rows(
-                    &before,
-                    "SELECT name, \"unique\", partial FROM pragma_index_list('member_runs') WHERE origin='c' ORDER BY name"
-                ),
-            );
-            assert_eq!(
-                foreign_keys(&after, "member_runs"),
-                foreign_keys(&before, "member_runs")
-            );
-            for table in RUN_REFERENCES {
-                assert_eq!(
-                    foreign_keys(&after, table),
-                    foreign_keys(&before, table),
-                    "{table}"
-                );
-                assert_eq!(ddl(&after, table), ddl(&before, table), "{table}");
-            }
-            assert_eq!(
-                rows(
-                    &after,
-                    "SELECT name FROM sqlite_schema WHERE name LIKE '%member_runs%' ORDER BY name"
-                ),
-                vec![
-                    vec![Value::Text("idx_member_runs_active".into())],
-                    vec![Value::Text("member_runs".into())],
-                ],
-                "no rebuild scratch table remains"
-            );
-        }
-
-        #[test]
-        fn successor_enforces_the_active_run_index_and_the_preserved_foreign_keys() {
-            let (_, after) = migrated();
-            assert!(
-                insert_run(&after, 2, "claude", "running", None).is_err(),
-                "one live run per member"
-            );
-            insert_run(&after, 2, "claude", "failed", None).unwrap();
-            assert!(insert_run(&after, 404, "claude", "exited", None).is_err());
-            assert!(
-                after
-                    .execute(
-                        "INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json)
-                         VALUES(404,1,'question',?1,'opened','{}')",
-                        [ "c".repeat(64) ],
-                    )
-                    .is_err(),
-                "a child row must reference an existing run"
-            );
-            assert!(
-                after
-                    .execute("DELETE FROM member_runs WHERE run_id=1", [])
-                    .is_err(),
-                "a referenced run is retained"
-            );
-        }
-
-        #[test]
-        fn successor_continues_run_ids_after_the_preserved_autoincrement_sequence() {
-            let (before, after) = migrated_in_place();
-            let sequence = |conn: &Connection| {
-                conn.query_row(
-                    "SELECT seq FROM sqlite_sequence WHERE name='member_runs'",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap()
-            };
-            assert_eq!(rows(&after, SEQUENCES), before.sequences);
-            assert_eq!(sequence(&after), 4);
-            after
-                .execute("DELETE FROM member_runs WHERE run_id=4", [])
-                .unwrap();
-            let next = insert_run(&after, 4, "opencode", "exited", None).unwrap();
-            assert_eq!(next, 5, "a deleted run id is not reused");
-        }
-
-        #[test]
-        fn successor_backend_check_accepts_hermes_and_every_existing_backend_only() {
-            let (before, after) = migrated();
-            for (member, backend) in [(2, "hermes"), (3, "claude"), (3, "codex"), (4, "opencode")] {
-                insert_run(&after, member, backend, "exited", None)
-                    .unwrap_or_else(|error| panic!("{backend}: {error}"));
-            }
-            for backend in ["gemini", "Hermes", "", "hermes "] {
-                assert!(
-                    insert_run(&after, 2, backend, "exited", None).is_err(),
-                    "{backend:?}"
-                );
-            }
-            assert!(
-                insert_run(&before, 2, "hermes", "exited", None).is_err(),
-                "the baseline still refuses hermes"
-            );
-        }
-
-        #[test]
-        fn successor_native_session_column_accepts_only_null_or_a_json_object() {
-            let (_, after) = migrated();
-            for session in ["{}", "{\"session_key\":\"tool:abc\",\"pid\":12}"] {
-                insert_run(&after, 2, "hermes", "exited", Some(session))
-                    .unwrap_or_else(|error| panic!("{session}: {error}"));
-            }
-            for session in ["[]", "\"session\"", "1", "null", "not json", "{", ""] {
-                assert!(
-                    insert_run(&after, 2, "hermes", "exited", Some(session)).is_err(),
-                    "{session:?}"
-                );
-            }
-            after
-                .execute(
-                    "UPDATE member_runs SET native_session_json='{\"session_key\":\"k\"}' WHERE run_id=1",
-                    [],
-                )
-                .unwrap();
-            assert!(
-                after
-                    .execute(
-                        "UPDATE member_runs SET native_session_json='[1]' WHERE run_id=1",
-                        []
-                    )
-                    .is_err()
-            );
-        }
-
-        #[test]
-        fn successor_preserves_the_v1_run_check_constraints() {
-            let (_, after) = migrated();
-            let id = insert_run(&after, 3, "codex", "exited", None).unwrap();
-            for damage in [
-                "mode_source='bogus'",
-                "coverage='partial'",
-                "status='paused'",
-                "event_evidence='full'",
-                "owner_epoch=0",
-                "owner_kind='other'",
-                "reachability='gone'",
-                "cleanup_state='half'",
-                "launch_nonce='short'",
-                "runtime_path='  '",
-                "resolved_mode=''",
-                "database_identity_json='[]'",
-                "permission_argv_json='{}'",
-                "effective_policy_json='[]'",
-                "cleanup_diagnostics_json='{}'",
-                "child_pid=0",
-                "recovery_origin_status='paused'",
-                "requested_mode='explicit-without-source'",
-                "mode_source='explicit'",
-            ] {
-                assert!(
-                    after
-                        .execute(
-                            &format!("UPDATE member_runs SET {damage} WHERE run_id=?1"),
-                            [id]
-                        )
-                        .is_err(),
-                    "{damage}"
-                );
-            }
-        }
-
-        #[test]
-        fn a_fresh_database_and_a_migrated_v1_database_share_the_head_run_shape() {
-            let (_, after) = migrated();
-            let fresh = at_version(head_version());
-            assert_eq!(ddl(&after, "member_runs"), ddl(&fresh, "member_runs"));
-            assert_eq!(
-                ddl(&after, "idx_member_runs_active"),
-                ddl(&fresh, "idx_member_runs_active")
-            );
-            assert_eq!(
-                column_names(&after, "member_runs"),
-                column_names(&fresh, "member_runs")
-            );
-        }
-    }
     mod runtime_tests {
         use rusqlite::Connection;
         use rusqlite::params;
@@ -1584,19 +1081,28 @@ mod tests {
             }
 
             fn run(&self, status: &str) -> rusqlite::Result<i64> {
+                self.backend_run("codex", status, None)
+            }
+
+            fn backend_run(
+                &self,
+                backend: &str,
+                status: &str,
+                native_session_json: Option<&str>,
+            ) -> rusqlite::Result<i64> {
                 self.conn.execute(
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,
              database_identity_json,launch_nonce,runtime_path,resolved_mode,mode_source,
              permission_argv_json,event_evidence,coverage,status,created_at,
              owner_epoch,owner_kind,owner_pid,owner_start_identity,reachability,
-             cleanup_state,event_seq_reserved_through,observation_gap_count)
-             VALUES(?1,?2,?3,'codex',?4,?5,'/isolated/runtime','never','default',
+             cleanup_state,event_seq_reserved_through,observation_gap_count,native_session_json)
+             VALUES(?1,?2,?3,?8,?4,?5,'/isolated/runtime','never','default',
              '[\"--ask-for-approval\",\"never\",\"--sandbox\",\"workspace-write\"]',
              'metadata','unknown',?6,?7,1,'creator',1234,'fixture-owner','reachable',
-             'incomplete',0,0)",
+             'incomplete',0,0,?9)",
             params![self.member,self.fleet,self.director,
                 json!({"canonical_path": self.conn.path().unwrap(), "instance_id": "a".repeat(32), "device":1,"inode":2}).to_string(),
-                "b".repeat(64),status,NOW],
+                "b".repeat(64),status,NOW,backend,native_session_json],
         )?;
                 Ok(self.conn.last_insert_rowid())
             }
@@ -1654,7 +1160,7 @@ mod tests {
             assert_eq!(original.len(), 32);
             assert!(original.bytes().all(|byte| byte.is_ascii_hexdigit()));
             assert_ne!(original, identity(&second.conn));
-            crate::db::tests::migrate_to_head(&mut first.conn).unwrap();
+            crate::db::initialize(&mut first.conn).unwrap();
             let url = format!("sqlite:///{}", first.conn.path().unwrap());
             assert_eq!(
                 identity(&crate::db::tests::connect(&url).unwrap()),
@@ -1732,11 +1238,7 @@ mod tests {
                     .execute_batch(&format!("DROP TABLE {table}"))
                     .unwrap();
                 assert!(
-                    !crate::db::tests::schema_matches_version(
-                        &fixture.conn,
-                        crate::db::tests::head_version()
-                    )
-                    .unwrap(),
+                    !crate::db::schema_matches(&fixture.conn).unwrap(),
                     "{table}"
                 );
             }
@@ -1831,6 +1333,57 @@ mod tests {
                     "{field}"
                 );
             }
+        }
+
+        #[test]
+        fn run_backend_check_accepts_every_supported_backend_only() {
+            let fixture = Fixture::new();
+            for backend in ["hermes", "claude", "codex", "opencode"] {
+                fixture
+                    .backend_run(backend, "exited", None)
+                    .unwrap_or_else(|error| panic!("{backend}: {error}"));
+            }
+            for backend in ["gemini", "Hermes", "", "hermes "] {
+                assert!(
+                    fixture.backend_run(backend, "exited", None).is_err(),
+                    "{backend:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn native_session_column_accepts_only_null_or_a_json_object() {
+            let fixture = Fixture::new();
+            for session in ["{}", "{\"session_key\":\"tool:abc\",\"pid\":12}"] {
+                fixture
+                    .backend_run("hermes", "exited", Some(session))
+                    .unwrap_or_else(|error| panic!("{session}: {error}"));
+            }
+            for session in ["[]", "\"session\"", "1", "null", "not json", "{", ""] {
+                assert!(
+                    fixture
+                        .backend_run("hermes", "exited", Some(session))
+                        .is_err(),
+                    "{session:?}"
+                );
+            }
+            let run = fixture.backend_run("hermes", "exited", None).unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET native_session_json='{\"session_key\":\"k\"}' WHERE run_id=?1",
+                    [run],
+                )
+                .unwrap();
+            assert!(
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET native_session_json='[1]' WHERE run_id=?1",
+                        [run]
+                    )
+                    .is_err()
+            );
         }
 
         #[test]
@@ -2045,24 +1598,14 @@ mod tests {
     }
 
     #[test]
-    fn classification_preserves_missing_behind_ahead_identity_and_sql_causes() {
+    fn classification_preserves_missing_current_identity_and_sql_causes() {
         let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
-        let head = crate::db::head_version();
-        assert!(matches!(classify_schema(&conn, head), SchemaState::Missing));
-        crate::db::migrate_to_head(&mut conn).unwrap();
-        assert!(
-            matches!(classify_schema(&conn, head), SchemaState::Head { version } if version == head)
-        );
-        conn.execute_batch("ALTER TABLE messages ADD COLUMN future_value TEXT")
-            .unwrap();
-        conn.execute("UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [head + 1]).unwrap();
-        assert!(matches!(
-            classify_schema(&conn, head),
-            SchemaState::Ahead { .. }
-        ));
+        assert!(matches!(classify_schema(&conn), SchemaState::Missing));
+        crate::db::initialize(&mut conn).unwrap();
+        assert!(matches!(classify_schema(&conn), SchemaState::Current));
         conn.execute_batch("PRAGMA application_id=1").unwrap();
         assert!(matches!(
-            classify_schema(&conn, head),
+            classify_schema(&conn),
             SchemaState::Incompatible { .. }
         ));
         conn.pragma_update(None, "application_id", crate::db::APPLICATION_ID)
@@ -2072,7 +1615,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            classify_schema(&conn, head),
+            classify_schema(&conn),
             SchemaState::Unreachable { .. }
         ));
     }

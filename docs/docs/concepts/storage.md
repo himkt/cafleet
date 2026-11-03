@@ -4,7 +4,7 @@ Use one SQLite file for a fleet's registry and durable messages. The CLI accesse
 
 ## Backend
 
-The default path is `~/.local/share/cafleet/cafleet_v9.db`. Set `CAFLEET_DATABASE_URL` to a `sqlite:///<path>` URL to select another file. Resolve a relative file path against the invoking working directory, then canonicalize the selected database file for shared pane-lock identity. Spawned panes inherit that URL.
+The default path is `~/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1`). Set `CAFLEET_DATABASE_URL` to a `sqlite:///<path>` URL to select another file. Resolve a relative file path against the invoking working directory, then canonicalize the selected database file for shared pane-lock identity. Spawned panes inherit that URL.
 
 Connections enforce foreign keys and normally use `PRAGMA busy_timeout=5000`. Bounded receiving caps database waits to its remaining operation budget. Fleet bootstrap writes its registry and current Director placement in one transaction; member creation preserves pending placement and compensation for failed pane creation.
 
@@ -14,28 +14,27 @@ Typed columns store every routing field and required enum. The [database schema]
 
 ## Schema management
 
-The current format has its own application identity, an embedded migration ledger and the expected table/column shapes; unrelated auxiliary tables, indexes and triggers stay compatible. An incompatible selected file is preserved unchanged: diagnosis runs before database content writes or setup installs assets.
+A compatible file has CAFleet's application identity, a ledger holding only the embedded schema baseline, the cafleet version that initialized it equal to the running CLI's, and the expected table/column shapes; unrelated auxiliary tables, indexes and triggers stay compatible. An incompatible selected file is preserved unchanged: diagnosis runs before database content writes or setup installs assets.
 
 | Selected state | Setup behavior |
 |---|---|
 | Empty SQLite file with identity zero and no user tables | Apply the embedded baseline transactionally |
-| Valid current format at the bundled head | Proceed idempotently |
-| Current format behind the bundled head | Apply known migrations |
-| Current format ahead of the bundled head | Fail before database writes, asset installation or asset-install recording |
-| Other populated/identified format or malformed current schema | Report incompatible format before writes |
+| Valid file of this version | Proceed idempotently |
+| Other populated/identified file, another version's file or malformed schema | Report incompatible format before writes |
 
 Schema checks run within a consistent read snapshot, and application identity and ledger contents are read on every validation, so a changed version or malformed definition fails at the boundary.
 
 Run `cafleet setup` after installation. The same classifier guards normal commands and feeds doctor's read-only diagnosis. Exact errors are in the [schema-version guard](https://github.com/himkt/cafleet/blob/main/SPEC.md#schema-version-guard).
 
-### Upgrading from `cafleet_v8.db`
+### Upgrading cafleet
 
-The `cafleet_v9.db` format family starts a fresh database. After upgrading the CLI:
+Each cafleet version starts from a fresh database, so no fleets, messages or runtime history carry across an upgrade:
 
-1. Run `cafleet setup` once. It creates `~/.local/share/cafleet/cafleet_v9.db` and records the asset installations there; until then `cafleet doctor` reports the database as absent.
-2. Create your fleets anew.
+1. Finish and delete your active fleets before upgrading.
+2. After upgrading, run `cafleet setup` once. It creates the version's `~/.local/share/cafleet/cafleet_<VERSION>.db` and records the asset installations there; until then `cafleet doctor` reports the database as absent.
+3. Create your fleets anew.
 
-The previous `~/.local/share/cafleet/cafleet_v8.db` stays in place, byte for byte. Its fleets, messages and runtime history remain in that file, and the new CLI neither reads nor migrates it: selecting it through `CAFLEET_DATABASE_URL` reports an incompatible format.
+Database files of earlier versions in `~/.local/share/cafleet/` stay in place, byte for byte. Selecting one through `CAFLEET_DATABASE_URL` reports an incompatible format; delete them by hand when you no longer need them. With an explicit `CAFLEET_DATABASE_URL`, point it at a new empty path, or delete the old file by hand, then run `cafleet setup`.
 
 ## Assets-install recording
 

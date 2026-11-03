@@ -19,7 +19,7 @@ A Director arms native reception before relying on replies and retains one recei
 | Concern | Responsibility |
 |---|---|
 | Configuration | Selected database, text limit and multiplexer override |
-| Persistence | Connection factory, format/shape diagnosis and embedded migrations |
+| Persistence | Connection factory, format/shape diagnosis and the embedded schema baseline |
 | Broker | Typed fleet/member/message/asset records and synchronous transactions |
 | Output | Ordered wire presenters, truncation and capture formatting |
 | Multiplexer | Discovery, pane creation/capture/input/kill and layout compensation |
@@ -82,7 +82,7 @@ Schema compatibility and the application identity are specified in §8 Database 
 
 Connections use SQLite foreign-key enforcement and a normal five-second busy timeout. A bounded operation caps that wait to its remaining budget. Resolve a relative selected SQLite file path against the invoking working directory and canonicalize the database file before lock-key directory construction.
 
-Validate database identity, ledger version and required table/column shapes for the recorded supported version before command writes and before setup installs assets. An invocation's validated connection serves its internal send, ACK and notification stamp operations; standalone public broker write functions retain their own format guard. Schedule schema upgrades between active command invocations. Empty zero-identity files initialize with the baseline atomically. Current-family known older versions migrate; an ahead ledger version fails setup before database mutation, asset installation or asset-install recording. Other populated/identified or malformed files fail without content writes:
+Validate database identity, the baseline ledger, the recorded cafleet version and required table/column shapes before command writes and before setup installs assets. An invocation's validated connection serves its internal send, ACK and notification stamp operations; standalone public broker write functions retain their own format guard. Empty zero-identity files initialize with the baseline atomically. Every other populated, identified or malformed file, including one recorded by another cafleet version, fails before database mutation, asset installation or asset-install recording:
 
 `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.`
 
@@ -118,7 +118,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 
 | Command | Purpose | Subject | JSON |
 |---|---|---|---|
-| `setup` | Initialize/migrate the current database and install assets | — | no |
+| `setup` | Initialize the version's database and install assets | — | no |
 | `doctor` | Diagnose multiplexer, database, agent assets and member runtimes | — | yes |
 | `fleet create` | Register the calling Director atomically | — | yes |
 | `fleet list` / `fleet show` | Read fleet registry | `FLEET_ID` for show | yes |
@@ -142,7 +142,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 
 | Variable | Field | Default | Meaning |
 |---|---|---|---|
-| `CAFLEET_DATABASE_URL` | `database_url` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v9.db` | Selected SQLite file path |
+| `CAFLEET_DATABASE_URL` | `database_url` | `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db`, `<VERSION>` being the package version (the version field of `cafleet --version`, e.g. `0.31.1`) | Selected SQLite file path |
 | `CAFLEET_MULTIPLEXER` | `multiplexer` | Auto-detect | Explicit supported multiplexer override |
 | `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | CLI text-output body codepoint limit |
 | `CAFLEET_MEMBER_ID` | — | Unset | Set by the runner in each member's spawn environment. Presence refuses the Director-only commands (§ Director-only command guard); the value is shown, never parsed. |
@@ -244,9 +244,9 @@ Send and member creation require exactly one positional body or `--file PATH`; `
 
 #### `cafleet setup` — Onboarding and Schema Management
 
-`cafleet setup [--coding-agent AGENT...]` prepares the database first, then installs assets. It validates the selected database format before any write: an empty or missing file is initialized with the embedded baseline in one transaction, a known older current-family version migrates to head, and an ahead ledger version or incompatible shape fails before database mutation, asset installation or asset-install recording. Compatible setup then installs embedded assets offline and records versions. Backend selection is multi-value/repeatable, deduplicated and defaults to the supported backend registry; selected backends install in registry order.
+`cafleet setup [--coding-agent AGENT...]` prepares the database first, then installs assets. It validates the selected database format before any write: an empty or missing file is initialized with the embedded baseline in one transaction, a current file of this version is left unchanged, and any other state fails with its schema-version guard error (§6.3 Schema-version guard) before database mutation, asset installation or asset-install recording. Compatible setup then installs embedded assets offline and records versions. Backend selection is multi-value/repeatable, deduplicated and defaults to the supported backend registry; selected backends install in registry order.
 
-After migrating, setup prints `Applied migrations to head ({head}) at {path}.`; a database already at head prints `Already at head ({head}).`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation and record, and setup exits 1 with that backend's cause.
+After initializing, setup prints `Initialized database at {path}.`; a database that is already current prints `Database already initialized at {path}.`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation and record, and setup exits 1 with that backend's cause.
 
 ##### Config-dir resolution
 
@@ -381,11 +381,11 @@ hermes: skipped terminal.client_env_passthrough names (binary hermes not found o
 
 #### Shared diagnosis and connection reuse
 
-Use the invocation’s shared classifier and connection for guard/setup work. Doctor completes its read-only checks even when the database is unavailable. Compatibility includes identity, ledger version and expected table/column shapes.
+Use the invocation’s shared classifier and connection for guard/setup work. Doctor completes its read-only checks even when the database is unavailable. Compatibility includes identity, baseline ledger, recorded cafleet version and expected table/column shapes.
 
 #### Schema-version guard
 
-Every fleet/member/message command validates the current format (§8 Database schema) before writes. Malformed or incompatible files fail with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve file bytes and existing sidecars. Empty state reports `no cafleet database; run 'cafleet setup'`. Behind state reports `database schema is outdated (schema M, head N); run 'cafleet setup'`; ahead reports `database schema M is newer than this cafleet (head N); upgrade cafleet`. Database-open/read errors preserve their cause. Setup initializes/repairs compatible known versions; doctor reports rather than blocks its other diagnostics.
+Every fleet/member/message command validates the current format (§8 Database schema) before writes. Malformed or incompatible files fail with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` A file recorded by another cafleet version is incompatible. Preserve file bytes and existing sidecars. Empty state reports `no cafleet database; run 'cafleet setup'`. Database-open/read errors preserve their cause. Doctor reports rather than blocks its other diagnostics.
 
 `--help` renders at parse time and exits before any command body runs, so
 neither group-level help (`cafleet fleet --help`) nor subcommand help
@@ -427,8 +427,8 @@ On success the text output is `Deleted fleet ID. Deregistered N members.` follow
 A full-environment diagnosis that reports **every** check even when the
 multiplexer is unavailable or the database is missing or incompatible — no
 early abort. `doctor` is exempt from the
-schema-version guard (§6.3 Schema-version guard): a missing, outdated or
-incompatible database is reported, not fatal. Its flags are the optional
+schema-version guard (§6.3 Schema-version guard): a missing or incompatible
+database is reported, not fatal. Its flags are the optional
 `--verbose` and `--json` (§6.3 JSON output (`--json`)); `--verbose` help reads
 `Print one row per individual check instead of the per-component summary`.
 
@@ -451,19 +451,19 @@ in this order:
 | Check name | `ok` | `info` | `warn` | `error` |
 |---|---|---|---|---|
 | `multiplexer` | `<backend> session=<session> window=<window_id> pane=<pane_id>` | — | — | The multiplexer resolution, availability or context-discovery error |
-| `database` | `compatible schema <N>` at head | — | — | The schema-version guard error for an empty, behind, ahead or incompatible database, or the open/inspection cause |
+| `database` | `cafleet <VERSION> at <path>` | — | — | The schema-version guard error for an empty or incompatible database, or the open/inspection cause |
 | `<agent>.configuration` | The resolved config path (§ Config-dir resolution) | — | — | The config-path validation error, or `HOME is not set` |
 | `<agent>.executable` | `<binary> is on PATH` | `<binary> is optional and absent from PATH` | — | — |
 | `opencode.preset[.<mode>]` | § OpenCode preset checks | § OpenCode preset checks | — | § OpenCode preset checks |
 | `hermes.client_env_passthrough` | § Hermes passthrough check | § Hermes passthrough check | — | § Hermes passthrough check |
-| `<agent>.installation` | `recorded <version> at <installed_at>` when the version at the resolved path equals the CLI version | `unavailable: configuration failed: <cause>`; `unavailable: <database error>` for a database not at head | `recorded <version> at <installed_at>; run 'cafleet setup --coding-agent <agent>'` for another version; `no installation recorded at <path>; run 'cafleet setup --coding-agent <agent>'` | `installation query failed: <cause>` |
+| `<agent>.installation` | `recorded <version> at <installed_at>` when the version at the resolved path equals the CLI version | `unavailable: configuration failed: <cause>`; `unavailable: <database error>` for a database that is not current | `recorded <version> at <installed_at>; run 'cafleet setup --coding-agent <agent>'` for another version; `no installation recorded at <path>; run 'cafleet setup --coding-agent <agent>'` | `installation query failed: <cause>` |
 | `member_runtime.<run_id>`, `member_runtime` | § Member runtime checks | § Member runtime checks | § Member runtime checks | § Member runtime checks |
 
 The three per-agent rows repeat for each backend in registry order; the
 OpenCode preset checks follow `opencode.executable`, and the Hermes passthrough
 check follows `hermes.executable`.
 A recorded version is compared by string equality. Installation records are
-read only at the resolved path of a database at head; a row recorded at
+read only at the resolved path of a current database; a row recorded at
 another path is not the resolved installation.
 
 ##### Summary lines
@@ -476,7 +476,7 @@ registry order, then the `members` lines (§ Member runtime checks).
 | Component | `ok` detail | Problem line |
 |---|---|---|
 | `multiplexer` | `<backend> (session <session>, pane <pane_id>)` | `error` with the check's cause |
-| `database` | `schema <N>` | `error` with the check's cause, which names `run 'cafleet setup'` or `upgrade cafleet` |
+| `database` | `cafleet <VERSION>` | `error` with the check's cause, which names `run 'cafleet setup'` |
 | `<agent>` | `ready` | The backend rules below |
 
 A backend line folds that backend's `configuration`, `executable`, OpenCode
@@ -494,7 +494,7 @@ matching rule applies:
 | Hermes passthrough unreadable | `error` | `cannot read hermes configuration through 'hermes config get': <cause>` | no |
 | Installation recorded at another version | `warn` | `assets from cafleet <version> (this is <cli version>)` | yes |
 | No installation recorded | `warn` | `assets not installed at <path>` | yes |
-| Installation unavailable because the database is not at head | `info` | `assets unchecked (database unavailable)` | no |
+| Installation unavailable because the database is not current | `info` | `assets unchecked (database unavailable)` | no |
 | Installation query failed | `error` | `installation query failed: <cause>` | no |
 
 For example:
@@ -582,7 +582,7 @@ files at the other base in place.
 
 ##### Member runtime checks
 
-With a compatible at-head database, doctor classifies every recorded member run in ascending `run_id` order, against a read-only connection and without mutating registry or runtime state, in two passes:
+With a compatible current database, doctor classifies every recorded member run in ascending `run_id` order, against a read-only connection and without mutating registry or runtime state, in two passes:
 
 1. **Registry pass.** One query reads every run's `run_id`, `member_id`, run `status`, `cleanup_state` and the member's registry `status`. It runs no probes and sits outside the time budget.
 2. **Probe pass.** Only runs the registry pass leaves unclassified are probed: the launch-descriptor, run-path, owner-lock and health probes. One five-second budget covers the pass, and each run is bounded by the smaller of 100 ms and the remaining budget.
@@ -619,7 +619,7 @@ The registry pass decides rows 2–4; the probe pass decides rows 1 and 5–10. 
 <status> members: <N> <label>: <ID ranges>[ — run '<command>'[ or '<command>']]
 ```
 
-`<N>` counts the distinct member IDs in that state. The ID ranges list those IDs ascending and de-duplicated; three or more consecutive IDs collapse to `a-b`, one or two consecutive IDs stay separate (`7, 8`), and items join with `, `. The next command keeps `ID` literal, because the line covers several members. With no runs, or only `ended` runs, doctor prints `ok members: none running`. A database that is not at head produces no runtime rows and the summary line `info members: not checked (database unavailable)`. For example:
+`<N>` counts the distinct member IDs in that state. The ID ranges list those IDs ascending and de-duplicated; three or more consecutive IDs collapse to `a-b`, one or two consecutive IDs stay separate (`7, 8`), and items join with `, `. The next command keeps `ID` literal, because the line covers several members. With no runs, or only `ended` runs, doctor prints `ok members: none running`. A database that is not current produces no runtime rows and the summary line `info members: not checked (database unavailable)`. For example:
 
 ```
 ok members: 4 running: 7, 8, 23, 24
@@ -1160,7 +1160,7 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | Command | Situation | Error message | Exit | Notes |
 |---|---|---|---|---|
 | (any surface resolving a config dir) | A set config-path variable holds a non-absolute value (empty string and relative paths included) | §6.3 Config-dir resolution validation | 1 | `doctor` reports it as the agent's configuration check instead |
-| (any non-setup command) | A missing, empty, behind, ahead or incompatible database | §6.3 Schema-version guard | 1 | — |
+| (any non-setup command) | A missing, empty or incompatible database | §6.3 Schema-version guard | 1 | — |
 | `member prompt` / `member exec` / `member press` / `member recover` / `permission respond` / `input reconcile` | `CAFLEET_MEMBER_ID` is set, with any value | §6.3 Director-only command guard | 1 | Fires after parsing and before settings, database or multiplexer access; stdout stays empty |
 | `member create` | `--coding-agent hermes` with an unreadable configuration or a `terminal.client_env_passthrough` lacking a CAFleet member name | §6.7 Hermes availability preflight | 1 | Fires before registration or multiplexer effects |
 | `member delete` | A `hermes` run whose work settlement cannot be verified | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 | The member row and runner cleanup records are kept |
@@ -2674,7 +2674,7 @@ tmux/herdr pane <--> CAFleet runner <--> child PTY <--> native agent CLI
 
 The runner owns the child PTY and reconstructs terminal state independently of the multiplexer. Terminal modes, signals and process handling preserve native input and owned-child cleanup.
 
-Store runtime artifacts in `.cafleet-runs/<database_namespace>/<run_id>/` beside the canonical selected database. The migration creates a singleton `runtime_database_identity` row with a random 128-bit `instance_id`; the database identity is the canonical path, filesystem device/inode and this stored instance ID. Compute `database_namespace` as the first 26 base32 characters of its SHA-256 digest. A private namespace manifest stores the complete identity; a prefix collision with a different manifest fails explicitly rather than sharing artifacts. Distinct databases under one parent therefore remain separate even with equal run IDs.
+Store runtime artifacts in `.cafleet-runs/<database_namespace>/<run_id>/` beside the canonical selected database. Baseline initialization creates a singleton `runtime_database_identity` row with a random 128-bit `instance_id`; the database identity is the canonical path, filesystem device/inode and this stored instance ID. Compute `database_namespace` as the first 26 base32 characters of its SHA-256 digest. A private namespace manifest stores the complete identity; a prefix collision with a different manifest fails explicitly rather than sharing artifacts. Distinct databases under one parent therefore remain separate even with equal run IDs.
 
 Directories use `0700`, descriptor/spool files use `0600`, and a control socket is accessible only to its owner. Create each run directory exclusively and reconcile an existing directory before reuse. Reject symlinks, ownership mismatches, malformed descriptors and socket paths exceeding the platform limit against the complete resulting path before pane creation. The descriptor contains schema version, complete database identity, fleet/member/Director/run identities, ownership epoch, a random launch nonce, literal child argv, absolute cwd, required environment overrides, evidence policy and initial terminal dimensions. Preserve the existing inherited native configuration; avoid copying the entire environment or creating per-member native profiles.
 
@@ -2915,7 +2915,7 @@ The member's routed refusal evidence remains the record in each case.
 
 #### Persistence, notification and read interfaces
 
-The `cafleet_v9.db` baseline creates the runtime records together with the broker tables (§8). A user upgrading from the `cafleet_v8.db` family runs `cafleet setup` once to create the v9 database; the v8 file and its sidecars are never opened, migrated, renamed or deleted, so its fleets, messages and runtime history stay there and the new CLI does not show them. The singleton `runtime_database_identity(singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1), instance_id TEXT NOT NULL)` has a random 128-bit hex instance ID initialized once during migration. Runtime records have these fields:
+The baseline creates the runtime records together with the broker tables (§8). Each cafleet version starts from its own database file; a file of another version is never opened for writes, migrated, renamed or deleted, and the running CLI does not show its fleets, messages or runtime history. The singleton `runtime_database_identity(singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1), instance_id TEXT NOT NULL)` has a random 128-bit hex instance ID initialized once during baseline initialization. Runtime records have these fields:
 
 | Table | Required fields and constraints |
 |---|---|
@@ -2982,7 +2982,7 @@ Runtime event kinds are `coverage_unknown`, `interaction_opened`, `interaction_o
 }
 ```
 
-Event keys are ordered `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for lifecycle events, then, for `input_delivery_result` only, ordered `input_id,message_id,delivery,stage`, then required `director_action`. The action object has ordered `kind,instruction,inspect_argv`, and its `kind` is `review_permission_request`, `review_automatic_refusal` or `review_automatic_review_unavailable`; other events use null action. Both automatic review event kinds fit this shape: `evidence.backend` together with the kind identifies the reviewer, and the effective policy lives on the run rather than in the payload. A binary of an earlier format family never reads these records, because it refuses the `cafleet_v9.db` application identity as an incompatible format.
+Event keys are ordered `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for lifecycle events, then, for `input_delivery_result` only, ordered `input_id,message_id,delivery,stage`, then required `director_action`. The action object has ordered `kind,instruction,inspect_argv`, and its `kind` is `review_permission_request`, `review_automatic_refusal` or `review_automatic_review_unavailable`; other events use null action. Both automatic review event kinds fit this shape: `evidence.backend` together with the kind identifies the reviewer, and the effective policy lives on the run rather than in the payload. A binary of another cafleet version never reads these records, because it refuses the file as an incompatible format.
 
 The evidence object, in events and in stored interaction evidence, has ordered keys `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from; it is null exactly when `operation` is null, including under metadata evidence.
 
@@ -3484,7 +3484,7 @@ Minimum-version delivery acceptance covers every bundled backend on each registe
 | Adversarial transition | Candidate/obscured/superseding interaction, human input during either settle, observer/owner loss and partial stage writes preserve no-write or uncertain outcomes |
 | Durable retry | A queued canonical preview drains by fallback and retains one ID/digest after composer changes and repeated queries; duplicate keys, conflicting digests, concurrent sender/drain, lost replies and stamp failures avoid duplicate dispatch |
 | Deferred failure and liveness | After closure with a busy pane lock and no further output/commands, the runner timer either delivers when the lock frees or publishes not submitted at the deadline; temporary storage/observer failure and terminal-commit recovery preserve FIFO/result visibility |
-| Migration and reporting | Fresh/head/previous-head upgrade, canonical digest validation, referential integrity, sequence preservation, self-send/no-pane output and durable reason/state projection for ordinary/history/permission-response receipts |
+| Schema and reporting | Fresh-baseline initialization, canonical digest validation, referential integrity, sequence preservation, self-send/no-pane output and durable reason/state projection for ordinary/history/permission-response receipts |
 
 Measurements establish submitted native input separately from model consumption, permission decisions and command completion.
 
@@ -3507,7 +3507,7 @@ Acceptance additionally covers the transport, lifecycle and persistence cases be
 
 ### 7.1 Configuration & environment
 
-Expand HOME only for the default `sqlite:///` URL ending in `cafleet_v9.db`. Explicit `sqlite:///<path>` overrides preserve their path text; relative file paths resolve against the invoking working directory before canonical database-file identity supplies shared pane locking. Validate supplied values and required state at their boundary. Config-directory relocation is resolved lazily per selected backend.
+Expand HOME only for the default `sqlite:///` URL naming `cafleet_<VERSION>.db`. Explicit `sqlite:///<path>` overrides preserve their path text; relative file paths resolve against the invoking working directory before canonical database-file identity supplies shared pane locking. Validate supplied values and required state at their boundary. Config-directory relocation is resolved lazily per selected backend.
 
 ### 7.2 Error handling & exit-code policy
 
@@ -3527,7 +3527,7 @@ Use UTC for durable timestamps, monotonic clocks for budgets and deadlines. Cap 
 
 ### 7.6 Packaging & distribution
 
-Ship one `cafleet` binary per release target. Archives are `cafleet-v<version>-<target>.tar.gz` containing the binary; the release tag is the bare package version. The compile-time version owns `--version`, asset stamps and doctor's installation checks. Embed migrations, skills and presets offline. Rust builds/release packaging require no frontend output. The documentation site retains its independent Node/pnpm tooling.
+Ship one `cafleet` binary per release target. Archives are `cafleet-v<version>-<target>.tar.gz` containing the binary; the release tag is the bare package version. The compile-time version owns `--version`, asset stamps and doctor's installation checks. Embed the schema baseline, skills and presets offline. Rust builds/release packaging require no frontend output. The documentation site retains its independent Node/pnpm tooling.
 
 ### 7.7 Agent-operation contract — one-shot command isolation
 
@@ -3535,7 +3535,7 @@ Agents run each CAFleet process as the only command in its shell-tool invocation
 
 ## 8. Database schema
 
-The baseline is version 1 in the current distinct format family, `cafleet_v9.db`, whose application identity is `PRAGMA application_id` `1128351289` (`0x43414639`, ASCII `CAF9`). The binary embeds `V1__baseline.sql` and its successor `V2__hermes_backend.sql`, so its head is 2. Any other identified or populated file, including a `cafleet_v8.db` file selected through `CAFLEET_DATABASE_URL`, is an incompatible format whose bytes are preserved, and `cafleet doctor` reports the default v9 file as absent until `cafleet setup` creates it. The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Known versions use their recorded migration shape; newer versions are diagnosed before any head-shape comparison. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
+The binary embeds one schema baseline, `V1__baseline.sql`, whose application identity is `PRAGMA application_id` `1128351289` (`0x43414639`, ASCII `CAF9`). Each cafleet version owns its default database file, `cafleet_<VERSION>.db`, where `<VERSION>` is the package version, and baseline initialization records that version in the `cafleet_database` row. The fresh baseline creates exactly the application tables declared in the schema, and its ledger holds exactly the row `(1, 'baseline')`. Compatibility diagnosis verifies, in order, the application identity, that baseline ledger, every required table’s column shape with required indexes/foreign keys, and a recorded version equal to the running binary's. Any other identified or populated file, including one recorded by another cafleet version or one whose ledger holds a row beyond the baseline, is an incompatible format whose bytes are preserved, and `cafleet doctor` reports the version's default file as absent until `cafleet setup` creates it. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
 
 | Table | Responsibility |
 |---|---|
@@ -3544,6 +3544,7 @@ The baseline is version 1 in the current distinct format family, `cafleet_v9.db`
 | `member_placements` | Multiplexer and coding-agent association |
 | `messages` | Point-to-point delivery, acknowledgement and preview stamp |
 | `runtime_database_identity` | Singleton database-instance identity for runtime namespaces |
+| `cafleet_database` | Singleton record of the cafleet version that initialized the file |
 | `member_runs` | Launch intent, ownership, lifecycle, recorded coverage and observed effective policy |
 | `member_interactions` | Observed interactive episodes and visibility closure |
 | `member_runtime_events` | Sequenced events with atomic Director inbox association or archival |
@@ -3551,7 +3552,7 @@ The baseline is version 1 in the current distinct format family, `cafleet_v9.db`
 | `member_permission_responses` | Immutable attributed decisions tied to input/event/interaction identity |
 | `member_permission_response_claims` | One possibly transmitted answer per observed episode |
 | `asset_installs` | Installed asset versions by backend and config path |
-| `refinery_schema_history` | Embedded migration ledger |
+| `refinery_schema_history` | Baseline ledger |
 
 Exact baseline DDL:
 
@@ -3614,12 +3615,17 @@ CREATE TABLE runtime_database_identity (
 );
 INSERT INTO runtime_database_identity VALUES(1, lower(hex(randomblob(16))));
 
+CREATE TABLE cafleet_database (
+    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+    cafleet_version TEXT NOT NULL CHECK(length(trim(cafleet_version)) > 0)
+);
+
 CREATE TABLE member_runs (
     run_id INTEGER PRIMARY KEY AUTOINCREMENT,
     member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
     fleet_id INTEGER NOT NULL REFERENCES fleets(fleet_id) ON DELETE RESTRICT,
     director_member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
-    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode')),
+    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode','hermes')),
     database_identity_json TEXT NOT NULL CHECK(json_valid(database_identity_json) AND json_type(database_identity_json) = 'object'),
     launch_nonce TEXT NOT NULL CHECK(length(launch_nonce) = 64 AND launch_nonce NOT GLOB '*[^0-9a-f]*'),
     runtime_path TEXT NOT NULL CHECK(length(trim(runtime_path)) > 0),
@@ -3654,6 +3660,7 @@ CREATE TABLE member_runs (
     exit_signal INTEGER,
     cleanup_diagnostics_json TEXT CHECK(cleanup_diagnostics_json IS NULL OR (json_valid(cleanup_diagnostics_json) AND json_type(cleanup_diagnostics_json) = 'array')),
     recovery_origin_status TEXT CHECK(recovery_origin_status IS NULL OR recovery_origin_status IN ('starting','prepared','running','degraded','stopping','recovering','exited','failed','lost')),
+    native_session_json TEXT CHECK(native_session_json IS NULL OR (json_valid(native_session_json) AND json_type(native_session_json) = 'object')),
     CHECK((mode_source = 'default' AND requested_mode IS NULL) OR (mode_source = 'explicit' AND requested_mode IS NOT NULL))
 );
 CREATE UNIQUE INDEX idx_member_runs_active ON member_runs(member_id) WHERE status NOT IN ('exited','failed','lost');
@@ -3756,17 +3763,11 @@ Baseline column semantics:
 
 Runtime records keep their run/member/fleet/Director references after soft deregistration, so history survives member and fleet closure.
 
-Version 2 (`V2__hermes_backend.sql`) rebuilds `member_runs` inside the migration transaction with SQLite's table-rebuild procedure, preserving every row, column, constraint, index and referencing foreign key. It changes two definitions:
-
-```sql
-    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode','hermes')),
-    -- appended as the last column:
-    native_session_json TEXT CHECK(native_session_json IS NULL OR (json_valid(native_session_json) AND json_type(native_session_json) = 'object'))
-```
+The binary appends `INSERT INTO cafleet_database(singleton_id, cafleet_version) VALUES(1, '<VERSION>');` to the baseline SQL, with `<VERSION>` its package version, and applies both in one transaction, so a failed initialization leaves no identity, table, ledger or version row.
 
 `native_session_json` records a `hermes` run's native session identity for work settlement (§6.7 Hermes work settlement) and is null for every other backend and for a run whose identity is not yet captured.
 
-Section 6.9 specifies every runtime table field, enum, nullability constraint, foreign-key association and uniqueness invariant, including database-instance identity, settled receipt retention, transactional same-run/event/Director response checks, privacy, zero-byte claim release and immutable audit semantics. Before a format family's first tagged release, its `V1__baseline.sql` baseline may be revised in place. After that release, schema changes extend the chain with contiguous embedded migrations that retain the application identity and existing data.
+Section 6.9 specifies every runtime table field, enum, nullability constraint, foreign-key association and uniqueness invariant, including database-instance identity, settled receipt retention, transactional same-run/event/Director response checks, privacy, zero-byte claim release and immutable audit semantics. Schema changes edit `V1__baseline.sql` in place; each cafleet version starts from a fresh database.
 
 ## 9. Testing strategy
 

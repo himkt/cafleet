@@ -6,7 +6,7 @@ Exact command facts for running CAFleet and interpreting its results.
 
 | Command | Purpose | Subject | JSON |
 |---|---|---|---|
-| `setup` | Initialize/migrate the current database and install assets | — | no |
+| `setup` | Initialize the version's database and install assets | — | no |
 | `doctor` | Diagnose multiplexer, database, agent assets and member runtimes | — | yes |
 | `fleet create` | Register the calling Director atomically | — | yes |
 | `fleet list` / `fleet show` | Read fleet registry | `FLEET_ID` for show | yes |
@@ -46,7 +46,7 @@ Every other command, including `permission inspect`, `input show`, `event show`,
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CAFLEET_DATABASE_URL` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v9.db` | SQLite path |
+| `CAFLEET_DATABASE_URL` | `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db`, `<VERSION>` being the package version (e.g. `0.31.1`) | SQLite path |
 | `CAFLEET_MULTIPLEXER` | Auto-detect | `tmux` or `herdr` override |
 | `CAFLEET_MAX_TEXT_LEN` | `200` | Text-body codepoint limit |
 | `CAFLEET_MEMBER_ID` | Unset | Set by the runner in each member's spawn environment. Presence refuses the Director-only commands (§ Director-only command guard); the value is shown, never parsed. |
@@ -410,7 +410,7 @@ Result fields: `member_id,run_id,outcome,replayed_count,inbox_count,archived_cou
 
 ## `setup` and `doctor`
 
-`cafleet setup [--coding-agent AGENT...]` prepares/migrates the database, then installs embedded skills/presets offline in backend registry order, default every backend. First failure stops installation, exit 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>` or config-path error.
+`cafleet setup [--coding-agent AGENT...]` initializes the version's database, then installs embedded skills/presets offline in backend registry order, default every backend. First failure stops installation, exit 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>` or config-path error.
 
 Codex installs `<codex home>/rules/cafleet.rules`, holding only `prefix_rule(pattern = ["cafleet"], decision = "allow")`. OpenCode installs the `cafleet` and `cafleet-ask` agent presets, whose shell maps end with `"cafleet *": "allow"`. Setup writes no Director-only deny, ask or prompt entry into any backend configuration.
 
@@ -426,7 +426,7 @@ For `hermes`, setup installs the skills, then merges `CAFLEET_DATABASE_URL`, `CA
 
 A backend line reads `ok <agent>: ready`, `info <agent>: not installed (<agent> is not on PATH)`, `error <agent>: <configuration cause>`, or its problem phrases joined by `; ` at the worst status, ending ` — run 'cafleet setup --coding-agent <agent>'` when setup fixes one, for example `warn codex: assets from cafleet 0.30.0 (this is 0.31.1) — run 'cafleet setup --coding-agent codex'`. A recorded version other than the CLI's, or no installation recorded, is `warn`. The Hermes check `hermes.client_env_passthrough` reports `hermes terminal.client_env_passthrough lacks CAFleet's member names: <name>, …; run 'cafleet setup --coding-agent hermes'` as `error`.
 
-`members` lines group member IDs by state, one line per occupied state: `<status> members: <N> <label>: <ID ranges>[ — run '<command>'[ or '<command>']]`. Three or more consecutive IDs collapse to `a-b`; `ID` in the command stays literal. With no live member the line is `ok members: none running`; a database not at head gives `info members: not checked (database unavailable)`; a failed run query gives `error members: could not be checked: <cause>`.
+`members` lines group member IDs by state, one line per occupied state: `<status> members: <N> <label>: <ID ranges>[ — run '<command>'[ or '<command>']]`. Three or more consecutive IDs collapse to `a-b`; `ID` in the command stays literal. With no live member the line is `ok members: none running`; a database that is not current gives `info members: not checked (database unavailable)`; a failed run query gives `error members: could not be checked: <cause>`.
 
 | Label | Status | Next command |
 |---|---|---|
@@ -448,9 +448,7 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | Command | Situation | Error message | Exit |
 |---|---|---|---|
 | (any fleet/member/message command) | No database | `no cafleet database; run 'cafleet setup'` | 1 |
-| (any fleet/member/message command) | Database behind the CLI | `database schema is outdated (schema M, head N); run 'cafleet setup'` | 1 |
-| (any fleet/member/message command) | Database ahead of the CLI | `database schema M is newer than this cafleet (head N); upgrade cafleet` | 1 |
-| (any fleet/member/message command) | Incompatible database file | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` | 1 |
+| (any fleet/member/message command) | Incompatible database file, including one from another cafleet version | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` | 1 |
 | `member prompt` / `member exec` / `member press` / `member recover` / `permission respond` / `input reconcile` | `CAFLEET_MEMBER_ID` is set, with any value | `Error: 'cafleet <command>' is a Director-only command and this process runs inside CAFleet member <value> (CAFLEET_MEMBER_ID is set); send the request to your Director.` | 1 |
 | `member create` | The backend binary is missing | `Error: binary <name> not found on PATH` | 1 |
 | `member create` | The selected opencode preset is missing or unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |

@@ -36,7 +36,7 @@ enum Command {
         #[arg(long, value_name = "ABSOLUTE_PATH")]
         descriptor: std::path::PathBuf,
     },
-    /// Migrate storage and install embedded coding-agent skills/presets.
+    /// Initialize the version's database and install embedded coding-agent skills/presets.
     Setup(setup::SetupArgs),
     /// Report independent environment, database and backend checks.
     Doctor(setup::DoctorArgs),
@@ -105,8 +105,7 @@ fn invocation_connection(
     let missing_database = || CafleetError::App("no cafleet database; run 'cafleet setup'".into());
     let validate = |conn: &mut rusqlite::Connection| {
         crate::db::with_database_budget(conn, deadline, |conn| {
-            crate::db::classify_selected_schema(conn, crate::db::head_version(), database_url)
-                .require_current()
+            crate::db::classify_selected_schema(conn, database_url).require_current()
         })
     };
     let mut preflight =
@@ -454,7 +453,7 @@ mod tests {
             let path = dir.path().join("registry.db");
             let settings = Settings::for_database(&path, None);
             let mut conn = crate::db::connect(&settings.database_url).unwrap();
-            crate::db::migrate_to_head(&mut conn).unwrap();
+            crate::db::initialize(&mut conn).unwrap();
             conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
             conn.execute_batch(mutation).unwrap();
             conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
@@ -1027,7 +1026,7 @@ mod tests {
         std::fs::write(&descriptor, b"{\"schema_version\":1}").unwrap();
         let settings = crate::config::Settings::for_database(&path, None);
         let mut conn = crate::db::connect(&settings.database_url).unwrap();
-        crate::db::migrate_to_head(&mut conn).unwrap();
+        crate::db::initialize(&mut conn).unwrap();
         drop(conn);
         let before = std::fs::read(&path).unwrap();
         let args = CliArgs::try_parse_from([

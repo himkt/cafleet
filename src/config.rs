@@ -25,8 +25,9 @@ impl Settings {
                     )
                 })?;
                 format!(
-                    "sqlite:///{}/.local/share/cafleet/cafleet_v9.db",
-                    home.display()
+                    "sqlite:///{}/.local/share/cafleet/cafleet_{}.db",
+                    home.display(),
+                    crate::cli::VERSION
                 )
             }
         };
@@ -113,13 +114,14 @@ mod tests {
     }
 
     #[test]
-    fn default_database_url_points_at_expanded_home_cafleet_v9() {
+    fn default_database_url_names_the_running_version() {
         let s = Settings::from_lookup(|_| None).unwrap();
         assert_eq!(
             s.database_url,
             format!(
-                "sqlite:///{}/.local/share/cafleet/cafleet_v9.db",
-                std::env::var("HOME").unwrap()
+                "sqlite:///{}/.local/share/cafleet/cafleet_{}.db",
+                std::env::var("HOME").unwrap(),
+                env!("CARGO_PKG_VERSION")
             )
         );
         assert!(

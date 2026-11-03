@@ -56,12 +56,17 @@ CREATE TABLE runtime_database_identity (
 );
 INSERT INTO runtime_database_identity VALUES(1, lower(hex(randomblob(16))));
 
+CREATE TABLE cafleet_database (
+    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+    cafleet_version TEXT NOT NULL CHECK(length(trim(cafleet_version)) > 0)
+);
+
 CREATE TABLE member_runs (
     run_id INTEGER PRIMARY KEY AUTOINCREMENT,
     member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
     fleet_id INTEGER NOT NULL REFERENCES fleets(fleet_id) ON DELETE RESTRICT,
     director_member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
-    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode')),
+    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode','hermes')),
     database_identity_json TEXT NOT NULL CHECK(json_valid(database_identity_json) AND json_type(database_identity_json) = 'object'),
     launch_nonce TEXT NOT NULL CHECK(length(launch_nonce) = 64 AND launch_nonce NOT GLOB '*[^0-9a-f]*'),
     runtime_path TEXT NOT NULL CHECK(length(trim(runtime_path)) > 0),
@@ -96,6 +101,7 @@ CREATE TABLE member_runs (
     exit_signal INTEGER,
     cleanup_diagnostics_json TEXT CHECK(cleanup_diagnostics_json IS NULL OR (json_valid(cleanup_diagnostics_json) AND json_type(cleanup_diagnostics_json) = 'array')),
     recovery_origin_status TEXT CHECK(recovery_origin_status IS NULL OR recovery_origin_status IN ('starting','prepared','running','degraded','stopping','recovering','exited','failed','lost')),
+    native_session_json TEXT CHECK(native_session_json IS NULL OR (json_valid(native_session_json) AND json_type(native_session_json) = 'object')),
     CHECK((mode_source = 'default' AND requested_mode IS NULL) OR (mode_source = 'explicit' AND requested_mode IS NOT NULL))
 );
 CREATE UNIQUE INDEX idx_member_runs_active ON member_runs(member_id) WHERE status NOT IN ('exited','failed','lost');

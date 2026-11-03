@@ -388,7 +388,7 @@ pub(crate) mod test_support {
             dir.path().join("listen.db").display()
         ))
         .unwrap();
-        crate::db::migrate_to_head(&mut conn).unwrap();
+        crate::db::initialize(&mut conn).unwrap();
         let created = broker::create_fleet(
             &mut conn,
             Some("listen"),

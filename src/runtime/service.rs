@@ -599,8 +599,7 @@ pub(crate) fn run_service(
     let mut services = services;
 
     let mut conn = crate::db::connect(&settings.database_url)?;
-    crate::db::classify_selected_schema(&conn, crate::db::head_version(), &settings.database_url)
-        .require_current()?;
+    crate::db::classify_selected_schema(&conn, &settings.database_url).require_current()?;
     let descriptor = load_descriptor(&conn, descriptor_path)?;
     let original = storage::get_run(&conn, descriptor.run_id)?;
     let creator = ProcessIdentity {

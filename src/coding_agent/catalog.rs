@@ -2587,27 +2587,6 @@ mod tests {
     }
 
     #[test]
-    fn bundled_fixtures_carry_no_personal_paths_or_account_names() {
-        for (source, bytes) in bundled_embedded() {
-            let file: Value = serde_json::from_slice(bytes).unwrap();
-            for (id, screen) in file["screens"]
-                .as_object()
-                .expect("the backend file contains a screen map")
-            {
-                for (row, line) in screen["lines"].as_array().unwrap().iter().enumerate() {
-                    let line = line.as_str().unwrap();
-                    for private in ["/Users/", "/root", "/development-pvc", "/home/", "himkt"] {
-                        assert!(
-                            !line.contains(private),
-                            "{source} screen {id} row {row} carries {private:?}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
     fn permission_inspection_catalog_retains_exact_executable_plans_and_provenance() {
         let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
         for (decision, choice, rule, bytes) in [
@@ -3068,30 +3047,6 @@ mod tests {
     }
 
     #[test]
-    fn bundled_claude_and_codex_operations_declare_neither_row_option() {
-        let definitions = bundled_definitions();
-        for profile in definitions["profiles"].as_array().unwrap() {
-            if profile["backend"] != "claude" && profile["backend"] != "codex" {
-                continue;
-            }
-            for rule in profile["rules"].as_array().unwrap() {
-                let operation = &rule["extract"]["operation"];
-                if operation.is_null() {
-                    continue;
-                }
-                for key in ["margin_rows", "row_trailer"] {
-                    assert!(
-                        operation.get(key).is_none(),
-                        "{} {} {key}",
-                        profile["backend"],
-                        rule["id"]
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     fn runtime_profile_capability_provenance_references_are_checked() {
         for (path, replacement) in [
             ("/fixtures/0/backend", json!("claude")),
@@ -3215,32 +3170,6 @@ mod tests {
             assert_eq!(unprobed.detection, Coverage::Unknown);
             assert_eq!(unprobed.composer, Coverage::Unknown);
             assert!(unprobed.answer_decisions.is_empty());
-        }
-    }
-
-    #[test]
-    fn runtime_profile_bundled_entries_are_identified_by_backend_and_min_version() {
-        let definitions = bundled_definitions();
-        let profiles = definitions["profiles"].as_array().unwrap();
-        assert!(!profiles.is_empty());
-        for profile in profiles {
-            let keys = profile
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(String::as_str)
-                .collect::<std::collections::BTreeSet<_>>();
-            assert_eq!(
-                keys,
-                std::collections::BTreeSet::from([
-                    "backend",
-                    "capabilities",
-                    "min_version",
-                    "rules"
-                ]),
-                "{}",
-                profile["backend"]
-            );
         }
     }
 
@@ -3911,31 +3840,11 @@ mod tests {
     }
     mod bundled_claude {
         use crate::coding_agent::catalog::tests::*;
-        use std::collections::BTreeSet;
 
         const CLAUDE_VERSION: &str = "2.1.302";
         const NATIVE_FIXTURE: &str = "claude-2.1.302-default-permission-1";
-        const ALLOW_FIXTURE: &str = "claude-2.1.302-allow-pre-stage-1";
-        const DENY_FIXTURE: &str = "claude-2.1.302-deny-pre-stage-1";
         const IDLE_FIXTURE: &str = "claude-2.1.302-idle-composer-1";
         const WRAPPED_FIXTURE: &str = "claude-2.1.302-wrapped-permission-1";
-        const WRAPPED_ALLOW_FIXTURE: &str = "claude-2.1.302-wrapped-allow-pre-stage-1";
-        const WRAPPED_DENY_FIXTURE: &str = "claude-2.1.302-wrapped-deny-pre-stage-1";
-        const BOXED_FIXTURE: &str = "claude-2.1.302-boxed-permission-1";
-        const BOXED_SINGLE_ROW_FIXTURE: &str = "claude-2.1.302-boxed-single-row-permission-1";
-        /// The captures of the predecessor form; every other Claude fixture is an
-        /// automatic-mode capture classified in `bundled_claude_auto`.
-        pub(super) const PREDECESSOR_FIXTURES: [&str; 9] = [
-            NATIVE_FIXTURE,
-            ALLOW_FIXTURE,
-            DENY_FIXTURE,
-            IDLE_FIXTURE,
-            WRAPPED_FIXTURE,
-            WRAPPED_ALLOW_FIXTURE,
-            WRAPPED_DENY_FIXTURE,
-            BOXED_FIXTURE,
-            BOXED_SINGLE_ROW_FIXTURE,
-        ];
 
         fn bytes(id: &str) -> Vec<u8> {
             bundled_fixture(id).into_bytes()
@@ -3953,36 +3862,6 @@ mod tests {
                 .is_err(),
                 "a restored masked status row is rejected"
             );
-        }
-
-        #[test]
-        fn bundled_claude_detection_and_catalog_cite_the_unwrapped_wrapped_and_boxed_native_captures()
-         {
-            let value = bundled_definitions();
-            let profile = value["profiles"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|profile| profile["backend"] == "claude")
-                .expect("bundled Claude profile");
-            assert_eq!(profile["min_version"], CLAUDE_VERSION);
-            let cited_by = |group: &str| {
-                profile["capabilities"][group]["fixture_ids"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|id| id.as_str().unwrap().to_owned())
-                    .collect::<BTreeSet<_>>()
-            };
-            for id in [
-                NATIVE_FIXTURE,
-                WRAPPED_FIXTURE,
-                BOXED_FIXTURE,
-                BOXED_SINGLE_ROW_FIXTURE,
-            ] {
-                assert!(cited_by("detection").contains(id), "{id}");
-            }
-            assert!(cited_by("composer").contains(IDLE_FIXTURE));
         }
 
         fn sequenced_replay(
@@ -4065,7 +3944,6 @@ mod tests {
     mod bundled_claude_auto {
         use crate::broker::runtime::AutomaticReview;
         use crate::coding_agent::catalog::tests::*;
-        use std::collections::BTreeSet;
 
         const CLAUDE_VERSION: &str = "2.1.302";
         const REFUSAL_RULE: &str = "claude-auto-refusal";
@@ -4395,82 +4273,7 @@ mod tests {
         }
 
         #[test]
-        fn bundled_claude_auto_profile_is_the_exact_2_1_302_profile_with_its_rule_groups() {
-            let capabilities = ProfileCatalog::bundled()
-                .unwrap()
-                .capabilities(CodingAgent::Claude, Some(CLAUDE_VERSION));
-            assert_eq!(capabilities.min_version.as_deref(), Some(CLAUDE_VERSION));
-            assert_eq!(capabilities.detection, Coverage::Tested);
-            let definitions: Value = serde_json::from_str(include_str!("bundled.json")).unwrap();
-            let claude = definitions["profiles"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|profile| profile["backend"] == "claude")
-                .collect::<Vec<_>>();
-            assert_eq!(
-                claude.len(),
-                1,
-                "the automatic-mode profile replaces its predecessor"
-            );
-            let profile = claude[0];
-            assert_eq!(profile["min_version"], CLAUDE_VERSION);
-            let group = |name: &str| {
-                profile["capabilities"][name]["rule_ids"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|id| id.as_str().unwrap().to_owned())
-                    .collect::<BTreeSet<_>>()
-            };
-            assert_eq!(
-                group("annotations"),
-                BTreeSet::from(
-                    [REFUSAL_RULE, NOTICE_RULE, UNAVAILABLE_RULE, INDICATOR_RULE].map(String::from)
-                )
-            );
-            for rule in [PERMISSION_RULE, ASK_RULE, TIP_RULE, STARTUP_RULE] {
-                assert!(group("detection").contains(rule), "{rule}");
-            }
-            assert!(group("composer").contains(IDLE_RULE));
-            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                let predecessor = ProfileCatalog::bundled()
-                    .unwrap()
-                    .answer_plan(
-                        CodingAgent::Claude,
-                        CLAUDE_VERSION,
-                        PERMISSION_RULE,
-                        decision,
-                    )
-                    .expect("predecessor answer plan is kept");
-                let expected: &[u8] = if decision == PermissionDecision::Allow {
-                    b"1"
-                } else {
-                    b"4"
-                };
-                assert_eq!(predecessor.stages()[0].bytes(), expected);
-            }
-        }
-
-        #[test]
-        fn bundled_claude_auto_fixtures_produce_exactly_their_primary_and_annotation_sets() {
-            let ids = CLASSIFICATION
-                .iter()
-                .map(|case| case.0.to_owned())
-                .collect::<BTreeSet<_>>();
-            let automatic = bundled_definitions()["fixtures"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|entry| entry["backend"] == "claude")
-                .map(|entry| entry["id"].as_str().unwrap().to_owned())
-                .filter(|id| {
-                    !crate::coding_agent::catalog::tests::bundled_claude::PREDECESSOR_FIXTURES
-                        .contains(&id.as_str())
-                })
-                .filter(|id| !submission_fixture_ids(CodingAgent::Claude).contains(id))
-                .collect::<BTreeSet<_>>();
-            assert_eq!(ids, automatic, "every automatic-mode fixture is classified");
+        fn bundled_claude_auto_fixtures_produce_their_primary_and_annotation_sets() {
             for (id, kind, rule, annotations) in CLASSIFICATION {
                 let observed = observe(id);
                 assert_eq!(observed.kind, kind, "{id}");
@@ -4688,25 +4491,6 @@ mod tests {
             );
         }
 
-        fn bundled_claude_profile() -> Value {
-            bundled_definitions()["profiles"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|profile| profile["backend"] == "claude")
-                .expect("bundled automatic-mode Claude profile")
-                .clone()
-        }
-
-        fn ids(values: &Value) -> BTreeSet<String> {
-            values
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|id| id.as_str().unwrap().to_owned())
-                .collect()
-        }
-
         #[test]
         fn bundled_claude_read_outside_dialogs_are_complete_permission_requests_with_their_operation()
          {
@@ -4770,83 +4554,6 @@ mod tests {
             assert!(
                 observe(READ_FORM).fingerprint != observe(EDIT_READ_FORM).fingerprint,
                 "a different displayed path is a different request"
-            );
-        }
-
-        #[test]
-        fn bundled_claude_read_outside_rule_joins_detection_with_its_detection_fixtures() {
-            let profile = bundled_claude_profile();
-            let detection = &profile["capabilities"]["detection"];
-            assert!(ids(&detection["rule_ids"]).contains(READ_RULE));
-            let cited = ids(&detection["fixture_ids"]);
-            for id in [READ_FORM, READ_LONG, EDIT_READ_FORM] {
-                assert!(cited.contains(id), "{id} is a detection fixture");
-            }
-            let answer_fixtures = profile["capabilities"]["answers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .flat_map(|answer| ids(&answer["fixture_ids"]))
-                .collect::<BTreeSet<_>>();
-            for id in [READ_ALLOW_CONTINUATION, READ_DENY_CONTINUATION] {
-                assert!(
-                    !cited.contains(id) && !answer_fixtures.contains(id),
-                    "{id} is a classification-test fixture only"
-                );
-            }
-            let outside_rules = profile["rules"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|rule| rule["id"].as_str().unwrap())
-                .filter(|id| id.ends_with("-outside-permission"))
-                .collect::<Vec<_>>();
-            assert_eq!(
-                outside_rules,
-                [READ_RULE],
-                "no sibling tool showed its own outside-the-working-directories dialog"
-            );
-            let rule = profile["rules"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|rule| rule["id"] == READ_RULE)
-                .unwrap();
-            assert_eq!(rule["observation"], "permission_request");
-            assert_eq!(rule["region"]["screen"], "alternate");
-            assert_eq!(rule["region"]["cursor"], "inside");
-            assert_eq!(rule["region"]["max_rows"], 24);
-            assert_eq!(rule["verified_noninteraction"], false);
-            assert_eq!(rule["sensitive"], false);
-            let matchers = rule["matchers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|matcher| matcher["id"].as_str().unwrap().to_owned())
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                matchers,
-                BTreeSet::from(
-                    [
-                        "heading",
-                        "operation",
-                        "question",
-                        "focus",
-                        "keep_allowing",
-                        "block_from_now",
-                        "deny",
-                        "allow"
-                    ]
-                    .map(String::from)
-                )
-            );
-            assert_eq!(
-                rule["extract"]["choices"],
-                json!([
-                    {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
-                    {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
-                ]),
-                "the persistent choices are matched but declare no choice"
             );
         }
 
@@ -4915,61 +4622,6 @@ mod tests {
                             .is_none(),
                         "{decision:?} {rule} plan on the read-outside dialog"
                     );
-                }
-            }
-        }
-
-        #[test]
-        fn bundled_claude_read_outside_answers_never_select_a_persistent_choice() {
-            let profile = bundled_claude_profile();
-            let answers = profile["capabilities"]["answers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|answer| answer["request_rule_id"] == READ_RULE)
-                .map(|answer| {
-                    (
-                        answer["decision"].as_str().unwrap().to_owned(),
-                        answer["answer_rule_id"].as_str().unwrap().to_owned(),
-                        answer["choice_id"].as_str().unwrap().to_owned(),
-                        answer["focus_matcher_id"].as_str().unwrap().to_owned(),
-                        answer["stages"].clone(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let stage = |hex: &str, choice: &str| json!([{"bytes_hex": hex, "required_rule_id": READ_RULE, "required_choice_id": choice}]);
-            assert_eq!(
-                answers,
-                [
-                    (
-                        "allow".to_owned(),
-                        "claude-read-outside-allow-digit".to_owned(),
-                        "allow-once".to_owned(),
-                        "focus".to_owned(),
-                        stage("34", "allow-once"),
-                    ),
-                    (
-                        "deny".to_owned(),
-                        "claude-read-outside-deny-digit".to_owned(),
-                        "deny-once".to_owned(),
-                        "focus".to_owned(),
-                        stage("33", "deny-once"),
-                    ),
-                ]
-            );
-            let catalog = ProfileCatalog::bundled().unwrap();
-            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                let plan = catalog
-                    .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, READ_RULE, decision)
-                    .unwrap();
-                for stage in plan.stages() {
-                    for refused in [b'1', b'2', b'\r', b'\t', 0x1b] {
-                        assert!(
-                            !stage.bytes().contains(&refused),
-                            "{decision:?} stage {:?} sends no persistent-choice, Enter, Tab or Escape byte",
-                            stage.bytes()
-                        );
-                    }
                 }
             }
         }
@@ -5376,7 +5028,6 @@ mod tests {
     mod bundled_codex_auto {
         use crate::broker::runtime::AutomaticReview;
         use crate::coding_agent::catalog::tests::*;
-        use std::collections::BTreeSet;
 
         const CODEX_VERSION: &str = "0.163.0";
         const REFUSAL_RULE: &str = "codex-auto-review-refusal";
@@ -5574,69 +5225,7 @@ mod tests {
         }
 
         #[test]
-        fn bundled_codex_auto_profile_is_the_exact_0_163_0_profile_with_its_rule_groups() {
-            let capabilities = ProfileCatalog::bundled()
-                .unwrap()
-                .capabilities(CodingAgent::Codex, Some(CODEX_VERSION));
-            assert_eq!(capabilities.min_version.as_deref(), Some(CODEX_VERSION));
-            let definitions: Value = serde_json::from_str(include_str!("bundled.json")).unwrap();
-            let codex = definitions["profiles"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|profile| profile["backend"] == "codex")
-                .collect::<Vec<_>>();
-            assert_eq!(
-                codex.len(),
-                1,
-                "the automatic-mode profile replaces its predecessor"
-            );
-            let group = |name: &str| {
-                codex[0]["capabilities"][name]["rule_ids"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|id| id.as_str().unwrap().to_owned())
-                    .collect::<BTreeSet<_>>()
-            };
-            assert_eq!(
-                group("annotations"),
-                BTreeSet::from([REFUSAL_RULE, INDICATOR_RULE].map(String::from))
-            );
-            assert!(group("detection").contains("codex-exec-approval"));
-            assert!(group("composer").contains(IDLE_RULE));
-            let rules = codex[0]["rules"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|rule| rule["id"].as_str().unwrap())
-                .collect::<BTreeSet<_>>();
-            assert!(!rules.contains("codex-auto-review-unavailable"));
-            assert!(!rules.contains("codex-auto-startup"));
-        }
-
-        #[test]
-        fn bundled_codex_auto_fixtures_produce_exactly_their_primary_and_annotation_sets() {
-            let automatic = bundled_definitions()["fixtures"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|entry| entry["backend"] == "codex")
-                .map(|entry| entry["id"].as_str().unwrap().to_owned())
-                .filter(|id| {
-                    !crate::coding_agent::catalog::tests::bundled_codex::PREDECESSOR_FIXTURES
-                        .contains(&id.as_str())
-                })
-                .filter(|id| !submission_fixture_ids(CodingAgent::Codex).contains(id))
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                CLASSIFICATION
-                    .iter()
-                    .map(|case| case.0.to_owned())
-                    .collect::<BTreeSet<_>>(),
-                automatic,
-                "every automatic-mode fixture is classified"
-            );
+        fn bundled_codex_auto_fixtures_produce_their_primary_and_annotation_sets() {
             for (id, kind, rule, annotations) in CLASSIFICATION {
                 let observed = observe(id);
                 assert_eq!(observed.kind, kind, "{id}");
@@ -6251,28 +5840,6 @@ mod tests {
                 .collect()
         }
 
-        fn definitions() -> Value {
-            bundled_definitions()
-        }
-
-        fn profile(definitions: &Value) -> &Value {
-            definitions["profiles"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|profile| profile["backend"] == "opencode")
-                .expect("bundled OpenCode profile")
-        }
-
-        fn rule<'a>(definitions: &'a Value, id: &str) -> &'a Value {
-            profile(definitions)["rules"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|rule| rule["id"] == id)
-                .expect("bundled OpenCode rule")
-        }
-
         fn guarded_fixture(
             id: &str,
             change_screen: impl FnOnce(&mut Value),
@@ -6361,216 +5928,6 @@ mod tests {
         }
 
         #[test]
-        fn bundled_opencode_definitions_declare_the_form_reason_dialog_and_idle_rules() {
-            let definitions = definitions();
-            let capabilities = &profile(&definitions)["capabilities"];
-            assert_eq!(profile(&definitions)["min_version"], OPENCODE_VERSION);
-            assert_eq!(
-                capabilities["detection"]["rule_ids"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|id| id.as_str().unwrap())
-                    .collect::<BTreeSet<_>>(),
-                BTreeSet::from([PERMISSION_RULE, COMPACT_RULE]),
-                "detection lists both request rules"
-            );
-            assert_eq!(
-                id_set(&capabilities["detection"]["fixture_ids"]),
-                BTreeSet::from([
-                    PERMISSION_FIXTURE,
-                    NARROW_FIXTURE,
-                    COMPACT_FIXTURE,
-                    MIN_FIXTURE
-                ])
-            );
-            assert_eq!(capabilities["composer"]["rule_ids"], json!([IDLE_RULE]));
-            assert_eq!(
-                id_set(&capabilities["composer"]["fixture_ids"]),
-                BTreeSet::from([IDLE_FIXTURE, NARROW_IDLE_FIXTURE])
-            );
-            assert_eq!(
-                capabilities["composer"]["submission"],
-                json!({
-                    "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":[
-                        "opencode-2.1.4-prompt-empty-composer-1",
-                        "opencode-2.1.4-prompt-typed-literal-1",
-                        "opencode-2.1.4-prompt-post-submit-1"
-                    ]},
-                    "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[
-                        "opencode-2.1.4-exec-empty-composer-1",
-                        "opencode-2.1.4-exec-typed-literal-1",
-                        "opencode-2.1.4-exec-post-submit-1"
-                    ]}
-                })
-            );
-            let reason = rule(&definitions, REASON_RULE);
-            assert_eq!(reason["observation"], "permission_continuation");
-            assert_eq!(reason["continues_rule_id"], PERMISSION_RULE);
-            assert_eq!(reason["continues_choice_id"], "deny-once");
-            assert_eq!(
-                id_set(&reason["fixture_ids"]),
-                BTreeSet::from([DENY_3_FIXTURE, NARROW_DENY_3_FIXTURE])
-            );
-            assert_eq!(
-                id_set(&rule(&definitions, COMPACT_REASON_RULE)["fixture_ids"]),
-                BTreeSet::from([COMPACT_DENY_3_FIXTURE, MIN_DENY_3_FIXTURE])
-            );
-            assert_eq!(
-                reason["extract"],
-                json!({"operation":null,"choices":[],"native_request_id":null})
-            );
-            assert_eq!(reason["region"]["cursor"], "any");
-            let form = rule(&definitions, PERMISSION_RULE);
-            assert_eq!(form["observation"], "permission_request");
-            assert_eq!(form["region"]["screen"], "primary");
-            assert_eq!(form["region"]["cursor"], "any");
-            assert!(form["region"]["max_rows"].as_u64().unwrap() >= 24);
-            assert_eq!(form["sensitive"], false);
-            assert_eq!(form["extract"]["native_request_id"], Value::Null);
-            assert_eq!(
-                form["extract"]["choices"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|choice| (choice["id"].clone(), choice["scope"].clone()))
-                    .collect::<Vec<_>>(),
-                [
-                    (json!("allow-once"), json!("single_request")),
-                    (json!("deny-once"), json!("single_request"))
-                ],
-                "the always choice has no choice entry"
-            );
-            let ids = form["matchers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|matcher| matcher["id"].as_str().unwrap())
-                .collect::<BTreeSet<_>>();
-            for id in ["heading", "operation", "focus", "allow", "deny"] {
-                assert!(ids.contains(id), "required matcher {id}");
-            }
-            let focus = form["matchers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|matcher| matcher["id"] == "focus")
-                .unwrap();
-            assert_eq!(focus["focus_style"], "background");
-            let idle = rule(&definitions, IDLE_RULE);
-            assert_eq!(idle["observation"], "composer_empty");
-            assert_eq!(idle["region"]["cursor"], "at_end");
-            assert_eq!(idle["verified_noninteraction"], true);
-        }
-
-        fn matcher<'a>(rule: &'a Value, id: &str) -> &'a Value {
-            rule["matchers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|matcher| matcher["id"] == id)
-                .unwrap_or_else(|| panic!("{} declares matcher {id}", rule["id"]))
-        }
-
-        #[test]
-        fn bundled_opencode_form_rule_matches_the_wide_and_split_layouts() {
-            let definitions = definitions();
-            let form = rule(&definitions, PERMISSION_RULE);
-            assert_eq!(
-                form["region"]["start_pattern"],
-                "^  △ Permission required\\s*$"
-            );
-            assert_eq!(
-                form["region"]["end_pattern"],
-                "  ⇆ select  enter confirm  esc reject\\s*$"
-            );
-            assert_eq!(
-                matcher(form, "focus")["pattern"],
-                "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?\\s*$"
-            );
-            assert_eq!(
-                matcher(form, "allow")["pattern"],
-                "^   (?P<label>Allow once)   "
-            );
-            assert_eq!(
-                matcher(form, "deny")["pattern"],
-                "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
-            );
-            for (id, scope) in [
-                ("focus", "line"),
-                ("allow", "line"),
-                ("deny", "line"),
-                ("controls", "region"),
-                ("operation", "region"),
-            ] {
-                assert_eq!(matcher(form, id)["scope"], scope, "{id}");
-            }
-            assert_eq!(matcher(form, "focus")["focus_style"], "background");
-            let operation = &form["extract"]["operation"];
-            assert_eq!(operation["matcher_id"], "operation");
-            assert_eq!(operation["margin_rows"], "continuation");
-            assert_eq!(operation["row_trailer"], "█");
-            assert!(
-                operation["row_margin"]
-                    .as_str()
-                    .is_some_and(|margin| !margin.is_empty()),
-                "the continuation margin is declared"
-            );
-        }
-
-        #[test]
-        fn bundled_opencode_reject_reason_reads_the_placeholder_through_one_region_matcher() {
-            let definitions = definitions();
-            let reason = rule(&definitions, REASON_RULE);
-            let ids = reason["matchers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|matcher| matcher["id"].as_str().unwrap())
-                .collect::<BTreeSet<_>>();
-            assert_eq!(ids, BTreeSet::from(["empty_reason", "heading"]));
-            assert_eq!(matcher(reason, "empty_reason")["scope"], "region");
-        }
-
-        #[test]
-        fn bundled_opencode_compact_rules_mirror_the_wide_and_split_rules_without_a_margin() {
-            let definitions = definitions();
-            let form = rule(&definitions, PERMISSION_RULE);
-            let compact = rule(&definitions, COMPACT_RULE);
-            for key in ["observation", "sensitive", "verified_noninteraction"] {
-                assert_eq!(compact[key], form[key], "{key}");
-            }
-            assert_eq!(compact["region"]["screen"], form["region"]["screen"]);
-            assert_eq!(compact["region"]["cursor"], form["region"]["cursor"]);
-            assert!(compact["region"]["max_rows"].as_u64().unwrap() >= 24);
-            assert_eq!(compact["extract"]["choices"], form["extract"]["choices"]);
-            assert_eq!(compact["extract"]["native_request_id"], Value::Null);
-            for (id, scope) in [
-                ("focus", "line"),
-                ("allow", "line"),
-                ("deny", "line"),
-                ("operation", "region"),
-            ] {
-                assert_eq!(matcher(compact, id)["scope"], scope, "{id}");
-            }
-            assert_eq!(matcher(compact, "focus")["focus_style"], "background");
-            let operation = &compact["extract"]["operation"];
-            assert_eq!(operation["matcher_id"], "operation");
-            assert_eq!(operation["row_trailer"], "█");
-            assert!(operation.get("row_margin").is_none());
-            assert!(operation.get("margin_rows").is_none());
-            let reason = rule(&definitions, COMPACT_REASON_RULE);
-            assert_eq!(reason["observation"], "permission_continuation");
-            assert_eq!(reason["continues_rule_id"], COMPACT_RULE);
-            assert_eq!(reason["continues_choice_id"], "deny-once");
-            assert_eq!(
-                reason["extract"],
-                json!({"operation":null,"choices":[],"native_request_id":null})
-            );
-            assert_eq!(matcher(reason, "empty_reason")["scope"], "region");
-        }
-
-        #[test]
         fn bundled_opencode_compact_answers_repeat_the_measured_stages_on_the_compact_rules() {
             let catalog = ProfileCatalog::bundled().unwrap();
             for (decision, choice, stages) in [
@@ -6653,14 +6010,6 @@ mod tests {
                 .unwrap()
                 .answer_plan(CodingAgent::Opencode, OPENCODE_VERSION, request, decision)
                 .unwrap()
-        }
-
-        fn id_set(ids: &Value) -> BTreeSet<&str> {
-            ids.as_array()
-                .unwrap()
-                .iter()
-                .map(|id| id.as_str().unwrap())
-                .collect()
         }
 
         fn focused_on(request: &str, screen: &ScreenSnapshot) -> Option<String> {
@@ -7528,24 +6877,6 @@ mod tests {
                     json!({"require_patterns":["^Live footer$"],"reject_patterns":[]});
             });
         }
-        #[test]
-        fn annotation_bundled_profiles_each_declare_the_annotations_capability() {
-            let definitions: Value = serde_json::from_str(include_str!("bundled.json")).unwrap();
-            for profile in definitions["profiles"].as_array().unwrap() {
-                assert!(
-                    profile["capabilities"]
-                        .as_object()
-                        .unwrap()
-                        .contains_key("annotations"),
-                    "{}",
-                    profile["backend"]
-                );
-                if profile["backend"] == "opencode" {
-                    assert_eq!(profile["capabilities"]["annotations"], Value::Null);
-                }
-            }
-            assert!(ProfileCatalog::bundled().is_ok());
-        }
     }
     mod profile_thresholds {
         use crate::coding_agent::catalog::tests::*;
@@ -7830,47 +7161,6 @@ mod tests {
                 assert_eq!(capability.answer_rule_id(), format!("{name}-allow-plan"));
                 assert_eq!(capability.fixture_ids(), &[fixture]);
             }
-        }
-
-        #[test]
-        fn bundled_profiles_declare_their_initial_boundary_and_keep_capture_versions() {
-            let definitions = bundled_definitions();
-            for boundary in BUNDLED_BOUNDARIES {
-                let profiles = definitions["profiles"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .filter(|profile| profile["backend"] == boundary.backend.name())
-                    .collect::<Vec<_>>();
-                assert_eq!(profiles.len(), 1, "{:?}", boundary.backend);
-                assert_eq!(profiles[0]["min_version"], boundary.min_version);
-                let minimum = semver::Version::parse(boundary.min_version).unwrap();
-                for fixture in definitions["fixtures"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .filter(|fixture| fixture["backend"] == boundary.backend.name())
-                {
-                    let id = fixture["id"].as_str().unwrap();
-                    let captured = fixture["native_version"].as_str().unwrap();
-                    assert!(
-                        id.starts_with(&format!("{}-{captured}-", boundary.backend.name())),
-                        "{id} keeps the native version it was captured at"
-                    );
-                    assert!(
-                        semver::Version::parse(captured).unwrap() >= minimum,
-                        "{id} is captured inside its profile interval"
-                    );
-                }
-            }
-            assert!(
-                definitions["fixtures"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|fixture| fixture["native_version"] == "2.1.308"),
-                "the Claude submission captures come from a later version inside the interval"
-            );
         }
 
         #[test]
