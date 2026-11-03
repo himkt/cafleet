@@ -1,7 +1,7 @@
 # Simplification Follow-ups
 
 **Status**: Approved
-**Progress**: 0/28 tasks complete
+**Progress**: 19/28 tasks complete
 **Last Updated**: 2026-11-03
 
 ## Overview
@@ -310,36 +310,36 @@ Order: documentation rows in rule order (`SPEC.md` → `docs/` → `skills/`), t
 
 ### Step 1: Prepare
 
-- [ ] Create branch `fix/0000213-simplification-follow-ups` from `main`. <!-- completed: -->
-- [ ] Run `mise //:test`, `mise //:lint` and `mise //docs:build` on the unchanged branch and record the baseline. <!-- completed: -->
+- [x] Create branch `fix/0000213-simplification-follow-ups` from `main`. <!-- completed: 2026-11-03T15:19 -->
+- [x] Run `mise //:test`, `mise //:lint` and `mise //docs:build` on the unchanged branch and record the baseline. <!-- completed: 2026-11-03T15:19 -->
 
 ### Step 2: SPEC.md
 
-- [ ] Apply F1-c. <!-- completed: -->
-- [ ] Apply F3-a to F3-i. <!-- completed: -->
-- [ ] Apply X1-01 to X1-29. <!-- completed: -->
-- [ ] Apply X4-1 to X4-3, X5 and X6. <!-- completed: -->
+- [x] Apply F1-c. <!-- completed: 2026-11-03T15:24 -->
+- [x] Apply F3-a to F3-i. <!-- completed: 2026-11-03T15:24 -->
+- [x] Apply X1-01 to X1-29. <!-- completed: 2026-11-03T15:24 -->
+- [x] Apply X4-1 to X4-3, X5 and X6. <!-- completed: 2026-11-03T15:24 -->
 
 ### Step 3: docs/
 
-- [ ] Apply X2-1 and X2-2. <!-- completed: -->
+- [x] Apply X2-1 and X2-2. <!-- completed: 2026-11-03T15:24 -->
 
 ### Step 4: skills/
 
-- [ ] Apply F1-d. <!-- completed: -->
-- [ ] Apply X3-1 to X3-6. <!-- completed: -->
-- [ ] Apply X7. <!-- completed: -->
+- [x] Apply F1-d. <!-- completed: 2026-11-03T15:24 -->
+- [x] Apply X3-1 to X3-6. <!-- completed: 2026-11-03T15:24 -->
+- [x] Apply X7. <!-- completed: 2026-11-03T15:24 -->
 
 ### Step 5: F1 test and code
 
-- [ ] Tester: write F1-b in `src/cli/member.rs` `mod tests::launch_policy` and confirm it fails against the current code (`CafleetError::Usage`, `Fleet '999' not found.`). <!-- completed: -->
-- [ ] Director: review F1-b against § F1 and commit it alone with `fix: add failing test for unknown fleet in member create` (`git add src/cli/member.rs` while the file holds only the test change; the documentation edits stay unstaged). <!-- completed: -->
-- [ ] Programmer: apply F1-a so F1-b and every existing test pass. <!-- completed: -->
+- [x] Tester: write F1-b in `src/cli/member.rs` `mod tests::launch_policy` and confirm it fails against the current code (`CafleetError::Usage`, `Fleet '999' not found.`). <!-- completed: 2026-11-03T15:22 -->
+- [x] Director: review F1-b against § F1 and commit it alone with `fix: add failing test for unknown fleet in member create` (`git add src/cli/member.rs` while the file holds only the test change; the documentation edits stay unstaged). <!-- completed: 2026-11-03T15:24 -->
+- [x] Programmer: apply F1-a so F1-b and every existing test pass. <!-- completed: 2026-11-03T15:27 -->
 
 ### Step 6: Checks
 
-- [ ] Run `mise //:test`, `mise //:lint` and `mise //docs:build`. <!-- completed: -->
-- [ ] Run the rendered-pipe, string, blank-line/pointer and anchor checks in § Verification. <!-- completed: -->
+- [x] Run `mise //:test`, `mise //:lint` and `mise //docs:build`. <!-- completed: 2026-11-03T15:29 -->
+- [x] Run the rendered-pipe, string, blank-line/pointer and anchor checks in § Verification. <!-- completed: 2026-11-03T15:29 -->
 
 ### Step 7: F2 native re-capture (final implementation step)
 
@@ -361,10 +361,10 @@ Order: documentation rows in rule order (`SPEC.md` → `docs/` → `skills/`), t
 
 ### Step 10: Commits
 
-- [ ] Commit `docs: describe SPEC acceptance and profiles and drop change-relative wording` (`SPEC.md`). <!-- completed: -->
-- [ ] Commit `docs: drop change-relative wording from docs` (`docs/`). <!-- completed: -->
-- [ ] Commit `docs: align skills with fleet errors and current-state wording` (`skills/`). <!-- completed: -->
-- [ ] Commit `fix: report unknown fleet in member create like other fleet commands` (`src/cli/member.rs`), after the Step 5 test commit. <!-- completed: -->
+- [x] Commit `docs: describe SPEC acceptance and profiles and drop change-relative wording` (`SPEC.md`). <!-- completed: 2026-11-03T15:33 -->
+- [x] Commit `docs: drop change-relative wording from docs` (`docs/`). <!-- completed: 2026-11-03T15:33 -->
+- [x] Commit `docs: align skills with fleet errors and current-state wording` (`skills/`). <!-- completed: 2026-11-03T15:33 -->
+- [x] Commit `fix: report unknown fleet in member create like other fleet commands` (`src/cli/member.rs`), after the Step 5 test commit. <!-- completed: 2026-11-03T15:33 -->
 
 ---
 
