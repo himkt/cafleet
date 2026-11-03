@@ -655,7 +655,11 @@ mod tests {
             let shell = &frontmatter["permission"]["shell"];
             let keys = key_order(shell);
             assert_eq!(keys.first().map(String::as_str), Some("*"), "{preset}");
-            assert_eq!(keys.last().map(String::as_str), Some("cafleet *"), "{preset}");
+            assert_eq!(
+                keys.last().map(String::as_str),
+                Some("cafleet *"),
+                "{preset}"
+            );
             assert_eq!(shell["cafleet *"], "allow", "{preset}");
             for key in &keys {
                 assert!(

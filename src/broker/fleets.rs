@@ -406,4 +406,49 @@ mod tests {
             ("codex".into(), "/b".into(), "old".into(), "old-time".into())
         );
     }
+
+    #[test]
+    fn member_run_registry_reads_run_and_member_states_in_ascending_run_order() {
+        use crate::broker::runtime::CleanupState;
+        use crate::broker::runtime::RunStatus;
+        use crate::broker::runtime::test_support::register_member_run;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "registry-read");
+        let first = register_member_run(&mut conn, fleet, director, "first");
+        let second = register_member_run(&mut conn, fleet, director, "second");
+        conn.execute(
+            "UPDATE member_runs SET status='exited', cleanup_state='complete' WHERE run_id=?1",
+            [first.run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE member_runs SET cleanup_state='incomplete' WHERE run_id=?1",
+            [second.run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE members SET status='deregistered' WHERE member_id=?1",
+            [second.member_id],
+        )
+        .unwrap();
+        let rows = member_run_registry(&conn).unwrap();
+        assert_eq!(
+            rows.iter().map(|row| row.run_id).collect::<Vec<_>>(),
+            [first.run_id, second.run_id]
+        );
+        assert_eq!(rows[0].member_id, first.member_id);
+        assert_eq!(rows[0].run_status, RunStatus::Exited);
+        assert_eq!(rows[0].cleanup_state, CleanupState::Complete);
+        assert_eq!(rows[0].member_status, "active");
+        assert_eq!(rows[1].member_id, second.member_id);
+        assert_eq!(rows[1].run_status, RunStatus::Starting);
+        assert_eq!(rows[1].cleanup_state, CleanupState::Incomplete);
+        assert_eq!(rows[1].member_status, "deregistered");
+        assert!(
+            member_run_registry(&Connection::open_in_memory().unwrap()).is_err(),
+            "a registry without member runs surfaces the query error"
+        );
+    }
 }

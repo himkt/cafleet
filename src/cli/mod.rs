@@ -1337,7 +1337,10 @@ mod tests {
                 .env("CAFLEET_MAX_TEXT_LEN", "bogus")
                 .env(
                     "CAFLEET_DATABASE_URL",
-                    format!("sqlite:///{}", database_dir.path().join("absent.db").display()),
+                    format!(
+                        "sqlite:///{}",
+                        database_dir.path().join("absent.db").display()
+                    ),
                 )
                 .env("RUST_BACKTRACE", "0")
                 .stdin(Stdio::null())

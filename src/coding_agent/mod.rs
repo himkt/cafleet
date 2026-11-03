@@ -2473,9 +2473,8 @@ mod tests {
         #[test]
         fn hermes_availability_reports_an_unreadable_passthrough_with_its_cause() {
             let prefix = "cannot read hermes configuration through 'hermes config get': ";
-            let failure = availability_error(&hermes_probe(Err(
-                "exited with exit status: 1".to_owned()
-            )));
+            let failure =
+                availability_error(&hermes_probe(Err("exited with exit status: 1".to_owned())));
             assert_eq!(failure.exit_code(), 1);
             assert_eq!(
                 failure.message(),

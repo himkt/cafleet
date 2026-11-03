@@ -2707,10 +2707,12 @@ mod tests {
             )
             .unwrap();
             assert!(started.elapsed() < Duration::from_millis(750));
+            assert_eq!(diagnosis.state, MemberState::InterruptedLaunch);
+            assert_eq!(
+                diagnosis.diagnostics[..2],
+                ["launch descriptor left over", expected_lock]
+            );
             let text = diagnosis.diagnostics.join("\n");
-            assert!(text.contains(expected_lock), "{text}");
-            assert!(text.contains("recover"), "{text}");
-            assert!(text.contains("descriptor"), "{text}");
             assert!(!text.contains(std::str::from_utf8(SPOOL_CANARY).unwrap()));
         }
 
@@ -2721,10 +2723,7 @@ mod tests {
             seed_owned_spool(&fixture, &artifacts, &held);
             let before_rows = registry_snapshot(&fixture.conn);
             let before_artifacts = owned_snapshot(&fixture, &artifacts, &held);
-            diagnose_without_content_effects(
-                &fixture,
-                "matching owner lock held: live_or_unreachable",
-            );
+            diagnose_without_content_effects(&fixture, "owner lock is held");
             assert_eq!(registry_snapshot(&fixture.conn), before_rows);
             assert_eq!(
                 owned_snapshot(&fixture, &artifacts, &held),
@@ -2740,10 +2739,7 @@ mod tests {
             let before_rows = registry_snapshot(&fixture.conn);
             let before_artifacts = owned_snapshot(&fixture, &artifacts, &held);
             drop(held);
-            diagnose_without_content_effects(
-                &fixture,
-                "matching owner lock is currently available",
-            );
+            diagnose_without_content_effects(&fixture, "owner lock is free");
             let held = RunLock::acquire_released(&fixture.conn, &fixture.run.owner())
                 .unwrap()
                 .expect("diagnosis releases its probe and preserves the original owner identity");
@@ -4140,6 +4136,138 @@ mod tests {
                         good["identity"]["database_identity_json"].clone(),
                         nonce,
                         "launch_nonce",
+                    );
+                }
+            }
+        }
+    }
+
+    mod runtime_diagnosis {
+        use crate::runtime::control::*;
+
+        fn observed(
+            descriptor_leftover: bool,
+            lock: OwnerLockProbe,
+            health: HealthProbe,
+        ) -> RuntimeDiagnosis {
+            RuntimeProbes::Observed {
+                descriptor_leftover,
+                lock,
+                health,
+            }
+            .classify()
+        }
+
+        fn refused() -> HealthProbe {
+            HealthProbe::Failed("member runtime: ECONNREFUSED: Connection refused".into())
+        }
+
+        fn assert_diagnosis(diagnosis: RuntimeDiagnosis, state: MemberState, phrases: &[&str]) {
+            assert_eq!(diagnosis.state, state, "{:?}", diagnosis.diagnostics);
+            assert_eq!(diagnosis.diagnostics, phrases);
+        }
+
+        #[test]
+        fn invalid_run_paths_are_an_interrupted_launch() {
+            assert_diagnosis(
+                RuntimeProbes::InvalidPaths("namespace manifest is missing".into()).classify(),
+                MemberState::InterruptedLaunch,
+                &["runtime files are invalid: namespace manifest is missing"],
+            );
+        }
+
+        #[test]
+        fn a_leftover_descriptor_is_an_interrupted_launch_before_any_health_outcome() {
+            for (held, lock_phrase) in [(true, "owner lock is held"), (false, "owner lock is free")]
+            {
+                let lock = || {
+                    if held {
+                        OwnerLockProbe::Held
+                    } else {
+                        OwnerLockProbe::Free
+                    }
+                };
+                assert_diagnosis(
+                    observed(true, lock(), HealthProbe::Answered),
+                    MemberState::InterruptedLaunch,
+                    &[
+                        "launch descriptor left over",
+                        lock_phrase,
+                        "runtime answered the health probe",
+                    ],
+                );
+                assert_diagnosis(
+                    observed(true, lock(), HealthProbe::Skipped),
+                    MemberState::InterruptedLaunch,
+                    &["launch descriptor left over", lock_phrase],
+                );
+            }
+        }
+
+        #[test]
+        fn a_health_reply_is_running_whatever_the_lock_state() {
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Held, HealthProbe::Answered),
+                MemberState::Running,
+                &["owner lock is held", "runtime answered the health probe"],
+            );
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Free, HealthProbe::Answered),
+                MemberState::Running,
+                &["owner lock is free", "runtime answered the health probe"],
+            );
+        }
+
+        #[test]
+        fn a_held_lock_without_a_health_reply_is_not_responding() {
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Held, refused()),
+                MemberState::NotResponding,
+                &[
+                    "owner lock is held",
+                    "runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused",
+                ],
+            );
+        }
+
+        #[test]
+        fn a_free_lock_without_a_health_reply_is_a_lost_runtime() {
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Free, refused()),
+                MemberState::LostRuntime,
+                &[
+                    "owner lock is free",
+                    "runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused",
+                ],
+            );
+        }
+
+        #[test]
+        fn a_health_probe_skipped_by_the_deadline_is_not_checked() {
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Held, HealthProbe::Skipped),
+                MemberState::NotChecked,
+                &["owner lock is held"],
+            );
+            assert_diagnosis(
+                observed(false, OwnerLockProbe::Free, HealthProbe::Skipped),
+                MemberState::NotChecked,
+                &["owner lock is free"],
+            );
+        }
+
+        #[test]
+        fn an_owner_lock_probe_failure_is_check_failed_with_only_its_cause() {
+            for descriptor_leftover in [false, true] {
+                for health in [HealthProbe::Answered, refused(), HealthProbe::Skipped] {
+                    assert_diagnosis(
+                        observed(
+                            descriptor_leftover,
+                            OwnerLockProbe::Failed("owner lock identity changed".into()),
+                            health,
+                        ),
+                        MemberState::CheckFailed,
+                        &["owner lock identity changed"],
                     );
                 }
             }
