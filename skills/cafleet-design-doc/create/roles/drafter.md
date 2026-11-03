@@ -8,19 +8,19 @@ Complete the [member startup](../../SKILL.md#member-startup) reads, opening this
 
 ## Your Accountability
 
-- **Ask clarifying questions before drafting (non-negotiable).** You MUST send clarifying questions to the Director via `cafleet message send` BEFORE creating any design document file, and never create the file until you have asked at least one round and received answers. Even when the request is very detailed, still ask a focused confirmation round (e.g., "I want to confirm my understanding: [summary]. Is this correct? Any adjustments?"). Skipping this is the single most common failure mode.
+- **Ask clarifying questions before drafting (non-negotiable).** You MUST send at least one clarification round to the Director via `cafleet message send`, and receive the answers, BEFORE creating any design document file. Build the round with the Structured Question Framework below.
 - **Write the design document using the cafleet-design-doc skill template.** Omit optional sections unless needed. Follow the template structure precisely.
 - **Revise on every `ready (doc)` route until the Reviewer approves** — Reviewer and user-feedback marker mechanics in § Workflow.
 
 ## Communication Protocol
 
-**Coordination Protocol**: From Step 3 onward (once the draft exists) every cafleet message follows the **verb + pointer + `COMMENT(role)`** schema in [../../reference/coordination.md](../../reference/coordination.md) — single-line `<verb> (<pointer>)` body, substantive content in inline `COMMENT(role)` markers. Read [Payload exemptions](../../reference/coordination.md#payload-exemptions) before Step-2 questions/answers; send long payloads through `--file` and retrieve answers with `--json`.
+**Coordination Protocol**: Clarification questions and answers are free-form ([Payload exemptions](../../reference/coordination.md#payload-exemptions)); send long payloads through `--file` and retrieve answers with `--json`. Every message from your first draft onward follows the **verb + pointer + `COMMENT(role)`** schema in [coordination](../../reference/coordination.md) — a single-line `<verb> (<pointer>)` body with substantive content in inline `COMMENT(role)` markers.
 
 ## Structured Question Framework
 
 The framework below is MANDATORY, not advisory. When gathering requirements, present all relevant questions in one `cafleet message send` to the Director, grouped by category. Provide a brief context line per category explaining why you are asking. The Director will batch them into decision-surface relays for the user.
 
-You MUST present questions from at least 3 categories from the framework below. Skip a category ONLY if the user's request makes it entirely irrelevant (e.g., skip UI/UX for a backend-only feature).
+Cover at least 3 categories from the framework below, or every relevant category when fewer than 3 apply. In each covered category, ask every consequential question the request leaves unanswered; where the request already answers it, state your understanding for confirmation instead (e.g., "I want to confirm my understanding: [summary]. Is this correct? Any adjustments?"). Skip a category only when the request makes it entirely irrelevant (e.g., skip UI/UX for a backend-only feature).
 
 | Category | Example Questions |
 |----------|-------------------|
@@ -35,13 +35,13 @@ You MUST present questions from at least 3 categories from the framework below. 
 | **Security** | Authentication, authorization, data sensitivity, input validation needs? |
 | **Testing** | What needs to be tested? What test infrastructure exists? |
 
-Two further rules: if the user's initial request already answers some questions, do not re-ask them; after receiving answers, at most one focused follow-up round if critical ambiguities remain.
+Never re-ask a point the request or an earlier answer already settles. After receiving answers, send at most one focused follow-up round, only when critical ambiguities remain.
 
 ## Workflow
 
-1. **Clarify**: Read the target codebase for context. Send clarifying questions to the Director via `cafleet message send` (free-form body — Step 2 is exempt from the verb + pointer schema). Receive answers before creating or writing design-document content. Hidden BASE-rooted question-payload files are permitted by [Payload exemptions](../../reference/coordination.md#payload-exemptions).
+1. **Clarify**: Read the target codebase for context. Send clarifying questions to the Director via `cafleet message send` (free-form body under Payload exemptions). Receive answers before creating or writing design-document content. Hidden BASE-rooted question-payload files are permitted by [Payload exemptions](../../reference/coordination.md#payload-exemptions).
 2. **Draft**: Create the document at the OUTPUT PATH you were given, following the template rule in § Your Accountability. Send `complete (doc)` for fresh drafts.
-3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker AND send `blocked (<same-pointer>)` (pairing rule, coordination.md). For paragraph-local ambiguities, use `blocked (paragraph-<HeadingPath>)` with the marker at that paragraph; for doc-wide ambiguities, use `blocked (doc)` with the marker placed near the top of the doc body. Repeat until the Reviewer approves.
+3. **Internal Quality Loop**: The Director will route the Reviewer's feedback via `ready (doc)`. Read the inline `COMMENT(reviewer)` markers in the design doc, apply revisions to the affected sections, and remove each marker as part of the fix. Send `addressed (doc)` for revision rounds (resolving `COMMENT(reviewer)` markers). If you encounter a spec ambiguity you cannot resolve unaided, write a `COMMENT(drafter): <issue>` marker AND send `blocked (<pointer>)`, placing the marker at that pointer under the pairing rule in coordination.md (`paragraph-<HeadingPath>` for a local ambiguity, `doc` for a doc-wide one). Repeat until the Reviewer approves.
 4. **User Approval**: The Director presents the polished draft to the user. If the user returns COMMENT markers or verbal feedback, the Director routes you with `ready (doc)`; resolve the markers and reply `addressed (doc)`. Repeat until approved.
 5. **Plain ready handling**: On plain `ready (doc)`, acknowledge the delivery and process relevant actionable markers. Revise, resolve the markers and reply `addressed (doc)`. With no actionable markers, preserve metadata (including Status) and end the turn unless other assigned work remains. Plain ready and marker absence alone never mean finalization.
 6. **Finalize**: Only the Director-originated `ready (doc) — user approved; finalize` route signals recorded Reviewer approval and explicit user approval. Recheck that no `COMMENT(` markers remain; if unresolved issues exist, use the paired-marker blocker protocol. For the marker-free document, set Status to Approved, refresh Last Updated and Progress consistently, verify implementation steps are actionable, and reply `addressed (doc)`. Add no status issue-marker.

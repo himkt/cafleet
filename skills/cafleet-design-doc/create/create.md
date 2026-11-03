@@ -4,9 +4,9 @@ Create a reviewed design document with a Director, Drafter and independent Revie
 
 ## Required reading
 
-Read and resolve your [backend](../../cafleet/reference/coding-agents.md), then the [Director role](../../cafleet/roles/director.md), [file layout](../reference/guidelines.md#file-layout), [BASE write protocol](../../cafleet/roles/director.md#base-directory-resolution), [supervision](../../cafleet/roles/director.md#supervision), [coordination](../reference/coordination.md) and [guidelines](../reference/guidelines.md). These references own model selection, paths, reception, messages and document format.
+Read and resolve your [backend](../../cafleet/reference/coding-agents.md), then the [Director role](../../cafleet/roles/director.md), [file layout](../reference/guidelines.md#file-layout), [BASE write protocol](../../cafleet/roles/director.md#base-directory-resolution), [supervision](../../cafleet/roles/director.md#supervision), [coordination](../reference/coordination.md) and [guidelines](../reference/guidelines.md), which own model selection, paths, reception, messages and document format.
 
-Use absolute role/core/backend paths and the canonical CAFleet spawn frame with the Step 1 delta table. Preserve literal identity placeholders, BASE/output paths and role boundaries. Assigned members continue this team. Read recovery or shutdown immediately before those actions.
+Preserve BASE/output paths and role boundaries.
 
 ## Director responsibilities
 
@@ -38,7 +38,7 @@ Render each member prompt from the [canonical spawn skeleton](../../cafleet/role
 
 ### Step 2: Clarification Phase (Director)
 
-For fresh work, have the Drafter inspect relevant source and identify consequential unanswered requirements before drafting. Relay focused questions through the executing backend's user-decision surface, preserve answers and route them back faithfully. Resume and review-only work start from existing content and annotations.
+For fresh work, have the Drafter inspect relevant source and send one clarification round before drafting: questions for consequential unanswered requirements and confirmation of the requirements it understood. Relay it through the executing backend's user-decision surface, preserve answers and route them back faithfully. Resume and review-only work start from existing content and annotations.
 
 ### Step 3: Internal Quality Loop (Director)
 
@@ -57,6 +57,6 @@ Route ordinary-language feedback and existing user markers to the Drafter withou
 
 ### Step 6: Finalize & Clean Up (Director)
 
-After user approval, send the Drafter an explicit finalization assignment: incorporate accepted decisions, resolve coordination markers, set Status to Approved and keep implementation progress accurate. Verify the final artifact and apply host Git/publication rules. Honor abort without marking the design approved.
+After user approval, send the Drafter exactly `ready (doc) — user approved; finalize`: incorporate accepted decisions, resolve coordination markers, set Status to Approved and keep implementation progress accurate. Verify the final artifact and apply host Git/publication rules. Honor abort without marking the design approved.
 
 Collect receiver closure and observed process exit, delete owned ordinary members, verify the root-only roster, then delete the owned fleet and confirm closure. Preserve resources outside this team's ownership.

@@ -1,6 +1,6 @@
 # Overview
 
-CAFleet multiplexes independent coding-agent sessions in tmux or herdr. Use its CLI and skills to delegate research, implementation and review, then collect durable replies while your host continues the task.
+CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coordinates them through durable messages: collaborative coding across multiple coding-agent backends, with full code transparency. Use its CLI and skills to delegate research, implementation and review, then collect durable replies while your session continues the task.
 
 ## Core terms
 
@@ -13,8 +13,8 @@ CAFleet multiplexes independent coding-agent sessions in tmux or herdr. Use its 
 | broker | The synchronous SQLite data-access layer used by the CLI | [Storage](storage.md) |
 | message | One point-to-point delivery, consumed through `input_required → completed` | [Output and formatting](https://github.com/himkt/cafleet/blob/main/SPEC.md#64-output--formatting) |
 | inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a show pointer | [Push notifications](https://github.com/himkt/cafleet/blob/main/SPEC.md#push-notifications) |
-| receive | A finite inbox wait for scripts and manual use that also retries ordinary-member previews | [Message wait](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-wait) |
-| inbox stream | A persistent read-only JSONL observer of pending messages with explicit ACK consumption | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
+| finite receive | A bounded inbox wait (`message wait`) for scripts and manual use that also retries ordinary-member previews | [Message wait](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-wait) |
+| listener | The Director's persistent read-only `message listen` process that streams pending messages as JSONL, with explicit ACK consumption | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
 | runner | The owned PTY observer and input arbiter for a member run | [Member permission events](members.md#member-permission-events) |
 | runtime event | A durable typed terminal/lifecycle observation linked to the Director’s inbox | [Member runtime](https://github.com/himkt/cafleet/blob/main/SPEC.md#69-member-pty-runtime) |
 | coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |
@@ -23,7 +23,7 @@ CAFleet multiplexes independent coding-agent sessions in tmux or herdr. Use its 
 
 Use the literal IDs returned by the CLI. A fleet partitions routing within the local trust model; it supplies no authentication. Members of a fleet share the selected database URL. Cross-fleet sends fail with `members {from} and {to} are not in the same fleet.`; missing destinations fail with `Destination member not found: {to_id}`.
 
-Fleet creation atomically registers the calling Director and its current pane. You can create an ordinary member immediately afterward. The Director owns teardown: deleting the fleet ends each ordinary member and closes its pane before deregistering the fleet, leaving the Director's own pane open.
+Fleet creation atomically registers the calling Director and its current pane. You can create an ordinary member immediately afterward. The Director owns [teardown](members.md#teardown).
 
 ## Responsibilities
 
@@ -39,7 +39,7 @@ The [subcommand summary](https://github.com/himkt/cafleet/blob/main/SPEC.md#subc
 
 ## Receiving delegated work
 
-The Director receives replies through its native inbox tools and ordinary members receive pane previews; the [fleet guide](../mixed-backend-team.md#manual-lifecycle) explains reception, consumption and recovery.
+The Director receives replies through its listener and ordinary members receive pane previews; the [fleet guide](../mixed-backend-team.md#receive-results) explains reception, consumption and recovery.
 
 ## Design document workflow
 
@@ -71,10 +71,8 @@ implementing the approved work.
 
 ### Watch the team work
 
-Read durable coordination with message poll/show and inspect the team’s visible panes with `member capture`. The Director receives replies and checks evidence until delegated work resolves; the [manual lifecycle](../mixed-backend-team.md#manual-lifecycle) explains reception.
+Read durable coordination with message poll/show and inspect the team’s visible panes with `member capture`. The Director receives replies and checks evidence until delegated work resolves.
 
 ### Invocation syntax
 
-See your coding-agent's skill documentation for the literal invocation
-syntax (Claude Code's `/skills`, codex's `/skills`, opencode's skill
-discovery).
+Each prompt is a plain request; your coding agent loads the `cafleet-design-doc` skill through its own skill mechanism, which [Coding agents](coding-agents.md) lists for each backend.

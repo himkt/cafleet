@@ -9,7 +9,7 @@ Create and execute iterative coordination uses the verb/pointer schema. These ex
 | Exchange | Producer and receiver | Boundary |
 |---|---|---|
 | Create pre-draft clarification | Drafter questions and Director user-answer relay | Before design-document content exists; normal coordination resumes with the first draft. |
-| Execute Verifier tool discovery | Verifier's initial tool-and-MCP inventory to Director | First substantive payload after ready; Phase 2 findings use ordinary paired markers. |
+| Execute Verifier tool discovery | Verifier's initial tool-and-MCP inventory to Director | First substantive payload after ready; later verification reports use ordinary paired markers. |
 
 Retrieve and send these payloads complete under the cafleet skill's [Send and Poll rules](../../cafleet/SKILL.md#send-unicast) (`--json` reads, `--file` for long bodies), then ACK the consumed delivery.
 
@@ -23,14 +23,14 @@ The canonical set is exactly 6. Members and the Director MUST pick from this lis
 |:--|:--|:--|:--|
 | `ready` | Director → member, or member → Director | "The pointer target is ready for you to read / act on." | Fresh assignments, member-to-Director "I have something for you to look at," and Director stall-nudges (the recipient interprets contextually — see below). |
 | `complete` | Member → Director | "I finished a fresh deliverable at the pointer target." | Initial drafts, freshly written tests, freshly written implementation, FIXME-resolution sweeps. |
-| `addressed` | Member → Director, or Director → Director (self-note) | "I resolved a pre-existing marker (a `COMMENT(role)` marker or a Director-arbitration note) at the pointer." | Round-2+ work on items already flagged in the doc or in source. |
+| `addressed` | Member → Director | "I resolved a pre-existing marker (a `COMMENT(role)` marker or a Director-arbitration note) at the pointer, or completed the Director's finalize assignment." | Round-2+ work on items already flagged in the doc or in source. |
 | `blocked` | Member → Director | "I cannot proceed at the pointer; the blocker rationale is in a `COMMENT(role)` marker at the same pointer." | Spec ambiguity, missing deps, environmental issues. |
 | `escalating` | Member → Director | "I am escalating an issue (e.g. a suspected test defect) at the pointer; the rationale is in a `COMMENT(role)` marker at the same pointer." | Test-defect arbitration, multi-round disagreements. |
-| `approved` | Reviewer → Director, or Director → user-result | "All quality criteria are met at the pointer (typically `doc`)." | Reviewer approval signal in the create and execute workflows. |
+| `approved` | Reviewer → Director | "All quality criteria are met at the pointer (typically `doc`)." | Reviewer approval signal in the create and execute workflows. |
 
-**Verb choice for `complete` vs `addressed`**: when in doubt, ask "did a marker exist before I started this turn?" — if yes, use `addressed`; if no, use `complete`.
+**Verb choice for `complete` vs `addressed`**: when in doubt, ask "did a marker exist before I started this turn?" — if yes, or if you are completing a finalize assignment, use `addressed`; otherwise use `complete`.
 
-**Director stall-nudges** reuse `ready (doc)` or `ready (paragraph-...)` — they are `ready` from the Director's perspective ("the pointer target is ready for you, please act"). The recipient interprets contextually: on receiving `ready (...)`, scan the pointer target for any `COMMENT(role)` markers addressed to your role or relevant to your current phase, and act accordingly. Re-sent `ready (...)` after a member's idle window is a nudge, not a new assignment — same target, same expected action.
+**Director stall-nudges** reuse `ready (doc)` or `ready (paragraph-...)`. On any `ready (...)`, scan the pointer target for `COMMENT(role)` markers addressed to your role or relevant to your current phase, and act on them. A `ready (...)` re-sent after a member's idle window is a nudge, not a new assignment — same target, same expected action.
 
 ## Pointer Forms
 
@@ -95,7 +95,7 @@ Roles:
 | Role | Who writes it | When |
 |:--|:--|:--|
 | `user-relay` | The Director acting as user-mediator | Carries user-derived clarifications and ordinary-language revision requests, preserving the user's meaning. |
-| `director` | The Director | Spec resolution notes, Director judgments, ambiguity arbitration, Phase C code-review feedback in the execute workflow. |
+| `director` | The Director | Spec resolution notes, Director judgments, ambiguity arbitration, Step 4 code-review feedback in the execute workflow. |
 | `drafter` | The Drafter | Spec ambiguities the Drafter cannot resolve and needs Director input on. |
 | `reviewer` | The Reviewer | Design-doc review findings in the create workflow; code-review findings at `<file>:<line>` in the execute workflow — both tagged with the existing `[COMPLIANCE]` / `[GAP]` / `[UNCLEAR]` / `[INCORRECT]` / `[IMPROVEMENT]` taxonomy inside the marker body. |
 | `programmer` | The Programmer | Implementation-side notes, escalation rationales, observations of spec gaps that block implementation. |
@@ -106,7 +106,7 @@ Rules:
 
 - One marker per logical issue. Do not bundle.
 - Body must be actionable — state the issue and what should change.
-- Reviewer markers carry one of the 5 review tags inside the body: `COMMENT(reviewer): [GAP] Step 4 lacks a Phase D entry.`
+- Reviewer markers carry one of the 5 review tags inside the body: `COMMENT(reviewer): [GAP] Step 4 lacks a verification entry.`
 
 Users may give feedback in ordinary language; they need not write markers or
 choose a pointer. The Director identifies the affected paragraph (or `doc` for
@@ -129,8 +129,9 @@ verb/pointer pairing, marker removal, or approval preconditions.
 A member may need to communicate something that does not point at any heading, file, or doc — e.g. "I crashed and restarted," "still working, no progress yet," a generic acknowledgement.
 
 - These ride as a pure cafleet message with a freeform short phrase. The set is **NOT a fixed canonical list** — members may use whatever short phrase fits ("restarted", "still working", "ack", "noted", etc.).
-- They MUST NOT match the `<verb> (<pointer>)` schema (no parentheses) and the Director MUST treat them as informational, not as work signals.
+- They MUST NOT match the `<verb> (<pointer>)` schema (no parentheses), and the Director treats them as informational, except for the spawn handshake below.
 - They do NOT add markers to the design doc.
+- The spawn handshake `ready` (optionally `ready: <recap>`) is an anchorless status, distinct from the `ready (<pointer>)` verb. It is the member's startup gate under the Director's Spawn Protocol, not a deliverable signal, and it never carries or replaces a role's first substantive message — the Drafter still sends its clarification round as a separate message and drafts nothing before the answers arrive.
 
 If a member finds themselves needing to send anchorless status updates frequently, that is a stall signal — the Director's [stall-response ladder](../../cafleet/roles/director.md#stall-response) still applies.
 

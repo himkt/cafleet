@@ -15,9 +15,9 @@ Complete the [member startup](../../SKILL.md#member-startup) reads, opening this
 
 ## Communication Protocol
 
-**Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
+**Coordination Protocol**: Follow [coordination](../../reference/coordination.md) for the verb + pointer schema, the `COMMENT(role)` role taxonomy and marker rules.
 
-**Role boundaries:** the Director owns all git operations and every commit, and all user communication; the Programmer owns implementation code — you write only test code, including inline test regions such as `#[cfg(test)]` modules; blockers route to the Director via `cafleet message send`. You run no subagents and no coding-agent CLI commands.
+**Role boundaries:** the Director owns all git operations and every commit, and all user communication; the Programmer owns implementation code — you write only test code, including inline test regions such as `#[cfg(test)]` modules; blockers route to the Director via `cafleet message send`. You run no subagents and launch no other coding-agent session (no backend binary and no `cafleet member create`); `cafleet` broker commands remain part of your protocol.
 
 ## Workflow
 
@@ -27,11 +27,11 @@ Before writing any tests, determine the test framework to use:
 
 1. **Check existing tests** in the project (e.g., `tests/` directory, `*_test.*` files, `__tests__/` directory)
 2. **Check configuration files** (e.g., `pytest.ini`, `pyproject.toml`, `jest.config.*`, `vitest.config.*`, `Cargo.toml` for `[dev-dependencies]`, `go.mod`)
-3. **Check the project-instructions file (`CLAUDE.md` / `AGENTS.md`, per your harness)** for testing conventions or preferences
+3. **Check the project-instructions file your harness loads** for testing conventions or preferences
 4. **If deterministic** → use the detected framework. Proceed silently to Phase 2 — no cafleet message is sent for a deterministic detection.
-5. **If ambiguous** → Send `blocked (doc)` via `cafleet message send` and write a `COMMENT(tester): framework selection ambiguous — found <evidence>; need user arbitration` marker near the top of the doc body (pairing rule, coordination.md: `doc` ⇒ doc-top). The Director relays via {decision_surface}, writes the answer back as `COMMENT(user-relay): <choice>` at the same location, and sends `ready (doc)`. Resume Phase 2 once the Director's `ready (doc)` lands.
+5. **If ambiguous** → Send `blocked (doc)` via `cafleet message send` and write a `COMMENT(tester): framework selection ambiguous — found <evidence>; need user arbitration` marker at the `doc` pointer (pairing rule, coordination.md: `doc` ⇒ doc-top). The Director relays via {decision_surface}, writes the answer back as `COMMENT(user-relay): <choice>` at the same location, and sends `ready (doc)`. Resume Phase 2 once the Director's `ready (doc)` lands.
 
-This detection only needs to happen once per project. After the framework is determined, use it for all subsequent steps.
+Detect the framework once per project and use it for every later step.
 
 ### Phase 2: Test Writing (per step)
 

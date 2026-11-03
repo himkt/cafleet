@@ -4,9 +4,9 @@ Implement an approved design through scoped CAFleet members, suitable verificati
 
 ## Required reading
 
-Read and resolve your [backend](../../cafleet/reference/coding-agents.md), then the [Director role](../../cafleet/roles/director.md), [file layout](../reference/guidelines.md#file-layout), [BASE write protocol](../../cafleet/roles/director.md#base-directory-resolution), [supervision](../../cafleet/roles/director.md#supervision), [coordination](../reference/coordination.md) and [guidelines](../reference/guidelines.md). Use their model selection, spawn frame, path guards, native reception and message rules without duplicating those registries here.
+Read and resolve your [backend](../../cafleet/reference/coding-agents.md), then the [Director role](../../cafleet/roles/director.md), [file layout](../reference/guidelines.md#file-layout), [BASE write protocol](../../cafleet/roles/director.md#base-directory-resolution), [supervision](../../cafleet/roles/director.md#supervision), [coordination](../reference/coordination.md) and [guidelines](../reference/guidelines.md). They own model selection, the spawn frame, path guards, native reception and message rules.
 
-Read recovery or shutdown immediately before those actions. Preserve host permissions, user scope, prior decisions and stop requests throughout execution.
+Preserve host permissions, user scope, prior decisions and stop requests throughout execution.
 
 ## Director responsibilities
 
@@ -39,7 +39,7 @@ Read the assigned roles before spawning: [Programmer](roles/programmer.md), [Tes
 
 1. Diagnose prerequisites, register the calling Director atomically and retain literal fleet/member IDs.
 2. Follow [Director wake](../../cafleet/roles/director.md#director-wake).
-3. Render compact role-by-path prompts with the delta table below: absolute role/core/backend paths, literal identity placeholders, BASE, owned paths and checks. Members load both skills and continue this team.
+3. Render compact role-by-path prompts with the delta table below, supplying BASE, owned paths and checks.
 4. Receive and ACK ready, then dispatch each member when inputs exist. Resolve uncertain launch/input by inspecting actual evidence before another submission.
 
 Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the CAFleet load purpose `for communication with the Director` and this per-role delta. Each line in the IMPORTANT row is a separate prompt line, rendered verbatim. Spawn the Reviewer only at Step 5.
@@ -57,9 +57,9 @@ Render each member prompt from the [canonical spawn skeleton](../../cafleet/role
 
 For a code step, the Tester writes behavior-focused tests; the Director reviews them against the design and commits eligible tests. The Programmer implements within its source ownership and runs the relevant checks. Suspected test defects return to the Director and Tester for arbitration. In a Programmer-only team, route findings directly to that owner.
 
-Review the final change for correctness, scope and maintainability; request fixes and affected checks until the step passes. Keep tests and implementation commits separate in TDD teams, applying host rules to mixed files. Update each completed checkbox and timestamp together, and keep any existing Progress counter accurate. Preserve completed work when resuming.
+Review the final change for correctness, scope and maintainability; request fixes and affected checks until the step passes. Keep tests and implementation commits separate in TDD teams, applying host rules to mixed files. Verify the Programmer's checkbox, timestamp and Progress update for each completed task. Preserve completed work when resuming.
 
-### Phase D: Verification (Director) — conditional
+### Verification (Director) — conditional
 
 Have the Verifier discover available tools and perform applicable real-product acceptance with isolated, owned resources. Require exact commands/results and concrete observations for changed safety boundaries. Record actual limitations; missing required evidence remains incomplete. Resolve failures with the owning member and repeat affected verification.
 

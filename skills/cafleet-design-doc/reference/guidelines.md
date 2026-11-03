@@ -75,7 +75,7 @@
 
 ## File Layout
 
-Normalize the design-doc argument to the task folder before [task-scope resolution](#task-scope-resolution): strip a trailing `/design-doc.md`; for a relative argument, strip a leading `design-docs/` if present and prepend `design-docs/` once. For an absolute argument, only strip the trailing filename and use that absolute folder directly. Task-scope resolution owns containment; the [Director's BASE write protocol](../../cafleet/roles/director.md#base-directory-resolution) owns guarded writes and disabled-audit behavior. The invoking workflow owns document discovery and its explicit output target.
+Normalize the design-doc argument to the task folder before [task-scope resolution](#task-scope-resolution): strip a trailing `/design-doc.md`; for a relative argument, strip a leading `design-docs/` if present and prepend `design-docs/` once. For an absolute argument, only strip the trailing filename and use that absolute folder directly. Task-scope resolution owns containment; the Director's [scratch and audit procedure](../../cafleet/roles/director.md#member-create--scratch-and-audit-files) owns guarded writes and disabled-audit behavior. The invoking workflow owns document discovery and its explicit output target.
 
 Design documents use `design-docs/NNNNNNN-<slug>/design-doc.md` in every repository using CAFleet. Use a short kebab-case feature description for `<slug>`.
 
@@ -88,7 +88,7 @@ Use this resolver when a consumer operates on a task folder. The Director or con
 3. Resolve the folder against the repository root when relative. Reject a relative path that equals the root (`the repo root is not a task folder`) or escapes it (`refusing to create a task folder outside the repo`). Resolve an absolute path directly: if it equals the root or is not strictly below it, return `<unset>` and create nothing.
 4. For a folder strictly below the repository root, return its absolute path as BASE. Create the selected folder lazily on the first consumer write, with audits under the task folder.
 
-The resolver applies containment to the normalized folder without writing files. Consumers own bucket prefixes, slug normalization and filename stripping; the Director's BASE write protocol owns the sentinel guard and explicit-output-target branch.
+The resolver applies containment to the normalized folder without writing files.
 
 ### Numbering
 

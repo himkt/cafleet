@@ -48,7 +48,7 @@ Every other command, including `permission inspect`, `input show`, `event show`,
 |---|---|---|
 | `CAFLEET_DATABASE_URL` | `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db`, `<VERSION>` being the package version (e.g. `0.31.1`) | SQLite path |
 | `CAFLEET_MULTIPLEXER` | Auto-detect | `tmux` or `herdr` override |
-| `CAFLEET_MAX_TEXT_LEN` | `200` | Text-body codepoint limit |
+| `CAFLEET_MAX_TEXT_LEN` | `200` | CLI text-output body codepoint limit |
 | `CAFLEET_MEMBER_ID` | Unset | Set by the runner in each member's spawn environment. Presence refuses the Director-only commands (§ Director-only command guard); the value is shown, never parsed. |
 
 Explicit `sqlite:///<path>` resolves relative paths against cwd and leaves literal tildes unexpanded. Counts require nonnegative integers: `<NAME> must be a non-negative integer (got '<value>')`.
@@ -312,11 +312,11 @@ Runner delivery follows [wrapped delivery methods](#wrapped-delivery-methods). N
 
 ### Runtime presentation
 
-Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Every ordinary member has a recorded run; only the root Director has `runtime:null`. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,reachability,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`), `unresolved_input_ids` and nullable `effective_policy`.
+Create/show include `member_id,name,registered_at,placement,runtime`; show also includes `description,status,kind`. Member creation records every ordinary member's run; `runtime` is null for the root Director and for an ordinary row without a run, which CAFleet never writes but send, prompt, exec, recover and delete handle. Runtime fields describe identity (`run_id,resolved_mode,owner_epoch`), state (`status,reachability,last_health_at,coverage,current_interaction_id`), ownership (`owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`), `unresolved_input_ids` and nullable `effective_policy`.
 
 Unresolved IDs include queued `ready`, `in_progress`, `accepted`, `uncertain`, ascending; accepted needs settlement, in-progress/uncertain needs Director reconciliation. Registry reads establish no live health. Effective policy contains `schema_version=1`, `automatic_review=available|unavailable`, nullable `observed_mode`, `rule_id`, nullable integer `event_id`, `observed_at`; null means no tested observation.
 
-Uncertain errors preserve exit category and known receipt/context, including `exec delivery to member 110 is uncertain: manual_input (method=profile)` and `input_id=INPUT_ID`.
+Uncertain errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: manual_input (method=profile)` and `input_id=INPUT_ID`.
 
 ### Delivery reporting
 
@@ -357,7 +357,7 @@ Kinds: `preview,prompt,exec,permission_response`; states: `ready,in_progress,acc
 
 Projection: deferred ready → queued with original reason; other ready → held/`zero_bytes_ready`; in-progress, uncertain or abandoned-uncertain → uncertain; accepted/submitted → submitted; not-submitted → not_submitted with cancellation reason/null method or reconciled selection. Unrecorded methods stay null with `method_unrecorded` outside ready. Permission responses have null delivery/deferred fields and dedicated validated request/decision/audit metadata digests.
 
-`uncertain_cause` records transition to uncertainty and survives reconciliation; null means never uncertain, pre-V8 input or runner-lost in-progress input.
+`uncertain_cause` records the transition to uncertainty and survives reconciliation; it is null for input that never became uncertain and for `in_progress` input left by runner loss.
 
 | Cause | Recorded when |
 |---|---|
@@ -447,8 +447,8 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 
 | Command | Situation | Error message | Exit |
 |---|---|---|---|
-| (any fleet/member/message command) | No database | `no cafleet database; run 'cafleet setup'` | 1 |
-| (any fleet/member/message command) | Incompatible database file, including one from another cafleet version | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` | 1 |
+| (any command except `setup` and `doctor`) | No database | `no cafleet database; run 'cafleet setup'` | 1 |
+| (any command except `setup` and `doctor`) | Incompatible database file, including one from another cafleet version | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` | 1 |
 | `member prompt` / `member exec` / `member press` / `member recover` / `permission respond` / `input reconcile` | `CAFLEET_MEMBER_ID` is set, with any value | `Error: 'cafleet <command>' is a Director-only command and this process runs inside CAFleet member <value> (CAFLEET_MEMBER_ID is set); send the request to your Director.` | 1 |
 | `member create` | The backend binary is missing | `Error: binary <name> not found on PATH` | 1 |
 | `member create` | The selected opencode preset is missing or unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |

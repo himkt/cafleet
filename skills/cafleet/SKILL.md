@@ -50,7 +50,7 @@ Use these neutral defaults only when a backend section omits a token or the back
 
 ## IDs
 
-Pass full database-assigned integers literally. Angle-bracket examples denote values to substitute, and environment variables supply no member identity. Commands take literal IDs; `CAFLEET_MEMBER_ID` only marks a member process, and the Director-only commands check only its presence. Literal IDs preserve host permission-pattern matching.
+Pass full database-assigned integers literally. Angle-bracket examples denote values to substitute, and environment variables supply no member identity. Literal IDs preserve host permission-pattern matching.
 
 | Position/flag | Subject |
 |---|---|
@@ -62,7 +62,7 @@ Pass full database-assigned integers literally. Angle-bracket examples denote va
 
 Read your literal `FLEET ID:`, `DIRECTOR MEMBER ID:` and `YOUR MEMBER ID:` spawn lines. Directors use IDs returned by creation. `<my-member-id>` is your own ID; `<target-member-id>` a recipient; `<message-id>` the printed delivery ID.
 
-Spawn prompts contain exactly the CLI's identity placeholders `{fleet_id}`, `{member_id}`, `{director_member_id}` and `{coding_agent}`. The CLI fills the newly allocated member ID and renders `CODING AGENT:` to the selected backend. Supply exactly one positional `PROMPT` or `--file PATH`; double other literal braces as `{{` / `}}`. The [substitution contract](reference/cli.md#member-create) owns syntax errors and exit semantics; [CLI environment variables](reference/cli.md#environment-variables) owns supported environment settings.
+Spawn prompts contain exactly the CLI's identity placeholders `{fleet_id}`, `{member_id}`, `{director_member_id}` and `{coding_agent}`. The CLI fills the newly allocated member ID and renders `CODING AGENT:` to the selected backend. Supply exactly one positional `PROMPT` or `--file PATH`. [CLI environment variables](reference/cli.md#environment-variables) owns supported environment settings.
 
 ## Soliciting user reactions
 
@@ -80,11 +80,11 @@ For `Operation not permitted` / `Permission denied`, check isolation and the hos
 cafleet message send --from-member-id <my-member-id> --to-member-id <target-member-id> "Assignment or reply"
 ```
 
-Supply one positional body or `--file PATH`; use file input for long/multiline text. Previews truncate by `CAFLEET_MAX_TEXT_LEN`; `--json` returns complete payloads.
+Supply one positional body or `--file PATH`; use file input for long/multiline text. Text output truncates bodies at `CAFLEET_MAX_TEXT_LEN`; `--json` returns complete payloads.
 
 Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a `message show ID --json` pointer; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/queue/fallback behavior. The root Director uses native reception or manual broker reads without automatic pane input, and its sends report `notification_sent: false` without a pane diagnostic or multiplexer requirement.
 
-Retain the committed message ID and successful record across a held preview or post-commit delivery error. Send each body once; a later send retries pending ordinary-member notifications. Recipients record deferred actions and ACK consumption. Fan out with one send per recipient and report failed recipients explicitly. [Send outcomes](reference/cli.md#message-send) owns exact diagnostics.
+Retain the committed message ID and successful record across a held preview or post-commit delivery error. Send each body once; a later send or `message wait` retries pending ordinary-member notifications. Recipients record deferred actions and ACK consumption. Fan out with one send per recipient and report failed recipients explicitly. [Send outcomes](reference/cli.md#message-send) owns exact diagnostics.
 
 ## Poll (Check Inbox)
 
@@ -92,7 +92,7 @@ Retain the committed message ID and successful record across a held preview or p
 cafleet message poll <my-member-id> [--json]
 ```
 
-Poll returns unACKed `input_required` deliveries newest first; `--json` includes complete bodies. The printed delivery ID differs from any host task-list ID. Members poll after ready, before reports and on every wake, then handle queued assignments before ending the turn. Directors poll on every wake and before completion. A later send retries a pending preview.
+Poll returns unACKed `input_required` deliveries newest first; `--json` includes complete bodies. The printed delivery ID differs from any host task-list ID. Your role file sets when to poll.
 
 ## Acknowledge (ACK)
 

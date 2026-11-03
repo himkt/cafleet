@@ -25,7 +25,7 @@ Complete the [member startup](../../SKILL.md#member-startup) reads, opening this
 Front-load your effort: read the design document and the **entire branch diff** before writing any feedback.
 
 1. On `ready (doc)` from the Director: read the design document, read the full branch diff, and run the checks you need to verify claims.
-2. Write one `COMMENT(reviewer): [TAG] <body>` marker per logical issue — in the source/test file at the affected line for source-anchored findings, at the affected design-doc paragraph for spec-level findings. One marker per logical issue; the body states the issue and what should change.
+2. Write one `COMMENT(reviewer): [TAG] <body>` marker per logical issue — in the source/test file at the affected line for source-anchored findings, at the affected design-doc paragraph for spec-level findings; the body states the issue and what should change.
 3. Report per § *Signals*.
 
 Tag taxonomy (used inside each `COMMENT(reviewer)` marker body, with code-review meanings):

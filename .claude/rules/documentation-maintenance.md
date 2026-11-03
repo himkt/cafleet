@@ -41,8 +41,8 @@ user-visible artifacts, never in terms of where the implementation lives.
 
 ### Describe behavior, not code locations
 
-- Name components by concept ("the broker", "the finite receiver", "the
-  receive procedure"), anchored to the Core terms table in the concepts
+- Name components by concept ("the broker", "the listener", "the finite
+  receive"), anchored to the Core terms table in the concepts
   overview — not by source file or module path.
 - When a page needs to say where a protocol or catalog is defined, attribute
   it to the shipping artifact the reader has ("part of the cafleet skill",
@@ -121,7 +121,7 @@ a restatement of the owned attributes.
 Two rules keep the non-owning mentions honest:
 
 - **Echo rule.** A non-owning page may describe an owned enumeration in
-  qualitative magnitude terms ("a receive operation bounds its native task lifetime"); it states no exact values.
+  qualitative magnitude terms ("a finite receive bounds its native task lifetime"); it states no exact values.
 - **Term tie-break.** When copies have drifted on what to call something, the
   term in the Core terms table of the concepts overview governs. The owning
   table and every linking mention adopt it.
