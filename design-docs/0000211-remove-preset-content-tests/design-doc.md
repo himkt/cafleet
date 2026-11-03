@@ -1,6 +1,6 @@
 # Remove Embedded Data Content Tests and Schema Migrations
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 26/26 tasks complete
 **Last Updated**: 2026-11-03
 
@@ -10,17 +10,17 @@ Remove the tests that restate the content of embedded data files instead of asse
 
 ## Success Criteria
 
-- [ ] Every test in § Audit result and § Database tests with action `delete` is absent; every `reduce`, `rename`, `move` and `adapt` row holds the listed result under its listed name; every `new` row exists.
-- [ ] Helpers and constants left without callers by those edits are absent.
-- [ ] Every installation-behavior test in `src/assets.rs` and the `hermes` test module remain unchanged.
-- [ ] `migrations/` holds only `V1__baseline.sql`, and its schema contains the `hermes` backend value, the `member_runs.native_session_json` column and the `cafleet_database` table.
-- [ ] With `CAFLEET_DATABASE_URL` unset and `HOME` set to a fresh directory, `cafleet setup` creates `$HOME/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1` from `cafleet 0.31.1`), and prints `Initialized database at PATH.`; a second run prints `Database already initialized at PATH.`; `cafleet doctor` reports `ok database: cafleet <VERSION>`.
-- [ ] A file recorded by another cafleet version, a file whose ledger holds a row beyond the baseline, and a file with another application identity are each classified `Incompatible` by the shared classifier that `cafleet setup`, the command guard and `cafleet doctor` call, and the other-version file keeps its bytes, as the § Database tests unit tests assert.
-- [ ] Outside `design-docs/`, no file mentions `cafleet_v9.db`, `V2__hermes_backend.sql`, `head_version`, `migration_chain`, `migrate_to_head`, `SchemaState::Behind`, `SchemaState::Ahead`, `database schema is outdated` or `is newer than this cafleet`.
-- [ ] `.claude/rules/code-quality.md` § Test placement states that tests drive production code and assert none of the text, keys, counts, ids or layout of embedded data files, with a matching Forbidden-patterns bullet; its former § Database migrations is headed `## Database schema` and reads as in § Revised convention text; `.claude/rules/documentation-maintenance.md` names "the schema baseline" instead of "migration files".
-- [ ] `docs/docs/contributing.md` carries the same test convention in its test paragraph.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
-- [ ] The test count reported by `mise //:test` equals the baseline minus 29: 31 tests are deleted and 2 are added; reduced, renamed, moved and adapted tests count as kept.
+- [x] Every test in § Audit result and § Database tests with action `delete` is absent; every `reduce`, `rename`, `move` and `adapt` row holds the listed result under its listed name; every `new` row exists.
+- [x] Helpers and constants left without callers by those edits are absent.
+- [x] Every installation-behavior test in `src/assets.rs` and the `hermes` test module remain unchanged.
+- [x] `migrations/` holds only `V1__baseline.sql`, and its schema contains the `hermes` backend value, the `member_runs.native_session_json` column and the `cafleet_database` table.
+- [x] With `CAFLEET_DATABASE_URL` unset and `HOME` set to a fresh directory, `cafleet setup` creates `$HOME/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1` from `cafleet 0.31.1`), and prints `Initialized database at PATH.`; a second run prints `Database already initialized at PATH.`; `cafleet doctor` reports `ok database: cafleet <VERSION>`.
+- [x] A file recorded by another cafleet version, a file whose ledger holds a row beyond the baseline, and a file with another application identity are each classified `Incompatible` by the shared classifier that `cafleet setup`, the command guard and `cafleet doctor` call, and the other-version file keeps its bytes, as the § Database tests unit tests assert.
+- [x] Outside `design-docs/`, no file mentions `cafleet_v9.db`, `V2__hermes_backend.sql`, `head_version`, `migration_chain`, `migrate_to_head`, `SchemaState::Behind`, `SchemaState::Ahead`, `database schema is outdated` or `is newer than this cafleet`.
+- [x] `.claude/rules/code-quality.md` § Test placement states that tests drive production code and assert none of the text, keys, counts, ids or layout of embedded data files, with a matching Forbidden-patterns bullet; its former § Database migrations is headed `## Database schema` and reads as in § Revised convention text; `.claude/rules/documentation-maintenance.md` names "the schema baseline" instead of "migration files".
+- [x] `docs/docs/contributing.md` carries the same test convention in its test paragraph.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [x] The test count reported by `mise //:test` equals the baseline minus 29: 31 tests are deleted and 2 are added; reduced, renamed, moved and adapted tests count as kept.
 
 ---
 
