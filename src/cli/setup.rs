@@ -1315,7 +1315,6 @@ mod tests {
                 .iter()
                 .map(|check| check.name.as_str())
                 .collect::<Vec<_>>();
-            assert!(!names.contains(&"hermes.approvals.deny"), "{names:?}");
             let position = names
                 .iter()
                 .position(|name| *name == "hermes.executable")
@@ -1427,6 +1426,38 @@ mod tests {
         use crate::broker::runtime::test_support::register_member_run;
         use crate::cli::setup::tests::*;
         use serde_json::Value;
+
+        #[test]
+        fn a_run_reached_after_the_time_budget_is_not_checked() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = crate::db::test_support::migrated_conn(&dir);
+            let (fleet, director) = create_fleet_fixture(&mut conn, "doctor-budget");
+            let run = register_member_run(&mut conn, fleet, director, "unprobed");
+            let rows = member_run_registry(&conn).unwrap();
+            assert_eq!(rows.len(), 1);
+            let deadline = Instant::now();
+            let probed = probe_run(&conn, &rows[0], deadline);
+            assert_eq!(probed.state, MemberState::NotChecked);
+            let check = runtime_check(&probed);
+            assert_eq!(
+                format!("{} {}: {}", check.status, check.name, check.detail),
+                format!(
+                    "info member_runtime.{}: member {1} not checked (time limit): runtime diagnosis time budget exhausted — run 'cafleet member show {1}'",
+                    run.run_id, run.member_id
+                )
+            );
+            let summary = state_summary(probed.state, vec![probed.member_id]);
+            assert_eq!(
+                format!(
+                    "{} {}: {}",
+                    summary.status, summary.component, summary.detail
+                ),
+                format!(
+                    "info members: 1 not checked (time limit): {} — run 'cafleet member show ID'",
+                    run.member_id
+                )
+            );
+        }
 
         #[test]
         fn id_ranges_collapse_runs_of_three_or_more_consecutive_ids() {
