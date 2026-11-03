@@ -91,7 +91,7 @@ Every claimed detector/composer/answer capability requires CAFleet-owned positiv
 
 The stream probe establishes a candidate Director's streamed background output while supervision continues. The candidate starts `cafleet message listen` through its native background-execution facility and keeps working on something unrelated in the same session. The probe passes when broker records another member sends at separate times during that work are each first observed in the listener's output delivered through that facility, then consumed without user input, while the same listener is still running, during the work or at the session's next turn boundary. The host may push the records or the Director may read the running process's output on demand. A record discovered through a foreground `poll`, `wait` or `show` invalidates the run. Output that reaches the session only when the process exits, such as a completion notification for a finite receive, fails the probe. Probe each native mechanism that can read a running background process separately. Passing establishes streamed background output; the backend's native reception recipe owns the concrete tool calls.
 
-1. Create an isolated database (`CAFLEET_DATABASE_URL=sqlite:///<task folder>/probe/director.db`) and run `cafleet setup` against it.
+1. Create an isolated database in a fresh short absolute directory, such as one from `mktemp -d` (`CAFLEET_DATABASE_URL=sqlite:///<probe dir>/director.db`), so the member runtime socket path stays within the platform limit; record its location and run `cafleet setup` against it.
 2. In a tmux pane, start the candidate Director session and register it with `cafleet fleet create --coding-agent <backend>`.
 3. Have the Director spawn one probe member on any Member-eligible backend, with a spawn prompt that sends `ready` and then ends its turn without further broker traffic. The probe member's ID is the sender identity.
 4. After the Director consumes the ready, have it start `cafleet message listen <director-id> --timeout 300` through the mechanism under test, then send the task prompt below the steps.
@@ -107,7 +107,7 @@ Classify each run as follows; the 240-second turn bound leaves 60 seconds of the
 
 | Classification | Condition |
 |---|---|
-| Invalid | The task turn ended before 240 s without the Director having ACKed `stream-probe 3`; the task turn was still running when the listener exited; a record was first observed through a foreground `poll`, `wait` or `show`; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
+| Invalid | The task turn ended before 240 s without the Director having ACKed `stream-probe 3`; the task turn was still running when the listener exited; a record was first observed through a foreground `poll`, `wait` or `show`; every record was first observed in the listener's output while it ran but an ACK landed at or after the listener exited; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
 | Pass | A valid run in which every record was first observed in the listener's output delivered through the mechanism under test and ACKed before the listener exited. |
 | Fail | A valid run in which any record was first observed only after the listener exited, or was never observed in the listener's output. |
 

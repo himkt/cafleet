@@ -75,10 +75,11 @@ The rest of that paragraph (Member requirements, carry-forward and manual `poll`
 
 > The stream probe establishes a candidate Director's streamed background output while supervision continues. The candidate starts `cafleet message listen` through its native background-execution facility and keeps working on something unrelated in the same session. The probe passes when broker records another member sends at separate times during that work are each first observed in the listener's output delivered through that facility, then consumed without user input, while the same listener is still running, during the work or at the session's next turn boundary. The host may push the records or the Director may read the running process's output on demand. A record discovered through a foreground `poll`, `wait` or `show` invalidates the run. Output that reaches the session only when the process exits, such as a completion notification for a finite receive, fails the probe. Probe each native mechanism that can read a running background process separately. Passing establishes streamed background output; the backend's native reception recipe owns the concrete tool calls.
 
-Its numbered steps change as follows (steps 1–3 unchanged):
+Its numbered steps change as follows (steps 2 and 3 unchanged):
 
 | Step | New content |
 |---|---|
+| 1 | Create an isolated database in a fresh short absolute directory, such as one from `mktemp -d` (`CAFLEET_DATABASE_URL=sqlite:///<probe dir>/director.db`), so the member runtime socket path stays within the platform limit; record its location and run `cafleet setup` against it. |
 | 4 | After the Director consumes the ready, have it start `cafleet message listen <director-id> --timeout 300` through the mechanism under test, then send the task prompt below the steps. |
 | 5 | Unchanged (three records at 20 s, 60 s and 120 s after the task prompt; record IDs and timestamps). |
 | 6 | Classify the run by the run classification below the steps. Capture the Director pane and retain the session records that show each record's first observation. |
@@ -94,7 +95,7 @@ Run classification (the 240-second turn bound leaves 60 seconds of the 300-secon
 
 | Classification | Condition |
 |---|---|
-| Invalid | The task turn ended before 240 s without the Director having ACKed `stream-probe 3`; the task turn was still running when the listener exited; a record was first observed through a foreground `poll`, `wait` or `show`; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
+| Invalid | The task turn ended before 240 s without the Director having ACKed `stream-probe 3`; the task turn was still running when the listener exited; a record was first observed through a foreground `poll`, `wait` or `show`; every record was first observed in the listener's output while it ran but an ACK landed at or after the listener exited; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
 | Pass | A valid run in which every record was first observed in the listener's output delivered through the mechanism under test and ACKed before the listener exited. |
 | Fail | A valid run in which any record was first observed only after the listener exited, or was never observed in the listener's output. |
 
@@ -211,7 +212,7 @@ Implementation fills one row per mechanism run, adding rows for repeated runs an
 | Backend and version | Mechanism (tool call and flags) | Run | Listener start | Message IDs and send times | First observation per record (tool result or event, time) | ACK times | Task-turn end | Listener exit | Classification |
 |---|---|---|---|---|---|---|---|---|---|
 | Hermes 2026.9.24 | `terminal` `background=true`, `notify=true` | 1 | 2026-11-02T23:45:44Z | 2 at 23:46:02Z, 3 at 23:46:42Z, 4 at 23:47:42Z | All three in the exit completion notification, 23:50:44Z | 23:50:54Z, 23:50:58Z, 23:51:02Z | 23:50:20Z | 23:50:44Z | Fail |
-| Hermes 2026.9.24 | `terminal` `background=true`, `notify=["\"event\":\"message\""]` (watch pattern) | 1 | 2026-11-02T23:58:58Z | 11 at 23:59:16Z, 12 at 23:59:56Z, 13 at 00:00:56Z | Watch-match notifications queued during the turn, injected after it at 00:03:27Z, 00:03:46Z, 00:03:55Z | 00:03:38Z, 00:03:49Z, 00:03:58Z | 00:03:27Z (271 s) | 00:03:58Z | Unclassified: record 13 ACKed at listener exit; repeated |
+| Hermes 2026.9.24 | `terminal` `background=true`, `notify=["\"event\":\"message\""]` (watch pattern) | 1 | 2026-11-02T23:58:58Z | 11 at 23:59:16Z, 12 at 23:59:56Z, 13 at 00:00:56Z | Watch-match notifications queued during the turn, injected after it at 00:03:27Z, 00:03:46Z, 00:03:55Z | 00:03:38Z, 00:03:49Z, 00:03:58Z | 00:03:27Z (271 s) | 00:03:58Z | Invalid: record 13 ACKed at listener exit; repeated |
 | Hermes 2026.9.24 | `terminal` `background=true`, `notify=["\"event\":\"message\""]` (watch pattern) | 2 | 2026-11-03T00:11:34Z | 17 at 00:11:52Z, 18 at 00:12:32Z, 19 at 00:13:32Z | Watch-match notifications injected at the turn boundary, 00:15:56Z, 00:16:03Z, 00:16:14Z | 00:15:59Z, 00:16:09Z, 00:16:20Z | 00:15:56Z (264 s) | 00:16:34Z | Pass |
 | Hermes 2026.9.24 | `terminal` `background=true`, then `process_manage` `action=poll` | 1 | 2026-11-02T23:51:48Z | 5 at 23:52:07Z, 6 at 23:52:47Z, 7 at 23:53:47Z | `process_manage` poll results with status `running`, 23:52:29Z, 23:52:49Z, 23:53:52Z | 23:52:31Z, 23:52:55Z, 23:53:58Z | 23:54:16Z (ACKed `stream-probe 3`) | 23:56:48Z | Pass |
 | Hermes 2026.9.24 | `terminal` `background=true`, then `process_manage` `action=log` with `offset` | 1 | 2026-11-02T23:55:31Z | 8 at 23:55:50Z, 9 at 23:56:30Z, 10 at 23:57:30Z | `process_manage` log results with status `running`, 23:55:59Z, 23:56:38Z, 23:57:35Z | 23:56:04Z, 23:56:42Z, 23:57:40Z | 23:57:56Z (ACKed `stream-probe 3`) | 00:00:31Z | Pass |
@@ -231,7 +232,7 @@ Selected branch: Hermes `yes`, `<read>` = `log`. Hermes `<probe date>` = 2026-11
 
 ### Step 1: Run live stream probes
 
-Follow § Probe procedure (new steps 4–7 and the run classification) for every row of § Probed mechanisms, with an isolated `CAFLEET_DATABASE_URL` under this design folder's hidden `probe/` directory, a tmux pane per candidate Director and a probe member on a Member-eligible backend.
+Follow § Probe procedure (new steps 4–7 and the run classification) for every row of § Probed mechanisms, with an isolated `CAFLEET_DATABASE_URL` in a fresh short absolute directory per § Probe procedure step 1, a tmux pane per candidate Director and a probe member on a Member-eligible backend.
 
 - [x] Confirm installed versions with `hermes --version` (expect `2026.9.24`) and `opencode --version` (expect `v2.1.4`); record them in § Probe evidence. <!-- completed: 2026-11-03T00:27 -->
 - [x] Enumerate Hermes's running-output facilities from the installed `terminal` and `process_manage` schemas and OpenCode 2.1.4's background-job and job-output tools from its installed help and session tool list; add a § Probe evidence row for each mechanism found. <!-- completed: 2026-11-03T00:27 -->
