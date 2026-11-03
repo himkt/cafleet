@@ -1,7 +1,7 @@
 # Docs, SPEC and Skills Simplification
 
 **Status**: Complete
-**Progress**: 29/30 tasks complete
+**Progress**: 30/30 tasks complete
 **Last Updated**: 2026-11-03
 
 ## Overview
@@ -429,7 +429,7 @@ Every run follows the same per-run procedure:
 
 - [x] Present the reviewed result (diff command, applied decisions, checks, follow-ups) for user approval through the executing backend's decision surface, and record the publication scope. Route any requested revision through a fix run and Step 5 before presenting again (execute Step 6). <!-- completed: 2026-11-03T13:45 -->
 - [x] After user approval, set Status to Complete, refresh Progress and Last Updated, and commit `docs: add design doc 0000212-docs-spec-skills-simplification` (design-doc.md only) (execute Step 8). <!-- completed: 2026-11-03T13:45 -->
-- [ ] With remote approval, push the branch without force and open one PR with `gh pr create --title "..." --body-file <path>` (execute Step 7). <!-- completed: -->
+- [x] With remote approval, push the branch without force and open one PR with `gh pr create --title "..." --body-file <path>` (execute Step 7). <!-- completed: 2026-11-03T13:48 -->
 
 ---
 
