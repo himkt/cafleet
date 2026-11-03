@@ -24,7 +24,7 @@ The flag means slightly different things per command:
   and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
 
-Run the root Director on a backend whose Director verdict is `yes`, and spawn members on backends whose Member verdict is `yes`. [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records each backend's verdicts with their evidence; a backend whose Director verdict is `no` runs only as a member.
+Run the root Director on a backend whose Director verdict is `yes`, and spawn members on backends whose Member verdict is `yes`. [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records each backend's verdicts with their evidence; a backend whose Director verdict is `no` runs only as a member. A Director keeps a broker listener running in the background while it works, so its backend must deliver that running process's output to the session as it arrives — at the latest at the session's next turn boundary. A backend whose background jobs surface output only when the process exits runs only as a member; [Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the probe.
 
 New members run through the CAFleet PTY runner with a declared detection-coverage state. Every launch mode is classified `auto` or `manual`. An `auto` mode is native automatic review or a fixed allow/deny policy, and a `manual` mode asks a human on the native surface for operations its rules do not settle. Omitting `--permission-mode` selects the backend's default mode, which is an `auto` mode on every backend:
 

@@ -163,7 +163,7 @@ State shared operational facts in each home for its audience.
 
 ### Director verdict changes
 
-To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version: native goal lifecycle controls from official documentation or installed help, and background execution while supervision continues from the CAFleet stream probe defined there. Record the version, source and date in `SPEC.md` § Role eligibility and the backend's Role eligibility table, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
+To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version: native goal lifecycle controls from official documentation or installed help, and streamed background output while supervision continues from the CAFleet stream probe defined there. Record the version, source and date in `SPEC.md` § Role eligibility and the backend's Role eligibility table, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
 
 ### Template
 
