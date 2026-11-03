@@ -10,16 +10,16 @@ The PTY runner marks every member process with `CAFLEET_MEMBER_ID`, and the six 
 
 ## Success Criteria
 
-- [ ] Every member child process spawned by the runner has `CAFLEET_MEMBER_ID=<member id>` in its environment, and Hermes members' terminal tools see it through `terminal.client_env_passthrough`.
-- [ ] With `CAFLEET_MEMBER_ID` set to any value, including empty, each of `member prompt`, `member exec`, `member press`, `member recover`, `permission respond` and `input reconcile` exits 1 with the guard error, before reading settings or opening the database or multiplexer. With the variable unset, these commands behave as they do today.
-- [ ] Every other command behaves the same whether `CAFLEET_MEMBER_ID` is set or not.
-- [ ] `cafleet setup` writes no Director-only deny or prompt entry into any backend configuration. The Hermes `approvals.deny` merge, its spawn preflight and the `hermes.approvals.deny` doctor row are gone. The Codex rules file holds only the broad `cafleet` allow, and the OpenCode presets hold no Director-only denies.
-- [ ] `member create --coding-agent hermes` refuses to start a member when `terminal.client_env_passthrough` lacks a CAFleet member name, so a Hermes member never runs without the guard variable.
-- [ ] By default, `cafleet doctor` prints one line for each of `multiplexer`, `database` and each backend, plus one `members` line per occupied member state, using ranges such as `1-6, 9-22`. Actionable states have status `warn` and end with ` — run '<command>'`. Ended runs of deregistered members are hidden.
-- [ ] `cafleet doctor --verbose` prints one row per check. `cafleet doctor --json` prints `{"summary":[…],"checks":[…]}`. Only an `error` status makes doctor exit 1.
-- [ ] `skills/cafleet/roles/member.md` tells members to send Director-only needs to the Director.
-- [ ] `SPEC.md`, `docs/`, the skills and their references describe the guard, the reduced setup writes and the new doctor contract. Nothing in them still describes the removed Hermes deny merge, Codex prompt rules or OpenCode preset denies, or the old doctor layout.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [x] Every member child process spawned by the runner has `CAFLEET_MEMBER_ID=<member id>` in its environment, and Hermes members' terminal tools see it through `terminal.client_env_passthrough`.
+- [x] With `CAFLEET_MEMBER_ID` set to any value, including empty, each of `member prompt`, `member exec`, `member press`, `member recover`, `permission respond` and `input reconcile` exits 1 with the guard error, before reading settings or opening the database or multiplexer. With the variable unset, these commands behave as they do today.
+- [x] Every other command behaves the same whether `CAFLEET_MEMBER_ID` is set or not.
+- [x] `cafleet setup` writes no Director-only deny or prompt entry into any backend configuration. The Hermes `approvals.deny` merge, its spawn preflight and the `hermes.approvals.deny` doctor row are gone. The Codex rules file holds only the broad `cafleet` allow, and the OpenCode presets hold no Director-only denies.
+- [x] `member create --coding-agent hermes` refuses to start a member when `terminal.client_env_passthrough` lacks a CAFleet member name, so a Hermes member never runs without the guard variable.
+- [x] By default, `cafleet doctor` prints one line for each of `multiplexer`, `database` and each backend, plus one `members` line per occupied member state, using ranges such as `1-6, 9-22`. Actionable states have status `warn` and end with ` — run '<command>'`. Ended runs of deregistered members are hidden.
+- [x] `cafleet doctor --verbose` prints one row per check. `cafleet doctor --json` prints `{"summary":[…],"checks":[…]}`. Only an `error` status makes doctor exit 1.
+- [x] `skills/cafleet/roles/member.md` tells members to send Director-only needs to the Director.
+- [x] `SPEC.md`, `docs/`, the skills and their references describe the guard, the reduced setup writes and the new doctor contract. Nothing in them still describes the removed Hermes deny merge, Codex prompt rules or OpenCode preset denies, or the old doctor layout.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
 
 ---
 
