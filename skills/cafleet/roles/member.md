@@ -73,6 +73,8 @@ If a native permission prompt is open in your pane, leave it; the Director or us
 
 Take literal IDs from `FLEET ID:`, `YOUR MEMBER ID:` and `DIRECTOR MEMBER ID:`; pass them explicitly. CLI validation surfaces missing identity. Poll your own inbox and use permitted Send/Poll/ACK/show operations. The Director owns lifecycle, roster listing, captures and explicit pane input, including `member press`.
 
+Commands that write into a member's live native session or runtime record — explicit pane input, permission answers, input reconciliation and run recovery — refuse inside a member with `Error: 'cafleet <command>' is a Director-only command …; send the request to your Director.` Lifecycle commands, roster listing and captures run without that refusal and remain the Director's as well. Send a need for any Director-owned command to the Director with the routing message in [Reconsider, then route](#reconsider-then-route), naming the command and its purpose.
+
 ## Shutdown
 
 When asked to wrap up, send one final broker report and return to the prompt; the Director owns deletion.

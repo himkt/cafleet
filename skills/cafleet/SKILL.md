@@ -50,7 +50,7 @@ Use these neutral defaults only when a backend section omits a token or the back
 
 ## IDs
 
-Pass full database-assigned integers literally. Angle-bracket examples denote values to substitute, and environment variables supply no member identity. Literal IDs preserve host permission-pattern matching.
+Pass full database-assigned integers literally. Angle-bracket examples denote values to substitute, and environment variables supply no member identity. Commands take literal IDs; `CAFLEET_MEMBER_ID` only marks a member process, and the Director-only commands check only its presence. Literal IDs preserve host permission-pattern matching.
 
 | Position/flag | Subject |
 |---|---|

@@ -1,7 +1,7 @@
 # Member command guard, backend configuration cleanup and doctor summary
 
 **Status**: Approved
-**Progress**: 24/60 tasks complete
+**Progress**: 33/60 tasks complete
 **Last Updated**: 2026-11-03
 
 ## Overview
@@ -396,18 +396,18 @@ Documentation is updated first, in the order `.claude/rules/documentation-mainte
 
 ### Step 4: skills/
 
-- [ ] `skills/cafleet/roles/member.md` § Identity and authority: add the §3 paragraph <!-- completed: -->
-- [ ] `skills/cafleet/reference/cli.md`: add the guard (six commands, trigger, error string, exit 1) to the command facts. Rewrite the `setup`/`doctor` section: Hermes passthrough only with the new skip line, Codex/OpenCode preset facts, doctor summary/verbose/JSON, statuses with `warn` and exit rule. Error table: replace the deny-glob row with the passthrough preflight row and add the guard row <!-- completed: -->
-- [ ] `skills/cafleet/reference/cli.md` § Environment variables: add the `CAFLEET_MEMBER_ID` row and name it in the forwarding sentence (§5) <!-- completed: -->
-- [ ] `skills/cafleet/SKILL.md` § IDs: add the literal-ID clarification sentence (§5) <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agents.md` opencode notes: rewrite the "last matching permission rule … denies" row as "the broad `cafleet *` allow lets members run broker commands; Director-only commands refuse inside the member through the runner guard". Remove "and Director-only denies" from the `cafleet-ask` row <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agents.md` hermes notes: replace the setup deny-merge row with a row saying that a Hermes Director whose command returns `BLOCKED: … user-defined deny rule '<glob>'` asks the operator, through the Director's decision surface, to remove that CAFleet glob from `approvals.deny`. The passthrough row names `CAFLEET_MEMBER_ID` and the spawn precondition. Preserve the model freshness date <!-- completed: -->
-- [ ] `skills/cafleet/roles/director.md`: the Hermes preflight sentence (missing passthrough names with `run 'cafleet setup --coding-agent hermes'`). The Recovery section reads doctor's member summary and its next command <!-- completed: -->
-- [ ] Grep `skills/` for `approvals.deny`, `Director-only deny`, `prompt` rules, `member_runtime` and `hermes.approvals`, and resolve every leftover <!-- completed: -->
+- [x] `skills/cafleet/roles/member.md` § Identity and authority: add the §3 paragraph <!-- completed: 2026-11-03T04:55 -->
+- [x] `skills/cafleet/reference/cli.md`: add the guard (six commands, trigger, error string, exit 1) to the command facts. Rewrite the `setup`/`doctor` section: Hermes passthrough only with the new skip line, Codex/OpenCode preset facts, doctor summary/verbose/JSON, statuses with `warn` and exit rule. Error table: replace the deny-glob row with the passthrough preflight row and add the guard row <!-- completed: 2026-11-03T04:55 -->
+- [x] `skills/cafleet/reference/cli.md` § Environment variables: add the `CAFLEET_MEMBER_ID` row and name it in the forwarding sentence (§5) <!-- completed: 2026-11-03T04:55 -->
+- [x] `skills/cafleet/SKILL.md` § IDs: add the literal-ID clarification sentence (§5) <!-- completed: 2026-11-03T04:55 -->
+- [x] `skills/cafleet/reference/coding-agents.md` opencode notes: rewrite the "last matching permission rule … denies" row as "the broad `cafleet *` allow lets members run broker commands; Director-only commands refuse inside the member through the runner guard". Remove "and Director-only denies" from the `cafleet-ask` row <!-- completed: 2026-11-03T04:55 -->
+- [x] `skills/cafleet/reference/coding-agents.md` hermes notes: replace the setup deny-merge row with a row saying that a Hermes Director whose command returns `BLOCKED: … user-defined deny rule '<glob>'` asks the operator, through the Director's decision surface, to remove that CAFleet glob from `approvals.deny`. The passthrough row names `CAFLEET_MEMBER_ID` and the spawn precondition. Preserve the model freshness date <!-- completed: 2026-11-03T04:55 -->
+- [x] `skills/cafleet/roles/director.md`: the Hermes preflight sentence (missing passthrough names with `run 'cafleet setup --coding-agent hermes'`). The Recovery section reads doctor's member summary and its next command <!-- completed: 2026-11-03T04:55 -->
+- [x] Grep `skills/` for `approvals.deny`, `Director-only deny`, `prompt` rules, `member_runtime` and `hermes.approvals`, and resolve every leftover <!-- completed: 2026-11-03T04:55 -->
 
 ### Step 5: Project rules
 
-- [ ] Confirm that no `.claude/rules/` convention changes. Edit only if one does <!-- completed: -->
+- [x] Confirm that no `.claude/rules/` convention changes. Edit only if one does <!-- completed: 2026-11-03T04:55 -->
 
 ### Step 6: Director-only command guard (code)
 
