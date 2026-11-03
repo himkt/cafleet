@@ -2501,6 +2501,37 @@ mod tests {
                 invalid_creation(CodingAgent::Codex, &extra);
             }
         }
+
+        #[test]
+        fn unknown_fleet_fails_like_other_fleet_commands_before_multiplexer_resolution() {
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = migrated_conn(&dir);
+            let mut arguments = create_arguments()
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>();
+            arguments[4] = "999".into();
+            arguments.push("literal assignment".into());
+            let Command::Member(command) = CliArgs::try_parse_from(arguments).unwrap().command
+            else {
+                panic!("member command expected")
+            };
+            let before = table_snapshot(&conn, |_| true);
+            let settings = Settings::for_database(
+                std::path::Path::new(conn.path().unwrap()),
+                Some("unavailable-test-multiplexer"),
+            );
+            let failure = member::run(&mut conn, &settings, command, crate::time::Deadline::new())
+                .expect_err("unknown fleet must fail");
+            assert!(
+                matches!(failure, CafleetError::App(_)),
+                "{}",
+                failure.message()
+            );
+            assert_eq!(failure.message(), "fleet '999' not found.");
+            assert_eq!(failure.exit_code(), 1);
+            assert_eq!(table_snapshot(&conn, |_| true), before);
+        }
     }
 
     mod press {
