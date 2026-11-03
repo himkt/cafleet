@@ -860,7 +860,7 @@ mod tests {
         }
 
         #[test]
-        fn runner_real_pty_child_receives_the_forwarded_config_location() {
+        fn runner_real_pty_child_receives_the_member_id_and_forwarded_config_location() {
             let fixture = Fixture::new();
             let mut spec = fixture.spec();
             let database_url = spec
@@ -869,15 +869,21 @@ mod tests {
                 .find(|(key, _)| key == "CAFLEET_DATABASE_URL")
                 .map(|(_, value)| value.clone())
                 .expect("fixture spawn environment carries the database URL");
-            spec.environment = crate::coding_agent::CodingAgent::Opencode
-                .spawn_environment(&database_url, &|name| {
+            let member_id = fixture.run.member_id;
+            let forwarded = crate::coding_agent::CodingAgent::Opencode
+                .forwarded_config(&|name| {
                     (name == "OPENCODE_CONFIG_DIR").then(|| "/cfg/open code".to_string())
                 })
                 .unwrap();
+            spec.environment = crate::coding_agent::CodingAgent::spawn_environment(
+                &database_url,
+                member_id,
+                forwarded,
+            );
             spec.argv = vec![
             "/bin/sh".into(),
             "-c".into(),
-            "printf 'config=%s\\n' \"$OPENCODE_CONFIG_DIR\"; printf 'database=%s\\n' \"$CAFLEET_DATABASE_URL\"".into(),
+            "printf 'config=%s\\n' \"$OPENCODE_CONFIG_DIR\"; printf 'database=%s\\n' \"$CAFLEET_DATABASE_URL\"; printf 'member=%s\\n' \"$CAFLEET_MEMBER_ID\"".into(),
         ];
             let mut owned = OwnedPty::prepare(spec.size);
             owned.session.spawn(&spec).unwrap();
@@ -887,6 +893,11 @@ mod tests {
             assert!(text.contains("config=/cfg/open code"), "{text:?}");
             assert!(
                 text.contains(&format!("database={database_url}")),
+                "{text:?}"
+            );
+            assert!(
+                text.lines()
+                    .any(|line| line.trim_end_matches('\r') == format!("member={member_id}")),
                 "{text:?}"
             );
             assert_eq!(status, ChildExit::Code(0));

@@ -984,24 +984,19 @@ mod tests {
     }
 
     #[test]
-    fn spawn_environment_forwards_the_selected_config_variable_after_the_database_url() {
+    fn forwarded_config_returns_only_the_selected_variable_with_the_creator_exact_value() {
         for &agent in CodingAgent::all() {
             let expected = every_config_variable(agent.config_variable()).unwrap();
             assert_eq!(
-                agent
-                    .spawn_environment(DATABASE_URL, &every_config_variable)
-                    .unwrap(),
-                vec![
-                    ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
-                    (agent.config_variable().to_owned(), expected),
-                ],
+                agent.forwarded_config(&every_config_variable).unwrap(),
+                Some((agent.config_variable().to_owned(), expected)),
                 "{agent:?} forwards only its own variable with the creator's exact value"
             );
         }
     }
 
     #[test]
-    fn spawn_environment_adds_nothing_when_the_config_variable_is_unset() {
+    fn forwarded_config_is_absent_when_the_selected_variable_is_unset() {
         for &agent in CodingAgent::all() {
             let others = |name: &str| {
                 (name != agent.config_variable())
@@ -1009,15 +1004,15 @@ mod tests {
                     .flatten()
             };
             assert_eq!(
-                agent.spawn_environment(DATABASE_URL, &others).unwrap(),
-                vec![("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned())],
+                agent.forwarded_config(&others).unwrap(),
+                None,
                 "{agent:?} forwards no default and no other backend's variable"
             );
         }
     }
 
     #[test]
-    fn spawn_environment_ignores_an_invalid_value_of_another_backend() {
+    fn forwarded_config_ignores_an_invalid_value_of_another_backend() {
         for &agent in CodingAgent::all() {
             let others_invalid = |name: &str| {
                 if name == agent.config_variable() {
@@ -1027,28 +1022,68 @@ mod tests {
                 }
             };
             assert_eq!(
-                agent
-                    .spawn_environment(DATABASE_URL, &others_invalid)
-                    .unwrap(),
+                agent.forwarded_config(&others_invalid).unwrap(),
+                Some((
+                    agent.config_variable().to_owned(),
+                    "/cfg/selected".to_owned()
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_environment_orders_database_url_member_id_then_the_forwarded_config() {
+        for &agent in CodingAgent::all() {
+            let forwarded = agent.forwarded_config(&every_config_variable).unwrap();
+            let expected = every_config_variable(agent.config_variable()).unwrap();
+            assert_eq!(
+                CodingAgent::spawn_environment(DATABASE_URL, 34, forwarded),
                 vec![
                     ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
-                    (
-                        agent.config_variable().to_owned(),
-                        "/cfg/selected".to_owned()
-                    ),
+                    ("CAFLEET_MEMBER_ID".to_owned(), "34".to_owned()),
+                    (agent.config_variable().to_owned(), expected),
+                ],
+                "{agent:?} with its config variable set"
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_environment_holds_database_url_and_member_id_when_the_config_variable_is_unset() {
+        for &agent in CodingAgent::all() {
+            let forwarded = agent.forwarded_config(&|_| None).unwrap();
+            assert_eq!(
+                CodingAgent::spawn_environment(DATABASE_URL, 34, forwarded),
+                vec![
+                    ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
+                    ("CAFLEET_MEMBER_ID".to_owned(), "34".to_owned()),
+                ],
+                "{agent:?} with its config variable unset"
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_environment_renders_the_member_id_in_decimal() {
+        for member_id in [1, 9, 10, 1234567890123] {
+            assert_eq!(
+                CodingAgent::spawn_environment(DATABASE_URL, member_id, None),
+                vec![
+                    ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
+                    ("CAFLEET_MEMBER_ID".to_owned(), member_id.to_string()),
                 ]
             );
         }
     }
 
     #[test]
-    fn spawn_environment_rejects_an_invalid_selected_value_with_the_config_dir_error() {
+    fn forwarded_config_rejects_an_invalid_selected_value_with_the_config_dir_error() {
         for &agent in CodingAgent::all() {
             for value in ["", "relative/cfg", "~/cfg"] {
                 let lookup =
                     |name: &str| (name == agent.config_variable()).then(|| value.to_string());
                 let failure = agent
-                    .spawn_environment(DATABASE_URL, &lookup)
+                    .forwarded_config(&lookup)
                     .expect_err("an invalid config location fails before registration");
                 assert!(matches!(failure, CafleetError::App(_)));
                 assert_eq!(
@@ -2302,14 +2337,23 @@ mod tests {
         }
 
         #[test]
-        fn hermes_spawn_environment_forwards_hermes_home() {
+        fn hermes_forwarded_config_returns_hermes_home() {
             let lookup = |name: &str| (name == "HERMES_HOME").then(|| "/srv/hermes".to_string());
             assert_eq!(
-                CodingAgent::Hermes
-                    .spawn_environment(DATABASE_URL, &lookup)
-                    .unwrap(),
+                CodingAgent::Hermes.forwarded_config(&lookup).unwrap(),
+                Some(("HERMES_HOME".to_owned(), "/srv/hermes".to_owned()))
+            );
+        }
+
+        #[test]
+        fn hermes_spawn_environment_places_hermes_home_after_the_member_id() {
+            let lookup = |name: &str| (name == "HERMES_HOME").then(|| "/srv/hermes".to_string());
+            let forwarded = CodingAgent::Hermes.forwarded_config(&lookup).unwrap();
+            assert_eq!(
+                CodingAgent::spawn_environment(DATABASE_URL, 34, forwarded),
                 vec![
                     ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
+                    ("CAFLEET_MEMBER_ID".to_owned(), "34".to_owned()),
                     ("HERMES_HOME".to_owned(), "/srv/hermes".to_owned()),
                 ]
             );
@@ -2355,11 +2399,12 @@ mod tests {
         }
 
         #[test]
-        fn hermes_client_env_passthrough_names_the_member_database_and_multiplexer_variables() {
+        fn hermes_client_env_passthrough_names_the_member_database_id_and_multiplexer_variables() {
             assert_eq!(
                 HERMES_CLIENT_ENV_PASSTHROUGH,
                 [
                     "CAFLEET_DATABASE_URL",
+                    "CAFLEET_MEMBER_ID",
                     "TMUX",
                     "TMUX_PANE",
                     "HERDR_ENV",

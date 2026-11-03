@@ -1373,6 +1373,83 @@ mod tests {
     }
 
     #[test]
+    fn member_create_hands_the_allocated_member_id_to_the_native_child_only() {
+        let dir = crate::runtime::test_support::short_tempdir();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, _) = create_fleet_fixture(&mut conn, "member-environment");
+        let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+        let config = dir.path().join("claude config");
+        std::fs::create_dir(&config).unwrap();
+        let descriptor_copy = dir.path().join("descriptor-copy.json");
+        let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in\n  *' display-message '*) printf 'main|@1|%%1\\n' ;;\n  *' split-window '*)\n    while [ $# -gt 0 ]; do\n      if [ \"$1\" = --descriptor ]; then\n        IFS= read -r line < \"$2\" || true\n        printf '%s' \"$line\" > \"$CAFLEET_TEST_DESCRIPTOR_COPY\"\n      fi\n      shift\n    done\n    exit 1 ;;\nesac";
+        let claude = "printf '2.1.302 (Claude Code)\\n'";
+        let fleet = fleet.to_string();
+        let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+            &settings,
+            &[
+                "member",
+                "create",
+                "--fleet-id",
+                &fleet,
+                "--name",
+                "worker",
+                "--description",
+                "member environment fixture",
+                "--coding-agent",
+                "claude",
+                "allocated member {member_id}",
+            ],
+            &[("tmux", tmux), ("claude", claude)],
+            &[
+                ("TMUX_PANE", "%1"),
+                ("CLAUDE_CONFIG_DIR", config.to_str().unwrap()),
+                (
+                    "CAFLEET_TEST_DESCRIPTOR_COPY",
+                    descriptor_copy.to_str().unwrap(),
+                ),
+            ],
+        );
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(output.status.code(), Some(1), "{stderr}");
+        assert!(stderr.contains("runner pane spawn failed"), "{stderr}");
+        let split = pane_calls
+            .lines()
+            .find(|line| line.starts_with("split-window "))
+            .unwrap_or_else(|| panic!("the runner pane was requested: {pane_calls}"));
+        assert!(!split.contains("CAFLEET_MEMBER_ID"), "{split}");
+        let descriptor: crate::runtime::LaunchDescriptor =
+            serde_json::from_slice(&std::fs::read(&descriptor_copy).unwrap()).unwrap();
+        let member_id = descriptor.member_id.to_string();
+        assert!(
+            descriptor
+                .spawn
+                .argv
+                .contains(&format!("allocated member {member_id}")),
+            "{:?}",
+            descriptor.spawn.argv
+        );
+        assert_eq!(
+            descriptor.spawn.environment,
+            vec![
+                (
+                    "CAFLEET_DATABASE_URL".to_owned(),
+                    format!(
+                        "sqlite:///{}",
+                        std::fs::canonicalize(conn.path().unwrap())
+                            .unwrap()
+                            .display()
+                    ),
+                ),
+                ("CAFLEET_MEMBER_ID".to_owned(), member_id),
+                (
+                    "CLAUDE_CONFIG_DIR".to_owned(),
+                    config.to_str().unwrap().to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn member_prompt_run_less_member_fails_before_pane_io() {
         assert_run_less_input_failure("prompt");
     }
