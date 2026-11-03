@@ -1,7 +1,7 @@
 # Member command guard, backend configuration cleanup and doctor summary
 
 **Status**: Approved
-**Progress**: 57/60 tasks complete
+**Progress**: 60/60 tasks complete
 **Last Updated**: 2026-11-03
 
 ## Overview
@@ -450,9 +450,9 @@ Documentation is updated first, in the order `.claude/rules/documentation-mainte
 
 ### Step 11: Validation
 
-- [ ] Run `mise //:test` and `mise //:lint`. Both pass <!-- completed: -->
-- [ ] Run `mise //docs:build`. It passes, and the rendered HTML of any changed table cell containing a literal pipe is intact <!-- completed: -->
-- [ ] Final grep across `SPEC.md`, `docs/`, `README.md`, `skills/`, `presets/` and `src/` for `approvals.deny` (only the operator instruction, the Hermes Director note and Hermes's own enforcement description remain), `HERMES_DIRECTOR_ONLY_DENIES`, `hermes.approvals.deny` and `Director-only rules` (none remain) <!-- completed: -->
+- [x] Run `mise //:test` and `mise //:lint`. Both pass <!-- completed: 2026-11-03T05:38 -->
+- [x] Run `mise //docs:build`. It passes, and the rendered HTML of any changed table cell containing a literal pipe is intact <!-- completed: 2026-11-03T05:38 -->
+- [x] Final grep across `SPEC.md`, `docs/`, `README.md`, `skills/`, `presets/` and `src/` for `approvals.deny` (only the operator instruction, the Hermes Director note and Hermes's own enforcement description remain), `HERMES_DIRECTOR_ONLY_DENIES`, `hermes.approvals.deny` and `Director-only rules` (none remain) <!-- completed: 2026-11-03T05:38 -->
 
 ---
 

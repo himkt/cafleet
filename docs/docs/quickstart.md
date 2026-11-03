@@ -62,8 +62,9 @@ call.
 These three commands send explicit native input into a member's pane. The
 `ask` entries are optional: keep them when you want to confirm each of the
 Director's dispatches, or drop them to let the Director dispatch without a
-prompt. Members never run these commands, because every Director-only command
-refuses inside a member process ([Command routing](concepts/members.md#command-routing)).
+prompt. Inside a member process every Director-only command refuses, which
+catches a member's accidental invocation; this guard is not a security
+boundary ([Command routing](concepts/members.md#command-routing)).
 
 A claude member needs no allow rule of its own for the broker commands:
 cafleet passes `Bash(cafleet message *)` on the member's spawn command line. A
@@ -156,9 +157,10 @@ file cannot select it.
 `Bash(cafleet *)` covers every subcommand the Director runs, for every fleet,
 because IDs are literal integer arguments. The `ask` entries outrank it, so
 you still confirm each explicit pane-input dispatch of the Director; remove
-them if you do not want that confirmation. They play no part in keeping members
-away from these commands: inside a member, every Director-only command refuses
-with a message that tells the member to ask its Director.
+them if you do not want that confirmation. Members are covered separately:
+inside a member, every Director-only command refuses with a message that tells
+the member to ask its Director, an accident guard rather than a security
+boundary.
 
 ### Codex
 
