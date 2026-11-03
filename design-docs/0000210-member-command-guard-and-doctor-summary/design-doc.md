@@ -1,7 +1,7 @@
 # Member command guard, backend configuration cleanup and doctor summary
 
 **Status**: Approved
-**Progress**: 16/60 tasks complete
+**Progress**: 24/60 tasks complete
 **Last Updated**: 2026-11-03
 
 ## Overview
@@ -382,17 +382,17 @@ Documentation is updated first, in the order `.claude/rules/documentation-mainte
 
 ### Step 2: docs/
 
-- [ ] `docs/docs/quickstart.md` configuration table: the hermes "setup installs" cell names only the skills and the member variables merged into `terminal.client_env_passthrough` <!-- completed: -->
-- [ ] `docs/docs/quickstart.md` *Other permission modes*: describe the `ask` entries as optional confirmation of the Director's explicit pane input. Members are covered by the guard <!-- completed: -->
-- [ ] `docs/docs/quickstart.md` *Codex*: the installed file allows every `cafleet` command, the minimum set is the `["cafleet", "message"]` allow, and the "Keep the installed file for a Director session" reasoning is updated <!-- completed: -->
-- [ ] `docs/docs/quickstart.md` *Hermes*: remove the deny-merge text and list. Keep the passthrough paragraph with `CAFLEET_MEMBER_ID`. State that `member create` refuses when a member name is missing. Add the §2.3 existing-installation instruction (CAFleet needs no `approvals.deny` entries; a `cafleet …` glob there blocks a Hermes Director; how to inspect and remove it; the six glob strings). Replace the doctor-row sentence with the `hermes` summary line <!-- completed: -->
-- [ ] `docs/docs/concepts/members.md` § Command routing: one paragraph saying that Director-only commands refuse inside a member process, that this is an accident guard and not a security boundary, and that members route such needs to the Director (link the SPEC guard section) <!-- completed: -->
-- [ ] `docs/docs/concepts/members.md` § Inspection and recovery: doctor's default summary groups members by state with the next command, and `--verbose`/`--json` give per-check detail (link the SPEC doctor section) <!-- completed: -->
-- [ ] Check `docs/docs/concepts/coding-agents.md`, `docs/docs/mixed-backend-team.md` and `docs/docs/index.md` for setup-write, preset-deny or doctor-layout statements, and update any that drift <!-- completed: -->
+- [x] `docs/docs/quickstart.md` configuration table: the hermes "setup installs" cell names only the skills and the member variables merged into `terminal.client_env_passthrough` <!-- completed: 2026-11-03T04:53 -->
+- [x] `docs/docs/quickstart.md` *Other permission modes*: describe the `ask` entries as optional confirmation of the Director's explicit pane input. Members are covered by the guard <!-- completed: 2026-11-03T04:53 -->
+- [x] `docs/docs/quickstart.md` *Codex*: the installed file allows every `cafleet` command, the minimum set is the `["cafleet", "message"]` allow, and the "Keep the installed file for a Director session" reasoning is updated <!-- completed: 2026-11-03T04:53 -->
+- [x] `docs/docs/quickstart.md` *Hermes*: remove the deny-merge text and list. Keep the passthrough paragraph with `CAFLEET_MEMBER_ID`. State that `member create` refuses when a member name is missing. Add the §2.3 existing-installation instruction (CAFleet needs no `approvals.deny` entries; a `cafleet …` glob there blocks a Hermes Director; how to inspect and remove it; the six glob strings). Replace the doctor-row sentence with the `hermes` summary line <!-- completed: 2026-11-03T04:53 -->
+- [x] `docs/docs/concepts/members.md` § Command routing: one paragraph saying that Director-only commands refuse inside a member process, that this is an accident guard and not a security boundary, and that members route such needs to the Director (link the SPEC guard section) <!-- completed: 2026-11-03T04:53 -->
+- [x] `docs/docs/concepts/members.md` § Inspection and recovery: doctor's default summary groups members by state with the next command, and `--verbose`/`--json` give per-check detail (link the SPEC doctor section) <!-- completed: 2026-11-03T04:53 -->
+- [x] Check `docs/docs/concepts/coding-agents.md`, `docs/docs/mixed-backend-team.md` and `docs/docs/index.md` for setup-write, preset-deny or doctor-layout statements, and update any that drift <!-- completed: 2026-11-03T04:53 -->
 
 ### Step 3: README.md
 
-- [ ] Confirm that README's pitch, install commands and section list are unaffected. Edit only if a drifted statement is found <!-- completed: -->
+- [x] Confirm that README's pitch, install commands and section list are unaffected. Edit only if a drifted statement is found <!-- completed: 2026-11-03T04:53 -->
 
 ### Step 4: skills/
 
