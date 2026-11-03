@@ -1,6 +1,8 @@
 use crate::assets::HermesConfigRunner;
 use crate::assets::agent_paths;
 use crate::assets::install_agent;
+use crate::broker::MemberRunRegistry;
+use crate::broker::runtime::CleanupState;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::SpawnProbe;
 use crate::config::EnvLookup;
@@ -8,12 +10,15 @@ use crate::config::Settings;
 use crate::db;
 use crate::db::SchemaState;
 use crate::error::CafleetError;
+use crate::runtime::control::MemberState;
 use crate::runtime::system::SystemProbe;
 use clap::Args;
 use rusqlite::Connection;
 use serde_json::json;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
 
 #[derive(Args)]
 pub(crate) struct SetupArgs {
@@ -131,6 +136,9 @@ fn install_selected(
 
 #[derive(Args)]
 pub(crate) struct DoctorArgs {
+    /// Print one row per individual check instead of the per-component summary.
+    #[arg(long)]
+    verbose: bool,
     /// Output in JSON format.
     #[arg(long)]
     json: bool,
@@ -141,6 +149,21 @@ struct Check {
     name: String,
     status: &'static str,
     detail: String,
+    problem: Option<Problem>,
+    runtime: Option<RuntimeFields>,
+}
+
+/// How a non-`ok` backend check reads on its backend's summary line.
+#[derive(Debug)]
+struct Problem {
+    phrase: String,
+    setup_fix: bool,
+}
+
+#[derive(Debug)]
+struct RuntimeFields {
+    member_id: Option<i64>,
+    state: MemberState,
 }
 
 impl Check {
@@ -149,92 +172,151 @@ impl Check {
             name: name.into(),
             status,
             detail: detail.into(),
+            problem: None,
+            runtime: None,
+        }
+    }
+
+    fn problem(mut self, phrase: impl Into<String>, setup_fix: bool) -> Self {
+        self.problem = Some(Problem {
+            phrase: phrase.into(),
+            setup_fix,
+        });
+        self
+    }
+}
+
+struct Summary {
+    component: String,
+    status: &'static str,
+    detail: String,
+    members: Option<(MemberState, Vec<i64>)>,
+}
+
+impl Summary {
+    fn new(component: impl Into<String>, status: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            component: component.into(),
+            status,
+            detail: detail.into(),
+            members: None,
+        }
+    }
+
+    fn members(
+        status: &'static str,
+        detail: impl Into<String>,
+        state: MemberState,
+        member_ids: Vec<i64>,
+    ) -> Self {
+        Self {
+            members: Some((state, member_ids)),
+            ..Self::new("members", status, detail)
         }
     }
 }
 
 pub(crate) fn doctor(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
+    doctor_with(settings, args, crate::broker::member_run_registry)
+}
+
+fn doctor_with(
+    settings: &Settings,
+    args: DoctorArgs,
+    registry: impl Fn(&Connection) -> Result<Vec<MemberRunRegistry>, CafleetError>,
+) -> Result<(), CafleetError> {
     let mux = crate::cli::available_mux(settings, None).and_then(|mux| {
         let context = mux
             .context_discovery()
             .map_err(|cause| CafleetError::App(cause.to_string()))?;
-        Ok(format!(
-            "{} session={} window={} pane={}",
-            mux.name(),
-            context.session,
-            context.window_id,
-            context.pane_id
+        Ok((
+            format!(
+                "{} session={} window={} pane={}",
+                mux.name(),
+                context.session,
+                context.window_id,
+                context.pane_id
+            ),
+            format!(
+                "{} (session {}, pane {})",
+                mux.name(),
+                context.session,
+                context.pane_id
+            ),
         ))
     });
-    let mut checks = vec![match mux {
-        Ok(detail) => Check::new("multiplexer", "ok", detail),
-        Err(cause) => Check::new("multiplexer", "error", cause.to_string()),
-    }];
+    let (mut checks, mut summary) = match mux {
+        Ok((detail, short)) => (
+            vec![Check::new("multiplexer", "ok", detail)],
+            vec![Summary::new("multiplexer", "ok", short)],
+        ),
+        Err(cause) => (
+            vec![Check::new("multiplexer", "error", cause.to_string())],
+            vec![Summary::new("multiplexer", "error", cause.to_string())],
+        ),
+    };
     let (conn, schema) = database(settings);
-    checks.push(match &schema {
+    match &schema {
         SchemaState::Head { version } => {
-            Check::new("database", "ok", format!("compatible schema {version}"))
+            checks.push(Check::new(
+                "database",
+                "ok",
+                format!("compatible schema {version}"),
+            ));
+            summary.push(Summary::new("database", "ok", format!("schema {version}")));
         }
-        schema => Check::new(
-            "database",
-            "error",
-            schema
+        schema => {
+            let cause = schema
                 .require_current()
                 .expect_err("a non-head schema is unavailable")
-                .to_string(),
-        ),
-    });
+                .to_string();
+            checks.push(Check::new("database", "error", cause.clone()));
+            summary.push(Summary::new("database", "error", cause));
+        }
+    }
     let home = crate::config::home_dir();
-    checks.extend(agent_checks(
-        conn.as_ref(),
-        &schema,
-        &SystemProbe,
-        home.as_deref(),
-    ));
+    let backend_checks = agent_checks(conn.as_ref(), &schema, &SystemProbe, home.as_deref());
+    summary.extend(
+        CodingAgent::all()
+            .iter()
+            .map(|agent| backend_summary(*agent, &backend_checks)),
+    );
+    checks.extend(backend_checks);
     if matches!(schema, SchemaState::Head { .. }) {
         let conn = conn
             .as_ref()
             .expect("compatible schema has an open connection");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let runs = crate::broker::member_run_ids(conn)?;
-        for run_id in runs {
-            if std::time::Instant::now() >= deadline {
-                checks.push(Check::new(
-                    "member_runtime",
-                    "info",
-                    "runtime diagnosis budget exhausted; inspect remaining runs explicitly",
-                ));
-                break;
-            }
-            let until =
-                deadline.min(std::time::Instant::now() + std::time::Duration::from_millis(100));
-            checks.push(
-                match crate::runtime::diagnose_runtime(conn, run_id, until) {
-                    Ok(diagnosis) => Check::new(
-                        format!("member_runtime.{run_id}"),
-                        "info",
-                        diagnosis.diagnostics.join("; "),
-                    ),
-                    Err(cause) => Check::new(
-                        format!("member_runtime.{run_id}"),
-                        "error",
-                        cause.to_string(),
-                    ),
-                },
-            );
-        }
+        let (member_rows, member_summary) = member_checks(conn, registry);
+        checks.extend(member_rows);
+        summary.extend(member_summary);
+    } else {
+        summary.push(Summary::members(
+            "info",
+            "not checked (database unavailable)",
+            MemberState::NotChecked,
+            Vec::new(),
+        ));
     }
     if args.json {
         println!(
             "{}",
-            json!({"checks": checks.iter().map(|check| json!({
-            "name": check.name, "status": check.status, "detail": check.detail,
-        })).collect::<Vec<_>>()})
+            json!({
+                "summary": summary.iter().map(summary_json).collect::<Vec<_>>(),
+                "checks": checks.iter().map(check_json).collect::<Vec<_>>(),
+            })
         );
-    } else {
+    } else if args.verbose {
         for check in &checks {
-            let detail = check.detail.replace('\n', "\\n").replace('\r', "\\r");
-            println!("{} {}: {}", check.status, check.name, detail);
+            println!("{} {}: {}", check.status, check.name, escape(&check.detail));
+        }
+    } else {
+        for line in &summary {
+            println!(
+                "{} {}: {}",
+                line.status,
+                line.component,
+                escape(&line.detail)
+            );
         }
     }
     if checks.iter().any(|check| check.status == "error") {
@@ -242,6 +324,281 @@ pub(crate) fn doctor(settings: &Settings, args: DoctorArgs) -> Result<(), Caflee
     } else {
         Ok(())
     }
+}
+
+fn escape(detail: &str) -> String {
+    detail.replace('\n', "\\n").replace('\r', "\\r")
+}
+
+fn summary_json(summary: &Summary) -> serde_json::Value {
+    let mut entry = json!({
+        "component": summary.component,
+        "status": summary.status,
+        "detail": summary.detail,
+    });
+    if let Some((state, member_ids)) = &summary.members {
+        entry["state"] = state.token().into();
+        entry["member_ids"] = json!(member_ids);
+    }
+    entry
+}
+
+fn check_json(check: &Check) -> serde_json::Value {
+    let mut entry = json!({
+        "name": check.name,
+        "status": check.status,
+        "detail": check.detail,
+    });
+    if let Some(runtime) = &check.runtime {
+        entry["member_id"] = json!(runtime.member_id);
+        entry["state"] = runtime.state.token().into();
+    }
+    entry
+}
+
+fn severity(status: &str) -> u8 {
+    match status {
+        "error" => 3,
+        "warn" => 2,
+        "info" => 1,
+        "ok" => 0,
+        other => unreachable!("unknown doctor status {other}"),
+    }
+}
+
+fn backend_summary(agent: CodingAgent, checks: &[Check]) -> Summary {
+    let name = agent.name();
+    let own = checks
+        .iter()
+        .filter(|check| {
+            check
+                .name
+                .strip_prefix(name)
+                .is_some_and(|rest| rest.starts_with('.'))
+        })
+        .collect::<Vec<_>>();
+    let find = |suffix: &str| {
+        let check_name = format!("{name}.{suffix}");
+        own.iter()
+            .find(|check| check.name == check_name)
+            .unwrap_or_else(|| panic!("every backend reports {check_name}"))
+    };
+    let configuration = find("configuration");
+    if configuration.status == "error" {
+        return Summary::new(name, "error", configuration.detail.clone());
+    }
+    if find("executable").status != "ok" {
+        return Summary::new(
+            name,
+            "info",
+            format!("not installed ({name} is not on PATH)"),
+        );
+    }
+    let problems = own
+        .iter()
+        .filter_map(|check| {
+            check
+                .problem
+                .as_ref()
+                .map(|problem| (check.status, problem))
+        })
+        .collect::<Vec<_>>();
+    let Some(status) = problems
+        .iter()
+        .map(|(status, _)| *status)
+        .max_by_key(|status| severity(status))
+    else {
+        return Summary::new(name, "ok", "ready");
+    };
+    let mut detail = problems
+        .iter()
+        .map(|(_, problem)| problem.phrase.as_str())
+        .collect::<Vec<_>>()
+        .join("; ");
+    if problems.iter().any(|(_, problem)| problem.setup_fix) {
+        detail.push_str(&format!(" — run 'cafleet setup --coding-agent {name}'"));
+    }
+    Summary::new(name, status, detail)
+}
+
+struct MemberRun {
+    run_id: i64,
+    member_id: i64,
+    state: MemberState,
+    phrases: Vec<String>,
+}
+
+fn classify_registry(row: &MemberRunRegistry) -> Option<MemberRun> {
+    let active = row.member_status == "active";
+    let finished = row.run_status.terminal() && row.cleanup_state == CleanupState::Complete;
+    let state = match (finished, active) {
+        (true, false) => MemberState::Ended,
+        (true, true) => MemberState::AgentExited,
+        (false, false) => MemberState::DeletedWithLeftoverRuntime,
+        (false, true) => return None,
+    };
+    Some(MemberRun {
+        run_id: row.run_id,
+        member_id: row.member_id,
+        state,
+        phrases: vec![format!(
+            "run {}, cleanup {}",
+            row.run_status.as_str(),
+            row.cleanup_state.as_str()
+        )],
+    })
+}
+
+fn probe_run(conn: &Connection, row: &MemberRunRegistry, deadline: Instant) -> MemberRun {
+    let now = Instant::now();
+    let (state, phrases) = if now >= deadline {
+        (
+            MemberState::NotChecked,
+            vec!["runtime diagnosis time budget exhausted".to_owned()],
+        )
+    } else {
+        let until = deadline.min(now + Duration::from_millis(100));
+        match crate::runtime::diagnose_runtime(conn, row.run_id, until) {
+            Ok(diagnosis) => (diagnosis.state, diagnosis.diagnostics),
+            Err(cause) => (MemberState::CheckFailed, vec![cause.to_string()]),
+        }
+    };
+    MemberRun {
+        run_id: row.run_id,
+        member_id: row.member_id,
+        state,
+        phrases,
+    }
+}
+
+fn member_checks(
+    conn: &Connection,
+    registry: impl Fn(&Connection) -> Result<Vec<MemberRunRegistry>, CafleetError>,
+) -> (Vec<Check>, Vec<Summary>) {
+    let rows = match registry(conn) {
+        Ok(rows) => rows,
+        Err(cause) => {
+            let mut check = Check::new(
+                "member_runtime",
+                "error",
+                format!("member runtimes could not be read: {cause}"),
+            );
+            check.runtime = Some(RuntimeFields {
+                member_id: None,
+                state: MemberState::CheckFailed,
+            });
+            let summary = Summary::members(
+                "error",
+                format!("could not be checked: {cause}"),
+                MemberState::CheckFailed,
+                Vec::new(),
+            );
+            return (vec![check], vec![summary]);
+        }
+    };
+    let classified = rows.iter().map(classify_registry).collect::<Vec<_>>();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let runs = rows
+        .iter()
+        .zip(classified)
+        .map(|(row, run)| run.unwrap_or_else(|| probe_run(conn, row, deadline)))
+        .collect::<Vec<_>>();
+    let checks = runs.iter().map(runtime_check).collect();
+    let mut summary = MemberState::SUMMARY_ORDER
+        .iter()
+        .filter_map(|state| {
+            let member_ids = runs
+                .iter()
+                .filter(|run| run.state == *state)
+                .map(|run| run.member_id)
+                .collect::<Vec<_>>();
+            (!member_ids.is_empty()).then(|| state_summary(*state, member_ids))
+        })
+        .collect::<Vec<_>>();
+    if summary.is_empty() {
+        summary.push(Summary::members(
+            "ok",
+            "none running",
+            MemberState::Running,
+            Vec::new(),
+        ));
+    }
+    (checks, summary)
+}
+
+fn runtime_check(run: &MemberRun) -> Check {
+    let detail = if run.state == MemberState::CheckFailed {
+        format!(
+            "member {} {}: {}",
+            run.member_id,
+            run.state.label(),
+            run.phrases.join("; ")
+        )
+    } else {
+        format!(
+            "member {} {}: {}{}",
+            run.member_id,
+            run.state.label(),
+            run.phrases.join("; "),
+            run_suffix(run.state.next_commands(), &run.member_id.to_string())
+        )
+    };
+    let mut check = Check::new(
+        format!("member_runtime.{}", run.run_id),
+        run.state.status(),
+        detail,
+    );
+    check.runtime = Some(RuntimeFields {
+        member_id: Some(run.member_id),
+        state: run.state,
+    });
+    check
+}
+
+fn state_summary(state: MemberState, mut member_ids: Vec<i64>) -> Summary {
+    member_ids.sort_unstable();
+    member_ids.dedup();
+    let detail = format!(
+        "{} {}: {}{}",
+        member_ids.len(),
+        state.label(),
+        format_id_ranges(&member_ids),
+        run_suffix(state.next_commands(), "ID")
+    );
+    Summary::members(state.status(), detail, state, member_ids)
+}
+
+fn run_suffix(commands: &[&str], member_id: &str) -> String {
+    if commands.is_empty() {
+        return String::new();
+    }
+    let quoted = commands
+        .iter()
+        .map(|command| format!("'{}'", command.replace("ID", member_id)))
+        .collect::<Vec<_>>();
+    format!(" — run {}", quoted.join(" or "))
+}
+
+/// Renders ascending, de-duplicated IDs, collapsing three or more consecutive IDs to `a-b`.
+fn format_id_ranges(ids: &[i64]) -> String {
+    let mut ids = ids.to_vec();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut items = Vec::new();
+    let mut start = 0;
+    while start < ids.len() {
+        let mut end = start;
+        while end + 1 < ids.len() && ids[end + 1] == ids[end] + 1 {
+            end += 1;
+        }
+        if end - start >= 2 {
+            items.push(format!("{}-{}", ids[start], ids[end]));
+        } else {
+            items.extend(ids[start..=end].iter().map(i64::to_string));
+        }
+        start = end + 1;
+    }
+    items.join(", ")
 }
 
 fn database(settings: &Settings) -> (Option<Connection>, SchemaState) {
@@ -327,6 +684,7 @@ fn agent_checks(
                     .require_current()
                     .expect_err("a non-head schema is unavailable");
                 Check::new(install_name, "info", format!("unavailable: {cause}"))
+                    .problem("assets unchecked (database unavailable)", false)
             }
         });
     }
@@ -366,6 +724,10 @@ fn preset_check(
                         "{}: {cause}; run 'cafleet setup --coding-agent {name}'",
                         preset.display()
                     ),
+                )
+                .problem(
+                    format!("preset {} is unreadable: {cause}", preset.display()),
+                    true,
                 ),
             }
         }
@@ -390,11 +752,20 @@ fn hermes_passthrough_check(
     let Some(executable) = probe.resolve_binary(CodingAgent::Hermes.name()) else {
         return Check::new(NAME, "info", "unavailable: executable is absent");
     };
-    match crate::coding_agent::hermes_client_env_names(
+    match crate::coding_agent::hermes_missing_client_env_names(
         probe.hermes_client_env_passthrough(&executable, base),
     ) {
-        Ok(()) => Check::new(NAME, "ok", "holds CAFleet's member names"),
-        Err(cause) => Check::new(NAME, "error", cause.message()),
+        Ok(missing) if missing.is_empty() => Check::new(NAME, "ok", "holds CAFleet's member names"),
+        Ok(missing) => {
+            let phrase = crate::coding_agent::hermes_missing_names_phrase(&missing);
+            Check::new(
+                NAME,
+                "error",
+                format!("hermes {phrase}; run 'cafleet setup --coding-agent hermes'"),
+            )
+            .problem(phrase, true)
+        }
+        Err(cause) => Check::new(NAME, "error", cause.message()).problem(cause.message(), false),
     }
 }
 
@@ -408,22 +779,33 @@ fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {
         }
         Ok(Some((version, when))) => Check::new(
             name,
-            "info",
+            "warn",
             format!(
                 "recorded {version} at {when}; run 'cafleet setup --coding-agent {}'",
                 agent.name()
             ),
+        )
+        .problem(
+            format!(
+                "assets from cafleet {version} (this is {})",
+                crate::cli::VERSION
+            ),
+            true,
         ),
         Ok(None) => Check::new(
             name,
-            "info",
+            "warn",
             format!(
                 "no installation recorded at {}; run 'cafleet setup --coding-agent {}'",
                 path.display(),
                 agent.name()
             ),
-        ),
-        Err(cause) => Check::new(name, "error", format!("installation query failed: {cause}")),
+        )
+        .problem(format!("assets not installed at {}", path.display()), true),
+        Err(cause) => {
+            let detail = format!("installation query failed: {cause}");
+            Check::new(name, "error", detail.clone()).problem(detail, false)
+        }
     }
 }
 
@@ -1725,10 +2107,16 @@ mod tests {
                         .unwrap()
                 })
                 .collect::<Vec<_>>();
-            let mut ascending = runtime_rows.clone();
-            ascending.sort_unstable();
-            assert_eq!(runtime_rows, ascending, "runtime rows follow run order");
-            assert_eq!(runtime_rows.len(), 10);
+            let mut recorded = [exited, ended, leftover, interrupted, unresponsive]
+                .into_iter()
+                .chain(&runs.lost)
+                .map(|run| run.run_id)
+                .collect::<Vec<_>>();
+            recorded.sort_unstable();
+            assert_eq!(
+                runtime_rows, recorded,
+                "one runtime row per recorded run, in run order"
+            );
             let payload = views.payload();
             let lost_entry = members_entry(&payload, "lost_runtime");
             assert_eq!(lost_entry["status"], "warn");

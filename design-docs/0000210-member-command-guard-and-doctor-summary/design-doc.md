@@ -1,7 +1,7 @@
 # Member command guard, backend configuration cleanup and doctor summary
 
 **Status**: Approved
-**Progress**: 46/60 tasks complete
+**Progress**: 57/60 tasks complete
 **Last Updated**: 2026-11-03
 
 ## Overview
@@ -433,20 +433,20 @@ Documentation is updated first, in the order `.claude/rules/documentation-mainte
 
 ### Step 9: Presets (code assets)
 
-- [ ] `presets/codex/cafleet.rules`: reduce to the single broad allow (§2.1) <!-- completed: -->
-- [ ] `presets/opencode/cafleet.md` and `cafleet-ask.md`: remove the six denies and update the body paragraphs (§2.2) <!-- completed: -->
-- [ ] Update every test that asserts preset content (grep `src/` for `cafleet.rules`, `cafleet-ask.md` and the deny strings), so it checks the new contract: the codex file equals the one-line allow, both OpenCode shell maps end with `"cafleet *": "allow"` and hold no `cafleet member`/`permission`/`input` entry, and the `cafleet-ask` frontmatter differs only in `description` and the `"*"` value <!-- completed: -->
+- [x] `presets/codex/cafleet.rules`: reduce to the single broad allow (§2.1) <!-- completed: 2026-11-03T05:21 -->
+- [x] `presets/opencode/cafleet.md` and `cafleet-ask.md`: remove the six denies and update the body paragraphs (§2.2) <!-- completed: 2026-11-03T05:21 -->
+- [x] Update every test that asserts preset content (grep `src/` for `cafleet.rules`, `cafleet-ask.md` and the deny strings), so it checks the new contract: the codex file equals the one-line allow, both OpenCode shell maps end with `"cafleet *": "allow"` and hold no `cafleet member`/`permission`/`input` entry, and the `cafleet-ask` frontmatter differs only in `description` and the `"*"` value <!-- completed: 2026-11-03T05:21 -->
 
 ### Step 10: Doctor summary (code)
 
-- [ ] `src/runtime/control.rs`: `RuntimeDiagnosis` gains a typed `state` (the §4.4 tokens) and returns the reworded phrases. Probe-only classification (rows 1 and 5–10) stays here <!-- completed: -->
-- [ ] `src/broker/fleets.rs`: replace `member_run_ids` with a registry read that returns `run_id, member_id, run status, cleanup_state, member status` in ascending `run_id` <!-- completed: -->
-- [ ] `src/cli/setup.rs`: add `--verbose` to `DoctorArgs`. Remove `hermes_approval_checks`' deny row. Set `warn` on installation version mismatch and on no installation recorded. Run the registry pass, then the budgeted probe pass. A registry-pass failure produces the §4.4 failure entries instead of aborting. Build summary entries per §4.3–4.4, verbose rows per §4.5 and JSON per §4.6. Keep the exit rule <!-- completed: -->
-- [ ] `src/cli/setup.rs`: add the ID-range formatter (ascending, de-duplicated, runs of three or more collapse) <!-- completed: -->
-- [ ] Tests in `src/runtime/control.rs`: each probe outcome combination maps to its state and phrases (descriptor leftover, invalid paths, lock held with and without health, lock free, lock error, deadline before health) <!-- completed: -->
-- [ ] Tests in `src/cli/setup.rs`: the ID-range formatter (`[]`, `[7]`, `[7,8]`, `[1..6,9..22]`, duplicates, unsorted input). Registry-pass rows 2–4. Member summary line order, counts, labels, next commands, `none running` and database-unavailable lines. Backend summary rules (configuration error, absent executable, version mismatch `warn` with the setup fix, preset error, passthrough error, mixed problems joined in order with a single fix suffix) <!-- completed: -->
-- [ ] Tests in `src/cli/setup.rs`: the default text prints only summary lines, `--verbose` prints only check rows (including `ended` rows), and `--json` has the §4.6 key order, `member_id`/`state` on runtime checks and `state`/`member_ids` on member summaries. Exit status is 0 with `warn`, and 1 with `Error: doctor found errors` on any `error`. Update the existing hermes doctor tests to the single passthrough row <!-- completed: -->
-- [ ] Tests in `src/cli/setup.rs` for failures: with a failing registry query, doctor still prints every other check, emits the §4.4 registry-failure summary line, check row and JSON entries, and exits 1. Inject the failure by passing the registry read to the member-check builder as a function argument, because a schema mutation would make the database incompatible and skip runtime checks altogether. A `check_failed` run prints `error member_runtime.<run_id>: member <id> could not be checked: <cause>` with no command suffix, and its summary line ends with ` — run 'cafleet doctor --verbose'` <!-- completed: -->
+- [x] `src/runtime/control.rs`: `RuntimeDiagnosis` gains a typed `state` (the §4.4 tokens) and returns the reworded phrases. Probe-only classification (rows 1 and 5–10) stays here <!-- completed: 2026-11-03T05:28 -->
+- [x] `src/broker/fleets.rs`: replace `member_run_ids` with a registry read that returns `run_id, member_id, run status, cleanup_state, member status` in ascending `run_id` <!-- completed: 2026-11-03T05:28 -->
+- [x] `src/cli/setup.rs`: add `--verbose` to `DoctorArgs`. Remove `hermes_approval_checks`' deny row. Set `warn` on installation version mismatch and on no installation recorded. Run the registry pass, then the budgeted probe pass. A registry-pass failure produces the §4.4 failure entries instead of aborting. Build summary entries per §4.3–4.4, verbose rows per §4.5 and JSON per §4.6. Keep the exit rule <!-- completed: 2026-11-03T05:28 -->
+- [x] `src/cli/setup.rs`: add the ID-range formatter (ascending, de-duplicated, runs of three or more collapse) <!-- completed: 2026-11-03T05:28 -->
+- [x] Tests in `src/runtime/control.rs`: each probe outcome combination maps to its state and phrases (descriptor leftover, invalid paths, lock held with and without health, lock free, lock error, deadline before health) <!-- completed: 2026-11-03T05:28 -->
+- [x] Tests in `src/cli/setup.rs`: the ID-range formatter (`[]`, `[7]`, `[7,8]`, `[1..6,9..22]`, duplicates, unsorted input). Registry-pass rows 2–4. Member summary line order, counts, labels, next commands, `none running` and database-unavailable lines. Backend summary rules (configuration error, absent executable, version mismatch `warn` with the setup fix, preset error, passthrough error, mixed problems joined in order with a single fix suffix) <!-- completed: 2026-11-03T05:28 -->
+- [x] Tests in `src/cli/setup.rs`: the default text prints only summary lines, `--verbose` prints only check rows (including `ended` rows), and `--json` has the §4.6 key order, `member_id`/`state` on runtime checks and `state`/`member_ids` on member summaries. Exit status is 0 with `warn`, and 1 with `Error: doctor found errors` on any `error`. Update the existing hermes doctor tests to the single passthrough row <!-- completed: 2026-11-03T05:28 -->
+- [x] Tests in `src/cli/setup.rs` for failures: with a failing registry query, doctor still prints every other check, emits the §4.4 registry-failure summary line, check row and JSON entries, and exits 1. Inject the failure by passing the registry read to the member-check builder as a function argument, because a schema mutation would make the database incompatible and skip runtime checks altogether. A `check_failed` run prints `error member_runtime.<run_id>: member <id> could not be checked: <cause>` with no command suffix, and its summary line ends with ` — run 'cafleet doctor --verbose'` <!-- completed: 2026-11-03T05:28 -->
 
 ### Step 11: Validation
 

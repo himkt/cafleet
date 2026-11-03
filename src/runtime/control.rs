@@ -1330,7 +1330,174 @@ pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthS
     let reply = crate::runtime::control::request(run, "health", deadline)?;
     HealthSnapshot::decode(reply, run)
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemberState {
+    Running,
+    NotResponding,
+    LostRuntime,
+    InterruptedLaunch,
+    AgentExited,
+    DeletedWithLeftoverRuntime,
+    CheckFailed,
+    NotChecked,
+    Ended,
+}
+
+impl MemberState {
+    /// Summary order of the states doctor prints; `Ended` is hidden from the summary.
+    pub(crate) const SUMMARY_ORDER: [Self; 8] = [
+        Self::Running,
+        Self::NotResponding,
+        Self::LostRuntime,
+        Self::InterruptedLaunch,
+        Self::AgentExited,
+        Self::DeletedWithLeftoverRuntime,
+        Self::CheckFailed,
+        Self::NotChecked,
+    ];
+
+    pub(crate) fn token(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::NotResponding => "not_responding",
+            Self::LostRuntime => "lost_runtime",
+            Self::InterruptedLaunch => "interrupted_launch",
+            Self::AgentExited => "agent_exited",
+            Self::DeletedWithLeftoverRuntime => "deleted_with_leftover_runtime",
+            Self::CheckFailed => "check_failed",
+            Self::NotChecked => "not_checked",
+            Self::Ended => "ended",
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::NotResponding => "not responding",
+            Self::LostRuntime => "lost runtime",
+            Self::InterruptedLaunch => "interrupted launch",
+            Self::AgentExited => "agent exited",
+            Self::DeletedWithLeftoverRuntime => "deleted with leftover runtime",
+            Self::CheckFailed => "could not be checked",
+            Self::NotChecked => "not checked (time limit)",
+            Self::Ended => "ended",
+        }
+    }
+
+    pub(crate) fn status(self) -> &'static str {
+        match self {
+            Self::Running => "ok",
+            Self::NotChecked | Self::Ended => "info",
+            Self::CheckFailed => "error",
+            Self::NotResponding
+            | Self::LostRuntime
+            | Self::InterruptedLaunch
+            | Self::AgentExited
+            | Self::DeletedWithLeftoverRuntime => "warn",
+        }
+    }
+
+    /// Next commands with `ID` standing for the member ID.
+    pub(crate) fn next_commands(self) -> &'static [&'static str] {
+        match self {
+            Self::Running | Self::Ended => &[],
+            Self::NotResponding | Self::InterruptedLaunch | Self::DeletedWithLeftoverRuntime => {
+                &["cafleet member recover ID"]
+            }
+            Self::LostRuntime => &["cafleet member recover ID", "cafleet member delete ID"],
+            Self::AgentExited => &["cafleet member delete ID"],
+            Self::CheckFailed => &["cafleet doctor --verbose"],
+            Self::NotChecked => &["cafleet member show ID"],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum OwnerLockProbe {
+    Held,
+    Free,
+    Failed(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum HealthProbe {
+    Answered,
+    Skipped,
+    Failed(String),
+}
+
+pub(crate) enum RuntimeProbes {
+    InvalidPaths(String),
+    Observed {
+        descriptor_leftover: bool,
+        lock: OwnerLockProbe,
+        health: HealthProbe,
+    },
+}
+
+impl RuntimeProbes {
+    pub(crate) fn classify(self) -> RuntimeDiagnosis {
+        let (descriptor_leftover, lock, health) = match self {
+            Self::InvalidPaths(cause) => {
+                return RuntimeDiagnosis {
+                    state: MemberState::InterruptedLaunch,
+                    diagnostics: vec![format!("runtime files are invalid: {cause}")],
+                };
+            }
+            Self::Observed {
+                descriptor_leftover,
+                lock,
+                health,
+            } => (descriptor_leftover, lock, health),
+        };
+        let held = match lock {
+            OwnerLockProbe::Held => true,
+            OwnerLockProbe::Free => false,
+            OwnerLockProbe::Failed(cause) => {
+                return RuntimeDiagnosis {
+                    state: MemberState::CheckFailed,
+                    diagnostics: vec![cause],
+                };
+            }
+        };
+        let mut diagnostics = Vec::new();
+        if descriptor_leftover {
+            diagnostics.push("launch descriptor left over".to_owned());
+        }
+        diagnostics.push(
+            if held {
+                "owner lock is held"
+            } else {
+                "owner lock is free"
+            }
+            .to_owned(),
+        );
+        let health_state = match health {
+            HealthProbe::Answered => {
+                diagnostics.push("runtime answered the health probe".to_owned());
+                MemberState::Running
+            }
+            HealthProbe::Skipped => MemberState::NotChecked,
+            HealthProbe::Failed(cause) => {
+                diagnostics.push(format!("runtime did not answer the health probe: {cause}"));
+                if held {
+                    MemberState::NotResponding
+                } else {
+                    MemberState::LostRuntime
+                }
+            }
+        };
+        let state = if descriptor_leftover {
+            MemberState::InterruptedLaunch
+        } else {
+            health_state
+        };
+        RuntimeDiagnosis { state, diagnostics }
+    }
+}
+
 pub(crate) struct RuntimeDiagnosis {
+    pub(crate) state: MemberState,
     pub(crate) diagnostics: Vec<String>,
 }
 pub(crate) fn diagnose_runtime(
@@ -1353,32 +1520,31 @@ fn diagnose_runtime_observed(
 ) -> Result<RuntimeDiagnosis> {
     check_deadline(Instant::now(), deadline)?;
     let run = storage::get_run(conn, run_id)?;
-    let mut diagnostics = Vec::new();
-    match validate_run_paths(conn, &run) {
+    let probes = match validate_run_paths(conn, &run) {
         Ok(paths) => {
-            if paths.descriptor.try_exists().map_err(io_error)? {
-                diagnostics.push(
-                    "leftover launch descriptor; use member recover after ownership validation"
-                        .into(),
-                );
-            }
-            match RunLock::acquire(conn,&run.owner()){
-                Ok(Some(_))=>diagnostics.push("matching owner lock is currently available; explicit recovery establishes loss".into()),
-                Ok(None)=>diagnostics.push("matching owner lock held: live_or_unreachable".into()),
-                Err(cause)=>diagnostics.push(cause.message().into_owned()),
-            }
-            if Instant::now() < deadline {
+            let descriptor_leftover = paths.descriptor.try_exists().map_err(io_error)?;
+            let lock = match RunLock::acquire(conn, &run.owner()) {
+                Ok(Some(_)) => OwnerLockProbe::Free,
+                Ok(None) => OwnerLockProbe::Held,
+                Err(cause) => OwnerLockProbe::Failed(cause.message().into_owned()),
+            };
+            let health = if Instant::now() < deadline {
                 match probe_health(&run, deadline) {
-                    Ok(_) => diagnostics.push("matching runtime health reply observed".into()),
-                    Err(cause) => diagnostics.push(format!(
-                        "runtime endpoint unavailable: {cause}; inspect with member recover"
-                    )),
+                    Ok(_) => HealthProbe::Answered,
+                    Err(cause) => HealthProbe::Failed(cause.to_string()),
                 }
+            } else {
+                HealthProbe::Skipped
+            };
+            RuntimeProbes::Observed {
+                descriptor_leftover,
+                lock,
+                health,
             }
         }
-        Err(cause) => diagnostics.push(format!("{cause}; explicit member recover required")),
-    }
-    Ok(RuntimeDiagnosis { diagnostics })
+        Err(cause) => RuntimeProbes::InvalidPaths(cause.to_string()),
+    };
+    Ok(probes.classify())
 }
 
 #[cfg(test)]

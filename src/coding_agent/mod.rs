@@ -645,6 +645,21 @@ fn hermes_version(line: &str) -> Result<&str, &'static str> {
 pub(crate) fn hermes_client_env_names(
     output: Result<String, CafleetError>,
 ) -> Result<(), CafleetError> {
+    let missing = hermes_missing_client_env_names(output)?;
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(CafleetError::App(format!(
+            "hermes {}; run 'cafleet setup --coding-agent hermes'",
+            hermes_missing_names_phrase(&missing)
+        )))
+    }
+}
+
+/// Returns the CAFleet member names the passthrough list lacks, in canonical order.
+pub(crate) fn hermes_missing_client_env_names(
+    output: Result<String, CafleetError>,
+) -> Result<Vec<&'static str>, CafleetError> {
     let text = output.map_err(|cause| {
         CafleetError::App(format!(
             "cannot read hermes configuration through 'hermes config get': {}",
@@ -656,18 +671,17 @@ pub(crate) fn hermes_client_env_names(
             "cannot read hermes configuration through 'hermes config get': terminal.client_env_passthrough is not a JSON array of strings: {cause}"
         ))
     })?;
-    let missing = HERMES_CLIENT_ENV_PASSTHROUGH
+    Ok(HERMES_CLIENT_ENV_PASSTHROUGH
         .into_iter()
         .filter(|name| !present.iter().any(|entry| entry == name))
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(CafleetError::App(format!(
-            "hermes terminal.client_env_passthrough lacks CAFleet's member names: {}; run 'cafleet setup --coding-agent hermes'",
-            missing.join(", ")
-        )))
-    }
+        .collect())
+}
+
+pub(crate) fn hermes_missing_names_phrase(missing: &[&str]) -> String {
+    format!(
+        "terminal.client_env_passthrough lacks CAFleet's member names: {}",
+        missing.join(", ")
+    )
 }
 
 pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {

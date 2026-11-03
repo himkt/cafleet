@@ -169,10 +169,31 @@ pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<usiz
     Ok(deregistered_count)
 }
 
-pub(crate) fn member_run_ids(conn: &Connection) -> Result<Vec<i64>, CafleetError> {
-    let mut statement = conn.prepare("SELECT run_id FROM member_runs ORDER BY run_id")?;
+pub(crate) struct MemberRunRegistry {
+    pub(crate) run_id: i64,
+    pub(crate) member_id: i64,
+    pub(crate) run_status: crate::broker::runtime::RunStatus,
+    pub(crate) cleanup_state: crate::broker::runtime::CleanupState,
+    pub(crate) member_status: String,
+}
+
+pub(crate) fn member_run_registry(
+    conn: &Connection,
+) -> Result<Vec<MemberRunRegistry>, CafleetError> {
+    let mut statement = conn.prepare(
+        "SELECT r.run_id, r.member_id, r.status, r.cleanup_state, m.status \
+         FROM member_runs r JOIN members m ON m.member_id = r.member_id ORDER BY r.run_id",
+    )?;
     let runs = statement
-        .query_map([], |row| row.get::<_, i64>(0))?
+        .query_map([], |row| {
+            Ok(MemberRunRegistry {
+                run_id: row.get(0)?,
+                member_id: row.get(1)?,
+                run_status: row.get(2)?,
+                cleanup_state: row.get(3)?,
+                member_status: row.get(4)?,
+            })
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(runs)
 }
