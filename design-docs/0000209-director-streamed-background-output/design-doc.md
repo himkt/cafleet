@@ -1,6 +1,6 @@
 # Director Requirement: Streamed Background Output
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 21/21 tasks complete
 **Last Updated**: 2026-11-03
 
@@ -280,3 +280,4 @@ Follow § Probe procedure (new steps 4–7 and the run classification) for every
 | 2026-11-02 | Initial draft |
 | 2026-11-02 | Verdicts follow live probes of every running-output mechanism; first-observation and run-validity rules; Hermes `no`/`yes` branches; Hermes Director-wake Note row deleted under `no` |
 | 2026-11-02 | Approved |
+| 2026-11-03 | Implemented; Hermes probes selected the `yes` branch with `process_manage` `action=log`; probe database moved to a short directory; late ACKs classified as invalid |
