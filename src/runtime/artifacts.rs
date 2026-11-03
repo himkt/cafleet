@@ -883,7 +883,7 @@ mod tests {
     fn runner_artifact_namespace_is_database_adjacent_and_separates_sibling_databases() {
         let first = Fixture::new();
         let mut second = Connection::open(first._dir.path().join("sibling.db")).unwrap();
-        crate::db::migrate_to_head(&mut second).unwrap();
+        crate::db::initialize(&mut second).unwrap();
         let a =
             RuntimePaths::for_run(&storage::database_identity(&first.conn).unwrap(), 1).unwrap();
         let b = RuntimePaths::for_run(&storage::database_identity(&second).unwrap(), 1).unwrap();

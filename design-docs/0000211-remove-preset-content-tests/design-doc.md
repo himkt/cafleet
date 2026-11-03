@@ -1,7 +1,7 @@
 # Remove Embedded Data Content Tests and Schema Migrations
 
 **Status**: Approved
-**Progress**: 9/26 tasks complete
+**Progress**: 20/26 tasks complete
 **Last Updated**: 2026-11-03
 
 ## Overview
@@ -331,26 +331,26 @@ Every Rust test is a unit test in a `#[cfg(test)] mod tests` block of the implem
 
 ### Step 3: Baseline and audit confirmation
 
-- [ ] Run `mise //:test` and note the reported test count as the baseline <!-- completed: -->
-- [ ] Confirm every row of § Audit result and § Database tests against the current tree; if a test changed or a new content or migration test appeared, update those tables and the Success Criteria count in this document before editing code <!-- completed: -->
+- [x] Run `mise //:test` and note the reported test count as the baseline (baseline: 1630 tests) <!-- completed: 2026-11-03T08:27 -->
+- [x] Confirm every row of § Audit result and § Database tests against the current tree; if a test changed or a new content or migration test appeared, update those tables and the Success Criteria count in this document before editing code <!-- completed: 2026-11-03T08:27 -->
 
 ### Step 4: Remove content assertions
 
-- [ ] Delete the six `src/assets.rs` tests in § Audit result and their four helpers <!-- completed: -->
-- [ ] Apply every `src/coding_agent/catalog.rs` row of § Audit result (deletions, reductions and renames) and delete helpers left without callers <!-- completed: -->
+- [x] Delete the six `src/assets.rs` tests in § Audit result and their four helpers <!-- completed: 2026-11-03T08:34 -->
+- [x] Apply every `src/coding_agent/catalog.rs` row of § Audit result (deletions, reductions and renames) and delete helpers left without callers <!-- completed: 2026-11-03T08:34 -->
 
 ### Step 5: Single baseline and versioned database
 
-- [ ] Fold `V2__hermes_backend.sql` into `V1__baseline.sql`, add the `cafleet_database` table as in § Database format, and delete `V2__hermes_backend.sql` <!-- completed: -->
-- [ ] In `src/db.rs`, replace `embed_migrations!` with `baseline()` / `initialize`, implement § Classification, and delete the items listed there <!-- completed: -->
-- [ ] In `src/config.rs`, derive the default URL from `crate::cli::VERSION` as in § Database format <!-- completed: -->
-- [ ] In `src/cli/setup.rs`, implement the setup and doctor rows of § Commands <!-- completed: -->
-- [ ] Update every remaining caller of the removed `src/db.rs` items, including `src/cli/mod.rs`, `src/runtime/service.rs`, `src/runtime/observation.rs` and test callers <!-- completed: -->
+- [x] Fold `V2__hermes_backend.sql` into `V1__baseline.sql`, add the `cafleet_database` table as in § Database format, and delete `V2__hermes_backend.sql` <!-- completed: 2026-11-03T08:29 -->
+- [x] In `src/db.rs`, replace `embed_migrations!` with `baseline()` / `initialize`, implement § Classification, and delete the items listed there <!-- completed: 2026-11-03T08:29 -->
+- [x] In `src/config.rs`, derive the default URL from `crate::cli::VERSION` as in § Database format <!-- completed: 2026-11-03T08:29 -->
+- [x] In `src/cli/setup.rs`, implement the setup and doctor rows of § Commands <!-- completed: 2026-11-03T08:29 -->
+- [x] Update every remaining caller of the removed `src/db.rs` items, including `src/cli/mod.rs`, `src/runtime/service.rs`, `src/runtime/observation.rs` and test callers <!-- completed: 2026-11-03T08:43 -->
 
 ### Step 6: Database tests
 
-- [ ] Apply every `src/db.rs` row of § Database tests and delete helpers left without callers <!-- completed: -->
-- [ ] Apply the `src/config.rs` and `src/cli/setup.rs` rows of § Database tests <!-- completed: -->
+- [x] Apply every `src/db.rs` row of § Database tests and delete helpers left without callers <!-- completed: 2026-11-03T08:42 -->
+- [x] Apply the `src/config.rs` and `src/cli/setup.rs` rows of § Database tests <!-- completed: 2026-11-03T08:42 -->
 
 ### Step 7: Verification
 

@@ -436,7 +436,7 @@ mod tests {
             }
             let sibling_path = fixture._dir.path().join("sibling.db");
             let mut sibling = Connection::open(&sibling_path).unwrap();
-            crate::db::migrate_to_head(&mut sibling).unwrap();
+            crate::db::initialize(&mut sibling).unwrap();
             let sibling_url = format!("sqlite:///{}", sibling_path.display());
             assert!(held.validate_binding(&sibling_url, &placement).is_err());
             let path =

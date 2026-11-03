@@ -76,29 +76,23 @@ fn prepare_database(settings: &Settings) -> Result<Connection, CafleetError> {
         })?;
     }
     if let Some(conn) = crate::db::open_existing(&settings.database_url, true)? {
-        let schema = crate::db::classify_selected_schema(
-            &conn,
-            crate::db::head_version(),
-            &settings.database_url,
-        );
+        let schema = crate::db::classify_selected_schema(&conn, &settings.database_url);
         match schema {
-            SchemaState::Missing | SchemaState::Behind { .. } | SchemaState::Head { .. } => {}
+            SchemaState::Missing | SchemaState::Current => {}
             _ => schema.require_current()?,
         }
     }
     let mut conn = crate::db::connect(&settings.database_url)?;
-    let head = crate::db::head_version();
-    let schema = crate::db::classify_selected_schema(&conn, head, &settings.database_url);
+    let schema = crate::db::classify_selected_schema(&conn, &settings.database_url);
     match schema {
-        SchemaState::Missing | SchemaState::Behind { .. } => {
-            crate::db::migrate_to_head(&mut conn)?;
-            crate::db::classify_schema(&conn, head).require_current()?;
-            println!(
-                "Applied migrations to head ({head}) at {}.",
-                db_file.display()
-            );
+        SchemaState::Missing => {
+            crate::db::initialize(&mut conn)?;
+            crate::db::classify_selected_schema(&conn, &settings.database_url).require_current()?;
+            println!("Initialized database at {}.", db_file.display());
         }
-        SchemaState::Head { .. } => println!("Already at head ({head})."),
+        SchemaState::Current => {
+            println!("Database already initialized at {}.", db_file.display())
+        }
         _ => schema.require_current()?,
     }
     Ok(conn)
@@ -257,18 +251,24 @@ fn doctor_with(
     };
     let (conn, schema) = database(settings);
     match &schema {
-        SchemaState::Head { version } => {
+        SchemaState::Current => {
+            let path = crate::db::database_path(&settings.database_url)
+                .expect("a current schema was opened through a valid database URL");
             checks.push(Check::new(
                 "database",
                 "ok",
-                format!("compatible schema {version}"),
+                format!("cafleet {} at {path}", crate::cli::VERSION),
             ));
-            summary.push(Summary::new("database", "ok", format!("schema {version}")));
+            summary.push(Summary::new(
+                "database",
+                "ok",
+                format!("cafleet {}", crate::cli::VERSION),
+            ));
         }
         schema => {
             let cause = schema
                 .require_current()
-                .expect_err("a non-head schema is unavailable")
+                .expect_err("a schema that is not current is unavailable")
                 .to_string();
             checks.push(Check::new("database", "error", cause.clone()));
             summary.push(Summary::new("database", "error", cause));
@@ -282,7 +282,7 @@ fn doctor_with(
             .map(|agent| backend_summary(*agent, &backend_checks)),
     );
     checks.extend(backend_checks);
-    if matches!(schema, SchemaState::Head { .. }) {
+    if matches!(schema, SchemaState::Current) {
         let conn = conn
             .as_ref()
             .expect("compatible schema has an open connection");
@@ -604,11 +604,7 @@ fn format_id_ranges(ids: &[i64]) -> String {
 fn database(settings: &Settings) -> (Option<Connection>, SchemaState) {
     match crate::db::open_existing(&settings.database_url, true) {
         Ok(Some(conn)) => {
-            let schema = db::classify_selected_schema(
-                &conn,
-                crate::db::head_version(),
-                &settings.database_url,
-            );
+            let schema = db::classify_selected_schema(&conn, &settings.database_url);
             (Some(conn), schema)
         }
         Ok(None) => (None, SchemaState::Missing),
@@ -671,8 +667,8 @@ fn agent_checks(
                 "info",
                 format!("unavailable: configuration failed: {cause}"),
             ),
-            (_, SchemaState::Head { .. }) => {
-                let conn = conn.expect("a head-compatible database has an open connection");
+            (_, SchemaState::Current) => {
+                let conn = conn.expect("a current database has an open connection");
                 install_check(
                     conn,
                     *agent,
@@ -890,9 +886,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.message().contains("CODEX_HOME"));
-        crate::db::classify_schema(&conn, crate::db::head_version())
-            .require_current()
-            .unwrap();
+        crate::db::classify_schema(&conn).require_current().unwrap();
         assert_eq!(installed_agents(&conn), ["claude"]);
         assert!(hermes.calls.is_empty());
         assert!(!home.path().join(".config/opencode").exists());
@@ -1061,9 +1055,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
         let probe = Probe::new(home.path(), true, None);
-        let schema = SchemaState::Head {
-            version: crate::db::head_version(),
-        };
+        let schema = SchemaState::Current;
         crate::broker::record_asset_install(
             &mut conn,
             "claude",
@@ -1827,7 +1819,7 @@ mod tests {
         }
 
         fn database_line() -> String {
-            format!("ok database: schema {}", crate::db::head_version())
+            format!("ok database: cafleet {}", crate::cli::VERSION)
         }
 
         fn record(conn: &mut Connection, scenario: &Scenario, agent: CodingAgent, version: &str) {
