@@ -19,6 +19,10 @@ Alternatively, extract the binary for your platform from
 run setup. Setup installs embedded skills and presets offline; use
 `--coding-agent` to select a backend.
 
+Rerun `cafleet setup` after every upgrade, patch releases included, because
+each version starts from a fresh database; see
+[Upgrading cafleet](concepts/storage.md#upgrading-cafleet).
+
 ## Configure
 
 CAFleet is designed to run inside a coding agent without per-command

@@ -8,7 +8,7 @@ Load relevant skills through the executing backend's supported loader. Assigned 
 
 ## Project: CAFleet
 
-CAFleet multiplexes coding-agent sessions and coordinates them through durable point-to-point messages. The Rust package at the repository root builds the unified CLI with clap, rusqlite and embedded refinery migrations. Skills and presets are embedded assets; the documentation site retains its own Node/pnpm toolchain.
+CAFleet multiplexes coding-agent sessions and coordinates them through durable point-to-point messages. The Rust package at the repository root builds the unified CLI with clap, rusqlite and an embedded refinery schema baseline. Skills and presets are embedded assets; the documentation site retains its own Node/pnpm toolchain.
 
 ## Commands
 

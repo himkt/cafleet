@@ -31,7 +31,7 @@ Every target below is updated in the same design-doc cycle as the change that to
 | `skills/cafleet/reference/cli.md` | Any change to a `SPEC.md` fact that `cli.md` carries, updated in the same change | Agents run stale commands |
 | `.claude/rules/` | The project convention the rule captures changes | Agents follow outdated conventions |
 
-`SPEC.md` edits preserve its section structure and contract-level detail, and stay descriptive — specification only, no recommendations or implementation advice. Paths that are part of a specified contract (embedded preset paths and their install targets, migration files) are `SPEC.md` content.
+`SPEC.md` edits preserve its section structure and contract-level detail, and stay descriptive — specification only, no recommendations or implementation advice. Paths that are part of a specified contract (embedded preset paths and their install targets, the schema baseline) are `SPEC.md` content.
 
 ## Audiences and paths
 
