@@ -3,8 +3,8 @@ name: cafleet-design-doc
 description: >-
   Use when the user asks to create a design doc, design document, specification,
   or technical spec (create workflow → Director/Drafter/Reviewer team); or to
-  implement or execute a design doc (execute workflow
-  → TDD team). Also the standardized format spec — consult the template and
+  implement or execute a design doc (execute workflow → TDD or Programmer-only
+  team). Also the standardized format spec — consult the template and
   guidelines when editing a design doc. Always invoke this skill and route into
   the matching workflow, orchestrated as a CAFleet team. Teammates in member teams
   load the core and assigned references through their backend's supported
@@ -46,7 +46,7 @@ For a main-session user request matching a scenario below, invoke this skill and
 | When the user wants to… | Invoke this skill and run |
 |:--|:--|
 | Create a design doc / specification / technical spec | the **create** workflow ([create/create.md](create/create.md)) — Director/Drafter/Reviewer team |
-| Implement / execute a design doc | the **execute** workflow ([execute/execute.md](execute/execute.md)) — TDD team |
+| Implement / execute a design doc | the **execute** workflow ([execute/execute.md](execute/execute.md)) — TDD or Programmer-only team |
 
 ## Member startup
 

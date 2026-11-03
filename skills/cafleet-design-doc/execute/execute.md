@@ -33,7 +33,7 @@ Inspect the default/current branch. On the default branch, propose a feature bra
 | External behavior or explicit live acceptance | Add Verifier for the required observations. |
 | Completed implementation | Add a fresh Reviewer after implementation and verification gates pass. |
 
-Read the assigned roles before spawning: [Programmer](roles/programmer.md), [Tester](roles/tester.md), [Verifier](roles/verifier.md) and [Reviewer](roles/reviewer.md). Existing roles retain their responsibilities; a Programmer-only team receives the documentation/configuration composition explicitly.
+Read the assigned roles before spawning: [Programmer](roles/programmer.md), [Tester](roles/tester.md), [Verifier](roles/verifier.md) and [Reviewer](roles/reviewer.md). Each role keeps the responsibilities its role file defines; a Programmer-only team receives the documentation/configuration composition explicitly.
 
 ### Step 3: Register & Spawn Members (Director)
 

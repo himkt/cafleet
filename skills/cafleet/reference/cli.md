@@ -454,7 +454,7 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `member create` | The selected opencode preset is missing or unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
 | `member create` | The hermes configuration is unreadable or its `terminal.client_env_passthrough` lacks a CAFleet member name | The preflight errors under § `member create` | 1 |
 | `member delete` | A `hermes` run's work stop cannot be verified | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 |
-| `member create` | Unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` | 2 |
+| `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID | `Error: fleet '<fleet-id>' not found.` | 1 |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
 | `member create` | The fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
 | `member create` | The fleet's root Director has no concrete placement | `Error: fleet <fleet-id>'s root Director (member <id>) has no concrete placement.` | 1 |

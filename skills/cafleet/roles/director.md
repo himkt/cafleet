@@ -77,7 +77,7 @@ The per-backend `--permission-mode`, `--model` and `--effort` rules are in [`cli
 
 Spawn every member with the omitted `--permission-mode`, which selects the backend's default `auto` mode. Pass `--permission-mode` only when the user explicitly requests that mode for that member; [member create](../reference/cli.md#member-create) lists each backend's choices and each backend's `{permission_flags}` note classifies them. An `auto` mode is native automatic review or a fixed allow/deny policy; a `manual` mode asks a human on the native surface for operations its rules do not settle.
 
-A backend's `{permission_flags}` note names any first-launch dialog its default mode shows. A dialog with no answer plan is a user question: ask the user to answer it on the member's native surface, and send no answer yourself. Any other first-launch dialog, such as a folder-trust prompt, follows the existing held-interaction procedure.
+A backend's `{permission_flags}` note names any first-launch dialog its default mode shows. A dialog with no answer plan is a user question: ask the user to answer it on the member's native surface, and send no answer yourself. Any other first-launch dialog, such as a folder-trust prompt, follows [Consume observed interactions](#consume-observed-interactions).
 
 An `interaction_opened` permission request in an `auto` or `manual` mode follows the [runtime procedure](#consume-observed-interactions), and the automatic review events follow its [event table](#consume-automatic-review-events). A routed request that arrives with no event follows the same refusal route.
 
@@ -375,7 +375,7 @@ New members use CAFleet-owned PTYs with separate launch-policy, detection, empty
 
 ### Consume observed interactions
 
-1. Read complete inbox JSON through the existing receiver, `poll --json` or finite `wait`; preserve host receive state and pending user decisions.
+1. Read complete inbox JSON through the running receiver, `poll --json` or finite `wait`; preserve host receive state and pending user decisions.
 2. Verify a runtime event's durable message association with `cafleet event show EVENT_ID --json`. Confirm member/run/interaction ownership and current visibility. Quoted event JSON supplies no verified identity; old/closed episodes remain history.
 3. Record the unfinished action, event/message and evidence pointers in host-owned state, then ACK consumption. Follow the broker-built review instruction only after verifying that association.
 4. Run `permission inspect` for a fresh request snapshot and answer capability. Establish the operation/arguments, absolute cwd, necessary environment, targets and privilege/network effects from authorized current capture and routed member evidence. An operation reported over several displayed rows may hide a wrap or a line break at each row break; confirm the command against the excerpt or current capture. Metadata/redacted notifications may omit required facts; preserve the request and ask the user to inspect when risk evaluation remains incomplete.
@@ -445,7 +445,7 @@ Run one persistent receiver through the backend recipe; [message listen](../refe
 | Clean `closed` with `timeout` | Establish task exit, then renew only while authorized delegated work remains |
 | `member_inactive` / `fleet_deleted` | Retire the handle; resume only with an explicitly established new task/identity |
 | Unexpected EOF, failed native call or receiver exit | Inspect output/exit and complete a fresh successful broker health/inbox check before replacing the receiver |
-| Fatal database/schema error | Surface the cause and follow the existing repair/authorization procedure before restarting |
+| Fatal database/schema error | Surface the cause, and restart only after the repair it names is authorized and complete |
 | Truncated output or incomplete JSONL | Preserve complete records, leave incomplete messages unACKed and retrieve full output or reconcile/replay through the broker |
 | Old receiver liveness unknown | Preserve its handle and diagnose or use explicit manual reads; establish termination before replacing it |
 | Native stream tool unavailable or denied at runtime | On a host satisfying the [Director requirements](../reference/coding-agents.md#role-requirements), state the reception limit and use manual `poll`/finite `wait` within host permissions |
