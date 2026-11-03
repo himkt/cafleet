@@ -224,9 +224,9 @@ The guard is an accident guard, not a security boundary: a member process can un
 
 #### `permissions.allow` coverage
 
-Use prefix rules such as `Bash(cafleet message *)` to cover broker operations, including `cafleet message listen ID --timeout 300` and finite `cafleet message wait`. Verify native Monitor authorization separately: a Bash-rule check establishes no Monitor permission. Literal IDs and trailing JSON flags preserve prefix matching.
+Prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message listen ID --timeout 300` and finite `cafleet message wait`. Native Monitor authorization is separate: a Bash-rule check establishes no Monitor permission. Literal IDs and trailing JSON flags preserve prefix matching.
 
-An operator who wants to confirm each explicit native pane-input dispatch of the Director may keep the `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` prefixes under `permissions.ask`; ask rules outrank allow rules. This is an optional Director-side confirmation posture: inside a member, the Director-only commands refuse through the runner guard (§ Director-only command guard). Authorize `cafleet permission respond` under the Director host’s effective policy after its request-specific decision; mode/source flags bypass no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses. The recommended permission profiles (§6.7 Claude permission posture) describe each role's needs.
+Keeping the `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` prefixes under `permissions.ask` makes the operator confirm each explicit native pane-input dispatch of the Director, because ask rules outrank allow rules. Inside a member, the Director-only commands refuse through the runner guard (§ Director-only command guard). `cafleet permission respond` runs under the Director host's effective policy after its request-specific decision; mode/source flags bypass no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses. The Claude permission profiles (§6.7 Claude permission posture) specify each role's entries.
 
 #### Message Body Truncation
 
@@ -281,7 +281,6 @@ validated value into the member environment (§6.3 Member environment).
 `<agent>.configuration` check instead of aborting (§6.3 `cafleet doctor` — Environment Diagnosis).
 
 **Recorded-path identity.** The `asset_installs` rows and `doctor`'s installation checks key on each agent's Recorded path above, stored absolute exactly as resolved (no canonicalization beyond the absolute-path validation); the fixed opencode skills base carries no identity.
-
 
 ##### Asset installation
 
@@ -362,7 +361,6 @@ Setup runs only the local binary and stays offline. `cafleet setup --coding-agen
 ```
 hermes: skipped terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes
 ```
-
 
 #### Shared diagnosis and connection reuse
 
@@ -519,7 +517,7 @@ runtime checks.
 ###### OpenCode preset checks
 
 `doctor` has no selected launch policy, so it checks the preset of every
-OpenCode launch-policy choice (§ Launch policy and capability registry), in
+OpenCode launch-policy choice (§6.9 Launch policy and capability registry), in
 catalog order. The default choice keeps the check name `opencode.preset`;
 every other choice appends `.<mode>`:
 
@@ -634,7 +632,7 @@ error member_runtime.5: member 5 could not be checked: database is locked
 | JSON summary entry | `{"component":"members","status":"error","detail":"could not be checked: <cause>","state":"check_failed","member_ids":[]}` |
 | JSON check entry | `{"name":"member_runtime","status":"error","detail":"member runtimes could not be read: <cause>","member_id":null,"state":"check_failed"}` |
 
-The recovery contract (§ Storage pressure and durability boundary) owns the probes and their recovery actions.
+The recovery contract (§6.9 Storage pressure and durability boundary) owns the probes and their recovery actions.
 
 #### `cafleet message` — Message Broker
 
@@ -700,7 +698,7 @@ Pending placement and a placement change under the lock are ordinary holds that 
 
 Text is `Messages available for member ID.` plus normal messages, or `Timed out waiting for member ID.`; diagnostics go to stderr. Both outcomes exit 0. Deleted subject/fleet or corrupt/unreadable state exits 1 with its cause and retains earlier notification diagnostics on stderr, including when JSON output was requested. Ctrl+C outside a delivery attempt terminates the process normally; inside an attempt it takes effect when the attempt's termination-deferral span (§6.5 Termination during pane input) ends.
 
-A script or operator uses `message wait` for finite manual reception and ordinary-member retry recovery, then polls and ACKs consumed messages. Native Director reception retains the existing listener process between events.
+A script or operator uses `message wait` for finite manual reception and ordinary-member retry recovery, then polls and ACKs consumed messages. Native Director reception keeps one listener process running across events (§6.3 `message listen`).
 
 ##### `message listen`
 
@@ -874,11 +872,9 @@ appends its own cause, and a recorded run with remaining diagnostics keeps
 compensation, and an interrupted pending creation reports
 `pending creation was interrupted`. Once the runner reports `started` under
 the matching identity, creation removes the descriptor and emits its result;
-placement publication alone keeps the rollback armed. Existing output keys
-retain their order and nullability; runtime fields append under the
+placement publication alone keeps the rollback armed. The output keys keep
+their documented order and nullability, and runtime fields follow the
 runtime presentation contract (§6.3 Runtime presentation).
-
-
 
 ##### `member delete`
 
@@ -898,7 +894,6 @@ the detailed view — including `kind` (`director` / `member`, §5.4 Member kind
 placement sub-dict and appended runtime summary — is the `--json` payload (see
 §6.3 Runtime presentation). An ordinary member's result appends the runtime text line; the root Director retains its registry row.
 
-
 ##### `member list`
 
 `cafleet member list FLEET_ID [--json]` — the positional `FLEET_ID` names the
@@ -913,7 +908,6 @@ Rows and activity follow §6.2 Members.
 Text idle values render as `Ns` / `Nm` / `Nh`.
 Per-member detail such as `description` and `registered_at` lives on
 §6.3 `member show`.
-
 
 ##### `member prompt`
 
@@ -991,7 +985,7 @@ Operational failures exit 1 with empty stdout, including under `--json`. Retain 
 | Selected adapter differs from placement | `press backend does not match the recorded placement` |
 | Selected live context differs from placement | `press target context does not match the recorded placement` |
 
-Missing member/placement and native process errors retain their existing primary diagnostics. A pending pane uses `member ID has no pane yet (pending placement) — nothing to press.` Binary-not-found, not-started and prelaunch expiration have zero writing invocations. Every started failure, including a pane-gone response, retains possible partial delivery; perform no automatic retry. Request-bound permission decisions retain the separate `permission respond` contract and host authorization.
+A missing member or placement and a native process error report their own primary diagnostic. A pending pane uses `member ID has no pane yet (pending placement) — nothing to press.` Binary-not-found, not-started and prelaunch expiration have zero writing invocations. Every started failure, including a pane-gone response, retains possible partial delivery; perform no automatic retry. Request-bound permission decisions retain the separate `permission respond` contract and host authorization.
 
 ##### `member capture`
 
@@ -1013,7 +1007,6 @@ default mode hashes the ANSI-stripped, carriage-return-defragmented string;
 `--ansi` hashes the ANSI-preserving string. No normalization occurs after the
 selected mode, and capture content is never stored in SQLite. Text member
 capture prints content without adding a newline.
-
 
 #### Runtime presentation
 
@@ -1041,7 +1034,7 @@ Ordered JSON keys are `member_id,run_id,outcome,replayed_count,inbox_count,archi
 
 #### Permission commands
 
-`cafleet permission inspect INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID [--json]` reads the current request through its pinned runner. Require positive IDs, then an existing interaction (an unknown `INTERACTION_ID` is reported as not found before any event, run or database-identity check), then an active ordinary target, pinned active Director and live fleet; verify the event/message association and interaction ownership under the existing pane lock. One original five-second deadline, clipped to any inherited SQL bound, covers locking, current observation/manual progress, database work and the control exchange. Inspection sends zero programmatic child bytes and creates no receipt, audit or claim. Unknown answer capability is an inspection result; stale ownership or an unavailable owner is an operational error.
+`cafleet permission inspect INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID [--json]` reads the current request through its pinned runner. Require positive IDs, then an existing interaction (an unknown `INTERACTION_ID` is reported as not found before any event, run or database-identity check), then an active ordinary target, pinned active Director and live fleet; verify the event/message association and interaction ownership under the member's pane-input lock (§6.5 Pane input lock). One original five-second deadline, clipped to any inherited SQL bound, covers locking, current observation/manual progress, database work and the control exchange. Inspection sends zero programmatic child bytes and creates no receipt, audit or claim. Unknown answer capability is an inspection result; stale ownership or an unavailable owner is an operational error.
 
 The inspection JSON is `{request}`. Its object has ordered keys:
 
@@ -1090,7 +1083,6 @@ Historical response projection uses only the durable row and immutable audit. Re
 | `ready` | The separate exact-metadata live-validation path; retain its original epoch/token binding. |
 
 An uncertain reply, live or retained, reports the receipt's recorded `uncertain_cause` (§6.9 Uncertain cause) as `reason`; a receipt without a recorded cause, such as an `in_progress` row left by runner loss, reports `prior transmission remains uncertain`. For a consumed key, `zero_bytes` describes this retry only and supplies no zero-byte evidence about the original attempt. A prior abandoned-uncertain claim remains possibly transmitted. This projection reads retained history even after current owner/interaction eligibility is lost.
-
 
 Response text is:
 
@@ -1147,7 +1139,7 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error; fires before registration or multiplexer effects |
 | (any subject-taking command) | Missing positional subject id | The parser's native missing-required-argument error naming the positional | 2 | — |
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
-| `member create` | Unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` | 2 | A usage error raised by the first fleet check, after the schema-version guard and before Director resolution |
+| `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID | `Error: fleet '<fleet-id>' not found.` | 1 | For `member create`, raised by the first fleet check, after the schema-version guard and before Director resolution |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 | — |
 | `member create` | The fleet row has no `director_member_id` recorded | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` | 1 | Mid-bootstrap corruption |
 | `member create` | The fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 | The live-fleet guard |
@@ -1178,7 +1170,6 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | `permission inspect` | The inspected run records a database identity other than the selected database's | `Error: invalid stored value for member_runs.database_identity_json: selected database identity mismatch` | 1 | Followed by the known interaction context |
 
 ### 6.4 Output & Formatting
-
 
 A message is a durable point-to-point delivery. The recipient owns its inbox and explicitly acknowledges consumption.
 
@@ -1235,7 +1226,6 @@ A runtime notification is an ordinary inbox record whose `text` is the complete 
 
 Capture timestamping, content hashing, mode selection and text output are specified in §6.3 `member capture`; the JSON key order is in §6.3 Output shapes.
 
-
 #### `strip_ansi` regex and CR-defrag
 
 The CSI regex is exactly `\x1b\[[0-?]*[ -/]*[@-~]`: ESC, `[`, any run of
@@ -1248,7 +1238,6 @@ row terminator, overwrites nothing — then keep only the substring after the
 **last** remaining `\r` (CR-redraw defrag: a TUI redraw `prefix\rNEW` keeps only
 `NEW`, and a CRLF-terminated `row\r\n` keeps `row`), then re-join with `\n`. An
 empty/falsy input returns unchanged.
-
 
 #### Formatter helper semantics
 
@@ -1299,14 +1288,12 @@ Auto-detect (an unset `CAFLEET_MULTIPLEXER`) is the default. `cafleet doctor`
 reports the resolved backend and its
 identifiers (§6.3 `cafleet doctor` — Environment Diagnosis).
 
-
 #### Error taxonomy
 
 Both backends report failures through one multiplexer error type carrying the
 backend's own message text, so CLI boundaries handle both uniformly. A creation
 error additionally records its pane-cleanup outcome (below), and a key-dispatch
 error records whether a writing process had started.
-
 
 #### Pane ownership during creation
 
@@ -1331,7 +1318,6 @@ compensation follows the
 creation failure order (§6.3 Creation failure compensation)
 and closes only the pane owned by that operation.
 
-
 #### Subprocess output and deadlines
 
 The shared subprocess runner captures stdout and stderr without truncation.
@@ -1351,7 +1337,6 @@ and kill/reap the child; cleanup failures accompany the primary error instead of
 replacing it. The deadline bounds observation and the start of cleanup; an
 unresponsive operating system can delay cleanup itself.
 
-
 #### Pane spawn working directory
 
 A member pane spawned by `cafleet member create` starts in the invoking
@@ -1364,7 +1349,6 @@ instead of the passwd login shell when `SHELL` is unset
 ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)).
 An unresolvable cwd fails the spawn with `cannot resolve the working directory
 for pane spawn: <cause>`; there is no fallback directory.
-
 
 #### Delete-time pane layout
 
@@ -1385,7 +1369,6 @@ shows a residual right split; a single remaining member needs no resize. The
 rebalance uses the original operation deadline after registry finalization.
 A failed or expired restoration emits a stderr diagnostic; `member delete`
 retains its successful close and deregistration result.
-
 
 #### Pane input lock
 
@@ -1425,7 +1408,7 @@ Interrupting a host turn can also end the turn's in-flight shell tool, including
 | `member create` | From the pane spawn through the registry commit or its compensation |
 | `member delete`, `fleet delete` | From lock acquisition through deregistration and layout cleanup |
 
-Every span is bounded by its existing deadline, so a deferred signal waits at most one span. `message wait` outside an attempt keeps default signal behavior. Multiplexer client processes started inside a span inherit the blocked set and stay bounded by their timeouts. The spawned member session is started by the multiplexer server and does not inherit it.
+Every span is bounded by its own deadline, so a deferred signal waits at most one span. `message wait` outside an attempt keeps default signal behavior. Multiplexer client processes started inside a span inherit the blocked set and stay bounded by their timeouts. The spawned member session is started by the multiplexer server and does not inherit it.
 
 `SIGKILL` cannot be deferred. A kill inside a span leaves:
 
@@ -1462,7 +1445,7 @@ The placement records no historical socket/server-generation identity. Context v
 
 Capture one inherited-or-new five-second absolute deadline before invocation database validation. The full availability/current-context/target-metadata/write chain uses absolute `run_until` execution with that supplied bound; relative or untimed helper execution supplies no press path. Retain one second for metadata/dispatch/cleanup when computing the lock-wait deadline, rather than the prompt reservation. Every later check uses the remaining original budget, and insufficient launch/cleanup reserve starts no new writing process.
 
-Within the original deadline, reserve 250 milliseconds for owned process cleanup and end collection/launch at that earlier bound. On an actual error, close read pipes, kill only the still-owned unreaped direct child and poll `try_wait` with sleeps at most 2 milliseconds while the original cleanup deadline has time remaining, checking that deadline after every interruption. Explicit cleanup and unwind fallback use the same original deadline and perform no blocking wait. An explicit cleanup attempt prevents a second Drop retry cycle; unconfirmed termination/reap remains an explicit diagnostic: `cleanup unconfirmed for child PID: original command deadline expired before reap`. Preserve actual kill/status errors and the primary process error; unwind emits cleanup diagnostics to stderr. Existing relative/untimed execution retains its separate behavior. Synchronous calls have no hard scheduler/syscall return-time guarantee.
+Within the original deadline, reserve 250 milliseconds for owned process cleanup and end collection/launch at that earlier bound. On an actual error, close read pipes, kill only the still-owned unreaped direct child and poll `try_wait` with sleeps at most 2 milliseconds while the original cleanup deadline has time remaining, checking that deadline after every interruption. Explicit cleanup and unwind fallback use the same original deadline and perform no blocking wait. An explicit cleanup attempt prevents a second Drop retry cycle; unconfirmed termination/reap remains an explicit diagnostic: `cleanup unconfirmed for child PID: original command deadline expired before reap`. Preserve actual kill/status errors and the primary process error; unwind emits cleanup diagnostics to stderr. Relative and untimed execution outside the press path follows § Subprocess output and deadlines. Synchronous calls have no hard scheduler/syscall return-time guarantee.
 
 Both writing adapters acknowledge only successful process completion with empty/whitespace stdout. Unexpected non-whitespace stdout on success is unreadable acknowledgment with uncertain effects; herdr metadata retains its command-specific JSON parsing. Binary-not-found/not-started means zero writing invocations; every started failure, including pane-gone stderr, timeout or unreadable output, retains possible prefix delivery and receives no automatic retry. Backend keyboard modes or key interception can affect actual PTY bytes even after acknowledgment. Use the CLI result/error contract (§6.3 `member press`) and observe actual native effects separately.
 
@@ -1508,7 +1491,7 @@ One synchronous drain uses a five-second attempt budget and the runtime pane-loc
 
 8. Continue at step 5 while the budget and input state permit. Each new attempt is evaluated afresh by the runner; a request queued behind an earlier queued input receives the same queued result.
 
-A retirement failure after settlement preserves the committed sent prefix and `notification_sent=true`. Report `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining known run/input/key context and the original cause. This warning uses the existing attempt error shape; durable settlement remains authoritative and grants no submission replay.
+A retirement failure after settlement preserves the committed sent prefix and `notification_sent=true`. Report `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining known run/input/key context and the original cause. This warning uses the attempt error shape; durable settlement remains authoritative and grants no submission replay.
 
 The lock owner retains the lock through final submission/settlement. Wrapped delivery follows the durable input contract (§6.9 Input arbitration and the original native answer); only absent receipts or certified ready/zero-byte state permit a new eligible attempt. Poll and ACK identify consumption independently of input delivery.
 
@@ -1566,7 +1549,6 @@ newline; an all-blank buffer becomes the empty string. Preserve interior blank
 lines. Enforce the last-N window client-side even when the backend returns more
 than requested, so the window shows the drawn bottom rather than blank cursor
 space. A blank tail deeper than the requested window is why capture over-fetches.
-
 
 #### Explicit key adapter surface
 
@@ -1925,9 +1907,9 @@ without a prompt. A write to one of Claude Code's protected paths, such as a
 project's `.git` or `.claude` directory, is denied whatever the allow list
 holds.
 
-The recommended Claude Code permission profiles, the auto mode profile for a
-Director session in `auto` and the other-modes profile for any other mode,
-carry these entries:
+Two Claude Code permission profiles specify each role's required entries: the
+auto mode profile for a Director session in `auto` and the other-modes profile
+for any other mode. They carry these entries:
 
 | Entry | Profile | Needed by | Why |
 |---|---|---|---|
@@ -2048,17 +2030,17 @@ regression escape: the Director captures the pane and escalates, and the
 allowlist is extended only by operator decision.
 
 Both postures are allowlists with no OS-level sandbox. Standalone
-un-enumerated commands fall to the `"*"` base. Apply these limits when
-choosing tools and authorizing commands:
+un-enumerated commands fall to the `"*"` base. These limits apply to tool use
+and command authorization:
 
-| Surface | Example | Usage limit |
+| Surface | Example | Limit |
 |---|---|---|
-| MCP-contributed tools | — | Their participation in preset permission evaluation is unverified on opencode 2.1.4. Keep loaded configurations free of MCP servers. |
-| Compound shell commands | <code>git log --stat; curl … &#124; sh</code> | Permission matching for compound lines is unverified on opencode 2.1.4. Submit one command per invocation and authorize each actual command. |
-| Interpreter or hook execution via allowed tooling | `mise //:test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | Authorize the code and hooks that an allowed command can execute. |
+| MCP-contributed tools | — | Their participation in preset permission evaluation is unverified on opencode 2.1.4; evaluation is established only for loaded configurations free of MCP servers. |
+| Compound shell commands | <code>git log --stat; curl … &#124; sh</code> | Permission matching for compound lines is unverified on opencode 2.1.4; matching is established for one command per invocation. |
+| Interpreter or hook execution via allowed tooling | `mise //:test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | An allowed command also runs the code and hooks it executes, under that command's permission. |
 
-cafleet ships no MCP stanzas. Use the `codex` backend for kernel-enforced
-isolation.
+cafleet ships no MCP stanzas. The `codex` backend provides kernel-enforced
+isolation (§6.7 Codex sandbox and configuration).
 
 #### Preset file format
 
@@ -2160,7 +2142,7 @@ A native shell probe displayed the actual command, exit code, duration and outpu
 
 ### 6.8 Configuration
 
-Settings retain the selected SQLite URL, nonnegative text limit and optional multiplexer override. The process reads only the explicitly named environment variables in §6.3. Spawned members receive `CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID` and, when the creator sets it, the selected backend's config-location variable (§ *Member environment*); identity is rendered into prompt literals, and `CAFLEET_MEMBER_ID` only marks the process for the Director-only command guard (§6.3 Director-only command guard).
+Settings retain the selected SQLite URL, nonnegative text limit and optional multiplexer override. The process reads only the explicitly named environment variables in §6.3. Spawned members receive `CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID` and, when the creator sets it, the selected backend's config-location variable (§6.3 *Member environment*); identity is rendered into prompt literals, and `CAFLEET_MEMBER_ID` only marks the process for the Director-only command guard (§6.3 Director-only command guard).
 
 ### 6.9 Member PTY runtime
 
@@ -2221,7 +2203,7 @@ The version probe below runs that exact path, and the same path is `argv[0]` of 
 
 ##### Native version probe
 
-`member create` records the installed native version of the resolved backend. After launch-policy validation and the backend availability check, and before registration, it runs the resolved executable (§ Native executable resolution) with exactly the argument `--version`, so each backend reports its own version. The probe has null stdin and captures at most 4096 bytes each of stdout and stderr. It ends within two seconds, and those two seconds belong to the command's existing ten-second creation budget, which starts before the probe. A probe still running at its bound is killed.
+`member create` records the installed native version of the resolved backend. After launch-policy validation and the backend availability check, and before registration, it runs the resolved executable (§ Native executable resolution) with exactly the argument `--version`, so each backend reports its own version. The probe has null stdin and captures at most 4096 bytes each of stdout and stderr. It ends within two seconds, and those two seconds belong to the command's ten-second creation budget, which starts before the probe. A probe still running at its bound is killed.
 
 The probe yields a version only when it exits with status `0` and the first stdout line has exactly one whitespace-separated token that, after stripping one leading `v`, parses as canonical SemVer `major.minor.patch` with optional prerelease and build metadata. That stripped token is recorded as the run's `native_version`. An incomplete version such as `2.1` is not a version token and is never normalized into one:
 
@@ -2562,7 +2544,7 @@ The operation evidence joins the processed rows with `\n`, and `operation_rows` 
 
 ##### Executable native plans
 
-Each operation's eligibility for the run's selected profile is independent (§ Profile selection by minimum version). Observing an empty composer supplies input-state evidence; executable submission additionally requires its measured literal/submit plan. Existing observation definitions without a submission plan retain their observation coverage and yield no executable composer capability. Synthetic plans run only in explicitly selected test services.
+Each operation's eligibility for the run's selected profile is independent (§ Profile selection by minimum version). Observing an empty composer supplies input-state evidence; executable submission additionally requires its measured literal/submit plan. An observation definition without a submission plan keeps its observation coverage and yields no executable composer capability. Synthetic plans run only in explicitly selected test services.
 
 NativeCapabilities reports empty-composer observation through `composer`, executable prompt submission through `prompt_submission`, and executable native-shell submission through `native_exec_submission`. Each operation field is `tested` exactly when the run's selected profile has a validated executable definition for that operation; otherwise it is `unknown`, and ordinary input for that operation uses delivery fallback. A catalog selected explicitly by test services describes its fixture coverage.
 
@@ -2642,7 +2624,7 @@ The runner owns the child PTY and reconstructs terminal state independently of t
 
 Store runtime artifacts in `.cafleet-runs/<database_namespace>/<run_id>/` beside the canonical selected database. Baseline initialization creates a singleton `runtime_database_identity` row with a random 128-bit `instance_id`; the database identity is the canonical path, filesystem device/inode and this stored instance ID. Compute `database_namespace` as the first 26 base32 characters of its SHA-256 digest. A private namespace manifest stores the complete identity; a prefix collision with a different manifest fails explicitly rather than sharing artifacts. Distinct databases under one parent therefore remain separate even with equal run IDs.
 
-Directories use `0700`, descriptor/spool files use `0600`, and a control socket is accessible only to its owner. Create each run directory exclusively and reconcile an existing directory before reuse. Reject symlinks, ownership mismatches, malformed descriptors and socket paths exceeding the platform limit against the complete resulting path before pane creation. The descriptor contains schema version, complete database identity, fleet/member/Director/run identities, ownership epoch, a random launch nonce, literal child argv, absolute cwd, required environment overrides, evidence policy and initial terminal dimensions. Preserve the existing inherited native configuration; avoid copying the entire environment or creating per-member native profiles.
+Directories use `0700`, descriptor/spool files use `0600`, and a control socket is accessible only to its owner. Create each run directory exclusively and reconcile an existing directory before reuse. Reject symlinks, ownership mismatches, malformed descriptors and socket paths exceeding the platform limit against the complete resulting path before pane creation. The descriptor contains schema version, complete database identity, fleet/member/Director/run identities, ownership epoch, a random launch nonce, literal child argv, absolute cwd, required environment overrides, evidence policy and initial terminal dimensions. Keep the native configuration the child inherits; avoid copying the entire environment or creating per-member native profiles.
 
 Replacing a database file creates a different filesystem identity and namespace even when restored bytes retain the instance ID. Runners validate the selected path's file/instance identity before input and storage mutations; replacement fences the old run from the new database, holds input and initiates owned-child cleanup. Retain the old namespace for explicit reconciliation; a new creator never adopts its socket or outbox. A copied database at another canonical path also receives a separate namespace.
 
@@ -2660,7 +2642,7 @@ Creation follows this ordered protocol:
 2. Register the pending member and allocate its run row in one transaction. Write the private descriptor and create the pane with the absolute current CAFleet executable and the internal runner argv.
 3. The runner validates the descriptor, acquires the precreated identity-pinned ownership lock, records its process identity, opens the PTY, initializes terminal state and event machinery, and binds its control endpoint. It reports `prepared` without spawning the native CLI.
 4. The creator connects, validates the nonce/run identity, and publishes the concrete pane placement with `status=prepared`. Only then send the control `start` frame. The runner revalidates placement, spawns the child and records `running` before reporting `started` with child PID/start identity.
-5. Return creation success only after `started`, meaning child spawn succeeded without a native-policy/liveness guarantee; include the run identity and detection coverage with the member result. A child that immediately exits is reported by `runner_exited`, including its native status and Director notification. Use a ten-second monotonic handshake budget and preserve existing rollback/cleanup diagnostics if any phase fails.
+5. Return creation success only after `started`, meaning child spawn succeeded without a native-policy/liveness guarantee; include the run identity and detection coverage with the member result. A child that immediately exits is reported by `runner_exited`, including its native status and Director notification. Use a ten-second monotonic handshake budget and preserve the rollback/cleanup diagnostics of any phase that fails.
 
 Until `start`, the runner exits if its creator disconnects or the handshake expires. Failure after child spawn kills and reaps that owned child, closes the known pane, deregisters the pending member and retains a failed run record. A failed cleanup retains the original failure plus explicit orphan/pane diagnostics. A timeout after `start` is an uncertain launch: inspect the existing run and stop its owned child during compensation; creating a second child is not a retry mechanism. Registration and pane ownership remain guarded until the handshake is complete.
 
@@ -2690,7 +2672,7 @@ Separate terminal transport, classification and event storage. Database waits, D
 | Runner receives termination or outer EOF/HUP | Stop programmatic input, terminate the owned process group, allow two seconds for cleanup, then kill verified remaining owned children and reap. Record the real termination cause. |
 | Runner fails while child is live | Mark observation degraded, stop programmatic input and attempt the same owned-child cleanup; return failure rather than a fabricated native success. |
 | Runner is killed without cleanup | Closing the PTY may cause native hangup, but descendants may survive. Mark reachability suspect until exclusive recovery establishes loss; inspect verified PID/start identity before signaling. |
-| Member/fleet deletion | Acquire existing pane locks in their established order, revalidate placement/run, request runner shutdown and finish pane/registry cleanup under existing semantics. Report any unconfirmed child cleanup explicitly. |
+| Member/fleet deletion | Acquire the pane-input locks in the order §6.3 `member delete` and `fleet delete` specify, revalidate placement/run, request runner shutdown and finish pane/registry cleanup as those commands specify. Report any unconfirmed child cleanup explicitly. |
 | Restart or replacement | Create a fresh member/run after explicit reconciliation. Keep earlier episodes/events; a process generation never inherits an earlier pending request or causes automatic command re-execution. |
 
 Use one shutdown clock starting at normal native-child exit, runner failure or termination request. Stop programmatic input immediately. During the first two seconds, drain available PTY bytes and terminate verified surviving descendants in the owned process group: send TERM immediately and KILL any verified survivors at the two-second boundary. Close the master at that boundary even if a descendant retains the slave. Nonblocking outer-display flushing ends by the three-second boundary; discard only undelivered display-tail bytes, record their count and retain a truncation diagnostic. Event-worker flush/SQLite attempts end by the four-second boundary; retain complete uncommitted outbox frames for explicit recovery and record any unsaved in-memory gap. All waits share these absolute deadlines.
@@ -2952,7 +2934,7 @@ Redacted mode requires `--event-redaction-file <ABSOLUTE_PATH>` naming readable 
 
 In redacted mode, apply the same configured patterns to every normalized screen-derived field before any persistence, including operations, choices, native IDs and latest interaction evidence. Replace matching fields in full with `[redacted]`; a profile-marked sensitive form or a rule named by `sensitive_rules` uses metadata-only evidence for the entire form. Apply UTF-8 bounds and escaping after policy transformation, then compute `evidence_digest`; persist no pre-policy screen hash or semantic fingerprint. Unmatched text is allowed only by this explicit operator choice, which does not promise automatic secret discovery.
 
-Persist a transition, its event and a normal `input_required` inbox message to the pinned Director in one immediate transaction. The message's text is the full event JSON and its sender is the observed member, with the typed `source` distinguishing runtime observation from model-authored speech. The transaction shares the broker’s existing fleet/active-member checks. Insert the message and event, fill the final ID-bearing payload and validate the complete association before commit; no intermediate message body is externally visible. A retry of the same `(run_id, event_seq)` returns the existing event/message IDs and verifies identical payload identity; conflicting reuse fails.
+Persist a transition, its event and a normal `input_required` inbox message to the pinned Director in one immediate transaction. The message's text is the full event JSON and its sender is the observed member, with the typed `source` distinguishing runtime observation from model-authored speech. The transaction applies the broker's fleet and active-member checks (§6.2). Insert the message and event, fill the final ID-bearing payload and validate the complete association before commit; no intermediate message body is externally visible. A retry of the same `(run_id, event_seq)` returns the existing event/message IDs and verifies identical payload identity; conflicting reuse fails.
 
 Before persistence, the outbox stores an observed transition keyed by `(run_id, event_seq)` and nullable `episode_seq`, with kind, original observation time and immutable evidence. The transaction allocates or resolves interaction/event/message IDs and produces the final public payload. Idempotence compares these original transition fields; generated IDs and commit timestamps are not inputs to that comparison.
 
@@ -3057,7 +3039,7 @@ An event worker owns SQLite and a private append-only per-run outbox. The parser
 
 The current owner reserves event-sequence ranges of 256 by advancing `event_seq_reserved_through` in a bounded ownership-checked transaction before using them. The classifier consumes the reserved range in memory; if the next range is unavailable it enters the defined observation-gap state while terminal I/O continues. Unused reserved values are valid gaps. Recovery allocates new sequences above this durable high-water mark as well as all committed/complete-spool sequences, so missing artifacts cannot cause reuse of a previously issued sequence.
 
-The Director-owned explicit `cafleet member recover <MEMBER_ID> --json` command operates on the recorded run of an active or deregistered member, never starts an agent, and returns recovery counts, final lifecycle/notification state and cleanup diagnostics. A five-second invocation deadline bounds each recovery pass. Start one cleanup clock at entry to the common recovery coordinator, before snapshot, locking, process/health evidence and replay; its existing two/three/four-second boundaries share that origin and are clipped to the supplied original deadline, including a deletion caller's earlier deadline. Incomplete replay retains the spool and `recovering` state for the next pass. `doctor` diagnoses recovery needs without mutating them. Member/fleet deletion invokes the same recovery component after successful runner shutdown and before deregistration when its remaining deadline permits; otherwise retain the namespace for a later explicit pass.
+The Director-owned explicit `cafleet member recover <MEMBER_ID> --json` command operates on the recorded run of an active or deregistered member, never starts an agent, and returns recovery counts, final lifecycle/notification state and cleanup diagnostics. A five-second invocation deadline bounds each recovery pass. Start one cleanup clock at entry to the common recovery coordinator, before snapshot, locking, process/health evidence and replay; its two/three/four-second boundaries share that origin and are clipped to the supplied original deadline, including a deletion caller's earlier deadline. Incomplete replay retains the spool and `recovering` state for the next pass. `doctor` diagnoses recovery needs without mutating them. Member/fleet deletion invokes the same recovery component after successful runner shutdown and before deregistration when its remaining deadline permits; otherwise retain the namespace for a later explicit pass.
 
 Every recovery counter measures durable work newly committed by this invocation.
 
@@ -3073,9 +3055,9 @@ Before returning an existing completed terminal result, validate supplied expect
 
 Recovery follows this sequence:
 
-1. Validate complete database/run identity, acquire the existing pane lock when a concrete placement remains, then open/verify the recorded runtime directory and lock inode without creating a replacement. A matching held lock returns `live_or_unreachable`. A creator-owned run still in startup also requires creator/pinned-process reconciliation even if its precreated lock is free. A missing path, changed inode or unregistered startup owner follows the special branch below; it is not a free-lock result.
+1. Validate complete database/run identity, acquire the member's pane-input lock when a concrete placement remains, then open/verify the recorded runtime directory and lock inode without creating a replacement. A matching held lock returns `live_or_unreachable`. A creator-owned run still in startup also requires creator/pinned-process reconciliation even if its precreated lock is free. A missing path, changed inode or unregistered startup owner follows the special branch below; it is not a free-lock result.
 2. After acquiring the matching ownership lock, CAS the run's owner epoch to the next integer, record the recovering PID/start identity, set `owner_kind=reconciler`, preserve `recovery_origin_status` on the first pass and set `status=recovering`. A later pass takes a fresh epoch and retains the same original status. This fences prior event producers and input clients.
-3. Under that exclusive ownership, validate the entire complete frame sequence before replay: checksums and sequence identities match, and `event_seq` is nondecreasing in physical order. Reconcile identical same-sequence originals idempotently; conflicting same-sequence originals or any physical sequence regression are complete corruption, which blocks the pass and preserves original spool bytes. Replay valid originals in their existing ascending order, updating interactions before later closures. An incomplete final suffix retains its separate tail diagnostic and exclusive-owner handling. Choose inbox or archived insertion from current member/fleet/Director status within each transaction.
+3. Under that exclusive ownership, validate the entire complete frame sequence before replay: checksums and sequence identities match, and `event_seq` is nondecreasing in physical order. Reconcile identical same-sequence originals idempotently; conflicting same-sequence originals or any physical sequence regression are complete corruption, which blocks the pass and preserves original spool bytes. Replay valid originals in their recorded ascending order, updating interactions before later closures. An incomplete final suffix retains its separate tail diagnostic and exclusive-owner handling. Choose inbox or archived insertion from current member/fleet/Director status within each transaction.
 4. After all complete original frames are reconciled, reserve new sequences above the durable reserved high-water mark, committed events and every valid complete outbox frame. Derive the terminal outcome from the original status and any replayed terminal lifecycle record. If neither establishes an exit/failure/loss, append a pending interaction's `monitor_lost` closure and then `runner_lost` through the same fsynced outbox/idempotent transaction path. Otherwise finish the recorded terminal outcome without inventing a loss; a replayed child exit supersedes the stale pre-crash running status. Repeated passes detect existing closure/loss records instead of generating them again.
 5. Persist the final `lost`, `exited` or `failed` status, ended/cleanup evidence and notification disposition, then truncate/fsync the outbox after validating all complete frames are committed and release ownership. Reconcile verified descendants under the bounded cleanup rules; unknown ownership remains a diagnostic. Retain archived events permanently under database retention and delete the outbox only when all complete frames are durably represented.
 
@@ -3125,7 +3107,7 @@ At the service, also cap new-operation admission to five seconds from the first 
 
 ##### Bounded input draining
 
-Before a programmatic input attempt, drain actual human and child input through the existing manual queue, terminal parser, ordered observer and outer display. A drain returns either `Pending` or `Quiescent` with the actual cumulative `human_generation`, the count of bytes classified as manual input (§ Terminal reply classification), and terminal `output_seq`. Quiescence describes transport and observation health; the input coordinator separately validates composer/request eligibility, ownership, reservation and the original deadline before a write.
+Before a programmatic input attempt, drain actual human and child input through the runner's manual queue, terminal parser, ordered observer and outer display. A drain returns either `Pending` or `Quiescent` with the actual cumulative `human_generation`, the count of bytes classified as manual input (§ Terminal reply classification), and terminal `output_seq`. Quiescence describes transport and observation health; the input coordinator separately validates composer/request eligibility, ownership, reservation and the original deadline before a write.
 
 Each call executes at most eight rounds under the original deadline. A round attempts at most one human read, one manual-queue PTY write, one child read, one display-queue write and one display flush, in that order. Skip an operation only for unavailable capacity or remaining quota, an empty queue or previously observed stream `EOF`. Let B be the positive configured `bytes_per_tick`; each actual read buffer is bounded by the minimum of 16384 bytes, the remaining stream quota and available queue capacity.
 
@@ -3141,7 +3123,7 @@ Each call executes at most eight rounds under the original deadline. A round att
 
 `Quiescent` requires both actual reads to return `WouldBlock` in the same completed round, an empty manual queue, consumed deferred child bytes, successful parser/observer processing and positive free display capacity. The final health sample must be present, nondegraded, have `pending_count=0` and `pending_evidence=false`. An absent health adapter supplies no proof; a healthy `Hold(Unknown)` state may establish physical quiescence while remaining ineligible for programmatic input. `Quiescent` also requires no pending terminal-reply prefix: each round first resolves expired prefixes, and a round that would otherwise certify quiescence while a prefix is pending returns `Pending` with blocker `terminal reply pending` and installs no proof. The eighth round may certify these actual facts; quota exhaustion, skipped reads, `Interrupted`, `EOF`, outstanding manual bytes, a pending reply prefix or display pressure supply `Pending` instead. A continuously readable source terminates at the round or byte bound. Deferred child bytes precede subsequent reads and consume the same child quota.
 
-Classify every actual positive human read immediately and count its manual bytes with checked cumulative unsigned 64-bit arithmetic, in both ordinary progress and input draining. Retain those counts and literal queued bytes when later PTY, child, display, parser or observer work fails. The service delivers the observed before/after count delta to manual-input invalidation on both successful and failed progress before propagating any error; a simultaneous notification failure accompanies the primary error. Actual nonrecoverable errors propagate, and a zero-length write retains the existing no-progress error. `Interrupted` requires a later fresh read pair; `EOF` records the stream state and leaves shutdown handling to the normal service path.
+Classify every actual positive human read immediately and count its manual bytes with checked cumulative unsigned 64-bit arithmetic, in both ordinary progress and input draining. Retain those counts and literal queued bytes when later PTY, child, display, parser or observer work fails. The service delivers the observed before/after count delta to manual-input invalidation on both successful and failed progress before propagating any error; a simultaneous notification failure accompanies the primary error. Actual nonrecoverable errors propagate, and a zero-length write fails with `terminal write made no progress`. `Interrupted` requires a later fresh read pair; `EOF` records the stream state and leaves shutdown handling to the normal service path.
 
 Clear stored drain proof at entry, then check the original deadline before I/O and before each endpoint/callback. Recheck after completed work, retaining the actual bytes/counts from successful completed I/O before reporting expiry. In-memory bookkeeping and observation of a completed read may finish after expiry; an observed expiration permits no later endpoint call or proof installation. Synchronous I/O and callbacks have no preemption guarantee, so finite work bounds and clock checks supply no hard syscall or callback latency cap. Every call retains the original deadline and performs no internal sleep or deadline renewal.
 
@@ -3189,11 +3171,11 @@ The live input guard distinguishes native-write authority, receipt-only writer e
 
 Rearm additionally requires the unchanged old token/epoch/metadata and the actual current request, selected answer plan, `human_generation` and healthy complete observation drain. Revalidate owner/audit/claim under the bounded immediate transaction, CAS ready to in-progress once, then require fresh normal pre-stage checks before any native byte. Retain the input ID, original audit, decision timestamp, key and digest. Preserve its matching claim, or restore that exact pair only when a released ready row has no competing claim. The exclusion-only proof grants no rearm authority. Each explicit ready invocation captures one expiration; an in-progress stage continuation retains its original attempt expiration.
 
-Live permission query, reconciliation and settled retirement use the existing serialized receipt operations and original run lock. Query preserves the last real retained stage and any pending writer/client. Reconciliation pins the original full input/audit snapshot, excludes active writers and leases, and commits a proven-zero not-submitted settlement plus matching claim deletion in one supplied-connection immediate transaction. Actual retained zero-byte in-progress evidence may establish that synchronized settlement; possible-byte or absent-cache uncertainty retains its claim. Submitted and abandoned-uncertain dispositions retain claims. A mutation failure rolls back settlement and claim removal together. Retirement removes only settled cache after validation; durable audit, key and claim history remain. The client retains its genuine pane guard and original inherited deadline through query, settlement, durable verification and one matching retire; already-settled same-disposition history returns unchanged before live work. An unavailable permission owner uses the same fixed-snapshot receipt-only exclusive guard. Only exact durable ready history supplies its zero-byte proof after positive prior-owner/startup exclusion and ownership CAS; disposition and matching claim removal share that transaction. Possibly transmitted history retains its claim. The native startup probe reports unknown, so unavailable exclusion preserves the original live failure.
+Live permission query, reconciliation and settled retirement use the serialized receipt operations and the original run lock. Query preserves the last real retained stage and any pending writer/client. Reconciliation pins the original full input/audit snapshot, excludes active writers and leases, and commits a proven-zero not-submitted settlement plus matching claim deletion in one supplied-connection immediate transaction. Actual retained zero-byte in-progress evidence may establish that synchronized settlement; possible-byte or absent-cache uncertainty retains its claim. Submitted and abandoned-uncertain dispositions retain claims. A mutation failure rolls back settlement and claim removal together. Retirement removes only settled cache after validation; durable audit, key and claim history remain. The client retains its genuine pane guard and original inherited deadline through query, settlement, durable verification and one matching retire; already-settled same-disposition history returns unchanged before live work. An unavailable permission owner uses the same fixed-snapshot receipt-only exclusive guard. Only exact durable ready history supplies its zero-byte proof after positive prior-owner/startup exclusion and ownership CAS; disposition and matching claim removal share that transaction. Possibly transmitted history retains its claim. The native startup probe reports unknown, so unavailable exclusion preserves the original live failure.
 
 A process loss, ownership change or unavailable receipt permits no automatic replay of an attempted submission. Keep notification unstamped, retain its durable uncertainty and reconcile actual output before a separate deliberate action. Explicit prompt/exec use generated keys and printed durable input IDs with the same rule.
 
-Native-exec success means submission, not execution success. Queued and held messages keep `notified_at` unset, and only confirmed submission or the existing ACK settlement stamps them. Queueing supplies no new permission event and never closes the native request.
+Native-exec success means submission, not execution success. Queued and held messages keep `notified_at` unset, and only confirmed submission or ACK settlement (§6.3 `message ack`) stamps them. Queueing supplies no new permission event and never closes the native request.
 
 Screen observation cannot create an atomic native request API: unread child output may race with a write, an unknown CLI can redraw unexpectedly, and a person can type concurrently. The runner therefore guarantees zero ordinary-input bytes for detected and candidate interactions and refuses uncertain states; tested composer profiles bound the remaining race for profile delivery, rather than asserting universal prompt preservation. Release evidence must include this race and preserve uncertainty instead of authorizing a second submission.
 
@@ -3244,11 +3226,11 @@ A queued request outlives the originating CLI connection and command deadline. E
 | Busy pane lock or temporary storage/observer unavailability before the deadline, with zero bytes | Retain the queued head and retry on the 100 ms timer | Input inspection remains `queued` with its original defer reason |
 | Five-second deadline expires with zero bytes | Settle `not_submitted`, clear the unused selected method, and advance after the terminal transaction commits | `input_delivery_result` with reason `pane_input_busy`, `storage_unavailable`, `observer_unavailable` or `delivery_budget_exhausted`, according to the last obstacle |
 | Target/run/placement identity fails revalidation or a queued preview is consumed, with zero bytes | Settle `not_submitted` immediately and advance after commit | The result with reason `target_inactive`, `target_changed` or `message_consumed` and diagnostic context |
-| Any attempt may have written a child byte | Record `uncertain`, stop automatic ordinary dispatch and retain its method and selection reason | The uncertain result; existing receipt reconciliation is required before advancing |
+| Any attempt may have written a child byte | Record `uncertain`, stop automatic ordinary dispatch and retain its method and selection reason | The uncertain result; receipt reconciliation (`input reconcile`) is required before advancing |
 
-If storage prevents the terminal transaction, discard the zero-byte payload and retain a metadata-only pending finalization at the FIFO head. Retry that transaction on the 100 ms timer without sending bytes or starting another input; commit the receipt when storage recovers, then advance, and its result event follows from that durable receipt. While publication is unavailable, write a runner-stderr diagnostic naming the input ID and persistence failure; the Director receives the durable result after recovery. Ownership loss transfers finalization to the existing fenced recovery path, and the old writer neither updates nor dispatches again. An accepted request therefore becomes queued, submitted, not submitted or uncertain; `held` remains a result for work the runner did not accept into its queue.
+If storage prevents the terminal transaction, discard the zero-byte payload and retain a metadata-only pending finalization at the FIFO head. Retry that transaction on the 100 ms timer without sending bytes or starting another input; commit the receipt when storage recovers, then advance, and its result event follows from that durable receipt. While publication is unavailable, write a runner-stderr diagnostic naming the input ID and persistence failure; the Director receives the durable result after recovery. Ownership loss transfers finalization to the fenced recovery path, and the old writer neither updates nor dispatches again. An accepted request therefore becomes queued, submitted, not submitted or uncertain; `held` remains a result for work the runner did not accept into its queue.
 
-Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` with reason `runner_stopped`. After runner loss, recovery may settle a deferred `ready` receipt as not submitted with reason `runner_lost` once ownership fencing establishes that its in-memory payload and writer are gone. Explicit payloads are never restored from disk; a later deliberate submission is a new request. Existing `in_progress`/`uncertain` reconciliation applies to any attempt that may have written bytes. A preview settled not submitted remains an unnotified broker message and may be retried explicitly under a new run's preview key.
+Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` with reason `runner_stopped`. After runner loss, recovery may settle a deferred `ready` receipt as not submitted with reason `runner_lost` once ownership fencing establishes that its in-memory payload and writer are gone. Explicit payloads are never restored from disk; a later deliberate submission is a new request. `in_progress`/`uncertain` reconciliation applies to any attempt that may have written bytes. A preview settled not submitted remains an unnotified broker message and may be retried explicitly under a new run's preview key.
 
 ##### Delivery reporting
 
@@ -3271,7 +3253,7 @@ A held `message send` reports one of these reasons:
 | `notification_held` | No deliverable pane, a recipient deregistered after the commit, a placement or run change during the attempt, or an unresolved earlier preview receipt |
 | `notification_failed` | The ordinary recipient has no recorded run, the pane stayed busy, runner exchange or storage failed, or the attempt deadline expired |
 
-Self-send evaluation precedes recipient delivery: equal sender and recipient IDs return `{"status":"not_applicable","method":null,"reason":"self_send"}` and a null `input_id`, also for an ordinary member with a healthy wrapped pane. Self-sends stay excluded from automatic preview selection and the runner queue. Other sends to a root Director use reason `director_stdout`. A queued preview counts as queued only: `notified_at` stays null until actual submission or the existing ACK settlement.
+Self-send evaluation precedes recipient delivery: equal sender and recipient IDs return `{"status":"not_applicable","method":null,"reason":"self_send"}` and a null `input_id`, also for an ordinary member with a healthy wrapped pane. Self-sends stay excluded from automatic preview selection and the runner queue. Other sends to a root Director use reason `director_stdout`. A queued preview counts as queued only: `notified_at` stays null until actual submission or ACK settlement (§6.3 `message ack`).
 
 Preview forms, body folding, inline limits and long-body pointers follow §6.5 Push notifications.
 
@@ -3325,7 +3307,7 @@ Settlement and reconciliation preserve the recorded cause. Inputs that never bec
 
 An explicitly authorized `member press` sends only its requested ordered keys through the member's outer multiplexer pane under the shared pane lock and selected-context/deadline contract (§6.5 Explicit key dispatch). It appends no Escape or Enter. This manual path remains available during observer degradation or a programmatic composer hold and follows the separate CLI acknowledgment/error contract (§6.3 `member press`).
 
-The runner counts the manual bytes of actual positive outer-terminal reads, excluding complete terminal replies (§ Terminal reply classification), retains their generation before any later I/O error and accounts each new delta once on both successful and failed transport steps before subsequent automatic advancement. Observed manual input invalidates automatic authority through the retained generation; a key argument or backend acknowledgment supplies no byte count, drain proof or permission receipt. Press changes no durable input/response row. Native approval/denial/cancellation and actual continuation remain independently observed outcomes under the existing Director/user policy.
+The runner counts the manual bytes of actual positive outer-terminal reads, excluding complete terminal replies (§ Terminal reply classification), retains their generation before any later I/O error and accounts each new delta once on both successful and failed transport steps before subsequent automatic advancement. Observed manual input invalidates automatic authority through the retained generation; a key argument or backend acknowledgment supplies no byte count, drain proof or permission receipt. Press changes no durable input/response row. Native approval/denial/cancellation and actual continuation remain independently observed outcomes under the Director/user policy.
 
 #### Request-bound permission responses
 
@@ -3358,15 +3340,15 @@ The next stage waits for its gate within the responding invocation's deadline, a
 - any other identity change, manual input or a degraded observation;
 - the deadline expiring.
 
-Inspection exposes the selected current post-policy evidence independently of private request/match/plan state. Missing facts follow the permission inspection projection (§6.3 Permission commands); neither operation text nor private plan eligibility substitutes for a disclosed structured fact. A proved `single_request` choice establishes answer eligibility independently of whether public evidence states the choice scope. Keep transient raw semantics, focus and plan bytes in memory; inspection preserves the existing evidence schema and persists no token or pre-policy digest.
+Inspection exposes the selected current post-policy evidence independently of private request/match/plan state. Missing facts follow the permission inspection projection (§6.3 Permission commands); neither operation text nor private plan eligibility substitutes for a disclosed structured fact. A proved `single_request` choice establishes answer eligibility independently of whether public evidence states the choice scope. Keep transient raw semantics, focus and plan bytes in memory; inspection exposes evidence in the permission inspection projection (§6.3 Permission commands) and persists no token or pre-policy digest.
 
 Retained operation keys are validated as §6.3 Permission commands specifies. The durable-only response projection preserves the immutable audit epoch and uses a null output sequence under the permission CLI contract (§6.3 Permission commands); a consumed retry's zero-byte stage describes that retry while retaining original disposition and claim uncertainty.
 
 Respond selects the requested decision's actual rule internally and retains it in its immutable audit/digest; §6.3 Permission commands owns the inspection projection, including `answer_rule_id` and the blocked-request representation.
 
-Use versioned control operations `permission_inspect` and `permission_respond` and the existing receipt query/retire boundary. A five-second command deadline covers locking, database work and socket exchange. Before the first byte, the serialized runner resolves pending manual input and unread output, revalidates the current visible stable permission request/token and tested answer capability, and commits the response receipt, audit and episode claim atomically under the current ownership epoch. The capability binds to the response without a profile identifier: its backend and native version equal the run's, its answer rule equals the response metadata's `answer_rule_id`, its request rule equals the event evidence `rule_id`, and its decision equals the requested decision with a non-empty fixture list. The request token, expected owner epoch and event/message association bind the response to the inspection that minted the token. Other interaction classes, uncertain state, stale identity or unavailable storage receive zero-byte rejection. Write only the profile's single-request answer plan, rechecking relevant state and each stage's gate before that stage; partial writes or ambiguous state retain durable uncertainty. The CLI accepts semantic allow/deny decisions, not arbitrary key sequences.
+Use versioned control operations `permission_inspect` and `permission_respond` and the receipt query/retire boundary (§ Durable input receipts and settlement). A five-second command deadline covers locking, database work and socket exchange. Before the first byte, the serialized runner resolves pending manual input and unread output, revalidates the current visible stable permission request/token and tested answer capability, and commits the response receipt, audit and episode claim atomically under the current ownership epoch. The capability binds to the response without a profile identifier: its backend and native version equal the run's, its answer rule equals the response metadata's `answer_rule_id`, its request rule equals the event evidence `rule_id`, and its decision equals the requested decision with a non-empty fixture list. The request token, expected owner epoch and event/message association bind the response to the inspection that minted the token. Other interaction classes, uncertain state, stale identity or unavailable storage receive zero-byte rejection. Write only the profile's single-request answer plan, rechecking relevant state and each stage's gate before that stage; partial writes or ambiguous state retain durable uncertainty. The CLI accepts semantic allow/deny decisions, not arbitrary key sequences.
 
-Track answer progress as cumulative actual positive byte counts across ordered stages. A complete nonfinal stage retains `partial` progress and durable `in_progress`; only complete final-stage submission establishes `submitted`, followed by durable `accepted` before returning acceptance. A stage syscall returning WouldBlock or Interrupted with zero bytes may yield within the same attempt and original expiration. Retain the untouched next-stage index and any cumulative `partial` progress, then retry only that stage after fresh actual drain, current token/request/choice/focus/plan, manual-generation, owner and immediate-transaction validation through a newly consumed guard. Completed stages remain completed. This continuation supplies neither a new invocation nor a ready-state rearm.
+Track answer progress as cumulative actual positive byte counts across ordered stages. A complete nonfinal stage retains `partial` progress and durable `in_progress`; only complete final-stage submission establishes `submitted`, followed by durable `accepted` before returning acceptance. A stage syscall returning WouldBlock or Interrupted with zero bytes may yield within the same attempt and original expiration. Retain the untouched next-stage index and any cumulative `partial` progress, then retry only that stage after fresh actual drain, current token/request/choice/focus/plan, `human_generation`, owner and immediate-transaction validation through a newly consumed guard. Completed stages remain completed. This continuation supplies neither a new invocation nor a ready-state rearm.
 
 Record a syscall result before yielding. A recorded zero-byte WouldBlock or Interrupted preserves the actual prior stage/count and releases its lease while consuming that guard; a yielding operation remains `in_progress` and supplies no zero-byte retirement proof. Dropping a consumed guard before I/O preserves its actual no-I/O state, while possible I/O without a recorded result retains uncertainty and every known earlier byte count. A positive short write, incompatible state, unrecorded possible I/O or expiration stops the remaining plan. Preserve cumulative progress, the original cause and any known input identity; persist uncertainty only within the original budget, retaining durable `in_progress` when bookkeeping fails.
 
@@ -3392,7 +3374,7 @@ Answer-profile capability belongs to the run's selected profile, rests on native
 
 #### Director consumption and continuation
 
-Use the existing `message listen`, `poll --json` and finite `wait` interfaces. Runtime events reach the Director's stdout receiver and durable inbox; they introduce no composer injection, Escape-first wake, goal activation or new host interrupt guarantee (latency targets: § Native acceptance and coverage). Native model consumption latency remains controlled by the Director host and may be unbounded while the host is blocked or paused.
+The Director consumes runtime events through `message listen`, `poll --json` and finite `wait`. Runtime events reach the Director's stdout receiver and durable inbox; they provide no composer injection, Escape-first wake, goal activation or host interrupt guarantee (latency targets: § Native acceptance and coverage). Native model consumption latency remains controlled by the Director host and may be unbounded while the host is blocked or paused.
 
 On a wake or poll, the Director reads the complete event, verifies its durable event/message link with `event show`, reconciles the current run/interaction, records the unfinished action in host-owned state, and ACKs the message as consumption. An ordinary member can quote event JSON; a claimed event identity is verified against stored ownership, never trusted from message text alone. Old/closed events remain readable but are not a new request to answer.
 
@@ -3419,13 +3401,13 @@ The Director handles the automatic review events (§ Automatic review events) th
 | Several `automatic_refusal_observed` events, then an idle member that sent no report | Codex 0.163.0 interrupts the turn after three consecutive automatic denials, so the member stops without routing a request (§ Annotation detection). Treat the events as one pending item and ask the member through the broker whether the refused operations are still needed; the broker message resumes it. |
 | `automatic_review_unavailable` | Record the member as interactive in host-owned supervision state, expect native permission forms from it and tell the user when the selected automatic mode cannot apply. No answer is sent. |
 
-A routed request that arrives with no event follows the refusal route above unchanged.
+A routed request that arrives with no event follows the refusal route above.
 
 #### Native acceptance and coverage
 
-Use synthetic terminal replay and real native PTYs for every declared detector, composer and answer capability on each registered multiplexer. A run without a selected profile, and a capability its selected profile does not declare, retain explicit `unknown` coverage and manual operation; fixed-policy launch modes use the version-selected profile like every other mode.
+Acceptance evidence for every declared detector, composer and answer capability consists of synthetic terminal replay and real native PTYs on each registered multiplexer. A run without a selected profile, and a capability its selected profile does not declare, retain explicit `unknown` coverage and manual operation; fixed-policy launch modes use the version-selected profile like every other mode.
 
-The release minimum is a real interactive permission request under Claude's native `default` policy and under Codex's native `on-request` policy with `workspace-write`, each on both tmux and herdr. Pin exact installed CLI versions by the acceptance records and corresponding bundled profiles; use permitted disposable fixtures that actually reach the native approval surface. Every minimum case must demonstrate blocked-model-independent detection, a committed actionable event/inbox record, Director consumption and preserved original request. Exercise separate fresh requests for verified Director-auto allow and deny, user-authorized responses under non-auto/unknown modes, and manual original-surface input; include a user-executed complete bound command. Record zero response bytes before required user permission, actual native results and observed continuation separately from submitted keys. Missing native availability, unknown coverage or an unobserved required case fails overall feature acceptance; unknown coverage is only the compatibility path for other versions/backends. Additional profiles retain their own declared acceptance gates.
+The release minimum is a real interactive permission request under Claude's native `default` policy and under Codex's native `on-request` policy with `workspace-write`, each on both tmux and herdr. Acceptance records pin exact installed CLI versions to their corresponding bundled profiles, and their permitted disposable fixtures actually reach the native approval surface. Every minimum case demonstrates blocked-model-independent detection, a committed actionable event/inbox record, Director consumption and a preserved original request. Separate fresh requests cover verified Director-auto allow and deny, user-authorized responses under non-auto/unknown modes, manual original-surface input and a user-executed complete bound command. The records show zero response bytes before required user permission and record actual native results and observed continuation separately from submitted keys. Missing native availability, unknown coverage or an unobserved required case fails overall feature acceptance; unknown coverage is only the compatibility path for other versions/backends. Additional profiles retain their own declared acceptance gates.
 
 Automatic-mode acceptance covers Claude `auto` and Codex `approve-for-me` on both tmux and herdr, with automatic review available for the account and model: the omitted-default launch, an auto-approved fixture, an auto-refused fixture with its event and Director handling, and, where the native host shows one, an escalated form answered allow and deny. A later-version case repeats the launch, auto-approved, auto-refused and escalated cases on a native version above its profile's `min_version`, recording the selected profile and each UI difference that failed to match. A fixture that does not produce its intended screen is a recorded limit for that backend, not a pass.
 
@@ -3446,20 +3428,20 @@ Minimum-version delivery acceptance covers every bundled backend on each registe
 
 Measurements establish submitted native input separately from model consumption, permission decisions and command completion.
 
-Record source/installed CAFleet version, native CLI version, native configuration/mode, detector and answer profiles, Director mode/provenance, attributed decision/evidence references, request identity/token, receipt/stage, multiplexer, terminal size, cwd and redacted evidence for live acceptance. Include a permitted operation, an ordinary command failure after allow, an actual permission refusal, an approval that blocks the model, both supported answer routes and observed continuation. Exercise stale tokens/epochs/events, same/different operation keys, conflicting decisions, partial writes/lost replies, redraw, fragmented ANSI/UTF-8, primary/alternate screens, resize, title-only prompts, question/trust/update screens, transcript quotes, identical requests, concurrent human/output/input, slow display, database locks, outbox pressure, startup compensation, runner hard kill and deletion. Unavailable native modes or unobserved cases remain explicit coverage limits and cannot pass that profile's release gate.
+Live acceptance records carry the source/installed CAFleet version, native CLI version, native configuration/mode, detector and answer profiles, Director mode/provenance, attributed decision/evidence references, request identity/token, receipt/stage, multiplexer, terminal size, cwd and redacted evidence. They include a permitted operation, an ordinary command failure after allow, an actual permission refusal, an approval that blocks the model, both supported answer routes and observed continuation. The exercised cases cover stale tokens/epochs/events, same/different operation keys, conflicting decisions, partial writes/lost replies, redraw, fragmented ANSI/UTF-8, primary/alternate screens, resize, title-only prompts, question/trust/update screens, transcript quotes, identical requests, concurrent human/output/input, slow display, database locks, outbox pressure, startup compensation, runner hard kill and deletion. Unavailable native modes or unobserved cases remain explicit coverage limits and cannot pass that profile's release gate.
 
-Acceptance additionally covers the transport, lifecycle and persistence cases below. With a live receiver and available storage, measure a target of two seconds from a stable prompt to inbox commit and another two seconds from commit to receiver output.
+Acceptance additionally covers the transport, lifecycle and persistence cases below. With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and another two seconds from commit to receiver output.
 
-- Test exact child argv for the selected native policy, preserving native/managed restrictions and existing sandbox boundaries.
-- Test equal run IDs across sibling databases and replacement at an unchanged path.
-- Test a held write transaction and a long statement to prove restoration/exit are independent of the connection's default timeout.
-- Test a child exiting while its descendant holds the slave, exit during a stalled display and a locked database, and deadline-bounded terminal restoration.
-- Test timeout followed by the original runner's recovery and concurrent recovery attempts.
-- Test a command containing a known secret and assert its absence from every database/message/outbox field in metadata mode and with a matching redaction pattern, including interaction updates.
-- Test hard kill with complete uncommitted frames, replay of an opening before loss closure, concurrent recovery, interruption during recovery, and deregistration before replay with archived rather than fabricated inbox records.
-- Test a live unlinked lock, verified death, unknown identity without attestation, matching/stale attestations, positive live evidence rejecting an attestation and concurrent database-only recovery.
-- Test cross-invocation accepted-then-failed-stamp recovery, queued-then-drained delivery after interaction closure, disconnected partial writes, receipt retirement followed by delayed replay, and a lost explicit-command stdout result.
-- Test every registered backend's omitted-policy argv and each adapter-declared explicit policy; profiles claiming detection, composer or answer support require both fixtures and real native evidence.
+- Exact child argv for the selected native policy, with native/managed restrictions and sandbox boundaries preserved.
+- Equal run IDs across sibling databases, and replacement at an unchanged path.
+- A held write transaction and a long statement, showing that restoration and exit are independent of the connection's default timeout.
+- A child exiting while its descendant holds the slave, exit during a stalled display and a locked database, and deadline-bounded terminal restoration.
+- Timeout followed by the original runner's recovery, and concurrent recovery attempts.
+- A command containing a known secret, which is absent from every database/message/outbox field in metadata mode and with a matching redaction pattern, including interaction updates.
+- Hard kill with complete uncommitted frames, replay of an opening before loss closure, concurrent recovery, interruption during recovery, and deregistration before replay with archived rather than fabricated inbox records.
+- A live unlinked lock, verified death, unknown identity without attestation, matching/stale attestations, positive live evidence rejecting an attestation and concurrent database-only recovery.
+- Cross-invocation accepted-then-failed-stamp recovery, queued-then-drained delivery after interaction closure, disconnected partial writes, receipt retirement followed by delayed replay, and a lost explicit-command stdout result.
+- Every registered backend's omitted-policy argv and each adapter-declared explicit policy; a profile claiming detection, composer or answer support carries both fixtures and real native evidence.
 
 ## 7. Cross-cutting concerns
 
@@ -3729,7 +3711,7 @@ Section 6.9 specifies every runtime table field, enum, nullability constraint, f
 
 ## 9. Testing strategy
 
-Exercise current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, uncertain-cause recording at every runner uncertain transition, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, ACK races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; backend/multiplexer smoke coverage; links, embedding and release builds. Preserve general timed pipe draining and owned-child cleanup coverage.
+The test suite covers current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; minimum-version profile selection, staged profile submission with its settle interval, terminal-reply classification of outer-terminal bytes and its pending-prefix bound, uncertain-cause recording at every runner uncertain transition, delivery fallback, runner-owned queueing and delivery reporting for wrapped members; budget exhaustion, zero automatic Director input and no pane capture on any input path; stream ordering/replay, exact bodies, isolation, read-only state, ACK races, scoped SQL/collection deadlines and handler cleanup, bounded partial/broken output and native receiver lifecycle; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; backend/multiplexer smoke coverage; links, embedding and release builds; and general timed pipe draining and owned-child cleanup.
 
 ## 10. CLI command checklist
 
