@@ -1,7 +1,7 @@
 # Member command guard, backend configuration cleanup and doctor summary
 
 **Status**: Approved
-**Progress**: 0/60 tasks complete
+**Progress**: 16/60 tasks complete
 **Last Updated**: 2026-11-03
 
 ## Overview
@@ -363,22 +363,22 @@ Documentation is updated first, in the order `.claude/rules/documentation-mainte
 
 ### Step 1: SPEC.md
 
-- [ ] §6.3 *Output shapes*: the `doctor` row becomes text `One STATUS COMPONENT: DETAIL summary line per component (--verbose: one STATUS NAME: DETAIL row per check)` and JSON `{summary, checks}` <!-- completed: -->
-- [ ] §6.3: add `#### Director-only command guard` after *Sender and recipient*, with §1.2–§1.4 (command set, trigger, check point before settings/database/multiplexer, refusal string and exit 1, no stdout for `permission respond`, accident-guard and inheritance limits, the rejected process-ancestry alternative stated descriptively) <!-- completed: -->
-- [ ] §6.3 *Environment variables*: add the `CAFLEET_MEMBER_ID` row (§5). §6.3 *Positional subject ids*: add the literal-ID clarification (§5) <!-- completed: -->
-- [ ] §6.8 *Configuration*: the spawned-member sentence names `CAFLEET_MEMBER_ID` (§5) <!-- completed: -->
-- [ ] §6.3 *`permissions.allow` coverage*: reword the `permissions.ask` paragraph as an optional Director-side operator-confirmation posture and point member protection at the guard section <!-- completed: -->
-- [ ] §6.3 *Config-dir resolution* table, hermes row: setup merges only `terminal.client_env_passthrough` (§ Hermes environment passthrough) <!-- completed: -->
-- [ ] §6.3 *Asset installation*: hermes table row and the "Hermes prints the skills line followed by …" sentence name only the member-names line. Replace `###### Hermes approval rules` with `###### Hermes environment passthrough` per §2.3, including the new skip line. Repoint every `§6.3 Hermes approval rules` reference in SPEC <!-- completed: -->
-- [ ] §6.3 *Member environment*: the spawn environment per §1.1, including `CAFLEET_MEMBER_ID`, runner-pane exclusion and the passthrough sentence <!-- completed: -->
-- [ ] §6.3 *`cafleet doctor`*: flags (`--json`, `--verbose`), output selection, statuses with `warn`, exit rule, check-row table without `hermes.approvals.deny` and with `warn` installation states, summary rules (§4.3), member states (§4.4), verbose rows (§4.5), JSON (§4.6). Replace `###### Hermes approval checks` with a single-row `hermes.client_env_passthrough` check section and rewrite `##### Member runtime checks` <!-- completed: -->
-- [ ] §6.3 *Error Messages*: add the guard row (the six commands, `CAFLEET_MEMBER_ID` set, exit 1, before settings/database/multiplexer). Change the hermes `member create` row to the passthrough preflight. Remove the `approvals.deny` merge `setup` row <!-- completed: -->
-- [ ] §6.7 *Backend capabilities*, hermes row: prerequisite becomes `approvals.mode` plus the `terminal.client_env_passthrough` names, a spawn precondition. Add that an operator `approvals.deny` glob matching a Director-only command blocks it in a Hermes Director's session <!-- completed: -->
-- [ ] §6.7 *Claude permission posture*: profile table ask row "Why" becomes the optional operator confirmation of explicit native pane-input dispatch, without the member-attempt rationale. Adjust the "An ask rule outranks every allow rule …" sentence to match <!-- completed: -->
-- [ ] §6.7 *codex rules file*: single broad allow (§2.1), minimum set reduced to the `["cafleet", "message"]` allow, separate-file operator rules for confirmation <!-- completed: -->
-- [ ] §6.7 *opencode preset* and *Preset file format*: remove the Director-only deny description and the "every Director-only deny" wording (§2.2) <!-- completed: -->
-- [ ] §6.7 *Hermes availability preflight* and *Contract error strings*: the passthrough preflight per §2.4. Remove the `approvals` read and the deny-glob error string. `doctor` reuses the same read <!-- completed: -->
-- [ ] Grep SPEC for `approvals.deny`, `Director-only`, `member_runtime`, `prompt` rules and `HERMES_` names, and resolve every leftover reference <!-- completed: -->
+- [x] §6.3 *Output shapes*: the `doctor` row becomes text `One STATUS COMPONENT: DETAIL summary line per component (--verbose: one STATUS NAME: DETAIL row per check)` and JSON `{summary, checks}` <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.3: add `#### Director-only command guard` after *Sender and recipient*, with §1.2–§1.4 (command set, trigger, check point before settings/database/multiplexer, refusal string and exit 1, no stdout for `permission respond`, accident-guard and inheritance limits, the rejected process-ancestry alternative stated descriptively) <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.3 *Environment variables*: add the `CAFLEET_MEMBER_ID` row (§5). §6.3 *Positional subject ids*: add the literal-ID clarification (§5) <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.8 *Configuration*: the spawned-member sentence names `CAFLEET_MEMBER_ID` (§5) <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.3 *`permissions.allow` coverage*: reword the `permissions.ask` paragraph as an optional Director-side operator-confirmation posture and point member protection at the guard section <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.3 *Config-dir resolution* table, hermes row: setup merges only `terminal.client_env_passthrough` (§ Hermes environment passthrough) <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.3 *Asset installation*: hermes table row and the "Hermes prints the skills line followed by …" sentence name only the member-names line. Replace `###### Hermes approval rules` with `###### Hermes environment passthrough` per §2.3, including the new skip line. Repoint every `§6.3 Hermes approval rules` reference in SPEC <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.3 *Member environment*: the spawn environment per §1.1, including `CAFLEET_MEMBER_ID`, runner-pane exclusion and the passthrough sentence <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.3 *`cafleet doctor`*: flags (`--json`, `--verbose`), output selection, statuses with `warn`, exit rule, check-row table without `hermes.approvals.deny` and with `warn` installation states, summary rules (§4.3), member states (§4.4), verbose rows (§4.5), JSON (§4.6). Replace `###### Hermes approval checks` with a single-row `hermes.client_env_passthrough` check section and rewrite `##### Member runtime checks` <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.3 *Error Messages*: add the guard row (the six commands, `CAFLEET_MEMBER_ID` set, exit 1, before settings/database/multiplexer). Change the hermes `member create` row to the passthrough preflight. Remove the `approvals.deny` merge `setup` row <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.7 *Backend capabilities*, hermes row: prerequisite becomes `approvals.mode` plus the `terminal.client_env_passthrough` names, a spawn precondition. Add that an operator `approvals.deny` glob matching a Director-only command blocks it in a Hermes Director's session <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.7 *Claude permission posture*: profile table ask row "Why" becomes the optional operator confirmation of explicit native pane-input dispatch, without the member-attempt rationale. Adjust the "An ask rule outranks every allow rule …" sentence to match <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.7 *codex rules file*: single broad allow (§2.1), minimum set reduced to the `["cafleet", "message"]` allow, separate-file operator rules for confirmation <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.7 *opencode preset* and *Preset file format*: remove the Director-only deny description and the "every Director-only deny" wording (§2.2) <!-- completed: 2026-11-03T04:51 -->
+- [x] §6.7 *Hermes availability preflight* and *Contract error strings*: the passthrough preflight per §2.4. Remove the `approvals` read and the deny-glob error string. `doctor` reuses the same read <!-- completed: 2026-11-03T04:51 -->
+- [x] Grep SPEC for `approvals.deny`, `Director-only`, `member_runtime`, `prompt` rules and `HERMES_` names, and resolve every leftover reference <!-- completed: 2026-11-03T04:51 -->
 
 ### Step 2: docs/
 
