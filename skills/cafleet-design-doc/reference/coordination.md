@@ -97,7 +97,7 @@ Roles:
 | `user-relay` | The Director acting as user-mediator | Carries user-derived clarifications and ordinary-language revision requests, preserving the user's meaning. |
 | `director` | The Director | Spec resolution notes, Director judgments, ambiguity arbitration, Step 4 code-review feedback in the execute workflow. |
 | `drafter` | The Drafter | Spec ambiguities the Drafter cannot resolve and needs Director input on. |
-| `reviewer` | The Reviewer | Design-doc review findings in the create workflow; code-review findings at `<file>:<line>` in the execute workflow — both tagged with the existing `[COMPLIANCE]` / `[GAP]` / `[UNCLEAR]` / `[INCORRECT]` / `[IMPROVEMENT]` taxonomy inside the marker body. |
+| `reviewer` | The Reviewer | Design-doc review findings in the create workflow; code-review findings at `<file>:<line>` in the execute workflow — both tagged with the `[COMPLIANCE]` / `[GAP]` / `[UNCLEAR]` / `[INCORRECT]` / `[IMPROVEMENT]` taxonomy inside the marker body. |
 | `programmer` | The Programmer | Implementation-side notes, escalation rationales, observations of spec gaps that block implementation. |
 | `tester` | The Tester | Test-spec gaps (Phase 2 and Phase 1 framework-selection), escalation rationales, evaluation of Programmer-routed test-defect reports. |
 | `verifier` | The Verifier | E2E findings, evidence pointers (`see file:line`), suggested-fix categorisation (impl bug / test gap / spec issue). |
@@ -112,8 +112,8 @@ Users may give feedback in ordinary language; they need not write markers or
 choose a pointer. The Director identifies the affected paragraph (or `doc` for
 a document-wide issue), records each request as `COMMENT(user-relay)` there,
 and routes it through the workflow. Ask only about ambiguous meaning or scope.
-For source/test feedback, the Director selects the affected file/line pointer; the workflow chooses its owner, including Programmer routing when no Tester exists. User-written markers remain accepted. This changes no member role obligations,
-verb/pointer pairing, marker removal, or approval preconditions.
+For source/test feedback, the Director selects the affected file/line pointer; the workflow chooses its owner, including Programmer routing when no Tester exists. User-written markers are accepted as well. Relayed and user-written feedback follows the same member role obligations,
+verb/pointer pairing, marker removal and approval preconditions as every other marker.
 
 ## Issue Markers vs Status Markers (split)
 
