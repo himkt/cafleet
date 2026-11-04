@@ -5901,6 +5901,7 @@ pub(crate) mod native_capture {
             Write,
             Glob,
             Grep,
+            BashTouch,
         }
         impl FileProbe {
             fn tool(self) -> &'static str {
@@ -5910,6 +5911,7 @@ pub(crate) mod native_capture {
                     Self::Write => "Write",
                     Self::Glob => "Glob",
                     Self::Grep => "Grep",
+                    Self::BashTouch => "Bash",
                 }
             }
             fn operation(self) -> &'static str {
@@ -5919,6 +5921,7 @@ pub(crate) mod native_capture {
                     Self::Write => "write the content cafleet-199-write-probe to the file",
                     Self::Glob => "match the pattern *.txt in the directory",
                     Self::Grep => "search for the pattern cafleet-199-read-probe in the directory",
+                    Self::BashTouch => "run exactly touch",
                 }
             }
             fn target(self) -> &'static str {
@@ -5927,6 +5930,7 @@ pub(crate) mod native_capture {
                     Self::Edit => "edit-target.txt",
                     Self::Write => "write-target.txt",
                     Self::Glob | Self::Grep => "",
+                    Self::BashTouch => "no-tip-access.txt",
                 }
             }
             fn probe(self) -> &'static str {
@@ -6081,7 +6085,7 @@ pub(crate) mod native_capture {
             ("TERM_PROGRAM_VERSION", "0.9.5"),
             ("HERDR_ENV", "1"),
         ];
-        static APPROVED_CASES: [ApprovedCase; 94] = [
+        static APPROVED_CASES: [ApprovedCase; 95] = [
             ApprovedCase {
                 id: "cells-002",
                 backend: CodingAgent::Claude,
@@ -6903,6 +6907,14 @@ pub(crate) mod native_capture {
             .bash("deny")
             .answer("deny", &["33"], "claude-bash-no-tip-cells-001"),
             ApprovedCase::claude(
+                "claude-bash-no-tip-access-cells-001",
+                "default",
+                DRIVER_NO_TIP_SETTINGS,
+                "nac1.db",
+                "nac1",
+            )
+            .file(FileProbe::BashTouch),
+            ApprovedCase::claude(
                 "claude-panel-auto-tip-cells-001",
                 "default",
                 DRIVER_PANEL_SETTINGS,
@@ -7201,6 +7213,16 @@ pub(crate) mod native_capture {
                     .map(|label| format!("{label}.executed"))
             }
             fn prompt(&self, cwd: &Path, helper: Option<&Path>) -> String {
+                if let (Some(FileProbe::BashTouch), Some(outside)) =
+                    (self.file_probe, self.outside_directory())
+                {
+                    return format!(
+                        "Use the {} tool to {} {} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
+                        FileProbe::BashTouch.tool(),
+                        FileProbe::BashTouch.operation(),
+                        outside.join(FileProbe::BashTouch.target()).display()
+                    );
+                }
                 if let (Some(probe), Some(outside)) = (self.file_probe, self.outside_directory()) {
                     return format!(
                         "Use the {} tool to {} on exactly {}. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
@@ -9516,6 +9538,19 @@ pub(crate) mod native_capture {
                             approved.id
                         );
                     }
+                }
+
+                #[test]
+                fn no_tip_access_prompt_runs_touch_on_the_outside_directory_with_bash() {
+                    let approved =
+                        configured("guard-no-tip-access", "default", DRIVER_NO_TIP_SETTINGS)
+                            .file(FileProbe::BashTouch);
+                    approved.validate().unwrap();
+                    assert_eq!(
+                        approved.prompt(Path::new("/tmp/cafleet-194/guard-no-tip-access"), None),
+                        "Use the Bash tool to run exactly touch /tmp/cafleet-194/guard-no-tip-access-outside/no-tip-access.txt as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation."
+                    );
+                    assert!(approved.claude_config_directory().is_some());
                 }
 
                 #[test]
