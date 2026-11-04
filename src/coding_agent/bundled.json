@@ -1923,7 +1923,7 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command\\s*$",
+            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside",
@@ -1933,7 +1933,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command\\s*$"
+              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
             },
             {
               "id": "operation",
@@ -2027,7 +2027,7 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command\\s*$",
+            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside",
@@ -2037,7 +2037,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command\\s*$"
+              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
             },
             {
               "id": "operation",
@@ -2110,7 +2110,7 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command\\s*$",
+            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside",
@@ -2120,7 +2120,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command\\s*$"
+              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
             },
             {
               "id": "operation",
@@ -2276,7 +2276,7 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Bash command\\s*$",
+            "start_pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside",
@@ -2286,7 +2286,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Bash command\\s*$"
+              "pattern": "^ Bash command(?:\\s+\\d+ of \\d+)?\\s*$"
             },
             {
               "id": "operation",
@@ -2354,7 +2354,7 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Read file\\s*$",
+            "start_pattern": "^ Read file(?:\\s+\\d+ of \\d+)?\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside",
@@ -2364,7 +2364,7 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Read file\\s*$"
+              "pattern": "^ Read file(?:\\s+\\d+ of \\d+)?\\s*$"
             },
             {
               "id": "operation",
@@ -2432,7 +2432,7 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Edit file\\s*$",
+            "start_pattern": "^ Edit file(?:\\s+\\d+ of \\d+)?\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside",
@@ -2442,12 +2442,12 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Edit file\\s*$"
+              "pattern": "^ Edit file(?:\\s+\\d+ of \\d+)?\\s*$"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^ Edit file\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+              "pattern": "(?m)^ Edit file(?:\\s+\\d+ of \\d+)?\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
             },
             {
               "id": "question",
@@ -2509,7 +2509,7 @@
           "observation": "permission_request",
           "region": {
             "screen": "either",
-            "start_pattern": "^ Create file\\s*$",
+            "start_pattern": "^ Create file(?:\\s+\\d+ of \\d+)?\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
             "cursor": "inside",
@@ -2519,12 +2519,12 @@
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ Create file\\s*$"
+              "pattern": "^ Create file(?:\\s+\\d+ of \\d+)?\\s*$"
             },
             {
               "id": "operation",
               "scope": "region",
-              "pattern": "(?m)^ Create file\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+              "pattern": "(?m)^ Create file(?:\\s+\\d+ of \\d+)?\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
             },
             {
               "id": "question",
