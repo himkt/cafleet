@@ -354,7 +354,7 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 | Note | Applies at |
 |---|---|
 | `clarify` offers the listed choices plus a free-text Other and waits up to an hour; a result whose `status` is `answered` records the decision. A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
-| A Hermes Director reads its background `listen` receiver through `process_manage` `action=log` between work steps (§ Hermes native Director reception); records reach the session when the Director reads, and an idle session is woken only by the receiver's exit notification. | [Director wake](../roles/director.md#director-wake) |
+| A Hermes Director keeps one background `listen` receiver started with `heartbeat=60` (§ Hermes native Director reception): Hermes injects a heartbeat notification carrying the receiver's new output, which wakes an idle Director, and the Director reads the running receiver through `process_manage` `action=log` on that turn and between work steps. | [Director wake](../roles/director.md#director-wake) |
 | Default mode `smart` (class `auto`): commands outside Hermes's dangerous-command patterns run unreviewed; the guardian model reviews the rest and may open an ESCALATE prompt or, after a guardian DENY, an owner-override prompt offering once/deny. The member waits while the Director answers allow-once or deny through the runtime procedure; an unanswered prompt fails closed at `approvals.timeout` (default 300 s) with a BLOCKED result, which the member routes like any refusal. Hardline floors, the sudo guard and `approvals.deny` block before review and route like any refusal. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [runtime procedure](../roles/director.md#consume-observed-interactions) |
 | CAFleet needs no `approvals.deny` entries. Hermes applies `approvals.deny` to every session, so a `cafleet …` glob there also blocks a Hermes Director's own command with `BLOCKED: … user-defined deny rule '<glob>'`; the Director then asks the operator, through its decision surface, to remove that CAFleet glob from `approvals.deny`. | `{decision_surface}`; `{permission_flags}`; [Director dispatch](../roles/director.md#director-side-dispatch) |
 | Each pane runs `hermes chat --cli --source tool --in <cwd>` with optional `--model` and `--reasoning`, then `-q <prompt>` as a fresh conversation. `member create` forwards a set `HERMES_HOME`, so the member uses the configuration setup merged into and the preflight checked. | `{permission_flags}`; member spawn |
@@ -366,17 +366,34 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 
 #### Hermes native Director reception
 
-After registration, start one receiver with the `terminal` tool, `background=true` and `notify=true`, running `<absolute cafleet path> message listen <director-id> --timeout 300` with the literal ID and the `cafleet` path your own shell resolves. Retain the returned process `session_id`, the Director ID, the output position already read and unfinished actions.
+After registration, start one receiver with the `terminal` tool, using the literal Director ID and the `cafleet` path your own shell resolves:
 
-While delegated work remains, read the running receiver between work steps with `process_manage` `action=log` with `offset` advanced past output already read on the retained `session_id`. Accumulate incomplete JSONL, consume complete records, reconcile replayed and known IDs with `cafleet message poll <director-id> --json`, record deferred actions and ACK consumption. Continue independent authorized work between reads.
+```python
+terminal(
+    command="<absolute cafleet path> message listen <director-id>",
+    background=True,
+    notify=True,
+    heartbeat=60,
+)
+```
 
-The receiver's exit notification follows its `closed` record or exit: verify termination and follow [receiver recovery](../roles/director.md#receiver-recovery), renewing while delegated work remains. Retire the receiver with `process_manage`, `action=kill` on the retained `session_id`, and verify that it exited. Preserve the process `session_id`, output position, partial JSONL and unfinished actions across compaction. When the background facility is unavailable or denied, follow [receiver recovery](../roles/director.md#receiver-recovery).
+Omit `--timeout`: the receiver runs until its `closed` record, retirement or failure. Require its `ready` record. Retain the returned process `session_id`, the Director ID, the log line offset already read, incomplete JSONL and unfinished actions, and keep this one receiver across messages, replies, idle periods and turn endings.
 
-Reception uses process output and broker reads, makes no pane input and leaves `/goal` `gate`/`wait` authority with the host.
+Every 60 seconds Hermes injects a heartbeat notification carrying the output the running receiver emitted since the previous one, which wakes an idle Director without user input; a tick with no new output sends nothing. Keep `heartbeat=60`; Hermes raises smaller values to 60. A heartbeat is a batched wake signal: it can carry several records, keeps only the newest 2,000 characters (its `omitted` field counts the rest), can arrive after its records were consumed, and turn admission adds latency beyond the interval.
+
+On every heartbeat turn and between work steps, read the receiver with `process_manage` `action=log`, `offset` advanced past lines already read and repeated until no new lines remain, on the retained `session_id`. Accumulate incomplete JSONL, consume complete records and follow [Director wake](../roles/director.md#director-wake), whose `cafleet message poll <director-id> --json` is the completeness check. Hermes keeps a 200,000-character rolling log; once the receiver's output outgrows it, older lines drop and `total_lines` stops growing. When a read returns a `total_lines` below the retained offset, or returns no lines on a turn whose heartbeat carried output, reconcile through `poll --json` and set the offset to the returned `total_lines`. Deduplicate by message ID: a record already consumed, including the startup output the first heartbeat repeats, is replay, never reported as new or ACKed again. Then end the turn with the same receiver running and no "nothing received" update. Start no `message wait` as a wake or rearm mechanism; a finite `wait` for ordinary-member retry rotation under Director wake step 4 remains available.
+
+Hermes documents `heartbeat` for bounded jobs rather than servers. This receiver is bounded by its fleet-supervision phase: keep it only while delegated work or an authorized user-feedback phase remains, and it ends with `closed` when the fleet is deleted, the Director becomes inactive or the Director retires it.
+
+For a bounded supervision phase or a host policy that requires finite leases, add `--timeout <seconds>` (`1..=1800`) to the same call; after its `closed` `timeout` record, verify termination and start one replacement only while delegated work remains. Add `persist_on_release=True` only when the operator explicitly asks for reception to survive conversation cleanup; it does not survive Hermes host exit and does not guarantee notification ownership after a session change, so reconcile with `poll --json` after any such change.
+
+The exit notification follows the receiver's `closed` record or exit: verify termination and follow [receiver recovery](../roles/director.md#receiver-recovery). After `fleet_deleted`, reconcile the exit output as history and end reception. Retire the receiver with `process_manage`, `action=kill` on the retained `session_id`, and verify that it exited. Preserve the process `session_id`, log offset, incomplete JSONL and unfinished actions across compaction. When the background facility is unavailable or denied, follow [receiver recovery](../roles/director.md#receiver-recovery).
+
+Reception uses process output, heartbeat notifications and broker reads, makes no pane input and leaves `/goal` `gate`/`wait` authority with the host; heartbeat wake needs no `/goal`.
 
 ### Role eligibility
 
 | Role | Eligible | Evidence |
 |---|---|---|
-| Director | `yes` | Goal lifecycle: native `/goal` lifecycle controls in installed source and in-session `/help goal`, 2026.9.24, checked 2026-11-02. Streamed background output: CAFleet stream probe with `terminal` `background=true` read through `process_manage` `action=log`, 2026.9.24, checked 2026-11-03. |
+| Director | `yes` | Goal lifecycle: native `/goal` lifecycle controls in installed source and in-session `/help goal`, 2026.9.24, checked 2026-11-02. Streamed background output: CAFleet stream probe with `terminal` `background=true` read through `process_manage` `action=log`, 2026.9.24, checked 2026-11-03. Idle wake: persistent `listen` receiver with `terminal` `heartbeat=60`, clean first-observation and extended live runs, 2026.9.24, checked 2026-11-04. |
 | Member | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |
