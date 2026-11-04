@@ -2322,6 +2322,56 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
+    mod panel_separator {
+        use crate::coding_agent::catalog::tests::*;
+
+        fn with_separator(pointer: &str, separator: Value) -> Value {
+            let mut value = crate::coding_agent::catalog::test_support::annotation::annotated();
+            value.pointer_mut(pointer).unwrap()["region"]["panel_separator"] = separator;
+            value
+        }
+
+        #[test]
+        fn a_region_loads_with_one_non_whitespace_panel_separator_glyph() {
+            for pointer in ["/profiles/0/rules/0", "/profiles/0/rules/1"] {
+                for glyph in ["│", "|", "┃"] {
+                    let value = with_separator(pointer, json!(glyph));
+                    ProfileCatalog::from_definitions(&value)
+                        .unwrap_or_else(|cause| panic!("{pointer} {glyph}: {}", cause.message()));
+                }
+            }
+            let question = question_fixture_definition();
+            let mut value = question.clone();
+            value["profiles"][0]["rules"][1]["region"]["panel_separator"] = json!("│");
+            assert!(ProfileCatalog::from_definitions(&value).is_ok());
+            assert!(
+                ProfileCatalog::from_definitions(&question).is_ok(),
+                "panel_separator stays optional"
+            );
+        }
+
+        #[test]
+        fn a_panel_separator_that_is_not_one_non_whitespace_glyph_is_refused() {
+            for separator in [
+                json!(""),
+                json!(" "),
+                json!("\t"),
+                json!("\u{a0}"),
+                json!("││"),
+                json!("ab"),
+                json!(1),
+                json!(["│"]),
+                Value::Null,
+            ] {
+                let value = with_separator("/profiles/0/rules/0", separator.clone());
+                assert!(
+                    ProfileCatalog::from_definitions(&value).is_err(),
+                    "{separator}"
+                );
+            }
+        }
+    }
+
     mod question_answers {
         use crate::coding_agent::catalog::tests::*;
 

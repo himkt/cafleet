@@ -2336,6 +2336,313 @@ mod tests {
     fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
         assert_no_debug_or_serialize!(AnswerMatch);
     }
+    mod panel_clipping {
+        use crate::coding_agent::detector::tests::*;
+
+        const COLS: u16 = 120;
+        const SEPARATOR: u16 = 80;
+        const PANEL: &str = "\x1b[2;48;5;235m";
+        const FORM: [&str; 6] = [
+            "Synthetic permission request",
+            "Operation: write disposable.txt",
+            "> Allow once",
+            "  Deny once",
+            "Request form: synthetic-only",
+            "Selection: ",
+        ];
+
+        struct Row {
+            left: String,
+            separator: Option<(u16, &'static str)>,
+            panel: String,
+        }
+        fn row(left: &str, separator: Option<u16>) -> Row {
+            Row {
+                left: left.into(),
+                separator: separator.map(|col| (col, PANEL)),
+                panel: " src/lib.rs +after".into(),
+            }
+        }
+        /// Writes each row at its 1-based screen row; a separator row draws the glyph at its
+        /// 0-based column in its style, then one panel cell run in the same background.
+        fn screen(rows: &[(u16, Row)], cursor: (u16, u16)) -> ScreenSnapshot {
+            let mut bytes = String::from("\x1b[0m\x1b[2J");
+            for (line, row) in rows {
+                bytes.push_str(&format!("\x1b[{line};1H{}", row.left));
+                if let Some((col, style)) = row.separator {
+                    bytes.push_str(&format!(
+                        "\x1b[{line};{}H{style}│\x1b[22m{}\x1b[0m",
+                        col + 1,
+                        row.panel
+                    ));
+                }
+            }
+            bytes.push_str(&format!("\x1b[{};{}H", cursor.0 + 1, cursor.1 + 1));
+            let mut state = TerminalState::new(TerminalSize {
+                rows: 24,
+                cols: COLS,
+            })
+            .unwrap();
+            state.feed(bytes.as_bytes()).unwrap();
+            state.snapshot()
+        }
+        /// The synthetic permission form at rows 19-24 with a separator at `columns[i]` on form
+        /// row `i` (none past the slice) and, when `above`, on every row above the form.
+        fn form(columns: &[Option<u16>], above: Option<u16>) -> ScreenSnapshot {
+            let mut rows = Vec::new();
+            if let Some(col) = above {
+                for line in 1..19 {
+                    rows.push((line, row("", Some(col))));
+                }
+            }
+            for (index, left) in FORM.iter().enumerate() {
+                rows.push((
+                    19 + index as u16,
+                    row(left, columns.get(index).copied().flatten()),
+                ));
+            }
+            screen(&rows, (23, 11))
+        }
+        fn declaring() -> Value {
+            let mut value = definitions();
+            value["profiles"][0]["rules"][0]["region"]["panel_separator"] = json!("│");
+            value
+        }
+        fn observe(definition: &Value, screen: &ScreenSnapshot) -> ScreenObservation {
+            let catalog = ProfileCatalog::from_definitions(definition).unwrap();
+            Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
+                .observe(screen)
+                .unwrap()
+        }
+        fn full_width() -> ScreenSnapshot {
+            form(&[], None)
+        }
+        fn assert_same_request(case: &str, clipped: &ScreenObservation, full: &ScreenObservation) {
+            assert_eq!(
+                clipped.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "{case}"
+            );
+            assert_eq!(clipped.rule_id, RULE, "{case}");
+            assert_eq!(clipped.match_evidence, MatchEvidence::Complete, "{case}");
+            for field in ["operation", "operation_rows", "choices", "excerpt"] {
+                assert_eq!(
+                    clipped.raw_evidence[field], full.raw_evidence[field],
+                    "{case}: {field}"
+                );
+            }
+            assert!(clipped.fingerprint == full.fingerprint, "{case}");
+        }
+
+        #[test]
+        fn a_shared_separator_column_clips_every_panel_row_for_a_declaring_rule() {
+            let full = observe(&declaring(), &full_width());
+            assert_eq!(full.rule_id, RULE);
+            let every = [Some(SEPARATOR); 6];
+            for (case, screen) in [
+                ("every form row", form(&every, None)),
+                (
+                    "every row above and on the form",
+                    form(&every, Some(SEPARATOR)),
+                ),
+                ("a full-width last row", form(&every[..5], Some(SEPARATOR))),
+                ("one panel row", form(&[None, Some(SEPARATOR)], None)),
+            ] {
+                assert_same_request(case, &observe(&declaring(), &screen), &full);
+            }
+        }
+
+        #[test]
+        fn a_clipped_request_answers_through_the_same_plan() {
+            let mut value = inspection_fixture_definition();
+            value["profiles"][0]["rules"][0]["region"]["panel_separator"] = json!("│");
+            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
+            let plan = catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    RULE,
+                    &AnswerKey::Decision(PermissionDecision::Allow),
+                )
+                .unwrap();
+            let clipped = detector
+                .match_answer(&form(&[Some(SEPARATOR); 6], Some(SEPARATOR)), &plan)
+                .unwrap()
+                .expect("the clipped form answers");
+            let full = detector
+                .match_answer(&full_width(), &plan)
+                .unwrap()
+                .expect("the full-width form answers");
+            assert_eq!(clipped.choices(), full.choices());
+            assert!(clipped.semantic() == full.semantic());
+            assert_eq!(clipped.focus(), full.focus());
+        }
+
+        #[test]
+        fn differing_separator_columns_clip_no_row() {
+            for columns in [
+                [Some(80), Some(81), Some(80), Some(80), Some(80), Some(80)],
+                [Some(80), Some(80), Some(80), Some(80), Some(80), Some(60)],
+            ] {
+                let observation = observe(&declaring(), &form(&columns, None));
+                assert_ne!(observation.rule_id, RULE, "{columns:?}");
+            }
+            let observation = observe(&declaring(), &form(&[Some(80); 6], Some(81)));
+            assert_ne!(observation.rule_id, RULE, "rows above use another column");
+        }
+
+        #[test]
+        fn a_separator_glyph_on_its_rows_background_is_never_a_separator() {
+            for (style, row_background) in [
+                ("", ""),
+                ("\x1b[2m", ""),
+                ("\x1b[2;48;5;235m", "\x1b[48;5;235m\x1b[2K"),
+            ] {
+                let rows = FORM
+                    .iter()
+                    .enumerate()
+                    .map(|(index, left)| {
+                        let mut value = row(left, Some(SEPARATOR));
+                        value.separator = Some((SEPARATOR, style));
+                        value.left = format!("{row_background}{left}");
+                        (19 + index as u16, value)
+                    })
+                    .collect::<Vec<_>>();
+                let observation = observe(&declaring(), &screen(&rows, (23, 11)));
+                assert_ne!(observation.rule_id, RULE, "{style:?}");
+            }
+            let boxed = [
+                (19, row("Synthetic permission request", None)),
+                (20, row("Operation: write disposable.txt", None)),
+                (21, row("> Allow once", None)),
+                (22, row("  Deny once", None)),
+                (23, row("Request form: synthetic-only", None)),
+                (24, row("Selection: ", None)),
+                (
+                    10,
+                    Row {
+                        left: format!("{:<50}│ touch /tmp/cafleet-f-out/p4.txt", ""),
+                        separator: None,
+                        panel: String::new(),
+                    },
+                ),
+            ];
+            let full = observe(&declaring(), &full_width());
+            assert_same_request(
+                "a boxed gutter",
+                &observe(&declaring(), &screen(&boxed, (23, 11))),
+                &full,
+            );
+        }
+
+        fn single_cell_panel(col: u16, panel: &str) -> ScreenSnapshot {
+            let rows = FORM
+                .iter()
+                .enumerate()
+                .map(|(index, left)| {
+                    let mut value = row(left, Some(col));
+                    value.panel = panel.into();
+                    (19 + index as u16, value)
+                })
+                .collect::<Vec<_>>();
+            screen(&rows, (23, 11))
+        }
+
+        #[test]
+        fn the_separator_column_lies_from_column_40_before_the_last_column() {
+            for (col, panel) in [(39, " "), (COLS - 1, "")] {
+                let observation = observe(&declaring(), &single_cell_panel(col, panel));
+                assert_ne!(observation.rule_id, RULE, "{col}");
+            }
+            let full = observe(&declaring(), &full_width());
+            for col in [40, COLS - 2] {
+                assert_same_request(
+                    &format!("column {col}"),
+                    &observe(&declaring(), &single_cell_panel(col, " ")),
+                    &full,
+                );
+            }
+        }
+
+        fn wrapped_form() -> ScreenSnapshot {
+            let mut rows = Vec::new();
+            for (index, left) in FORM.iter().enumerate() {
+                let mut value = row(left, Some(SEPARATOR));
+                if index == 1 {
+                    value.panel = format!(" {}", "x".repeat(45));
+                }
+                rows.push((19 + index as u16, value));
+            }
+            screen(&rows, (23, 11))
+        }
+
+        #[test]
+        fn a_clipped_row_is_never_soft_joined_to_the_next_row() {
+            let screen = wrapped_form();
+            assert!(
+                screen.screen.row_wrapped(19),
+                "the overflowing panel text wraps the operation row"
+            );
+            assert_ne!(
+                observe(&definitions(), &screen).rule_id,
+                RULE,
+                "unclipped, the wrapped operation row joins the next row"
+            );
+            assert_same_request(
+                "a wrapped panel row",
+                &observe(&declaring(), &screen),
+                &observe(&declaring(), &full_width()),
+            );
+        }
+
+        fn state_rule(id: &str, separator: bool) -> Value {
+            let mut rule = json!({
+                "id":id,"priority":100,"observation":"question",
+                "region":{"screen":"either","start_pattern":"^Status idle +│ ready$","end_pattern":"^Status idle +│ ready$","max_rows":1,"cursor":"any"},
+                "matchers":[{"id":"status","scope":"line","pattern":"^Status idle +│ ready$"}],
+                "extract":{"operation":null,"choices":[],"native_request_id":null},
+                "verified_noninteraction":false,"sensitive":false
+            });
+            if separator {
+                rule["region"]["panel_separator"] = json!("│");
+            }
+            rule
+        }
+        fn with_state_rule(separator: bool) -> Value {
+            let mut value = declaring();
+            value["profiles"][0]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .push(state_rule("synthetic-panel-state", separator));
+            value["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+                json!([RULE, "synthetic-panel-state"]);
+            value
+        }
+
+        #[test]
+        fn rules_without_a_panel_separator_see_unclipped_rows() {
+            let mut status = row("Status idle", Some(SEPARATOR));
+            status.panel = " ready".into();
+            let screen = screen(&[(5, status)], (0, 0));
+            let unclipped = observe(&with_state_rule(false), &screen);
+            assert_eq!(unclipped.rule_id, "synthetic-panel-state");
+            assert_eq!(
+                unclipped.kind,
+                ObservationKind::Interaction(InteractionClass::Question)
+            );
+            let clipped = observe(&with_state_rule(true), &screen);
+            assert_ne!(clipped.rule_id, "synthetic-panel-state");
+        }
+
+        #[test]
+        fn a_profile_without_any_panel_separator_never_clips() {
+            let observation = observe(&definitions(), &form(&[Some(SEPARATOR); 6], None));
+            assert_ne!(observation.rule_id, RULE);
+            assert_eq!(observe(&definitions(), &full_width()).rule_id, RULE);
+        }
+    }
+
     mod question_answers {
         use crate::coding_agent::detector::tests::*;
 
