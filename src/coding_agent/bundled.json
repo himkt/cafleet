@@ -1882,11 +1882,12 @@
           "priority": 100,
           "observation": "permission_request",
           "region": {
-            "screen": "alternate",
+            "screen": "either",
             "start_pattern": "^ Bash command\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
-            "cursor": "inside"
+            "cursor": "inside",
+            "panel_separator": "│"
           },
           "matchers": [
             {
@@ -1959,7 +1960,7 @@
           "priority": 50,
           "observation": "composer_empty",
           "region": {
-            "screen": "alternate",
+            "screen": "either",
             "start_pattern": "^❯\\u{a0}",
             "end_pattern": "^❯\\u{a0}",
             "max_rows": 1,
@@ -1985,11 +1986,12 @@
           "priority": 100,
           "observation": "permission_request",
           "region": {
-            "screen": "alternate",
+            "screen": "either",
             "start_pattern": "^ Bash command\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
-            "cursor": "inside"
+            "cursor": "inside",
+            "panel_separator": "│"
           },
           "matchers": [
             {
@@ -2067,11 +2069,12 @@
           "priority": 100,
           "observation": "permission_request",
           "region": {
-            "screen": "alternate",
+            "screen": "either",
             "start_pattern": "^ Bash command\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
-            "cursor": "inside"
+            "cursor": "inside",
+            "panel_separator": "│"
           },
           "matchers": [
             {
@@ -2149,11 +2152,12 @@
           "priority": 100,
           "observation": "permission_request",
           "region": {
-            "screen": "alternate",
+            "screen": "either",
             "start_pattern": "^ Read outside the working directories\\s*$",
             "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
             "max_rows": 24,
-            "cursor": "inside"
+            "cursor": "inside",
+            "panel_separator": "│"
           },
           "matchers": [
             {
@@ -2227,31 +2231,411 @@
           "sensitive": false
         },
         {
-          "id": "claude-auto-startup",
+          "id": "claude-bash-permission-no-tip",
           "priority": 100,
-          "observation": "question",
+          "observation": "permission_request",
           "region": {
-            "screen": "alternate",
-            "start_pattern": "^ {2,3}Teach auto mode about your environment\\?\\s*$",
-            "end_pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel\\s*$",
-            "max_rows": 14,
-            "cursor": "inside"
+            "screen": "either",
+            "start_pattern": "^ Bash command\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
           },
           "matchers": [
             {
               "id": "heading",
               "scope": "line",
-              "pattern": "^ {2,3}Teach auto mode about your environment\\?\\s*$"
+              "pattern": "^ Bash command\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
             },
             {
               "id": "focus",
               "scope": "line",
-              "pattern": "^ {2,3}❯ \\S"
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "remember",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, and (?:always allow access to \\S.* from this project|don’t ask again for: \\S.*)\\s*$"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-read-file-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Read file\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Read file\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to proceed\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "remember",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, allow reading from \\S"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation",
+              "row_margin": " "
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-edit-file-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Edit file\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Edit file\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^ Edit file\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to make this edit to \\S.*\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "remember",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits \\S"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-create-file-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Create file\\s*$",
+            "end_pattern": "^ Esc to cancel · Tab to amend\\s*$",
+            "max_rows": 24,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Create file\\s*$"
+            },
+            {
+              "id": "operation",
+              "scope": "region",
+              "pattern": "(?m)^ Create file\\s*\\n (?P<operation>[^\\n]*\\S)\\s*\\n╌{3,}$"
+            },
+            {
+              "id": "question",
+              "scope": "line",
+              "pattern": "^ Do you want to create \\S.*\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^ ❯ [1-9]\\. "
+            },
+            {
+              "id": "allow",
+              "scope": "line",
+              "pattern": "^ [❯ ] 1\\. (?P<label>Yes)\\s*$"
+            },
+            {
+              "id": "remember",
+              "scope": "line",
+              "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits \\S"
+            },
+            {
+              "id": "deny",
+              "scope": "line",
+              "pattern": "^ [❯ ] 3\\. (?P<label>No)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": {
+              "matcher_id": "operation",
+              "capture": "operation"
+            },
+            "choices": [
+              {
+                "id": "allow-once",
+                "label": {
+                  "matcher_id": "allow",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              },
+              {
+                "id": "deny-once",
+                "label": {
+                  "matcher_id": "deny",
+                  "capture": "label"
+                },
+                "scope": "single_request"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-startup",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^  Teach auto mode about your environment\\?\\s*$",
+            "end_pattern": "^  Enter to confirm · Esc to cancel\\s*$",
+            "max_rows": 14,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^  Teach auto mode about your environment\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^  ❯ [1-9]\\. "
+            },
+            {
+              "id": "yes",
+              "scope": "line",
+              "pattern": "^  [❯ ] 1\\. Yes\\s*$"
+            },
+            {
+              "id": "not_now",
+              "scope": "line",
+              "pattern": "^  [❯ ] 2\\. (?P<label>Not now)\\s*$"
+            },
+            {
+              "id": "dont_show",
+              "scope": "line",
+              "pattern": "^  [❯ ] 3\\. (?P<label>Don't show again)\\s*$"
             },
             {
               "id": "footer",
               "scope": "line",
-              "pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel\\s*$"
+              "pattern": "^  Enter to confirm · Esc to cancel\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [
+              {
+                "id": "not-now",
+                "label": {
+                  "matcher_id": "not_now",
+                  "capture": "label"
+                },
+                "scope": "persistent"
+              },
+              {
+                "id": "dont-show-again",
+                "label": {
+                  "matcher_id": "dont_show",
+                  "capture": "label"
+                },
+                "scope": "persistent"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-env-setup-wizard",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^   Teach auto mode about your environment\\?\\s*$",
+            "end_pattern": "^   ←/→ to change · Enter to continue · Esc to cancel\\s*$",
+            "max_rows": 14,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^   Teach auto mode about your environment\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^   ❯ \\S"
+            },
+            {
+              "id": "footer",
+              "scope": "line",
+              "pattern": "^   ←/→ to change · Enter to continue · Esc to cancel\\s*$"
             }
           ],
           "extract": {
@@ -2263,15 +2647,117 @@
           "sensitive": false
         },
         {
+          "id": "claude-auto-default-nudge",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^ Make auto mode your default permission mode\\?\\s*$",
+            "end_pattern": "^   (?:❯ |  )No, keep \\S.*$",
+            "max_rows": 10,
+            "cursor": "inside",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "heading",
+              "scope": "line",
+              "pattern": "^ Make auto mode your default permission mode\\?\\s*$"
+            },
+            {
+              "id": "focus",
+              "scope": "line",
+              "pattern": "^   ❯ \\S",
+              "focus_style": "marker"
+            },
+            {
+              "id": "accept",
+              "scope": "line",
+              "pattern": "^   (?:❯ |  )(?P<label>Yes, set auto mode as my default permission mode)\\s*$"
+            },
+            {
+              "id": "decline",
+              "scope": "line",
+              "pattern": "^   (?:❯ |  )(?P<label>No, keep \\S.*?)\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [
+              {
+                "id": "accept",
+                "label": {
+                  "matcher_id": "accept",
+                  "capture": "label"
+                },
+                "scope": "persistent"
+              },
+              {
+                "id": "decline",
+                "label": {
+                  "matcher_id": "decline",
+                  "capture": "label"
+                },
+                "scope": "persistent"
+              }
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false,
+          "frame": {
+            "require_patterns": [],
+            "reject_patterns": [
+              "^❯\\u{a0}"
+            ]
+          }
+        },
+        {
+          "id": "claude-question-pending-notice",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "either",
+            "start_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$",
+            "end_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$",
+            "max_rows": 1,
+            "cursor": "any",
+            "panel_separator": "│"
+          },
+          "matchers": [
+            {
+              "id": "notice",
+              "scope": "line",
+              "pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.\\s*$"
+            }
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false,
+          "frame": {
+            "require_patterns": [
+              "^❯\\u{a0}"
+            ],
+            "reject_patterns": [
+              "^  Showing detailed transcript · ctrl\\+o to toggle"
+            ]
+          }
+        },
+        {
           "id": "claude-auto-refusal",
           "priority": 40,
           "observation": "automatic_refusal",
           "region": {
-            "screen": "alternate",
+            "screen": "either",
             "start_pattern": "^● [A-Z][A-Za-z]*\\(",
             "end_pattern": "^  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[",
             "max_rows": 8,
-            "cursor": "any"
+            "cursor": "any",
+            "panel_separator": "│"
           },
           "matchers": [
             {
@@ -2304,11 +2790,12 @@
           "priority": 40,
           "observation": "automatic_refusal",
           "region": {
-            "screen": "alternate",
+            "screen": "either",
             "start_pattern": "^ +[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\] · /permissions",
             "end_pattern": "^─{3,}(?: \\S.* ─)?$",
             "max_rows": 2,
-            "cursor": "any"
+            "cursor": "any",
+            "panel_separator": "│"
           },
           "matchers": [
             {
@@ -2341,11 +2828,12 @@
           "priority": 40,
           "observation": "automatic_review_unavailable",
           "region": {
-            "screen": "alternate",
+            "screen": "either",
             "start_pattern": "^ +auto mode disabled by settings\\b",
             "end_pattern": "^─{3,}(?: \\S.* ─)?$",
             "max_rows": 2,
-            "cursor": "any"
+            "cursor": "any",
+            "panel_separator": "│"
           },
           "matchers": [
             {
@@ -2375,7 +2863,7 @@
           "priority": 40,
           "observation": "automatic_review_available",
           "region": {
-            "screen": "alternate",
+            "screen": "either",
             "start_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
             "end_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
             "max_rows": 1,
@@ -2435,7 +2923,14 @@
             "claude-auto-ask-permission",
             "claude-bash-permission-auto-tip",
             "claude-read-outside-permission",
-            "claude-auto-startup"
+            "claude-auto-startup",
+            "claude-bash-permission-no-tip",
+            "claude-read-file-permission",
+            "claude-edit-file-permission",
+            "claude-create-file-permission",
+            "claude-auto-env-setup-wizard",
+            "claude-auto-default-nudge",
+            "claude-question-pending-notice"
           ],
           "fixture_ids": [
             "claude-2.1.302-access-permission-1",
@@ -2456,7 +2951,20 @@
             "claude-2.1.308-auto-tip-padded-question-1",
             "claude-2.1.309-read-outside-permission-1",
             "claude-2.1.309-read-outside-long-path-1",
-            "claude-2.1.309-edit-outside-permission-1"
+            "claude-2.1.309-edit-outside-permission-1",
+            "claude-2.1.312-auto-default-nudge-1",
+            "claude-2.1.312-auto-default-accept-edits-nudge-1",
+            "claude-2.1.312-question-pending-notice-1",
+            "claude-2.1.312-auto-env-setup-offer-1",
+            "claude-2.1.312-primary-auto-default-nudge-1",
+            "claude-2.1.312-primary-default-permission-1",
+            "claude-2.1.312-read-file-permission-1",
+            "claude-2.1.312-edit-file-permission-1",
+            "claude-2.1.312-create-file-permission-1",
+            "claude-2.1.312-bash-no-tip-permission-1",
+            "claude-2.1.312-bash-no-tip-access-permission-1",
+            "claude-2.1.312-panel-default-permission-1",
+            "claude-2.1.312-panel-default-permission-144-1"
           ]
         },
         "composer": {
@@ -2466,7 +2974,8 @@
           "fixture_ids": [
             "claude-2.1.302-idle-composer-1",
             "claude-2.1.302-auto-idle-composer-1",
-            "claude-2.1.302-default-manual-idle-1"
+            "claude-2.1.302-default-manual-idle-1",
+            "claude-2.1.312-primary-idle-composer-1"
           ],
           "submission": {
             "prompt": {
@@ -2627,6 +3136,198 @@
             ],
             "fixture_ids": [
               "claude-2.1.309-read-outside-deny-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-read-file-permission",
+            "answer_rule_id": "claude-read-file-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-read-file-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-read-file-allow-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-read-file-permission",
+            "answer_rule_id": "claude-read-file-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-read-file-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-read-file-deny-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-edit-file-permission",
+            "answer_rule_id": "claude-edit-file-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-edit-file-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-edit-file-allow-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-edit-file-permission",
+            "answer_rule_id": "claude-edit-file-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-edit-file-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-edit-file-deny-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-create-file-permission",
+            "answer_rule_id": "claude-create-file-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-create-file-permission",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-create-file-allow-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-create-file-permission",
+            "answer_rule_id": "claude-create-file-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-create-file-permission",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-create-file-deny-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-bash-permission-no-tip",
+            "answer_rule_id": "claude-bash-no-tip-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "31",
+                "required_rule_id": "claude-bash-permission-no-tip",
+                "required_choice_id": "allow-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-bash-no-tip-allow-pre-stage-1"
+            ]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-bash-permission-no-tip",
+            "answer_rule_id": "claude-bash-no-tip-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-bash-permission-no-tip",
+                "required_choice_id": "deny-once"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-bash-no-tip-deny-pre-stage-1"
+            ]
+          },
+          {
+            "request_rule_id": "claude-auto-default-nudge",
+            "answer_rule_id": "claude-auto-default-decline",
+            "choice_id": "decline",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "0e",
+                "required_rule_id": "claude-auto-default-nudge",
+                "required_choice_id": "decline",
+                "required_focus_choice_id": "accept"
+              },
+              {
+                "bytes_hex": "0d",
+                "required_rule_id": "claude-auto-default-nudge",
+                "required_choice_id": "decline",
+                "required_focus_choice_id": "decline"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-auto-default-decline-pre-stage-1",
+              "claude-2.1.312-auto-default-decline-post-stage-1-1"
+            ]
+          },
+          {
+            "request_rule_id": "claude-auto-startup",
+            "answer_rule_id": "claude-auto-env-setup-not-now-digit",
+            "choice_id": "not-now",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "32",
+                "required_rule_id": "claude-auto-startup",
+                "required_choice_id": "not-now"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-auto-env-setup-not-now-pre-stage-1"
+            ]
+          },
+          {
+            "request_rule_id": "claude-auto-startup",
+            "answer_rule_id": "claude-auto-env-setup-dont-show-again-digit",
+            "choice_id": "dont-show-again",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {
+                "bytes_hex": "33",
+                "required_rule_id": "claude-auto-startup",
+                "required_choice_id": "dont-show-again"
+              }
+            ],
+            "fixture_ids": [
+              "claude-2.1.312-auto-env-setup-dont-show-again-pre-stage-1"
             ]
           }
         ]
