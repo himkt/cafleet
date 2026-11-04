@@ -6037,7 +6037,7 @@ pub(crate) mod native_capture {
         };
         const DRIVER_ENV_SETUP_GLOBAL: ClaudeConfigCase = ClaudeConfigCase::Seeded {
             settings: "{}",
-            global: r#"{"numStartups":5,"autoModeEnvSetup":{"denials":5}}"#,
+            global: r#"{"numStartups":5,"autoModeEnvSetup":{"denials":5},"hasSeenAutoModeEntryWarning":true}"#,
         };
         const DRIVER_EDIT_READ_ALLOWED: ClaudeConfigCase = ClaudeConfigCase::Seeded {
             settings: r#"{"permissions":{"allow":["Read(/{outside}/**)"]}}"#,
