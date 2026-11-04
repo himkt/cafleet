@@ -1142,6 +1142,376 @@
       "sha256": "7612b2b6764ce45bd6aad104bae3af08644a3c7b1a044a01207a386cfe6b89fc"
     },
     {
+      "id": "claude-2.1.312-auto-default-nudge-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "e63233c325c62d32e6b1840d68bcde86eb76c3f95ed024f9a8888157e15f466e"
+    },
+    {
+      "id": "claude-2.1.312-auto-default-accept-edits-nudge-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "201fdee665e98fc006c6e4d9c1211caf3f2d6f8836b090fa6b497f4d26cf83a8"
+    },
+    {
+      "id": "claude-2.1.312-auto-default-decline-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "774dc199ee9254db5363ac030d75486ccce4a8df2226795e79f8ca1935633ea2"
+    },
+    {
+      "id": "claude-2.1.312-auto-default-decline-post-stage-1-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "cfa58f662917035cd9db73cac4d0a6b999730bcdae7f61c29687e77c7acefc94"
+    },
+    {
+      "id": "claude-2.1.312-auto-default-decline-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "7e44864e2060fd9f2a4314bc565602aa0bfdb3cb9b369ad95a2c093e6935264f"
+    },
+    {
+      "id": "claude-2.1.312-question-pending-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "2223a56228cc1658948ee77c9b9f0b5dc8ae95f726f121e490693e5f8651ff3b"
+    },
+    {
+      "id": "claude-2.1.312-question-pending-after-clear-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c6b348e1e3c1254977b66326de63e671ffe97e8418a2f5e839ec8f2493ccbfa8"
+    },
+    {
+      "id": "claude-2.1.312-question-pending-send-notice-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "ce24593e2ad8433218ff14b7d8af1fff680ce89cbdc247afa9f209dff0e8507a"
+    },
+    {
+      "id": "claude-2.1.312-question-pending-after-send-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "5d6856581af3ab21447b670b98a9543438e49416c416155052e91214cce3b07c"
+    },
+    {
+      "id": "claude-2.1.312-question-pending-after-send-idle-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "a0ad94b46e2cfcda230b983a28bf209f4e0989b26bf33a207bd6c82f93727042"
+    },
+    {
+      "id": "claude-2.1.312-auto-env-setup-offer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "7e8a82dee74b9c50b44eb3e67759f265eb9216adef56f3d75e2ac03ea5c14fad"
+    },
+    {
+      "id": "claude-2.1.312-auto-env-setup-not-now-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "7a00de5b1d32b3dedaea89c74cc24a23075fea9ef6c1f6a5dabf31aab8e9da8e"
+    },
+    {
+      "id": "claude-2.1.312-auto-env-setup-not-now-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "371e7af345042b1e23f4fab9d97f8000c921dc4aeb2ef1eec40bd9997ebad51f"
+    },
+    {
+      "id": "claude-2.1.312-auto-env-setup-dont-show-again-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "300f5d4af3b1361483dab0e730b7e5f0c18e69f017900ac363adce4af96e1a43"
+    },
+    {
+      "id": "claude-2.1.312-auto-env-setup-dont-show-again-continuation-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "dda64c5772b70c0ed0210946c460d7e66dc9b50885a19808dbae6d4e1c2af8d3"
+    },
+    {
+      "id": "claude-2.1.312-primary-auto-default-nudge-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c1b0a80b055de8164fe6430c7c0e621e6b89fbb21b4b0136795603a7be3f5e24"
+    },
+    {
+      "id": "claude-2.1.312-primary-default-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "1d3b97f49750c702e5ba9a3763f6206957eb2313f897372e86f95cb431cbce91"
+    },
+    {
+      "id": "claude-2.1.312-primary-closed-form-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "31857f53c78acef478c69e3c6ebc1295af0efee80eadb30474383d89852fa319"
+    },
+    {
+      "id": "claude-2.1.312-primary-idle-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "df58ebf9ad43c7090deb13446e1d5211bbb84024f355ffbb88ef5e398066138a"
+    },
+    {
+      "id": "claude-2.1.312-primary-resized-narrow-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 100,
+      "source_ref": "native/claude.json",
+      "sha256": "640d2f16c0c3d6c833df147d0645a4e0474b4ba4151f48fc644cb78f6ea5bafa"
+    },
+    {
+      "id": "claude-2.1.312-primary-resized-idle-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "4fb4f7e0c3b6aafa3e7ab648911cf1f667416053f6299c79b020cd43b4a9a14b"
+    },
+    {
+      "id": "claude-2.1.312-read-file-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "afaaca07e6dfadb411726130e6e9d53c2118455eb05ada797da6fcebad7eb153"
+    },
+    {
+      "id": "claude-2.1.312-read-file-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "cd0e0b4fa255a2b91b7053b38d95205ce75eef6b5b0cf0b26582855ea2ee8f11"
+    },
+    {
+      "id": "claude-2.1.312-read-file-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c155d9fe306374d609cb4556c7c022c5c6077e0c4be4d32e6d3f37265c143591"
+    },
+    {
+      "id": "claude-2.1.312-edit-file-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "c947be9aaaf48c407acfe7a6f07f7ad4d476aaa2fdf2f7eb1f1fbbe55e1fadb7"
+    },
+    {
+      "id": "claude-2.1.312-edit-file-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "ded7ba56452818f994e1953c86a2025ffafc7d05d25511a4c11f91411de2cfd6"
+    },
+    {
+      "id": "claude-2.1.312-edit-file-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "2a451061df9bb928558b783196ee0afe2431bc877865397215f6b1b454263d91"
+    },
+    {
+      "id": "claude-2.1.312-create-file-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "ffbeb3ed78c076b45da4f50fa5508f627eaf1c13afeb1194ae33399f9692b8c5"
+    },
+    {
+      "id": "claude-2.1.312-create-file-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "8098188eea709c11c86d44cf7e818be849569e34019d736b6d826c4a765c320a"
+    },
+    {
+      "id": "claude-2.1.312-create-file-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "a33802b4af4b77da0bda2cb4def94fd366e8b237e6f1959a0295d0ef657f377b"
+    },
+    {
+      "id": "claude-2.1.312-bash-no-tip-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "db5525b6ef26d94f6524967e9aa868ac2311c6accbc9c65b846bfb7651690092"
+    },
+    {
+      "id": "claude-2.1.312-bash-no-tip-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "714378c043f51d2670c61453f29da55a4d7cee9c09bbf759674b87e928e20704"
+    },
+    {
+      "id": "claude-2.1.312-bash-no-tip-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "4c63597b8f8a38f2ad9af1d103fdee256b39e3d0fedbea660f86a893159479b6"
+    },
+    {
+      "id": "claude-2.1.312-bash-no-tip-access-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "80d5128ad0d47839ef4c82c867735e46e60e18b918f9eb5223bfdd72dfc22408"
+    },
+    {
+      "id": "claude-2.1.312-panel-default-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 166,
+      "source_ref": "native/claude.json",
+      "sha256": "caa968f81cb2efa57c64093b5c24aaf9354bcbea33286660f5d9c5717ed97fe2"
+    },
+    {
+      "id": "claude-2.1.312-panel-default-permission-144-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 144,
+      "source_ref": "native/claude.json",
+      "sha256": "2c9dbc10a009c2ac9350c531e01f672f5e10f700e6c08f4aa60f029a9e956daf"
+    },
+    {
+      "id": "claude-2.1.312-panel-default-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 166,
+      "source_ref": "native/claude.json",
+      "sha256": "ab67be584708731805870b21aac4c8904032533f54c1e1f041ddc33548fca9ca"
+    },
+    {
       "id": "hermes-2026.9.24-escalate-tmux-120-1",
       "kind": "native",
       "backend": "hermes",

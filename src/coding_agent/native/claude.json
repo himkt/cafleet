@@ -3918,6 +3918,4038 @@
           "reason": "reviewed_privacy"
         }
       ]
+    },
+    "claude-2.1.312-auto-default-nudge-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 4029,
+      "cursor_row": 26,
+      "cursor_col": 3,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude ",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments. ",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Churned for 1s · done 3:32 PM",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Make auto mode your default permission mode?",
+        "",
+        "   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and",
+        "   prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.",
+        "",
+        "   ❯ Yes, set auto mode as my default permission mode",
+        "     No, keep manual mode",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-auto-default-accept-edits-nudge-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 4033,
+      "cursor_row": 26,
+      "cursor_col": 3,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude ",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments. ",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Crunched for 1s · done 3:33 PM",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Make auto mode your default permission mode?",
+        "",
+        "   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and",
+        "   prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.",
+        "",
+        "   ❯ Yes, set auto mode as my default permission mode",
+        "     No, keep accept edits",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-auto-default-decline-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 4040,
+      "cursor_row": 26,
+      "cursor_col": 3,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude ",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments. ",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Crunched for 1s · done 3:37 PM",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Make auto mode your default permission mode?",
+        "",
+        "   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and",
+        "   prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.",
+        "",
+        "   ❯ Yes, set auto mode as my default permission mode",
+        "     No, keep manual mode",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-auto-default-decline-post-stage-1-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 4041,
+      "cursor_row": 27,
+      "cursor_col": 3,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments.",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Crunched for 1s · done 3:37 PM",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Make auto mode your default permission mode?",
+        "",
+        "   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and",
+        "   prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.",
+        "",
+        "     Yes, set auto mode as my default permission mode",
+        "   ❯ No, keep manual mode",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-auto-default-decline-continuation-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 4042,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments.",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Crunched for 1s · done 3:37 PM",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "                                                       ◐ medium · /effort · Update available! Run: mise upgrade claude",
+        "────────────────────────────────────────────────────────────────────────── cafleet-194-claude-auto-default-decline-001 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle)"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-question-pending-notice-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3589,
+      "cursor_row": 33,
+      "cursor_col": 34,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude ",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments. ",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Cooked for 2s · done 3:33 PM",
+        "Claude has a question for you — it shows once you send or clear what you're typing.",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "                                                                                                    ◐ medium · /effort",
+        "──────────────────────────────────────────────────────────────────────── cafleet-194-claude-question-pending-cells-001 ─",
+        "❯ Reply with the single word done.",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle)"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-question-pending-after-clear-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3590,
+      "cursor_row": 26,
+      "cursor_col": 3,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments.",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Cooked for 2s · done 3:33 PM",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Make auto mode your default permission mode?",
+        "",
+        "   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and",
+        "   prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.",
+        "",
+        "   ❯ Yes, set auto mode as my default permission mode",
+        "     No, keep manual mode",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-question-pending-send-notice-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3259,
+      "cursor_row": 33,
+      "cursor_col": 34,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude ",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments. ",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Worked for 1s · done 3:36 PM",
+        "Claude has a question for you — it shows once you send or clear what you're typing.",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "                                                                                                    ◐ medium · /effort",
+        "──────────────────────────────────────────────────────────────────────── cafleet-194-claude-question-pending-cells-002 ─",
+        "❯ Reply with the single word done.",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle)"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-question-pending-after-send-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3260,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments.",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Worked for 1s · done 3:36 PM",
+        "",
+        "❯ Reply with the single word done.",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "✶ Actualizing…",
+        "  ⎿  Tip: Run /web-setup to use cloud sessions with the GitHub account gh is signed in to",
+        "                                                                                                    ◐ medium · /effort",
+        "──────────────────────────────────────────────────────────────────────── cafleet-194-claude-question-pending-cells-002 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-question-pending-after-send-idle-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3261,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments.",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Worked for 1s · done 3:36 PM",
+        "",
+        "❯ Reply with the single word done.",
+        "",
+        "● done",
+        "",
+        "✻ Worked for 1s · done 3:36 PM",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "                                                                                                    ◐ medium · /effort",
+        "──────────────────────────────────────────────────────────────────────── cafleet-194-claude-question-pending-cells-002 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-auto-env-setup-offer-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3404,
+      "cursor_row": 27,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "✻ Sautéed for 1s · done 3:49 PM",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  Teach auto mode about your environment?",
+        "",
+        "  Auto mode works better when it knows your environment. Takes about a minute.",
+        "",
+        "  ❯ 1. Yes",
+        "    2. Not now",
+        "    3. Don't show again",
+        "",
+        "  Enter to confirm · Esc to cancel",
+        "────────────────────────────────────────────────────────────────────────── cafleet-194-claude-auto-env-setup-cells-001 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-auto-env-setup-not-now-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3636,
+      "cursor_row": 27,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "✻ Cogitated for 2s · done 3:49 PM",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  Teach auto mode about your environment?",
+        "",
+        "  Auto mode works better when it knows your environment. Takes about a minute.",
+        "",
+        "  ❯ 1. Yes",
+        "    2. Not now",
+        "    3. Don't show again",
+        "",
+        "  Enter to confirm · Esc to cancel",
+        "──────────────────────────────────────────────────────────────────────── cafleet-194-claude-auto-env-setup-not-now-001 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-auto-env-setup-not-now-continuation-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3637,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "✻ Cogitated for 2s · done 3:49 PM",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "                                                                                                    ◐ medium · /effort",
+        "──────────────────────────────────────────────────────────────────────── cafleet-194-claude-auto-env-setup-not-now-001 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-auto-env-setup-dont-show-again-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3863,
+      "cursor_row": 27,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "✻ Brewed for 2s · done 3:50 PM",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  Teach auto mode about your environment?",
+        "",
+        "  Auto mode works better when it knows your environment. Takes about a minute.",
+        "",
+        "  ❯ 1. Yes",
+        "    2. Not now",
+        "    3. Don't show again",
+        "",
+        "  Enter to confirm · Esc to cancel",
+        "──────────────────────────────────────────────────────────────── cafleet-194-claude-auto-env-setup-dont-show-again-001 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-auto-env-setup-dont-show-again-continuation-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 3864,
+      "cursor_row": 33,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "✻ Brewed for 2s · done 3:50 PM",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/… · Update available! Run: mise upgrade claude",
+        "──────────────────────────────────────────────────────────────── cafleet-194-claude-auto-env-setup-dont-show-again-001 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏵⏵ auto mode on (shift+tab to cycle)"
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-primary-auto-default-nudge-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 14703,
+      "cursor_row": 24,
+      "cursor_col": 3,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "  Get to finished work sooner with Opus 5.5. Switch anytime with /model.",
+        "",
+        "❯ Reply with the single word ready and then wait.                                                                       ",
+        "",
+        "● Auto mode lets Claude handle permission prompts automatically — Claude checks each tool call for risky actions",
+        "  and prompt injection before executing. Actions Claude identifies as safe are executed, while actions Claude ",
+        "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude ",
+        "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments. ",
+        "  Shift+Tab to change mode.",
+        "",
+        "● ready",
+        "",
+        "✻ Worked for 2s · done 3:57 PM",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Make auto mode your default permission mode?",
+        "",
+        "   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and",
+        "   prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.",
+        "",
+        "   ❯ Yes, set auto mode as my default permission mode",
+        "     No, keep manual mode",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-primary-default-permission-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 21076,
+      "cursor_row": 23,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "  Get to finished work sooner with Opus 5.5. Switch anytime with /model.",
+        "",
+        "❯ Use Bash to attempt exactly /tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow as one command.",
+        "  Preserve any native permission request for the operator. After the native decision, report the actual result and",
+        "  stop. Keep work inside this disposable operation.",
+        "",
+        "● Bash(/tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow)",
+        "  ⎿  Waiting…",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Bash command",
+        " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below",
+        " Run the permission probe with the allow argument",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " /tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " This command requires approval",
+        "",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, and don’t ask again for: /tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow *",
+        "   3. Yes, and switch to auto mode · auto mode handles these prompts for you",
+        "   4. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-primary-closed-form-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 21077,
+      "cursor_row": 16,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "  Get to finished work sooner with Opus 5.5. Switch anytime with /model.",
+        "",
+        "❯ Use Bash to attempt exactly /tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow as one command.",
+        "  Preserve any native permission request for the operator. After the native decision, report the actual result and",
+        "  stop. Keep work inside this disposable operation.",
+        "",
+        "● Bash(/tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow)",
+        "  ⎿  Interrupted · What should Claude do instead?",
+        "",
+        "✻ Churned for 3s · done 3:59 PM",
+        "",
+        "──────────────────────────────────────────────────────────────────────── cafleet-194-claude-primary-auto-tip-cells-001 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏸ manual mode on · ? for shortcuts · ← for agents",
+        "                                                                            Update available! Run: mise upgrade claude",
+        "                  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-primary-idle-composer-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 21078,
+      "cursor_row": 16,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "  Get to finished work sooner with Opus 5.5. Switch anytime with /model.",
+        "",
+        "❯ Use Bash to attempt exactly /tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow as one command.",
+        "  Preserve any native permission request for the operator. After the native decision, report the actual result and",
+        "  stop. Keep work inside this disposable operation.",
+        "",
+        "● Bash(/tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow)",
+        "  ⎿  Interrupted · What should Claude do instead?",
+        "",
+        "✻ Churned for 3s · done 3:59 PM",
+        "",
+        "──────────────────────────────────────────────────────────────────────── cafleet-194-claude-primary-auto-tip-cells-001 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏸ manual mode on · ? for shortcuts · ← for agents",
+        "                                                                            Update available! Run: mise upgrade claude",
+        "                  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-primary-resized-narrow-1": {
+      "rows": 36,
+      "cols": 100,
+      "alternate_screen": false,
+      "screen_seq": 21079,
+      "cursor_row": 17,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "  Get to finished work sooner with Opus 5.5. Switch anytime with /model.",
+        "  1 more notice hidden",
+        "",
+        "❯ Use Bash to attempt exactly /tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe",
+        "  allow as one command. Preserve any native permission request for the operator. After the native",
+        "  decision, report the actual result and stop. Keep work inside this disposable operation.",
+        "",
+        "● Bash(/tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow)",
+        "  ⎿  Interrupted · What should Claude do instead?",
+        "",
+        "✻ Churned for 3s · done 3:59 PM",
+        "",
+        "──────────────────────────────────────────────────── cafleet-194-claude-primary-auto-tip-cells-001 ─",
+        "❯ ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏸ manual mode on · ? for shortcuts",
+        "                                                        Update available! Run: mise upgrade claude",
+        "  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tra…",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-primary-resized-idle-composer-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 21080,
+      "cursor_row": 17,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "  Get to finished work sooner with Opus 5.5. Switch anytime with /model.",
+        "  1 more notice hidden",
+        "",
+        "❯ Use Bash to attempt exactly /tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow as one command. ",
+        "  Preserve any native permission request for the operator. After the native decision, report the actual result and      ",
+        "  stop. Keep work inside this disposable operation.                                                                     ",
+        "",
+        "● Bash(/tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow)",
+        "  ⎿  Interrupted · What should Claude do instead?",
+        "",
+        "✻ Churned for 3s · done 3:59 PM",
+        "",
+        "──────────────────────────────────────────────────────────────────────── cafleet-194-claude-primary-auto-tip-cells-001 ─",
+        "❯  ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  ⏸ manual mode on · ? for shortcuts                                        Update available! Run: mise upgrade claude",
+        "                                                                                                    ◐ medium · /effort",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-read-file-permission-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 8136,
+      "cursor_row": 21,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  Reading /tmp/cafleet-194/claude-read-file-cells-001-outside/probe.txt",
+        "  ⎿  /tmp/cafleet-194/claude-read-file-cells-001-outside/probe.txt",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Read file",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Read(/tmp/cafleet-194/claude-read-file-cells-001-outside/probe.txt)",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, allow reading from /tmp/cafleet-194/claude-read-file-cells-001-outside during this session",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-read-file-allow-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 7795,
+      "cursor_row": 21,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  Reading /tmp/cafleet-194/claude-read-file-allow-001-outside/probe.txt",
+        "  ⎿  /tmp/cafleet-194/claude-read-file-allow-001-outside/probe.txt",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Read file",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Read(/tmp/cafleet-194/claude-read-file-allow-001-outside/probe.txt)",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, allow reading from /tmp/cafleet-194/claude-read-file-allow-001-outside during this session",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-read-file-deny-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 7965,
+      "cursor_row": 21,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  Reading /tmp/cafleet-194/claude-read-file-deny-001-outside/probe.txt",
+        "  ⎿  /tmp/cafleet-194/claude-read-file-deny-001-outside/probe.txt",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Read file",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Read(/tmp/cafleet-194/claude-read-file-deny-001-outside/probe.txt)",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, allow reading from /tmp/cafleet-194/claude-read-file-deny-001-outside during this session",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-edit-file-permission-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 9321,
+      "cursor_row": 26,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  Read 1 file ",
+        "",
+        "● Update(/tmp/cafleet-194/claude-edit-file-cells-001-outside/edit-target.txt)",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Edit file",
+        " ../claude-edit-file-cells-001-outside/edit-target.txt",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " 1 -before                                                                                                              ",
+        " 1   No newline at end of file",
+        " 2 +after                                                                                                               ",
+        " 3   No newline at end of file",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to make this edit to edit-target.txt?",
+        " ❯ 1. Yes",
+        "   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session; Yes, and",
+        "      always allow access to /tmp/cafleet-194/claude-edit-file-cells-001-outside for this session (shift+tab)",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-edit-file-allow-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 9558,
+      "cursor_row": 27,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  Read 1 file ",
+        "  ⎿  12 skills available",
+        "",
+        "● Update(/tmp/cafleet-194/claude-edit-file-allow-001-outside/edit-target.txt)",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Edit file",
+        " ../claude-edit-file-allow-001-outside/edit-target.txt",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " 1 -before                                                                                                              ",
+        " 1   No newline at end of file",
+        " 2 +after                                                                                                               ",
+        " 3   No newline at end of file",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to make this edit to edit-target.txt?",
+        " ❯ 1. Yes",
+        "   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session; Yes, and",
+        "      always allow access to /tmp/cafleet-194/claude-edit-file-allow-001-outside for this session (shift+tab)",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-edit-file-deny-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 7684,
+      "cursor_row": 24,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "● Update(/tmp/cafleet-194/claude-edit-file-deny-001-outside/edit-target.txt)",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Edit file",
+        " ../claude-edit-file-deny-001-outside/edit-target.txt",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " 1 -before                                                                                                              ",
+        " 1   No newline at end of file",
+        " 2 +after                                                                                                               ",
+        " 3   No newline at end of file",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to make this edit to edit-target.txt?",
+        " ❯ 1. Yes",
+        "   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session; Yes, and",
+        "      always allow access to /tmp/cafleet-194/claude-edit-file-deny-001-outside for this session (shift+tab)",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-create-file-permission-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 5286,
+      "cursor_row": 22,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "● Write(/tmp/cafleet-194/claude-create-file-cells-001-outside/write-target.txt)",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Create file",
+        " ../claude-create-file-cells-001-outside/write-target.txt",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        "  1 cafleet-199-write-probe",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to create write-target.txt?",
+        " ❯ 1. Yes",
+        "   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session; Yes, and",
+        "      always allow access to /tmp/cafleet-194/claude-create-file-cells-001-outside for this session (shift+tab)",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-create-file-allow-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 5837,
+      "cursor_row": 22,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "● Write(/tmp/cafleet-194/claude-create-file-allow-001-outside/write-target.txt)",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Create file",
+        " ../claude-create-file-allow-001-outside/write-target.txt",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        "  1 cafleet-199-write-probe",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to create write-target.txt?",
+        " ❯ 1. Yes",
+        "   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session; Yes, and",
+        "      always allow access to /tmp/cafleet-194/claude-create-file-allow-001-outside for this session (shift+tab)",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-create-file-deny-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 5591,
+      "cursor_row": 21,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "● Write(/tmp/cafleet-194/claude-create-file-deny-001-outside/write-target.txt)",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Create file",
+        " ../claude-create-file-deny-001-outside/write-target.txt",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        "  1 cafleet-199-write-probe",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to create write-target.txt?",
+        " ❯ 1. Yes",
+        "   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session; Yes, and",
+        "      always allow access to /tmp/cafleet-194/claude-create-file-deny-001-outside for this session (shift+tab)",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-bash-no-tip-permission-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 8273,
+      "cursor_row": 24,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  Running permission-probe with allow argument",
+        "  ⎿  $ /tmp/cafleet-194/claude-bash-no-tip-cells-001/permission-probe allow",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Bash command",
+        " Run permission-probe with allow argument",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " /tmp/cafleet-194/claude-bash-no-tip-cells-001/permission-probe allow",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " This command requires approval",
+        "",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, and don’t ask again for: /tmp/cafleet-194/claude-bash-no-tip-cells-001/permission-probe allow *",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-bash-no-tip-allow-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 7775,
+      "cursor_row": 24,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "● Running permission-probe with allow argument",
+        "  ⎿  $ /tmp/cafleet-194/claude-bash-no-tip-allow-001/permission-probe allow",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Bash command",
+        " Run permission-probe with allow argument",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " /tmp/cafleet-194/claude-bash-no-tip-allow-001/permission-probe allow",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " This command requires approval",
+        "",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, and don’t ask again for: /tmp/cafleet-194/claude-bash-no-tip-allow-001/permission-probe allow *",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-bash-no-tip-deny-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 7779,
+      "cursor_row": 24,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  Running permission-probe with deny argument",
+        "  ⎿  $ /tmp/cafleet-194/claude-bash-no-tip-deny-001/permission-probe deny",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Bash command",
+        " Run permission-probe with deny argument",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " /tmp/cafleet-194/claude-bash-no-tip-deny-001/permission-probe deny",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " This command requires approval",
+        "",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, and don’t ask again for: /tmp/cafleet-194/claude-bash-no-tip-deny-001/permission-probe deny *",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-bash-no-tip-access-permission-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 7855,
+      "cursor_row": 22,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "● Creating no-tip-access.txt via touch in the outside directory",
+        "  ⎿  $ touch /tmp/cafleet-194/claude-bash-no-tip-access-cells-001-outside/no-tip-access.txt",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Bash command",
+        " Create no-tip-access.txt via touch in the outside directory",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " │ touch /tmp/cafleet-194/claude-bash-no-tip-access-cells-001-outside/no-tip-access.txt",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, and always allow access to /tmp/cafleet-194/claude-bash-no-tip-access-cells-001-outside from this project",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-panel-default-permission-1": {
+      "rows": 36,
+      "cols": 166,
+      "alternate_screen": true,
+      "screen_seq": 20298,
+      "cursor_row": 29,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "      1   No newline at end of file                                                         │──────────────────────────────────────────────────────────────────────── ",
+        "      2 +after                                                                              │started.json (untracked)                                                 ",
+        "      3   No newline at end of file                                                         │──────────────────────────────────────────────────────────────────────── ",
+        "                                                                                            │New file not yet staged.                                                 ",
+        "  Running 1 shell command…                                                                  │Run `git add :/started.json` to see line counts.                         ",
+        "  ⎿  $ /tmp/cafleet-194/claude-panel-auto-tip-cells-001/permission-probe allow              │                                                                         ",
+        "                                                                                            │+12 files edited before this session (show)                              ",
+        "────────────────────────────────────────────────────────────────────────────────────────────│                                                                         ",
+        " Bash command                                                                               │                                                                         ",
+        " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below          │                                                                         ",
+        " Run permission-probe with the allow argument                                               │                                                                         ",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│                                                                         ",
+        " /tmp/cafleet-194/claude-panel-auto-tip-cells-001/permission-probe allow                    │                                                                         ",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│                                                                         ",
+        " This command requires approval                                                             │                                                                         ",
+        "                                                                                            │                                                                         ",
+        " Do you want to proceed?                                                                    │                                                                         ",
+        " ❯ 1. Yes                                                                                   │                                                                         ",
+        "   2. Yes, and don’t ask again for:                                                         │                                                                         ",
+        "      /tmp/cafleet-194/claude-panel-auto-tip-cells-001/permission-probe allow *             │                                                                         ",
+        "   3. Yes, and switch to auto mode · auto mode handles these prompts for you                │                                                                         ",
+        "   4. No                                                                                    │                                                                         ",
+        "                                                                                            │                                                                         ",
+        " Esc to cancel · Tab to amend                                                               │                                                                         "
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 12,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 5,
+          "end_col": 85,
+          "bg": {
+            "kind": "indexed",
+            "index": 22
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        }
+      ]
+    },
+    "claude-2.1.312-panel-default-permission-144-1": {
+      "rows": 36,
+      "cols": 144,
+      "alternate_screen": true,
+      "screen_seq": 19290,
+      "cursor_row": 29,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "● The edit applied. Now I'll run the permission probe as a single command so the│────────────────────────────────────────────────────────────── ",
+        "  native permission prompt can come up.                                         │started.json (untracked)                                       ",
+        "                                                                                │────────────────────────────────────────────────────────────── ",
+        "  Running 1 shell command…                                                      │New file not yet staged.                                       ",
+        "  ⎿  $ /tmp/cafleet-194/claude-panel-auto-tip-cells-002/permission-probe allow  │Run `git add :/started.json` to see line counts.               ",
+        "                                                                                │                                                               ",
+        "────────────────────────────────────────────────────────────────────────────────│+12 files edited before this session (show)                    ",
+        " Bash command                                                                   │                                                               ",
+        " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\"    │                                                               ",
+        " below                                                                          │                                                               ",
+        " Run permission-probe with allow argument                                       │                                                               ",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│                                                               ",
+        " /tmp/cafleet-194/claude-panel-auto-tip-cells-002/permission-probe allow        │                                                               ",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│                                                               ",
+        " This command requires approval                                                 │                                                               ",
+        "                                                                                │                                                               ",
+        " Do you want to proceed?                                                        │                                                               ",
+        " ❯ 1. Yes                                                                       │                                                               ",
+        "   2. Yes, and don’t ask again for:                                             │                                                               ",
+        "      /tmp/cafleet-194/claude-panel-auto-tip-cells-002/permission-probe allow * │                                                               ",
+        "   3. Yes, and switch to auto mode · auto mode handles these prompts for you    │                                                               ",
+        "   4. No                                                                        │                                                               ",
+        "                                                                                │                                                               ",
+        " Esc to cancel · Tab to amend                                                   │                                                               "
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 12,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 80,
+          "end_col": 144,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        }
+      ]
+    },
+    "claude-2.1.312-panel-default-allow-pre-stage-1": {
+      "rows": 36,
+      "cols": 166,
+      "alternate_screen": true,
+      "screen_seq": 19956,
+      "cursor_row": 29,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "      1   No newline at end of file                                                         │──────────────────────────────────────────────────────────────────────── ",
+        "      2 +after                                                                              │started.json (untracked)                                                 ",
+        "      3   No newline at end of file                                                         │──────────────────────────────────────────────────────────────────────── ",
+        "                                                                                            │New file not yet staged.                                                 ",
+        "  Running 1 shell command…                                                                  │Run `git add :/started.json` to see line counts.                         ",
+        "  ⎿  $ /tmp/cafleet-194/claude-panel-auto-tip-allow-001/permission-probe allow              │                                                                         ",
+        "                                                                                            │+12 files edited before this session (show)                              ",
+        "────────────────────────────────────────────────────────────────────────────────────────────│                                                                         ",
+        " Bash command                                                                               │                                                                         ",
+        " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below          │                                                                         ",
+        " Run permission-probe with the allow argument                                               │                                                                         ",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│                                                                         ",
+        " /tmp/cafleet-194/claude-panel-auto-tip-allow-001/permission-probe allow                    │                                                                         ",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│                                                                         ",
+        " This command requires approval                                                             │                                                                         ",
+        "                                                                                            │                                                                         ",
+        " Do you want to proceed?                                                                    │                                                                         ",
+        " ❯ 1. Yes                                                                                   │                                                                         ",
+        "   2. Yes, and don’t ask again for:                                                         │                                                                         ",
+        "      /tmp/cafleet-194/claude-panel-auto-tip-allow-001/permission-probe allow *             │                                                                         ",
+        "   3. Yes, and switch to auto mode · auto mode handles these prompts for you                │                                                                         ",
+        "   4. No                                                                                    │                                                                         ",
+        "                                                                                            │                                                                         ",
+        " Esc to cancel · Tab to amend                                                               │                                                                         "
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 12,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 5,
+          "end_col": 85,
+          "bg": {
+            "kind": "indexed",
+            "index": 22
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 92,
+          "end_col": 166,
+          "bg": {
+            "kind": "indexed",
+            "index": 235
+          }
+        }
+      ]
     }
   }
 }
