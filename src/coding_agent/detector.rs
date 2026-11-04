@@ -2455,6 +2455,180 @@ mod tests {
     fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
         assert_no_debug_or_serialize!(AnswerMatch);
     }
+    mod claude_2_1_312_guards {
+        use crate::coding_agent::detector::tests::*;
+
+        const DIALOG_A: &str = "claude-auto-default-nudge";
+        const NOTICE: &str = "claude-question-pending-notice";
+        const NUDGE: &str = "claude-2.1.312-auto-default-nudge-1";
+        const PENDING: &str = "claude-2.1.312-question-pending-notice-1";
+        const NOTICE_TEXT: &str =
+            "Claude has a question for you — it shows once you send or clear what you're typing.";
+        type LineChange = Box<dyn FnOnce(&mut Vec<String>)>;
+
+        fn replay(
+            id: &str,
+            change: impl FnOnce(&mut Vec<String>),
+            cursor: Option<(u16, u16)>,
+        ) -> ScreenObservation {
+            let fixture = bundled_screen(id);
+            let document: Value = serde_json::from_str(&fixture).unwrap();
+            let screen = replay_native_fixture(
+                &fixture,
+                change,
+                document["alternate_screen"].as_bool().unwrap(),
+                cursor,
+            );
+            Detector::new(
+                &ProfileCatalog::bundled().unwrap(),
+                CodingAgent::Claude,
+                Some("2.1.312"),
+            )
+            .observe(&screen)
+            .unwrap()
+        }
+        fn unchanged(id: &str) -> ScreenObservation {
+            replay(id, |_| {}, None)
+        }
+
+        #[test]
+        fn a_dialog_a_quoted_above_a_live_composer_is_no_interaction() {
+            assert_eq!(unchanged(NUDGE).rule_id, DIALOG_A);
+            for cursor in [None, Some((33, 2))] {
+                let quoted = replay(NUDGE, |lines| lines[33] = "❯\u{a0}".into(), cursor);
+                assert_ne!(quoted.rule_id, DIALOG_A, "{cursor:?}");
+                assert!(
+                    !matches!(quoted.kind, ObservationKind::Interaction(_)),
+                    "{cursor:?}: {:?}",
+                    quoted.kind
+                );
+            }
+        }
+
+        #[test]
+        fn a_pending_notice_outside_its_live_frame_or_margin_is_no_interaction() {
+            assert_eq!(unchanged(PENDING).rule_id, NOTICE);
+            let cases: [(&str, LineChange); 5] = [
+                (
+                    "assistant quote",
+                    Box::new(|lines| lines[19] = format!("● {NOTICE_TEXT}")),
+                ),
+                (
+                    "continuation quote",
+                    Box::new(|lines| lines[19] = format!("  {NOTICE_TEXT}")),
+                ),
+                (
+                    "quoted sentence",
+                    Box::new(|lines| lines[19] = format!("The notice said: {NOTICE_TEXT}")),
+                ),
+                (
+                    "transcript viewer",
+                    Box::new(|lines| {
+                        lines[30] = "  Showing detailed transcript · ctrl+o to toggle".into()
+                    }),
+                ),
+                (
+                    "no live composer",
+                    Box::new(|lines| lines[33] = "❯ Reply with the single word done.".into()),
+                ),
+            ];
+            for (case, change) in cases {
+                let observed = replay(PENDING, change, None);
+                assert_ne!(observed.rule_id, NOTICE, "{case}");
+                assert!(
+                    !matches!(observed.kind, ObservationKind::Interaction(_)),
+                    "{case}: {:?}",
+                    observed.kind
+                );
+            }
+        }
+
+        #[test]
+        fn primary_screen_remnants_after_the_form_closes_produce_no_interaction() {
+            for id in [
+                "claude-2.1.312-primary-closed-form-1",
+                "claude-2.1.312-primary-idle-composer-1",
+                "claude-2.1.312-primary-resized-narrow-1",
+                "claude-2.1.312-primary-resized-idle-composer-1",
+            ] {
+                let observed = unchanged(id);
+                assert_eq!(observed.kind, ObservationKind::ComposerEmpty, "{id}");
+                assert_eq!(observed.rule_id, "claude-idle-composer", "{id}");
+                for cursor in [(6, 2), (10, 2), (11, 5)] {
+                    let elsewhere = replay(id, |_| {}, Some(cursor));
+                    assert!(
+                        !matches!(elsewhere.kind, ObservationKind::Interaction(_)),
+                        "{id} {cursor:?}: {:?}",
+                        elsewhere.kind
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn trailing_padding_keeps_each_new_rule_identity() {
+            for (id, rule) in [
+                (NUDGE, DIALOG_A),
+                ("claude-2.1.312-auto-default-accept-edits-nudge-1", DIALOG_A),
+                ("claude-2.1.312-primary-auto-default-nudge-1", DIALOG_A),
+                (PENDING, NOTICE),
+                (
+                    "claude-2.1.312-auto-env-setup-offer-1",
+                    "claude-auto-startup",
+                ),
+                (
+                    "claude-2.1.302-auto-env-setup-wizard-1",
+                    "claude-auto-env-setup-wizard",
+                ),
+                (
+                    "claude-2.1.312-read-file-permission-1",
+                    "claude-read-file-permission",
+                ),
+                (
+                    "claude-2.1.312-edit-file-permission-1",
+                    "claude-edit-file-permission",
+                ),
+                (
+                    "claude-2.1.312-create-file-permission-1",
+                    "claude-create-file-permission",
+                ),
+                (
+                    "claude-2.1.312-bash-no-tip-permission-1",
+                    "claude-bash-permission-no-tip",
+                ),
+                (
+                    "claude-2.1.312-bash-no-tip-access-permission-1",
+                    "claude-bash-permission-no-tip",
+                ),
+            ] {
+                let plain = unchanged(id);
+                assert_eq!(plain.rule_id, rule, "{id}");
+                for padding in [1, 4] {
+                    let padded = replay(
+                        id,
+                        |lines| {
+                            for line in lines.iter_mut() {
+                                if !line.trim().is_empty() && line.chars().count() + padding < 120 {
+                                    line.push_str(&" ".repeat(padding));
+                                }
+                            }
+                        },
+                        None,
+                    );
+                    assert_eq!(padded.rule_id, rule, "{id} +{padding}");
+                    assert_eq!(padded.kind, plain.kind, "{id} +{padding}");
+                    for field in ["operation", "operation_rows", "choices"] {
+                        assert_eq!(
+                            padded.raw_evidence[field], plain.raw_evidence[field],
+                            "{id} +{padding}: {field}"
+                        );
+                    }
+                    assert!(padded.fingerprint == plain.fingerprint, "{id} +{padding}");
+                }
+            }
+        }
+    }
+
     mod panel_clipping {
         use crate::coding_agent::detector::tests::*;
 

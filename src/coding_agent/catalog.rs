@@ -4697,6 +4697,7 @@ mod tests {
         const PERMISSION_RULE: &str = "claude-bash-permission";
         const TIP_RULE: &str = "claude-bash-permission-auto-tip";
         const STARTUP_RULE: &str = "claude-auto-startup";
+        const WIZARD_RULE: &str = "claude-auto-env-setup-wizard";
         const READ_RULE: &str = "claude-read-outside-permission";
         const IDLE_RULE: &str = "claude-idle-composer";
         const UNMATCHED: &str = "unmatched-screen";
@@ -4820,7 +4821,7 @@ mod tests {
             (ASK_FORM, FORM, ASK_RULE, &[]),
             (STARTUP_CANCELLED, COMPOSER, IDLE_RULE, &[INDICATOR]),
             (STARTUP_OFFER, QUESTION, STARTUP_RULE, &[INDICATOR]),
-            (STARTUP_WIZARD, QUESTION, STARTUP_RULE, &[]),
+            (STARTUP_WIZARD, QUESTION, WIZARD_RULE, &[]),
             (
                 "claude-2.1.302-auto-fresh-first-launch-notice-1",
                 UNKNOWN,
@@ -5395,54 +5396,85 @@ mod tests {
         }
 
         #[test]
-        fn bundled_claude_auto_startup_dialog_is_one_question_without_an_answer_plan() {
+        fn bundled_claude_auto_startup_offer_and_wizard_are_separate_questions() {
             let catalog = ProfileCatalog::bundled().unwrap();
             let offer = observe(STARTUP_OFFER);
             let wizard = observe(STARTUP_WIZARD);
-            for (id, observed) in [(STARTUP_OFFER, &offer), (STARTUP_WIZARD, &wizard)] {
+            for (id, observed, choices) in [
+                (
+                    STARTUP_OFFER,
+                    &offer,
+                    json!(["Not now", "Don't show again"]),
+                ),
+                (STARTUP_WIZARD, &wizard, json!([])),
+            ] {
                 assert_eq!(observed.match_evidence, MatchEvidence::Complete, "{id}");
                 assert!(!observed.verified_noninteraction, "{id}");
                 assert_eq!(observed.raw_evidence["operation"], Value::Null, "{id}");
-                assert_eq!(observed.raw_evidence["choices"], json!([]), "{id}");
+                assert_eq!(observed.raw_evidence["choices"], choices, "{id}");
                 assert!(observed.fingerprint.is_some(), "{id}");
             }
             assert!(
-                offer.fingerprint == wizard.fingerprint,
-                "the offer and its wizard are one dialog"
+                offer.fingerprint != wizard.fingerprint,
+                "the offer and its wizard are separate dialogs"
             );
-            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+            for rule in [STARTUP_RULE, WIZARD_RULE] {
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    assert!(
+                        catalog
+                            .answer_plan(
+                                CodingAgent::Claude,
+                                CLAUDE_VERSION,
+                                rule,
+                                &AnswerKey::Decision(decision)
+                            )
+                            .is_none(),
+                        "{rule} {decision:?}"
+                    );
+                }
+            }
+            for choice in ["not-now", "dont-show-again"] {
                 assert!(
                     catalog
                         .answer_plan(
                             CodingAgent::Claude,
                             CLAUDE_VERSION,
                             STARTUP_RULE,
-                            &AnswerKey::Decision(decision)
+                            &AnswerKey::Choice(choice.into())
                         )
-                        .is_none(),
-                    "{decision:?}"
+                        .is_some(),
+                    "{choice}"
                 );
             }
+            assert!(
+                catalog
+                    .answer_plans(CodingAgent::Claude, CLAUDE_VERSION, WIZARD_RULE)
+                    .is_empty(),
+                "the wizard has no answer plan"
+            );
         }
 
         #[test]
-        fn tracker_holds_one_question_episode_across_the_startup_dialog_until_the_composer_returns()
-        {
+        fn tracker_opens_separate_question_episodes_for_the_startup_offer_and_its_wizard() {
             let mut run = replay_run(EvidencePolicy::metadata());
             let offer = run.episode(STARTUP_OFFER, 0, 300);
             assert_eq!(offer.len(), 1, "{offer:?}");
             assert_eq!(offer[0].kind, RuntimeEventKind::InteractionOpened);
             assert_eq!(offer[0].episode_seq, Some(1));
             assert_eq!(offer[0].classification, Some(InteractionClass::Question));
+            assert_eq!(offer[0].evidence_json["rule_id"], STARTUP_RULE);
             let wizard = run.episode(STARTUP_WIZARD, 350, 900);
-            assert!(
-                wizard.is_empty(),
-                "the wizard continues the episode: {wizard:?}"
-            );
+            assert_eq!(wizard.len(), 2, "the wizard replaces the offer: {wizard:?}");
+            assert_eq!(wizard[0].kind, RuntimeEventKind::InteractionClosed);
+            assert_eq!(wizard[0].episode_seq, Some(1));
+            assert_eq!(wizard[1].kind, RuntimeEventKind::InteractionOpened);
+            assert_eq!(wizard[1].episode_seq, Some(2));
+            assert_eq!(wizard[1].classification, Some(InteractionClass::Question));
+            assert_eq!(wizard[1].evidence_json["rule_id"], WIZARD_RULE);
             let cancelled = run.episode(STARTUP_CANCELLED, 950, 1400);
             assert_eq!(cancelled.len(), 1, "{cancelled:?}");
             assert_eq!(cancelled[0].kind, RuntimeEventKind::InteractionClosed);
-            assert_eq!(cancelled[0].episode_seq, Some(1));
+            assert_eq!(cancelled[0].episode_seq, Some(2));
             assert_eq!(
                 cancelled[0].close_reason,
                 Some(InteractionCloseReason::NotVisible)
@@ -5795,6 +5827,699 @@ mod tests {
                     millis += 50;
                 }
             }
+        }
+    }
+
+    mod bundled_claude_2_1_312 {
+        use crate::coding_agent::catalog::tests::*;
+
+        const VERSION_312: &str = "2.1.312";
+        const DIALOG_A: &str = "claude-auto-default-nudge";
+        const NOTICE: &str = "claude-question-pending-notice";
+        const OFFER: &str = "claude-auto-startup";
+        const WIZARD: &str = "claude-auto-env-setup-wizard";
+        const READ: &str = "claude-read-file-permission";
+        const EDIT: &str = "claude-edit-file-permission";
+        const CREATE: &str = "claude-create-file-permission";
+        const NO_TIP: &str = "claude-bash-permission-no-tip";
+        const BASH: &str = "claude-bash-permission";
+        const IDLE: &str = "claude-idle-composer";
+
+        const YES: &str = "Yes, set auto mode as my default permission mode";
+        const MANUAL: [&str; 2] = [YES, "No, keep manual mode"];
+        const ACCEPT_EDITS: [&str; 2] = [YES, "No, keep accept edits"];
+        const OFFER_CHOICES: [&str; 2] = ["Not now", "Don't show again"];
+        const FORM_CHOICES: [&str; 2] = ["Yes", "No"];
+        const NO_CHOICES: [&str; 0] = [];
+
+        const QUESTION: ObservationKind = ObservationKind::Interaction(InteractionClass::Question);
+        const FORM: ObservationKind =
+            ObservationKind::Interaction(InteractionClass::PermissionRequest);
+        const COMPOSER: ObservationKind = ObservationKind::ComposerEmpty;
+
+        type Expected = (
+            &'static str,
+            ObservationKind,
+            &'static str,
+            Option<&'static str>,
+            &'static [&'static str],
+        );
+
+        const CLASSIFICATION: [Expected; 39] = [
+            (
+                "claude-2.1.312-auto-default-nudge-1",
+                QUESTION,
+                DIALOG_A,
+                None,
+                &MANUAL,
+            ),
+            (
+                "claude-2.1.312-auto-default-accept-edits-nudge-1",
+                QUESTION,
+                DIALOG_A,
+                None,
+                &ACCEPT_EDITS,
+            ),
+            (
+                "claude-2.1.312-auto-default-decline-pre-stage-1",
+                QUESTION,
+                DIALOG_A,
+                None,
+                &MANUAL,
+            ),
+            (
+                "claude-2.1.312-auto-default-decline-post-stage-1-1",
+                QUESTION,
+                DIALOG_A,
+                None,
+                &MANUAL,
+            ),
+            (
+                "claude-2.1.312-auto-default-decline-continuation-1",
+                COMPOSER,
+                IDLE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-question-pending-notice-1",
+                QUESTION,
+                NOTICE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-question-pending-after-clear-1",
+                QUESTION,
+                DIALOG_A,
+                None,
+                &MANUAL,
+            ),
+            (
+                "claude-2.1.312-question-pending-send-notice-1",
+                QUESTION,
+                NOTICE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-question-pending-after-send-1",
+                COMPOSER,
+                IDLE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-question-pending-after-send-idle-1",
+                COMPOSER,
+                IDLE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-auto-env-setup-offer-1",
+                QUESTION,
+                OFFER,
+                None,
+                &OFFER_CHOICES,
+            ),
+            (
+                "claude-2.1.312-auto-env-setup-not-now-pre-stage-1",
+                QUESTION,
+                OFFER,
+                None,
+                &OFFER_CHOICES,
+            ),
+            (
+                "claude-2.1.312-auto-env-setup-not-now-continuation-1",
+                COMPOSER,
+                IDLE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-auto-env-setup-dont-show-again-pre-stage-1",
+                QUESTION,
+                OFFER,
+                None,
+                &OFFER_CHOICES,
+            ),
+            (
+                "claude-2.1.312-auto-env-setup-dont-show-again-continuation-1",
+                COMPOSER,
+                IDLE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-primary-auto-default-nudge-1",
+                QUESTION,
+                DIALOG_A,
+                None,
+                &MANUAL,
+            ),
+            (
+                "claude-2.1.312-primary-default-permission-1",
+                FORM,
+                BASH,
+                Some("/tmp/cafleet-194/claude-primary-auto-tip-cells-001/permission-probe allow"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-primary-closed-form-1",
+                COMPOSER,
+                IDLE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-primary-idle-composer-1",
+                COMPOSER,
+                IDLE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-primary-resized-narrow-1",
+                COMPOSER,
+                IDLE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-primary-resized-idle-composer-1",
+                COMPOSER,
+                IDLE,
+                None,
+                &NO_CHOICES,
+            ),
+            (
+                "claude-2.1.312-read-file-permission-1",
+                FORM,
+                READ,
+                Some("Read(/tmp/cafleet-194/claude-read-file-cells-001-outside/probe.txt)"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-read-file-allow-pre-stage-1",
+                FORM,
+                READ,
+                Some("Read(/tmp/cafleet-194/claude-read-file-allow-001-outside/probe.txt)"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-read-file-deny-pre-stage-1",
+                FORM,
+                READ,
+                Some("Read(/tmp/cafleet-194/claude-read-file-deny-001-outside/probe.txt)"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-edit-file-permission-1",
+                FORM,
+                EDIT,
+                Some("../claude-edit-file-cells-001-outside/edit-target.txt"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-edit-file-allow-pre-stage-1",
+                FORM,
+                EDIT,
+                Some("../claude-edit-file-allow-001-outside/edit-target.txt"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-edit-file-deny-pre-stage-1",
+                FORM,
+                EDIT,
+                Some("../claude-edit-file-deny-001-outside/edit-target.txt"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-create-file-permission-1",
+                FORM,
+                CREATE,
+                Some("../claude-create-file-cells-001-outside/write-target.txt"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-create-file-allow-pre-stage-1",
+                FORM,
+                CREATE,
+                Some("../claude-create-file-allow-001-outside/write-target.txt"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-create-file-deny-pre-stage-1",
+                FORM,
+                CREATE,
+                Some("../claude-create-file-deny-001-outside/write-target.txt"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-bash-no-tip-permission-1",
+                FORM,
+                NO_TIP,
+                Some("/tmp/cafleet-194/claude-bash-no-tip-cells-001/permission-probe allow"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-bash-no-tip-allow-pre-stage-1",
+                FORM,
+                NO_TIP,
+                Some("/tmp/cafleet-194/claude-bash-no-tip-allow-001/permission-probe allow"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-bash-no-tip-deny-pre-stage-1",
+                FORM,
+                NO_TIP,
+                Some("/tmp/cafleet-194/claude-bash-no-tip-deny-001/permission-probe deny"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-bash-no-tip-access-permission-1",
+                FORM,
+                NO_TIP,
+                Some(
+                    "│ touch /tmp/cafleet-194/claude-bash-no-tip-access-cells-001-outside/no-tip-access.txt",
+                ),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-panel-default-permission-1",
+                FORM,
+                BASH,
+                Some("/tmp/cafleet-194/claude-panel-auto-tip-cells-001/permission-probe allow"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-panel-default-permission-144-1",
+                FORM,
+                BASH,
+                Some("/tmp/cafleet-194/claude-panel-auto-tip-cells-002/permission-probe allow"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-panel-default-allow-pre-stage-1",
+                FORM,
+                BASH,
+                Some("/tmp/cafleet-194/claude-panel-auto-tip-allow-001/permission-probe allow"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.302-auto-env-setup-offer-1",
+                QUESTION,
+                OFFER,
+                None,
+                &OFFER_CHOICES,
+            ),
+            (
+                "claude-2.1.302-auto-env-setup-wizard-1",
+                QUESTION,
+                WIZARD,
+                None,
+                &NO_CHOICES,
+            ),
+        ];
+
+        const PRIMARY: [&str; 2] = [
+            "claude-2.1.312-primary-auto-default-nudge-1",
+            "claude-2.1.312-primary-default-permission-1",
+        ];
+        const PANEL: [(&str, usize); 3] = [
+            ("claude-2.1.312-panel-default-permission-1", 92),
+            ("claude-2.1.312-panel-default-permission-144-1", 80),
+            ("claude-2.1.312-panel-default-allow-pre-stage-1", 92),
+        ];
+
+        fn document(id: &str) -> Value {
+            serde_json::from_str(&bundled_fixture(id)).unwrap()
+        }
+        fn replay_document(document: &Value, alternate: bool) -> ScreenSnapshot {
+            replay_native_fixture(&document.to_string(), |_| {}, alternate, None)
+        }
+        fn screen(id: &str) -> ScreenSnapshot {
+            let document = document(id);
+            replay_document(&document, document["alternate_screen"].as_bool().unwrap())
+        }
+        fn detector() -> Detector {
+            Detector::new(
+                &ProfileCatalog::bundled().unwrap(),
+                CodingAgent::Claude,
+                Some(VERSION_312),
+            )
+        }
+        fn observe(id: &str) -> ScreenObservation {
+            detector().observe(&screen(id)).unwrap()
+        }
+        fn observe_screen(screen: &ScreenSnapshot) -> ScreenObservation {
+            detector().observe(screen).unwrap()
+        }
+        fn assert_same_evidence(case: &str, left: &ScreenObservation, right: &ScreenObservation) {
+            assert_eq!(left.kind, right.kind, "{case}");
+            assert_eq!(left.rule_id, right.rule_id, "{case}");
+            assert_eq!(left.match_evidence, right.match_evidence, "{case}");
+            for field in ["operation", "operation_rows", "choices"] {
+                assert_eq!(
+                    left.raw_evidence[field], right.raw_evidence[field],
+                    "{case}: {field}"
+                );
+            }
+            assert!(left.fingerprint == right.fingerprint, "{case}");
+        }
+
+        #[test]
+        fn each_2_1_312_fixture_classifies_with_its_rule_and_evidence() {
+            for (id, kind, rule, operation, choices) in CLASSIFICATION {
+                let observed = observe(id);
+                assert_eq!(observed.kind, kind, "{id}");
+                assert_eq!(observed.rule_id, rule, "{id}");
+                assert_eq!(observed.raw_evidence["rule_id"], rule, "{id}");
+                assert_eq!(observed.match_evidence, MatchEvidence::Complete, "{id}");
+                if matches!(kind, ObservationKind::Interaction(_)) {
+                    assert_eq!(observed.raw_evidence["operation"], json!(operation), "{id}");
+                    assert_eq!(
+                        observed.raw_evidence["operation_rows"],
+                        json!(operation.map(|_| 1)),
+                        "{id}"
+                    );
+                    assert_eq!(observed.raw_evidence["choices"], json!(choices), "{id}");
+                    assert!(observed.fingerprint.is_some(), "{id}");
+                    assert!(!observed.verified_noninteraction, "{id}");
+                } else {
+                    assert!(observed.verified_noninteraction, "{id}");
+                }
+            }
+        }
+
+        #[test]
+        fn primary_screen_fixtures_match_their_alternate_screen_rendering() {
+            for id in PRIMARY {
+                let document = document(id);
+                assert_eq!(document["alternate_screen"], false, "{id}");
+                let primary = observe_screen(&replay_document(&document, false));
+                let alternate = observe_screen(&replay_document(&document, true));
+                assert_same_evidence(id, &primary, &alternate);
+                assert!(
+                    matches!(primary.kind, ObservationKind::Interaction(_)),
+                    "{id}"
+                );
+            }
+        }
+
+        fn full_width(document: &Value, separator: usize) -> Value {
+            let mut full = document.clone();
+            full.as_object_mut().unwrap().remove("cell_backgrounds");
+            for line in full["lines"].as_array_mut().unwrap() {
+                let text = line.as_str().unwrap();
+                let separated = text.chars().nth(separator) == Some('│');
+                if separated {
+                    *line = json!(text.chars().take(separator).collect::<String>());
+                }
+            }
+            full
+        }
+
+        #[test]
+        fn sidebar_fixtures_match_their_full_width_rendering() {
+            for (id, separator) in PANEL {
+                let document = document(id);
+                assert!(document.get("cell_backgrounds").is_some(), "{id}");
+                let beside = observe_screen(&replay_document(&document, true));
+                let full =
+                    observe_screen(&replay_document(&full_width(&document, separator), true));
+                assert_same_evidence(id, &beside, &full);
+                assert_eq!(beside.rule_id, BASH, "{id}");
+            }
+        }
+
+        #[test]
+        fn existing_claude_rules_keep_classifying_their_2_1_302_forms() {
+            for (id, rule) in [
+                ("claude-2.1.302-default-permission-1", BASH),
+                ("claude-2.1.302-wrapped-permission-1", BASH),
+                ("claude-2.1.302-idle-composer-1", IDLE),
+            ] {
+                let observed = Detector::new(
+                    &ProfileCatalog::bundled().unwrap(),
+                    CodingAgent::Claude,
+                    Some("2.1.302"),
+                )
+                .observe(&replay_native_fixture(
+                    &bundled_fixture(id),
+                    |_| {},
+                    true,
+                    None,
+                ))
+                .unwrap();
+                assert_eq!(observed.rule_id, rule, "{id}");
+            }
+        }
+
+        fn plan(rule: &str, key: AnswerKey) -> Option<AnswerPlan> {
+            ProfileCatalog::bundled().unwrap().answer_plan(
+                CodingAgent::Claude,
+                VERSION_312,
+                rule,
+                &key,
+            )
+        }
+        fn stages(plan: &AnswerPlan) -> Vec<(Vec<u8>, Option<String>)> {
+            plan.stages()
+                .iter()
+                .map(|stage| {
+                    (
+                        stage.bytes().to_vec(),
+                        stage.required_focus_choice_id().map(str::to_owned),
+                    )
+                })
+                .collect()
+        }
+
+        #[test]
+        fn dialog_a_decline_resolves_to_two_marker_gated_stages() {
+            let decline =
+                plan(DIALOG_A, AnswerKey::Choice("decline".into())).expect("Dialog A decline plan");
+            assert_eq!(
+                decline.capability().answer_rule_id(),
+                "claude-auto-default-decline"
+            );
+            assert_eq!(decline.capability().request_rule_id(), DIALOG_A);
+            assert_eq!(decline.choice_id(), "decline");
+            assert_eq!(decline.focus_matcher_id(), "focus");
+            assert_eq!(
+                stages(&decline),
+                [
+                    (vec![0x0e], Some("accept".to_owned())),
+                    (vec![0x0d], Some("decline".to_owned())),
+                ]
+            );
+            for fixture in [
+                "claude-2.1.312-auto-default-decline-pre-stage-1",
+                "claude-2.1.312-auto-default-decline-post-stage-1-1",
+            ] {
+                assert!(
+                    decline
+                        .capability()
+                        .fixture_ids()
+                        .contains(&fixture.to_owned()),
+                    "{fixture}"
+                );
+            }
+            for (fixture, focus) in [
+                ("claude-2.1.312-auto-default-decline-pre-stage-1", "accept"),
+                (
+                    "claude-2.1.312-auto-default-decline-post-stage-1-1",
+                    "decline",
+                ),
+                ("claude-2.1.312-primary-auto-default-nudge-1", "accept"),
+            ] {
+                let matched = detector()
+                    .match_answer(&screen(fixture), &decline)
+                    .unwrap()
+                    .expect("the decline plan matches its dialog");
+                assert_eq!(matched.focused_choice_id(), Some(focus), "{fixture}");
+            }
+        }
+
+        #[test]
+        fn dialog_b_offer_choices_resolve_to_their_single_digits() {
+            for (choice, rule, byte) in [
+                ("not-now", "claude-auto-env-setup-not-now-digit", b'2'),
+                (
+                    "dont-show-again",
+                    "claude-auto-env-setup-dont-show-again-digit",
+                    b'3',
+                ),
+            ] {
+                let plan = plan(OFFER, AnswerKey::Choice(choice.into())).expect("offer plan");
+                assert_eq!(plan.capability().answer_rule_id(), rule);
+                assert_eq!(stages(&plan), [(vec![byte], None)], "{choice}");
+                for fixture in [
+                    "claude-2.1.312-auto-env-setup-offer-1",
+                    "claude-2.1.302-auto-env-setup-offer-1",
+                ] {
+                    assert!(
+                        detector()
+                            .match_answer(&screen(fixture), &plan)
+                            .unwrap()
+                            .is_some(),
+                        "{choice} {fixture}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn no_plan_selects_a_yes_choice_of_either_nudge_dialog() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            assert!(plan(DIALOG_A, AnswerKey::Choice("accept".into())).is_none());
+            assert!(plan(OFFER, AnswerKey::Choice("yes".into())).is_none());
+            for rule in [WIZARD, NOTICE] {
+                assert!(
+                    catalog
+                        .answer_plans(CodingAgent::Claude, VERSION_312, rule)
+                        .is_empty(),
+                    "{rule}"
+                );
+            }
+            for rule in [DIALOG_A, OFFER, WIZARD, NOTICE] {
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    assert!(
+                        plan(rule, AnswerKey::Decision(decision)).is_none(),
+                        "{rule}"
+                    );
+                }
+            }
+            for rule in catalog.rule_ids() {
+                for plan in catalog.answer_plans(CodingAgent::Claude, VERSION_312, &rule) {
+                    assert_ne!(plan.choice_id(), "accept", "{rule}");
+                    if rule == OFFER {
+                        assert!(
+                            plan.stages()
+                                .iter()
+                                .all(|stage| !stage.bytes().contains(&b'1')),
+                            "{rule}"
+                        );
+                    }
+                    for stage in plan.stages() {
+                        assert!(!stage.bytes().contains(&0x1b), "{rule}");
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn file_and_no_tip_decisions_resolve_to_their_single_request_digits() {
+            for (rule, prefix) in [
+                (READ, "claude-read-file"),
+                (EDIT, "claude-edit-file"),
+                (CREATE, "claude-create-file"),
+                (NO_TIP, "claude-bash-no-tip"),
+            ] {
+                let fixture_prefix = prefix.trim_start_matches("claude-");
+                for (decision, choice, byte, name) in [
+                    (PermissionDecision::Allow, "allow-once", b'1', "allow"),
+                    (PermissionDecision::Deny, "deny-once", b'3', "deny"),
+                ] {
+                    let plan = plan(rule, AnswerKey::Decision(decision))
+                        .unwrap_or_else(|| panic!("{rule} {decision:?} plan"));
+                    assert_eq!(
+                        plan.capability().answer_rule_id(),
+                        format!("{prefix}-{name}-digit"),
+                        "{rule}"
+                    );
+                    assert_eq!(plan.choice_id(), choice, "{rule}");
+                    assert_eq!(stages(&plan), [(vec![byte], None)], "{rule} {name}");
+                    let pre_stage = format!("claude-2.1.312-{fixture_prefix}-{name}-pre-stage-1");
+                    assert!(
+                        plan.capability().fixture_ids().contains(&pre_stage),
+                        "{rule} cites {pre_stage}"
+                    );
+                    assert!(
+                        detector()
+                            .match_answer(&screen(&pre_stage), &plan)
+                            .unwrap()
+                            .is_some(),
+                        "{pre_stage}"
+                    );
+                }
+                for key in ["allow-once", "deny-once"] {
+                    assert!(
+                        plan(rule, AnswerKey::Choice(key.into())).is_none(),
+                        "{rule}"
+                    );
+                }
+            }
+        }
+
+        fn replay_run() -> Run {
+            Run::new(EvidencePolicy::metadata(), observe)
+        }
+
+        #[test]
+        fn tracker_replaces_the_pending_notice_with_dialog_a_after_the_draft_is_cleared() {
+            let mut run = replay_run();
+            let notice = run.episode("claude-2.1.312-question-pending-notice-1", 0, 300);
+            assert_eq!(notice.len(), 1, "{notice:?}");
+            assert_eq!(notice[0].kind, RuntimeEventKind::InteractionOpened);
+            assert_eq!(notice[0].classification, Some(InteractionClass::Question));
+            assert_eq!(notice[0].evidence_json["rule_id"], NOTICE);
+            let cleared = run.episode("claude-2.1.312-question-pending-after-clear-1", 350, 900);
+            assert_eq!(cleared.len(), 2, "{cleared:?}");
+            assert_eq!(cleared[0].kind, RuntimeEventKind::InteractionClosed);
+            assert_eq!(cleared[0].episode_seq, notice[0].episode_seq);
+            assert_eq!(cleared[1].kind, RuntimeEventKind::InteractionOpened);
+            assert_eq!(cleared[1].classification, Some(InteractionClass::Question));
+            assert_eq!(cleared[1].evidence_json["rule_id"], DIALOG_A);
+            assert_ne!(cleared[1].episode_seq, notice[0].episode_seq);
+        }
+
+        #[test]
+        fn tracker_closes_the_pending_notice_without_dialog_a_after_the_draft_is_sent() {
+            let mut run = replay_run();
+            let notice = run.episode("claude-2.1.312-question-pending-send-notice-1", 0, 300);
+            assert_eq!(notice.len(), 1, "{notice:?}");
+            assert_eq!(notice[0].evidence_json["rule_id"], NOTICE);
+            let sent = run.episode("claude-2.1.312-question-pending-after-send-1", 350, 900);
+            assert_eq!(sent.len(), 1, "{sent:?}");
+            assert_eq!(sent[0].kind, RuntimeEventKind::InteractionClosed);
+            assert_eq!(sent[0].episode_seq, notice[0].episode_seq);
+            assert_eq!(
+                sent[0].close_reason,
+                Some(InteractionCloseReason::NotVisible)
+            );
+            let idle = run.episode(
+                "claude-2.1.312-question-pending-after-send-idle-1",
+                950,
+                1400,
+            );
+            assert!(idle.is_empty(), "no Dialog A episode opens: {idle:?}");
+        }
+
+        #[test]
+        fn tracker_closes_dialog_a_once_its_decline_returns_the_composer() {
+            let mut run = replay_run();
+            let opened = run.episode("claude-2.1.312-auto-default-decline-pre-stage-1", 0, 300);
+            assert_eq!(opened.len(), 1, "{opened:?}");
+            let moved = run.episode(
+                "claude-2.1.312-auto-default-decline-post-stage-1-1",
+                350,
+                700,
+            );
+            assert!(
+                moved.is_empty(),
+                "a focus move keeps the episode: {moved:?}"
+            );
+            let closed = run.episode(
+                "claude-2.1.312-auto-default-decline-continuation-1",
+                750,
+                1300,
+            );
+            assert_eq!(closed.len(), 1, "{closed:?}");
+            assert_eq!(closed[0].kind, RuntimeEventKind::InteractionClosed);
+            assert_eq!(closed[0].episode_seq, opened[0].episode_seq);
         }
     }
 

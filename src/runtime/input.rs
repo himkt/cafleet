@@ -5389,6 +5389,48 @@ mod tests {
                     );
                 }
 
+                #[test]
+                fn staged_claude_pending_question_notice_during_the_settle_stops_before_the_submit_key()
+                 {
+                    use crate::coding_agent::detector::test_support::bundled_screen;
+                    use crate::coding_agent::detector::test_support::native_fixture_bytes;
+                    use crate::runtime::input::tests::permission_inspection_contracts::with_claude_host;
+                    with_claude_host(
+                        "2.1.312",
+                        "claude-2.1.312-auto-default-decline-continuation-1",
+                        |host, _, _| {
+                            let mut program = LITERAL.as_bytes().to_vec();
+                            program.push(b'\r');
+                            host.pty.expect_program(program);
+                            until_literal_written(
+                                host,
+                                prompt_request(host, "prompt:pending-question-notice"),
+                            );
+                            host.show(native_fixture_bytes(&bundled_screen(
+                                "claude-2.1.312-question-pending-notice-1",
+                            )));
+                            let reply = finish_after_interruption(host);
+                            let cause = stored(host, &reply)
+                                .uncertain_cause
+                                .expect("a stopped stage records its cause");
+                            assert!(
+                                matches!(
+                                    cause,
+                                    storage::UncertainCause::InteractionCandidate
+                                        | storage::UncertainCause::InteractionOpen
+                                ),
+                                "{cause:?}"
+                            );
+                            assert_stopped_with(host, &reply, cause);
+                            assert!(
+                                host.pty.program.is_empty(),
+                                "the submit key is never written"
+                            );
+                            assert!(!host.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
+                        },
+                    );
+                }
+
                 fn quiesce_once(host: &mut Host) -> InputDrain {
                     host.coordinator
                         .progress_with_manual(&mut host.transport, |transport| {
@@ -9751,6 +9793,126 @@ mod tests {
                     Some(crate::broker::runtime::DeliveryMethod::Profile)
                 );
                 assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+            });
+        }
+
+        #[test]
+        fn a_preview_prompt_and_exec_during_dialog_a_queue_with_zero_bytes_and_each_drains_once() {
+            use crate::runtime::input::tests::ordinary_prompt::support::canonical_preview;
+            use crate::runtime::input::tests::ordinary_prompt::support::preview_request;
+            const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
+            const LITERAL: &str = "queued behind the auto-mode nudge";
+            let fixture = |id: &str| {
+                native_fixture_bytes(
+                    &crate::coding_agent::detector::test_support::bundled_screen(id),
+                )
+            };
+            with_claude_host("2.1.312", IDLE, |h, _, _| {
+                h.pty
+                    .child
+                    .bytes
+                    .extend(fixture("claude-2.1.312-auto-default-nudge-1"));
+                settled_ids(h);
+                assert!(matches!(
+                    h.controller.health(&h.writer).eligibility,
+                    InputEligibility::Hold(_)
+                ));
+                let run = h.fixture.run.clone();
+                let message = crate::broker::send_message(
+                    &mut h.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    "preview during Dialog A",
+                )
+                .unwrap();
+                let preview = canonical_preview(&message);
+                let mut program = preview.as_bytes().to_vec();
+                program.push(b'\r');
+                program.extend_from_slice(LITERAL.as_bytes());
+                program.push(b'\r');
+                program.extend_from_slice(b"! ");
+                program.extend_from_slice(LITERAL.as_bytes());
+                program.push(b'\r');
+                h.pty.expect_program(program.clone());
+                let mut prompt = h.request("prompt:dialog-a");
+                prompt.operation = InputControlOperation::SubmitPrompt(SubmitInput {
+                    operation_key: "prompt:dialog-a".into(),
+                    input_kind: storage::InputKind::Prompt,
+                    message_id: None,
+                    literal: LITERAL.into(),
+                });
+                let mut exec = h.request("exec:dialog-a");
+                exec.operation = InputControlOperation::SubmitExec(SubmitInput {
+                    operation_key: "exec:dialog-a".into(),
+                    input_kind: storage::InputKind::Exec,
+                    message_id: None,
+                    literal: LITERAL.into(),
+                });
+                let mut queued_ids = Vec::new();
+                for (case, request) in [
+                    ("preview", preview_request(h, &message, &preview)),
+                    ("prompt", prompt),
+                    ("exec", exec),
+                ] {
+                    let Some(InputControlReply::Submission(queued)) = h.handle(request).unwrap()
+                    else {
+                        panic!("a {case} during Dialog A returns a Submission reply")
+                    };
+                    assert_eq!(
+                        (queued.status, queued.stage),
+                        (SubmissionStatus::Queued, SubmissionStage::ZeroBytes),
+                        "{case}"
+                    );
+                    assert_eq!(
+                        queued
+                            .delivery
+                            .as_ref()
+                            .and_then(|delivery| delivery.reason.as_deref()),
+                        Some("interaction_open"),
+                        "{case}"
+                    );
+                    queued_ids.push(queued.input_id.expect("queued work has a durable input ID"));
+                }
+                for _ in 0..20 {
+                    h.drain();
+                    h.advance();
+                }
+                assert!(
+                    h.pty.offers.is_empty(),
+                    "no byte, Enter included, reaches Dialog A: {:?}",
+                    h.pty.offers
+                );
+                h.show(fixture(IDLE));
+                while !queued_ids.iter().all(|id| {
+                    matches!(
+                        storage::get_input(&h.fixture.conn, *id).unwrap().state,
+                        storage::InputState::Accepted | storage::InputState::Settled
+                    )
+                }) {
+                    assert!(Instant::now() < h.until, "the queued inputs drain in time");
+                    h.drain();
+                    h.advance();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                for _ in 0..20 {
+                    h.drain();
+                    h.advance();
+                }
+                assert_eq!(
+                    h.pty.program,
+                    vec![program],
+                    "each input is delivered once, in order"
+                );
+                assert!(h.pty.manual.is_empty(), "{:?}", h.pty.manual);
+                for id in queued_ids {
+                    let input = storage::get_input(&h.fixture.conn, id).unwrap();
+                    assert_eq!(input.state, storage::InputState::Accepted, "{id}");
+                    assert_eq!(
+                        input.delivery_method,
+                        Some(crate::broker::runtime::DeliveryMethod::Profile)
+                    );
+                    assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+                }
             });
         }
 
