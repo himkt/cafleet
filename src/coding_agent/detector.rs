@@ -2593,6 +2593,37 @@ mod tests {
         }
 
         #[test]
+        fn a_batched_heading_outside_its_live_form_is_no_interaction() {
+            const BATCHED: &str = "claude-2.1.312-read-file-batched-permission-1";
+            const READ: &str = "claude-read-file-permission";
+            assert_eq!(unchanged(BATCHED).rule_id, READ);
+            let cases: [(&str, LineChange); 4] = [
+                (
+                    "assistant quote",
+                    Box::new(|lines| lines[18] = format!("●{}", &lines[18][1..])),
+                ),
+                (
+                    "counter without a heading",
+                    Box::new(|lines| lines[18] = format!("{:>120}", "1 of 2")),
+                ),
+                (
+                    "counter on another heading",
+                    Box::new(|lines| lines[18] = format!(" Read files{:>109}", "1 of 2")),
+                ),
+                ("no live footer", Box::new(|lines| lines[27].clear())),
+            ];
+            for (case, change) in cases {
+                let observed = replay(BATCHED, change, None);
+                assert_ne!(observed.rule_id, READ, "{case}");
+                assert!(
+                    !matches!(observed.kind, ObservationKind::Interaction(_)),
+                    "{case}: {:?}",
+                    observed.kind
+                );
+            }
+        }
+
+        #[test]
         fn primary_screen_remnants_after_the_form_closes_produce_no_interaction() {
             for id in [
                 "claude-2.1.312-primary-closed-form-1",

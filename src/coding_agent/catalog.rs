@@ -5847,6 +5847,8 @@ mod tests {
         const CREATE: &str = "claude-create-file-permission";
         const NO_TIP: &str = "claude-bash-permission-no-tip";
         const BASH: &str = "claude-bash-permission";
+        const TIP: &str = "claude-bash-permission-auto-tip";
+        const ASK: &str = "claude-auto-ask-permission";
         const IDLE: &str = "claude-idle-composer";
 
         const YES: &str = "Yes, set auto mode as my default permission mode";
@@ -5869,7 +5871,7 @@ mod tests {
             &'static [&'static str],
         );
 
-        const CLASSIFICATION: [Expected; 39] = [
+        const CLASSIFICATION: [Expected; 43] = [
             (
                 "claude-2.1.312-auto-default-nudge-1",
                 QUESTION,
@@ -6132,6 +6134,36 @@ mod tests {
                 &FORM_CHOICES,
             ),
             (
+                "claude-2.1.312-read-file-batched-permission-1",
+                FORM,
+                READ,
+                Some("Read(/tmp/cafleet-194/claude-read-file-batched-cells-001-outside/probe.txt)"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-read-file-batched-allow-post-stage-1",
+                FORM,
+                READ,
+                Some(
+                    "Read(/tmp/cafleet-194/claude-read-file-batched-cells-001-outside/batched-probe.txt)",
+                ),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-read-file-batched-deny-pre-stage-1",
+                FORM,
+                READ,
+                Some("Read(/tmp/cafleet-194/claude-read-file-batched-deny-001-outside/probe.txt)"),
+                &FORM_CHOICES,
+            ),
+            (
+                "claude-2.1.312-bash-batched-permission-1",
+                FORM,
+                BASH,
+                Some("/tmp/cafleet-194/claude-bash-batched-cells-001/permission-probe allow"),
+                &FORM_CHOICES,
+            ),
+            (
                 "claude-2.1.302-auto-env-setup-offer-1",
                 QUESTION,
                 OFFER,
@@ -6278,6 +6310,163 @@ mod tests {
                 ))
                 .unwrap();
                 assert_eq!(observed.rule_id, rule, "{id}");
+            }
+        }
+
+        const HEADINGS: [&str; 4] = [" Read file", " Edit file", " Create file", " Bash command"];
+        const BATCHED: [&str; 3] = [
+            "claude-2.1.312-read-file-batched-permission-1",
+            "claude-2.1.312-read-file-batched-allow-post-stage-1",
+            "claude-2.1.312-read-file-batched-deny-pre-stage-1",
+        ];
+        const HEADED_FORMS: [(&str, &str, Option<usize>); 14] = [
+            ("claude-2.1.312-read-file-permission-1", READ, None),
+            ("claude-2.1.312-edit-file-permission-1", EDIT, None),
+            ("claude-2.1.312-create-file-permission-1", CREATE, None),
+            ("claude-2.1.312-bash-no-tip-permission-1", NO_TIP, None),
+            (
+                "claude-2.1.312-bash-no-tip-access-permission-1",
+                NO_TIP,
+                None,
+            ),
+            ("claude-2.1.312-primary-default-permission-1", BASH, None),
+            ("claude-2.1.312-panel-default-permission-1", BASH, Some(92)),
+            (
+                "claude-2.1.312-panel-default-permission-144-1",
+                BASH,
+                Some(80),
+            ),
+            ("claude-2.1.312-bash-batched-permission-1", BASH, None),
+            ("claude-2.1.302-default-permission-1", BASH, None),
+            ("claude-2.1.302-wrapped-permission-1", BASH, None),
+            ("claude-2.1.302-access-permission-1", TIP, None),
+            ("claude-2.1.308-auto-tip-padded-question-1", TIP, None),
+            ("claude-2.1.302-auto-ask-permission-1", ASK, None),
+        ];
+
+        fn fixture_version(id: &str) -> &str {
+            id.split('-').nth(1).unwrap()
+        }
+        fn observe_changed(id: &str, change: impl FnOnce(&mut Vec<String>)) -> ScreenObservation {
+            let fixture = bundled_fixture(id);
+            let document: Value = serde_json::from_str(&fixture).unwrap();
+            let screen = replay_native_fixture(
+                &fixture,
+                change,
+                document["alternate_screen"].as_bool().unwrap(),
+                None,
+            );
+            Detector::new(
+                &ProfileCatalog::bundled().unwrap(),
+                CodingAgent::Claude,
+                Some(fixture_version(id)),
+            )
+            .observe(&screen)
+            .unwrap()
+        }
+        fn heading_row(lines: &[String], width: usize) -> usize {
+            let rows: Vec<usize> = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| {
+                    let left: String = line.chars().take(width).collect();
+                    HEADINGS.contains(&left.trim_end())
+                })
+                .map(|(row, _)| row)
+                .collect();
+            assert_eq!(rows.len(), 1, "{rows:?}");
+            rows[0]
+        }
+        fn with_counter(lines: &mut [String], width: usize, counter: &str) {
+            let row = heading_row(lines, width);
+            let left: String = lines[row].chars().take(width).collect();
+            let rest: String = lines[row].chars().skip(width).collect();
+            lines[row] = format!(
+                "{:<pad$}{counter}{rest}",
+                left.trim_end(),
+                pad = width - counter.chars().count()
+            );
+        }
+        fn without_counter(lines: &mut [String]) -> String {
+            let counter =
+                Regex::new(r"^( (?:Read file|Edit file|Create file|Bash command)) +(\d+ of \d+)$")
+                    .unwrap();
+            let rows: Vec<(usize, String, String)> = lines
+                .iter()
+                .enumerate()
+                .filter_map(|(row, line)| {
+                    counter
+                        .captures(line.trim_end())
+                        .map(|found| (row, found[1].to_owned(), found[2].to_owned()))
+                })
+                .collect();
+            assert_eq!(rows.len(), 1, "{rows:?}");
+            let (row, heading, shown) = rows.into_iter().next().unwrap();
+            lines[row] = heading;
+            shown
+        }
+
+        #[test]
+        fn batched_read_fixtures_match_their_counter_free_single_form() {
+            for (id, shown) in BATCHED.into_iter().zip(["1 of 2", "2 of 2", "1 of 2"]) {
+                let batched = observe(id);
+                let mut stripped = None;
+                let single = observe_changed(id, |lines| stripped = Some(without_counter(lines)));
+                assert_eq!(stripped.as_deref(), Some(shown), "{id}");
+                assert_same_evidence(id, &batched, &single);
+                assert_eq!(batched.rule_id, READ, "{id}");
+            }
+        }
+
+        #[test]
+        fn a_heading_counter_changes_no_identity_on_every_heading_anchored_form() {
+            let mut rules = BTreeSet::new();
+            for (id, rule, separator) in HEADED_FORMS {
+                let width = separator.unwrap_or(document(id)["cols"].as_u64().unwrap() as usize);
+                let single = observe_changed(id, |_| {});
+                assert_eq!(single.rule_id, rule, "{id}");
+                for counter in ["1 of 2", "2 of 2", "10 of 12"] {
+                    let counted = observe_changed(id, |lines| with_counter(lines, width, counter));
+                    assert_same_evidence(&format!("{id} {counter}"), &counted, &single);
+                }
+                rules.insert(rule);
+            }
+            assert_eq!(
+                rules,
+                BTreeSet::from([READ, EDIT, CREATE, NO_TIP, BASH, TIP, ASK])
+            );
+        }
+
+        #[test]
+        fn a_heading_counter_of_another_shape_leaves_the_form_unmatched() {
+            let id = "claude-2.1.312-read-file-permission-1";
+            for counter in ["1 of", "of 2", "1/2", "1 of 2 queued", "one of two"] {
+                let observed = observe_changed(id, |lines| with_counter(lines, 120, counter));
+                assert_ne!(observed.rule_id, READ, "{counter}");
+                assert!(
+                    !matches!(observed.kind, ObservationKind::Interaction(_)),
+                    "{counter}: {:?}",
+                    observed.kind
+                );
+            }
+        }
+
+        #[test]
+        fn batched_read_forms_resolve_the_single_request_digits() {
+            for (decision, fixtures) in [
+                (PermissionDecision::Allow, &BATCHED[..2]),
+                (PermissionDecision::Deny, &BATCHED[2..]),
+            ] {
+                let plan = plan(READ, AnswerKey::Decision(decision)).unwrap();
+                for id in fixtures {
+                    assert!(
+                        detector()
+                            .match_answer(&screen(id), &plan)
+                            .unwrap()
+                            .is_some(),
+                        "{id} {decision:?}"
+                    );
+                }
             }
         }
 
@@ -6524,6 +6713,26 @@ mod tests {
             assert_eq!(closed.len(), 1, "{closed:?}");
             assert_eq!(closed[0].kind, RuntimeEventKind::InteractionClosed);
             assert_eq!(closed[0].episode_seq, opened[0].episode_seq);
+        }
+
+        #[test]
+        fn tracker_supersedes_the_first_batched_read_with_the_second_after_its_allow() {
+            let mut run = replay_run();
+            let first = run.episode(BATCHED[0], 0, 300);
+            assert_eq!(first.len(), 1, "{first:?}");
+            assert_eq!(first[0].kind, RuntimeEventKind::InteractionOpened);
+            assert_eq!(first[0].evidence_json["rule_id"], READ);
+            let second = run.episode(BATCHED[1], 350, 900);
+            assert_eq!(second.len(), 2, "{second:?}");
+            assert_eq!(second[0].kind, RuntimeEventKind::InteractionClosed);
+            assert_eq!(
+                second[0].close_reason,
+                Some(InteractionCloseReason::Superseded)
+            );
+            assert_eq!(second[0].episode_seq, first[0].episode_seq);
+            assert_eq!(second[1].kind, RuntimeEventKind::InteractionOpened);
+            assert_eq!(second[1].evidence_json["rule_id"], READ);
+            assert_ne!(second[1].episode_seq, first[0].episode_seq);
         }
     }
 
