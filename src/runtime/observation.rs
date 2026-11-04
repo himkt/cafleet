@@ -5936,6 +5936,69 @@ pub(crate) mod native_capture {
                 }
             }
         }
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        enum ClaudeConfigCase {
+            Seeded {
+                settings: &'static str,
+                global: &'static str,
+            },
+            Fresh {
+                settings: &'static str,
+            },
+        }
+        const DRIVER_SEEDED: ClaudeConfigCase = ClaudeConfigCase::Seeded {
+            settings: "{}",
+            global: "{}",
+        };
+        impl ClaudeConfigCase {
+            fn overlays(self) -> [&'static str; 2] {
+                match self {
+                    Self::Seeded { settings, global } => [settings, global],
+                    Self::Fresh { settings } => [settings, "{}"],
+                }
+            }
+        }
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        enum NudgeChoice {
+            AutoDefaultDecline,
+            EnvSetupNotNow,
+            EnvSetupDontShowAgain,
+        }
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        enum ChangedTo {
+            True,
+            Set,
+        }
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        struct DocumentedChange {
+            key_path: &'static [&'static str],
+            value: ChangedTo,
+        }
+        impl NudgeChoice {
+            const fn stage_hex(self) -> &'static [&'static str] {
+                match self {
+                    Self::AutoDefaultDecline => &["0e", "0d"],
+                    Self::EnvSetupNotNow => &["32"],
+                    Self::EnvSetupDontShowAgain => &["33"],
+                }
+            }
+            fn documented_change(self) -> DocumentedChange {
+                match self {
+                    Self::AutoDefaultDecline => DocumentedChange {
+                        key_path: &[".claude.json", "hasSeenAutoDefaultNudge"],
+                        value: ChangedTo::True,
+                    },
+                    Self::EnvSetupNotNow => DocumentedChange {
+                        key_path: &[".claude.json", "autoModeEnvSetup", "dismissedAt"],
+                        value: ChangedTo::Set,
+                    },
+                    Self::EnvSetupDontShowAgain => DocumentedChange {
+                        key_path: &[".claude.json", "autoModeEnvSetup", "dismissed"],
+                        value: ChangedTo::True,
+                    },
+                }
+            }
+        }
         struct ApprovedCase {
             id: &'static str,
             backend: CodingAgent,
@@ -5948,11 +6011,45 @@ pub(crate) mod native_capture {
             file_probe: Option<FileProbe>,
             database: &'static str,
             socket: &'static str,
+            claude_config: Option<ClaudeConfigCase>,
+            nudge: Option<NudgeChoice>,
+            baseline: Option<&'static str>,
+            panel_probe: bool,
             size: TerminalSize,
         }
         const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
             rows: 36,
             cols: 120,
+        };
+        const DRIVER_PANEL_SIZE: TerminalSize = TerminalSize {
+            rows: 36,
+            cols: 166,
+        };
+        const DRIVER_PANEL_MIN_SIZE: TerminalSize = TerminalSize {
+            rows: 36,
+            cols: 144,
+        };
+        const DRIVER_PANEL_PROBE: &str = "panel-probe.txt";
+        const DRIVER_PANEL_COMMITTED: &str = "panel-committed.txt";
+        const DRIVER_AUTO_DEFAULT_SETTINGS: ClaudeConfigCase = ClaudeConfigCase::Seeded {
+            settings: r#"{"permissions":{"defaultMode":"default"}}"#,
+            global: "{}",
+        };
+        const DRIVER_ENV_SETUP_GLOBAL: ClaudeConfigCase = ClaudeConfigCase::Seeded {
+            settings: "{}",
+            global: r#"{"numStartups":5,"autoModeEnvSetup":{"denials":5}}"#,
+        };
+        const DRIVER_EDIT_READ_ALLOWED: ClaudeConfigCase = ClaudeConfigCase::Seeded {
+            settings: r#"{"permissions":{"allow":["Read(/{outside}/**)"]}}"#,
+            global: "{}",
+        };
+        const DRIVER_NO_TIP_SETTINGS: ClaudeConfigCase = ClaudeConfigCase::Seeded {
+            settings: r#"{"permissions":{"defaultMode":"default","disableAutoMode":"disable"}}"#,
+            global: "{}",
+        };
+        const DRIVER_PANEL_SETTINGS: ClaudeConfigCase = ClaudeConfigCase::Seeded {
+            settings: r#"{"permissions":{"allow":["Edit(/{cwd}/panel-probe.txt)"]}}"#,
+            global: "{}",
         };
         const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
         const DRIVER_BOXED_WRAP_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
@@ -5984,7 +6081,7 @@ pub(crate) mod native_capture {
             ("TERM_PROGRAM_VERSION", "0.9.5"),
             ("HERDR_ENV", "1"),
         ];
-        const APPROVED_CASES: [ApprovedCase; 69] = [
+        static APPROVED_CASES: [ApprovedCase; 94] = [
             ApprovedCase {
                 id: "cells-002",
                 backend: CodingAgent::Claude,
@@ -5997,6 +6094,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "nc02.db",
                 socket: "tc02",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6011,6 +6112,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "na01.db",
                 socket: "ta01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6025,6 +6130,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "nd01.db",
                 socket: "td01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6039,6 +6148,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "ni01.db",
                 socket: "ti01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6053,6 +6166,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "xt01.db",
                 socket: "xt01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6067,6 +6184,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "xc01.db",
                 socket: "xc01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6081,6 +6202,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "xa01.db",
                 socket: "xa01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6095,6 +6220,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "xd01.db",
                 socket: "xd01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6109,6 +6238,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "xi01.db",
                 socket: "xi01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6123,6 +6256,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "nwc1.db",
                 socket: "twc1",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_WRAPPED_SIZE,
             },
             ApprovedCase {
@@ -6137,6 +6274,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "nwa1.db",
                 socket: "twa1",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_WRAPPED_SIZE,
             },
             ApprovedCase {
@@ -6151,6 +6292,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "nwd1.db",
                 socket: "twd1",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_WRAPPED_SIZE,
             },
             ApprovedCase {
@@ -6165,6 +6310,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "nb89.db",
                 socket: "tb89",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_BOXED_WRAP_SIZE,
             },
             ApprovedCase {
@@ -6179,6 +6328,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "nb12.db",
                 socket: "tb12",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6193,6 +6346,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "oc01.db",
                 socket: "oc01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6207,6 +6364,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "oa01.db",
                 socket: "oa01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6221,6 +6382,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "od01.db",
                 socket: "od01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6235,6 +6400,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "od02.db",
                 socket: "od02",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6249,6 +6418,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "od03.db",
                 socket: "od03",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6263,6 +6436,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "of01.db",
                 socket: "of01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6277,6 +6454,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "of02.db",
                 socket: "of02",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6291,6 +6472,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "oi01.db",
                 socket: "oi01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6305,6 +6490,10 @@ pub(crate) mod native_capture {
                 file_probe: None,
                 database: "oh01.db",
                 socket: "oh01",
+                claude_config: None,
+                nudge: None,
+                baseline: None,
+                panel_probe: false,
                 size: DRIVER_HERDR_ENV_SIZE,
             },
             ApprovedCase::opencode_survey("opencode-survey-096", "os096.db", "os096", 96),
@@ -6453,72 +6642,294 @@ pub(crate) mod native_capture {
                 "opencode-narrow-deny-003-min",
                 DRIVER_MIN_SIZE,
             ),
-            ApprovedCase::claude_file(
+            ApprovedCase::claude(
                 "claude-read-outside-cells-001",
-                None,
-                &[],
-                DRIVER_READ,
+                "auto",
+                DRIVER_SEEDED,
                 "rc01.db",
                 "rc01",
-            ),
-            ApprovedCase::claude_file(
+            )
+            .file(DRIVER_READ),
+            ApprovedCase::claude(
                 "claude-read-outside-long-001",
-                None,
-                &[],
-                FileProbe::Read {
-                    probe: DRIVER_LONG_READ_PROBE,
-                },
+                "auto",
+                DRIVER_SEEDED,
                 "rl01.db",
                 "rl01",
-            ),
-            ApprovedCase::claude_file(
+            )
+            .file(FileProbe::Read {
+                probe: DRIVER_LONG_READ_PROBE,
+            }),
+            ApprovedCase::claude(
                 "claude-read-outside-allow-001",
-                Some("allow"),
-                &["34"],
-                DRIVER_READ,
+                "auto",
+                DRIVER_SEEDED,
                 "ra01.db",
                 "ra01",
-            ),
-            ApprovedCase::claude_file(
+            )
+            .file(DRIVER_READ)
+            .answer("allow", &["34"], "claude-read-outside-cells-001"),
+            ApprovedCase::claude(
                 "claude-read-outside-deny-001",
-                Some("deny"),
-                &["33"],
-                DRIVER_READ,
+                "auto",
+                DRIVER_SEEDED,
                 "rd01.db",
                 "rd01",
-            ),
-            ApprovedCase::claude_file(
+            )
+            .file(DRIVER_READ)
+            .answer("deny", &["33"], "claude-read-outside-cells-001"),
+            ApprovedCase::claude(
                 "claude-edit-outside-cells-001",
-                None,
-                &[],
-                FileProbe::Edit,
+                "auto",
+                DRIVER_SEEDED,
                 "ec01.db",
                 "ec01",
-            ),
-            ApprovedCase::claude_file(
+            )
+            .file(FileProbe::Edit),
+            ApprovedCase::claude(
                 "claude-write-outside-cells-001",
-                None,
-                &[],
-                FileProbe::Write,
+                "auto",
+                DRIVER_SEEDED,
                 "wc01.db",
                 "wc01",
-            ),
-            ApprovedCase::claude_file(
+            )
+            .file(FileProbe::Write),
+            ApprovedCase::claude(
                 "claude-glob-outside-cells-001",
-                None,
-                &[],
-                FileProbe::Glob,
+                "auto",
+                DRIVER_SEEDED,
                 "gc01.db",
                 "gc01",
-            ),
-            ApprovedCase::claude_file(
+            )
+            .file(FileProbe::Glob),
+            ApprovedCase::claude(
                 "claude-grep-outside-cells-001",
-                None,
-                &[],
-                FileProbe::Grep,
+                "auto",
+                DRIVER_SEEDED,
                 "sc01.db",
                 "sc01",
+            )
+            .file(FileProbe::Grep),
+            ApprovedCase::claude(
+                "claude-auto-default-cells-001",
+                "auto",
+                DRIVER_AUTO_DEFAULT_SETTINGS,
+                "dc01.db",
+                "dc01",
             ),
+            ApprovedCase::claude(
+                "claude-auto-default-decline-001",
+                "auto",
+                DRIVER_AUTO_DEFAULT_SETTINGS,
+                "dd01.db",
+                "dd01",
+            )
+            .choice(
+                NudgeChoice::AutoDefaultDecline,
+                "claude-auto-default-cells-001",
+            ),
+            ApprovedCase::claude(
+                "claude-auto-default-accept-edits-cells-001",
+                "auto",
+                ClaudeConfigCase::Seeded {
+                    settings: r#"{"permissions":{"defaultMode":"acceptEdits"}}"#,
+                    global: "{}",
+                },
+                "de01.db",
+                "de01",
+            ),
+            ApprovedCase::claude(
+                "claude-question-pending-cells-001",
+                "auto",
+                DRIVER_AUTO_DEFAULT_SETTINGS,
+                "qp01.db",
+                "qp01",
+            ),
+            ApprovedCase::claude(
+                "claude-question-pending-cells-002",
+                "auto",
+                DRIVER_AUTO_DEFAULT_SETTINGS,
+                "qp02.db",
+                "qp02",
+            ),
+            ApprovedCase::claude(
+                "claude-auto-env-setup-cells-001",
+                "auto",
+                DRIVER_ENV_SETUP_GLOBAL,
+                "bc01.db",
+                "bc01",
+            ),
+            ApprovedCase::claude(
+                "claude-auto-env-setup-not-now-001",
+                "auto",
+                DRIVER_ENV_SETUP_GLOBAL,
+                "bn01.db",
+                "bn01",
+            )
+            .choice(
+                NudgeChoice::EnvSetupNotNow,
+                "claude-auto-env-setup-cells-001",
+            ),
+            ApprovedCase::claude(
+                "claude-auto-env-setup-dont-show-again-001",
+                "auto",
+                DRIVER_ENV_SETUP_GLOBAL,
+                "bs01.db",
+                "bs01",
+            )
+            .choice(
+                NudgeChoice::EnvSetupDontShowAgain,
+                "claude-auto-env-setup-cells-001",
+            ),
+            ApprovedCase::claude(
+                "claude-primary-auto-tip-cells-001",
+                "default",
+                ClaudeConfigCase::Fresh { settings: "{}" },
+                "pt01.db",
+                "pt01",
+            )
+            .bash("allow"),
+            ApprovedCase::claude(
+                "claude-primary-auto-default-cells-001",
+                "auto",
+                ClaudeConfigCase::Fresh {
+                    settings: r#"{"permissions":{"defaultMode":"default"}}"#,
+                },
+                "pd01.db",
+                "pd01",
+            ),
+            ApprovedCase::claude(
+                "claude-read-file-cells-001",
+                "default",
+                DRIVER_SEEDED,
+                "frc1.db",
+                "frc1",
+            )
+            .file(DRIVER_READ),
+            ApprovedCase::claude(
+                "claude-read-file-allow-001",
+                "default",
+                DRIVER_SEEDED,
+                "fra1.db",
+                "fra1",
+            )
+            .file(DRIVER_READ)
+            .answer("allow", &["31"], "claude-read-file-cells-001"),
+            ApprovedCase::claude(
+                "claude-read-file-deny-001",
+                "default",
+                DRIVER_SEEDED,
+                "frd1.db",
+                "frd1",
+            )
+            .file(DRIVER_READ)
+            .answer("deny", &["33"], "claude-read-file-cells-001"),
+            ApprovedCase::claude(
+                "claude-edit-file-cells-001",
+                "default",
+                DRIVER_EDIT_READ_ALLOWED,
+                "fec1.db",
+                "fec1",
+            )
+            .file(FileProbe::Edit),
+            ApprovedCase::claude(
+                "claude-edit-file-allow-001",
+                "default",
+                DRIVER_EDIT_READ_ALLOWED,
+                "fea1.db",
+                "fea1",
+            )
+            .file(FileProbe::Edit)
+            .answer("allow", &["31"], "claude-edit-file-cells-001"),
+            ApprovedCase::claude(
+                "claude-edit-file-deny-001",
+                "default",
+                DRIVER_EDIT_READ_ALLOWED,
+                "fed1.db",
+                "fed1",
+            )
+            .file(FileProbe::Edit)
+            .answer("deny", &["33"], "claude-edit-file-cells-001"),
+            ApprovedCase::claude(
+                "claude-create-file-cells-001",
+                "default",
+                DRIVER_SEEDED,
+                "fcc1.db",
+                "fcc1",
+            )
+            .file(FileProbe::Write),
+            ApprovedCase::claude(
+                "claude-create-file-allow-001",
+                "default",
+                DRIVER_SEEDED,
+                "fca1.db",
+                "fca1",
+            )
+            .file(FileProbe::Write)
+            .answer("allow", &["31"], "claude-create-file-cells-001"),
+            ApprovedCase::claude(
+                "claude-create-file-deny-001",
+                "default",
+                DRIVER_SEEDED,
+                "fcd1.db",
+                "fcd1",
+            )
+            .file(FileProbe::Write)
+            .answer("deny", &["33"], "claude-create-file-cells-001"),
+            ApprovedCase::claude(
+                "claude-bash-no-tip-cells-001",
+                "default",
+                DRIVER_NO_TIP_SETTINGS,
+                "ntc1.db",
+                "ntc1",
+            )
+            .bash("allow"),
+            ApprovedCase::claude(
+                "claude-bash-no-tip-allow-001",
+                "default",
+                DRIVER_NO_TIP_SETTINGS,
+                "nta1.db",
+                "nta1",
+            )
+            .bash("allow")
+            .answer("allow", &["31"], "claude-bash-no-tip-cells-001"),
+            ApprovedCase::claude(
+                "claude-bash-no-tip-deny-001",
+                "default",
+                DRIVER_NO_TIP_SETTINGS,
+                "ntd1.db",
+                "ntd1",
+            )
+            .bash("deny")
+            .answer("deny", &["33"], "claude-bash-no-tip-cells-001"),
+            ApprovedCase::claude(
+                "claude-panel-auto-tip-cells-001",
+                "default",
+                DRIVER_PANEL_SETTINGS,
+                "pc01.db",
+                "pc01",
+            )
+            .bash("allow")
+            .panel(DRIVER_PANEL_SIZE),
+            ApprovedCase::claude(
+                "claude-panel-auto-tip-cells-002",
+                "default",
+                DRIVER_PANEL_SETTINGS,
+                "pc02.db",
+                "pc02",
+            )
+            .bash("allow")
+            .panel(DRIVER_PANEL_MIN_SIZE),
+            ApprovedCase::claude(
+                "claude-panel-auto-tip-allow-001",
+                "default",
+                DRIVER_PANEL_SETTINGS,
+                "pa01.db",
+                "pa01",
+            )
+            .bash("allow")
+            .panel(DRIVER_PANEL_SIZE)
+            .answer("allow", &["31"], "claude-panel-auto-tip-cells-001"),
         ];
         const DRIVER_READ: FileProbe = FileProbe::Read { probe: "probe.txt" };
         impl ApprovedCase {
@@ -6566,61 +6977,171 @@ pub(crate) mod native_capture {
                     file_probe: None,
                     database,
                     socket,
+                    claude_config: None,
+                    nudge: None,
+                    baseline: None,
+                    panel_probe: false,
                     size,
                 }
             }
-            const fn claude_file(
+            const fn claude(
                 id: &'static str,
-                decision: Option<&'static str>,
-                stage_hex: &'static [&'static str],
-                file_probe: FileProbe,
+                permission_mode: &'static str,
+                claude_config: ClaudeConfigCase,
                 database: &'static str,
                 socket: &'static str,
             ) -> Self {
                 Self {
                     id,
                     backend: CodingAgent::Claude,
-                    permission_mode: "auto",
-                    mode: if decision.is_some() {
-                        DriverMode::AnswerStage
-                    } else {
-                        DriverMode::NoAnswer
-                    },
-                    decision,
+                    permission_mode,
+                    mode: DriverMode::NoAnswer,
+                    decision: None,
                     prefix_hex: &[],
-                    stage_hex,
+                    stage_hex: &[],
                     probe_argument: None,
-                    file_probe: Some(file_probe),
+                    file_probe: None,
                     database,
                     socket,
+                    claude_config: Some(claude_config),
+                    nudge: None,
+                    baseline: None,
+                    panel_probe: false,
                     size: DRIVER_FULL_SIZE,
                 }
+            }
+            const fn file(mut self, file_probe: FileProbe) -> Self {
+                self.file_probe = Some(file_probe);
+                self
+            }
+            const fn bash(mut self, argument: &'static str) -> Self {
+                self.probe_argument = Some(argument);
+                self
+            }
+            const fn panel(mut self, size: TerminalSize) -> Self {
+                self.panel_probe = true;
+                self.size = size;
+                self
+            }
+            const fn answer(
+                mut self,
+                decision: &'static str,
+                stage_hex: &'static [&'static str],
+                baseline: &'static str,
+            ) -> Self {
+                self.mode = DriverMode::AnswerStage;
+                self.decision = Some(decision);
+                self.stage_hex = stage_hex;
+                self.baseline = Some(baseline);
+                self
+            }
+            const fn choice(mut self, nudge: NudgeChoice, baseline: &'static str) -> Self {
+                self.mode = DriverMode::AnswerStage;
+                self.stage_hex = nudge.stage_hex();
+                self.nudge = Some(nudge);
+                self.baseline = Some(baseline);
+                self
+            }
+            fn validate(&self) -> Result<()> {
+                ensure(
+                    (self.mode == DriverMode::NoAnswer)
+                        == (self.prefix_hex.is_empty() && self.stage_hex.is_empty())
+                        && self
+                            .prefix_hex
+                            .iter()
+                            .chain(self.stage_hex)
+                            .all(|stage| stage.as_bytes().chunks(2).all(|byte| byte != b"1b")),
+                    "reviewed case stages differ from its driver mode or contain Escape",
+                )?;
+                if self.file_probe.is_some() {
+                    match self.permission_mode {
+                        "auto" => ensure(
+                            self.stage_hex.iter().all(|stage| {
+                                stage.as_bytes().chunks(2).all(|byte| {
+                                    !matches!(byte, b"31" | b"32" | b"0d" | b"0a" | b"09")
+                                })
+                            }),
+                            "a file-tool case stage selects a persistent choice, Enter or Tab",
+                        )?,
+                        "default" => ensure(
+                            self.stage_hex
+                                .iter()
+                                .all(|stage| matches!(*stage, "31" | "33")),
+                            "a default-mode file-tool case may send only 31 or 33",
+                        )?,
+                        _ => {
+                            return Err(error("a file-tool case runs in auto or default mode"));
+                        }
+                    }
+                }
+                if let Some(nudge) = self.nudge {
+                    ensure(
+                        self.stage_hex == nudge.stage_hex()
+                            && self.prefix_hex.is_empty()
+                            && self.decision.is_none()
+                            && self.file_probe.is_none()
+                            && self.probe_argument.is_none(),
+                        "a nudge case sends exactly its dismissal stages",
+                    )?;
+                }
+                let Some(config) = self.claude_config else {
+                    return ensure(
+                        self.file_probe.is_none()
+                            && self.nudge.is_none()
+                            && self.baseline.is_none()
+                            && !self.panel_probe,
+                        "file-tool, nudge, baseline and sidebar cases own a Claude configuration",
+                    );
+                };
+                ensure(
+                    self.backend == CodingAgent::Claude,
+                    "a configured case runs Claude",
+                )?;
+                let [settings, global] = config.overlays();
+                let outside = self.outside_directory();
+                let cwd = Path::new(DRIVER_NEUTRAL_ROOT).join(self.id);
+                driver_settings_overlay(settings, &cwd, outside.as_deref())?;
+                driver_overlay(global, &cwd, outside.as_deref())?;
+                ensure(
+                    !matches!(config, ClaudeConfigCase::Fresh { .. })
+                        || self.mode == DriverMode::NoAnswer,
+                    "a fresh onboarding case answers nothing",
+                )?;
+                match (self.mode == DriverMode::AnswerStage, self.baseline) {
+                    (true, Some(baseline)) => {
+                        let baseline = APPROVED_CASES
+                            .iter()
+                            .find(|case| case.id == baseline)
+                            .ok_or_else(|| error("a baseline names an unreviewed case"))?;
+                        ensure(
+                            baseline.mode == DriverMode::NoAnswer
+                                && baseline.claude_config == self.claude_config
+                                && baseline.permission_mode == self.permission_mode,
+                            "a baseline is a no-answer case with the same configuration and mode",
+                        )?;
+                    }
+                    (false, None) => {}
+                    _ => {
+                        return Err(error(
+                            "exactly every configured answer case names its baseline",
+                        ));
+                    }
+                }
+                ensure(
+                    !self.panel_probe
+                        || (self.file_probe.is_none()
+                            && self.probe_argument.is_some()
+                            && (self.size == DRIVER_PANEL_SIZE
+                                || self.size == DRIVER_PANEL_MIN_SIZE)),
+                    "a sidebar case runs the Bash probe at a sidebar size",
+                )
             }
             fn select(case: &DriverCase) -> Result<&'static Self> {
                 let approved = APPROVED_CASES
                     .iter()
                     .find(|approved| approved.id == case.case_id)
                     .ok_or_else(|| error("unreviewed native case"))?;
-                ensure(
-                    (approved.mode == DriverMode::NoAnswer)
-                        == (approved.prefix_hex.is_empty() && approved.stage_hex.is_empty())
-                        && approved
-                            .prefix_hex
-                            .iter()
-                            .chain(approved.stage_hex)
-                            .all(|stage| stage.as_bytes().chunks(2).all(|byte| byte != b"1b")),
-                    "reviewed case stages differ from its driver mode or contain Escape",
-                )?;
-                ensure(
-                    approved.file_probe.is_none()
-                        || approved.stage_hex.iter().all(|stage| {
-                            stage
-                                .as_bytes()
-                                .chunks(2)
-                                .all(|byte| !matches!(byte, b"31" | b"32" | b"0d" | b"0a" | b"09"))
-                        }),
-                    "a file-tool case stage selects a persistent choice, Enter or Tab",
-                )?;
+                approved.validate()?;
                 let (mode, window) = match approved.mode {
                     DriverMode::NoAnswer => ("no_answer", 0),
                     DriverMode::AnswerStage => ("answer_stage", DRIVER_ANSWER_WINDOW_MS),
@@ -6657,16 +7178,16 @@ pub(crate) mod native_capture {
                     .map(|_| Path::new(DRIVER_NEUTRAL_ROOT).join(format!("{}-outside", self.id)))
             }
             fn claude_config_directory(&self) -> Option<PathBuf> {
-                self.file_probe
+                self.claude_config
                     .map(|_| Path::new(DRIVER_PRIVATE_ROOT).join(format!("{}-claude", self.id)))
             }
-            // File-tool cases run on a native version outside the explicit-mode catalog, so they
-            // launch under the omitted default, which resolves to their `permission_mode`.
             fn requested_mode(&self) -> Option<&'static str> {
-                match self.file_probe {
-                    Some(_) => None,
-                    None => Some(self.permission_mode),
-                }
+                let default = self
+                    .backend
+                    .resolve_policy(None, None)
+                    .expect("an omitted launch policy always resolves")
+                    .resolved_mode;
+                (self.permission_mode != default).then_some(self.permission_mode)
             }
             fn member_name(&self) -> String {
                 format!("cafleet-194-{}", self.id)
@@ -6679,7 +7200,7 @@ pub(crate) mod native_capture {
                     .and_then(|argument| argument.split(' ').next())
                     .map(|label| format!("{label}.executed"))
             }
-            fn prompt(&self, helper: Option<&Path>) -> String {
+            fn prompt(&self, cwd: &Path, helper: Option<&Path>) -> String {
                 if let (Some(probe), Some(outside)) = (self.file_probe, self.outside_directory()) {
                     return format!(
                         "Use the {} tool to {} on exactly {}. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
@@ -6689,6 +7210,13 @@ pub(crate) mod native_capture {
                     );
                 }
                 let helper = helper.expect("a shell-probe case binds its helper");
+                if let (true, Some(argument)) = (self.panel_probe, self.probe_argument) {
+                    return format!(
+                        "Use the Edit tool to replace the text before with after in the file {}. Then use Bash to attempt exactly {} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
+                        cwd.join(DRIVER_PANEL_PROBE).display(),
+                        helper.display()
+                    );
+                }
                 match (self.probe_argument, self.backend) {
                     (Some(argument), CodingAgent::Codex) => format!(
                         "Use the shell tool to run exactly {} {argument} as one command with sandbox_permissions set to require_escalated and the justification \"CAFleet permission probe\". Preserve any native approval request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
@@ -7211,7 +7739,10 @@ pub(crate) mod native_capture {
                 policy.resolved_mode == approved.permission_mode,
                 "resolved native policy differs from the reviewed case",
             )?;
-            let prompt = approved.prompt(case.helper.as_ref().map(|helper| helper.path.as_path()));
+            let prompt = approved.prompt(
+                &case.cwd,
+                case.helper.as_ref().map(|helper| helper.path.as_path()),
+            );
             let mut argv = approved.backend.build_spawn_argv_with_policy(
                 &prompt,
                 &approved.member_name(),
@@ -7370,92 +7901,176 @@ pub(crate) mod native_capture {
             Ok(Value::Object(state))
         }
 
-        fn driver_seed_configuration(case: &DriverCase) -> Result<Vec<(&'static str, Vec<u8>)>> {
-            let seed = Path::new(DRIVER_PRIVATE_ROOT).join(DRIVER_CLAUDE_SEED);
+        struct DriverSeed {
+            credentials: Vec<u8>,
+            global: Map<String, Value>,
+            settings: Map<String, Value>,
+        }
+        fn driver_validated_seed(
+            credentials: Vec<u8>,
+            global: &[u8],
+            settings: &[u8],
+            local_settings_present: bool,
+        ) -> Result<DriverSeed> {
             ensure(
-                !seed
-                    .join("settings.local.json")
-                    .try_exists()
-                    .map_err(io_error)?,
+                !local_settings_present,
                 "the Claude seed configuration must hold no local settings file",
             )?;
-            let settings = crate::runtime::observation::native_capture::files::read_private(
-                &seed.join("settings.json"),
-                4096,
-            )?;
-            let theme_only: Value = serde_json::from_slice(&settings).map_err(io_error)?;
+            let settings = match serde_json::from_slice(settings).map_err(io_error)? {
+                Value::Object(object)
+                    if object.len() == 1 && object.get("theme").is_some_and(Value::is_string) =>
+                {
+                    object
+                }
+                _ => {
+                    return Err(error(
+                        "the seed settings.json must be exactly a theme-only object",
+                    ));
+                }
+            };
+            let Value::Object(global) = serde_json::from_slice(global).map_err(io_error)? else {
+                return Err(error("seed .claude.json must be an object"));
+            };
             ensure(
-                theme_only
-                    .as_object()
-                    .is_some_and(|object| object.len() == 1 && object["theme"].is_string()),
-                "the seed settings.json must be exactly a theme-only object",
+                !global.contains_key("hasSeenAutoDefaultNudge")
+                    && !global.contains_key("autoModeEnvSetup"),
+                "the seed .claude.json must hold no auto-mode nudge state",
             )?;
-            let credentials = crate::runtime::observation::native_capture::files::read_private(
-                &seed.join(".credentials.json"),
-                65536,
+            Ok(DriverSeed {
+                credentials,
+                global,
+                settings,
+            })
+        }
+        fn driver_read_seed() -> Result<DriverSeed> {
+            let seed = Path::new(DRIVER_PRIVATE_ROOT).join(DRIVER_CLAUDE_SEED);
+            let read = |name: &str, limit: usize| {
+                crate::runtime::observation::native_capture::files::read_private(
+                    &seed.join(name),
+                    limit,
+                )
+            };
+            driver_validated_seed(
+                read(".credentials.json", 65536)?,
+                &read(".claude.json", 4 * 1024 * 1024)?,
+                &read("settings.json", 4096)?,
+                seed.join("settings.local.json")
+                    .try_exists()
+                    .map_err(io_error)?,
+            )
+        }
+
+        fn driver_overlay(
+            overlay: &str,
+            cwd: &Path,
+            outside: Option<&Path>,
+        ) -> Result<Map<String, Value>> {
+            fn expand(value: &mut Value, cwd: &str, outside: Option<&str>) -> Result<()> {
+                match value {
+                    Value::String(text) => {
+                        if text.contains("{outside}") {
+                            let outside = outside.ok_or_else(|| {
+                                error("an overlay names {outside} without a file probe")
+                            })?;
+                            *text = text.replace("{outside}", outside);
+                        }
+                        *text = text.replace("{cwd}", cwd);
+                        Ok(())
+                    }
+                    Value::Array(items) => items
+                        .iter_mut()
+                        .try_for_each(|item| expand(item, cwd, outside)),
+                    Value::Object(object) => object
+                        .values_mut()
+                        .try_for_each(|item| expand(item, cwd, outside)),
+                    _ => Ok(()),
+                }
+            }
+            let Value::Object(mut object) = serde_json::from_str(overlay).map_err(io_error)? else {
+                return Err(error("a configuration overlay is a JSON object"));
+            };
+            let outside = outside.map(|path| path.to_string_lossy().into_owned());
+            object
+                .values_mut()
+                .try_for_each(|value| expand(value, &cwd.to_string_lossy(), outside.as_deref()))?;
+            Ok(object)
+        }
+        fn driver_settings_overlay(
+            overlay: &str,
+            cwd: &Path,
+            outside: Option<&Path>,
+        ) -> Result<Map<String, Value>> {
+            let overlay = driver_overlay(overlay, cwd, outside)?;
+            ensure(
+                overlay
+                    .keys()
+                    .all(|key| matches!(key.as_str(), "tui" | "permissions")),
+                "a settings overlay may hold only tui and permissions",
             )?;
-            let global = crate::runtime::observation::native_capture::files::read_private(
-                &seed.join(".claude.json"),
-                4 * 1024 * 1024,
-            )?;
-            let mut global: Value = serde_json::from_slice(&global).map_err(io_error)?;
+            Ok(overlay)
+        }
+        fn driver_claude_files(
+            config: ClaudeConfigCase,
+            seed: DriverSeed,
+            cwd: &Path,
+            outside: Option<&Path>,
+        ) -> Result<Vec<(&'static str, Vec<u8>)>> {
+            let [settings_overlay, global_overlay] = config.overlays();
+            let settings_overlay = driver_settings_overlay(settings_overlay, cwd, outside)?;
+            let encode =
+                |object: Map<String, Value>| serde_json::to_vec_pretty(&object).map_err(io_error);
+            if let ClaudeConfigCase::Fresh { .. } = config {
+                return Ok(vec![
+                    (".credentials.json", seed.credentials),
+                    ("settings.json", encode(settings_overlay)?),
+                ]);
+            }
+            let mut global = seed.global;
             let projects = global
-                .as_object_mut()
-                .ok_or_else(|| error("seed .claude.json must be an object"))?
                 .entry("projects")
                 .or_insert_with(|| json!({}))
                 .as_object_mut()
                 .ok_or_else(|| error("seed projects must be an object"))?;
+            let cwd_key = cwd.to_string_lossy().into_owned();
             ensure(
-                !projects.contains_key(case.cwd.to_string_lossy().as_ref()),
+                !projects.contains_key(&cwd_key),
                 "the seed already names the case cwd",
             )?;
-            projects.insert(
-                case.cwd.to_string_lossy().into_owned(),
-                json!({"hasTrustDialogAccepted": true}),
-            );
+            projects.insert(cwd_key, json!({"hasTrustDialogAccepted": true}));
+            global.extend(driver_overlay(global_overlay, cwd, outside)?);
+            let mut settings = seed.settings;
+            settings.extend(settings_overlay);
             Ok(vec![
-                (".credentials.json", credentials),
-                (
-                    ".claude.json",
-                    serde_json::to_vec_pretty(&global).map_err(io_error)?,
-                ),
-                ("settings.json", settings),
+                (".credentials.json", seed.credentials),
+                (".claude.json", encode(global)?),
+                ("settings.json", encode(settings)?),
             ])
         }
 
+        // The credentials file refreshes its token on its own schedule and holds no setting.
         fn driver_config_snapshot(directory: &Path) -> Result<BTreeMap<String, Value>> {
-            fn visit(
-                root: &Path,
-                directory: &Path,
-                snapshot: &mut BTreeMap<String, Value>,
-            ) -> Result<()> {
-                for entry in std::fs::read_dir(directory).map_err(io_error)? {
-                    let path = entry.map_err(io_error)?.path();
-                    let metadata = std::fs::symlink_metadata(&path).map_err(io_error)?;
-                    if metadata.is_dir() {
-                        visit(root, &path, snapshot)?;
-                    } else if path
-                        .extension()
-                        .is_some_and(|extension| extension == "json")
-                    {
-                        let bytes = std::fs::read(&path).map_err(io_error)?;
-                        let value = serde_json::from_slice(&bytes).unwrap_or_else(
-                            |_| json!({"unparsed_sha256": crate::digest::sha256_hex(&bytes)}),
-                        );
-                        snapshot.insert(
-                            path.strip_prefix(root)
-                                .expect("entries lie below the configuration")
-                                .to_string_lossy()
-                                .into_owned(),
-                            value,
-                        );
-                    }
-                }
-                Ok(())
-            }
             let mut snapshot = BTreeMap::new();
-            visit(directory, directory, &mut snapshot)?;
+            for entry in std::fs::read_dir(directory).map_err(io_error)? {
+                let path = entry.map_err(io_error)?.path();
+                let name = path
+                    .file_name()
+                    .expect("directory entries are named")
+                    .to_string_lossy()
+                    .into_owned();
+                if name == ".credentials.json"
+                    || !name.ends_with(".json")
+                    || !std::fs::symlink_metadata(&path)
+                        .map_err(io_error)?
+                        .is_file()
+                {
+                    continue;
+                }
+                let bytes = std::fs::read(&path).map_err(io_error)?;
+                let value = serde_json::from_slice(&bytes).unwrap_or_else(
+                    |_| json!({"unparsed_sha256": crate::digest::sha256_hex(&bytes)}),
+                );
+                snapshot.insert(name, value);
+            }
             Ok(snapshot)
         }
 
@@ -7483,17 +8098,14 @@ pub(crate) mod native_capture {
                 _ => {}
             }
         }
-
-        fn driver_persistent_setting_check(
-            case: &DriverCase,
-            approved: &ApprovedCase,
+        fn driver_changed_configuration(
             before: &BTreeMap<String, Value>,
-        ) -> Result<()> {
-            let config = approved
-                .claude_config_directory()
-                .expect("file-tool cases own a private configuration");
-            let after = driver_config_snapshot(&config)?;
-            let cwd = case.cwd.to_string_lossy().into_owned();
+            after: &BTreeMap<String, Value>,
+            cwd: &Path,
+            outside: Option<&Path>,
+        ) -> BTreeSet<Vec<String>> {
+            let cwd = cwd.to_string_lossy();
+            let outside = outside.map(|path| path.to_string_lossy().into_owned());
             let mut changed = Vec::new();
             for file in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
                 let mut path = vec![file.clone()];
@@ -7504,20 +8116,81 @@ pub(crate) mod native_capture {
                     &mut changed,
                 );
             }
-            let changed: Vec<Vec<String>> = changed
+            changed
                 .into_iter()
                 .map(|path| {
                     path.into_iter()
                         .map(|segment| {
                             if segment == cwd {
                                 "<cwd>".into()
+                            } else if outside.as_ref() == Some(&segment) {
+                                "<outside>".into()
                             } else {
                                 segment
                             }
                         })
                         .collect()
                 })
-                .collect();
+                .collect()
+        }
+        fn driver_compare_configuration(
+            changed: &BTreeSet<Vec<String>>,
+            baseline: &BTreeSet<Vec<String>>,
+            documented: Option<DocumentedChange>,
+            after: &BTreeMap<String, Value>,
+        ) -> Result<()> {
+            let mut expected = baseline.clone();
+            if let Some(change) = documented {
+                let (file, keys) = change
+                    .key_path
+                    .split_first()
+                    .expect("a documented change names its file");
+                let value = after
+                    .get(*file)
+                    .and_then(|object| object.pointer(&format!("/{}", keys.join("/"))));
+                ensure(
+                    match change.value {
+                        ChangedTo::True => value == Some(&Value::Bool(true)),
+                        ChangedTo::Set => value.is_some_and(|value| !value.is_null()),
+                    },
+                    "the answer's documented configuration change is absent",
+                )?;
+                expected.insert(change.key_path.iter().map(|key| (*key).into()).collect());
+            }
+            ensure(
+                changed == &expected,
+                "changed configuration key paths differ from the baseline plus the documented change",
+            )
+        }
+        const DRIVER_CONFIG_CHECK: &str = "claude-config-check.json";
+        fn driver_baseline_changes(baseline: &str) -> Result<BTreeSet<Vec<String>>> {
+            let check: Value = driver_read(
+                &Path::new(DRIVER_NEUTRAL_ROOT)
+                    .join(baseline)
+                    .join(DRIVER_CONFIG_CHECK),
+            )?;
+            ensure(
+                check["schema_version"] == 1 && check["case_id"] == baseline,
+                "the baseline configuration check binding differs",
+            )?;
+            serde_json::from_value(check["changed_key_paths"].clone()).map_err(io_error)
+        }
+
+        fn driver_persistent_setting_check(
+            case: &DriverCase,
+            approved: &ApprovedCase,
+            before: &BTreeMap<String, Value>,
+        ) -> Result<()> {
+            let config = approved
+                .claude_config_directory()
+                .expect("configured cases own a private configuration");
+            let after = driver_config_snapshot(&config)?;
+            let changed = driver_changed_configuration(
+                before,
+                &after,
+                &case.cwd,
+                approved.outside_directory().as_deref(),
+            );
             let mut settings_files = Vec::new();
             let project = case.cwd.join(".claude");
             for path in [
@@ -7529,11 +8202,137 @@ pub(crate) mod native_capture {
                     settings_files.push(path);
                 }
             }
+            let baseline = approved.baseline.map(driver_baseline_changes).transpose();
+            let documented = approved.nudge.map(NudgeChoice::documented_change);
             driver_publish(
-                &case.cwd.join("claude-config-check.json"),
+                &case.cwd.join(DRIVER_CONFIG_CHECK),
                 &json!({"schema_version":1,"case_id":approved.id,"changed_key_paths":changed,
+                    "baseline_case_id":approved.baseline,
+                    "baseline_changed_key_paths":baseline.as_ref().ok(),
+                    "baseline_error":baseline.as_ref().err().map(|e|e.message().into_owned()),
+                    "documented_change":documented.map(|change| change.key_path),
                     "settings_files":settings_files}),
                 Instant::now() + Duration::from_secs(5),
+            )?;
+            ensure(
+                settings_files.is_empty(),
+                "a settings file other than the configuration settings.json appeared",
+            )?;
+            match baseline? {
+                Some(baseline) => {
+                    driver_compare_configuration(&changed, &baseline, documented, &after)
+                }
+                None => Ok(()),
+            }
+        }
+
+        fn driver_create_panel_repository(
+            case: &DriverCase,
+            approved: &ApprovedCase,
+        ) -> Result<()> {
+            if !approved.panel_probe {
+                return Ok(());
+            }
+            driver_private_file(
+                &case.cwd.join(DRIVER_PANEL_COMMITTED),
+                b"cafleet diff sidebar repository\n",
+            )?;
+            for arguments in [
+                &["init", "--quiet"][..],
+                &["add", DRIVER_PANEL_COMMITTED],
+                &[
+                    "-c",
+                    "user.name=cafleet",
+                    "-c",
+                    "user.email=cafleet@invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "sidebar probe base",
+                ],
+            ] {
+                let status = std::process::Command::new("git")
+                    .args(arguments)
+                    .current_dir(&case.cwd)
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map_err(io_error)?;
+                ensure(status.success(), "the sidebar repository setup failed")?;
+            }
+            driver_private_file(
+                &case.cwd.join(DRIVER_PANEL_PROBE),
+                DRIVER_EDIT_TARGET_CONTENT.as_bytes(),
+            )
+        }
+
+        fn driver_panel_separator_column(screen: &vt100::Screen) -> Option<u16> {
+            let (rows, cols) = screen.size();
+            let (rows, cols) = (rows.get(), cols.get());
+            let mut shared = None;
+            for row in 0..rows {
+                let background = |col: u16| {
+                    screen
+                        .cell(row, col)
+                        .expect("cells lie on the screen")
+                        .bgcolor()
+                };
+                let separator = (40..cols.saturating_sub(1)).find(|&col| {
+                    screen
+                        .cell(row, col)
+                        .is_some_and(|cell| cell.contents() == "│")
+                        && background(col) != background(col - 1)
+                        && background(col) == background(col + 1)
+                });
+                match (shared, separator) {
+                    (_, None) => {}
+                    (None, Some(col)) => shared = Some(col),
+                    (Some(known), Some(col)) if known == col => {}
+                    (Some(_), Some(_)) => return None,
+                }
+            }
+            shared
+        }
+        fn driver_confirm_panel_separator(
+            case: &DriverCase,
+            approved: &ApprovedCase,
+            pane: &str,
+            until: Instant,
+        ) -> Result<()> {
+            let text = driver_tmux(case, &["capture-pane", "-p", "-e", "-N", "-t", pane], until)?;
+            let mut parser = vt100::Parser::new(
+                approved
+                    .size
+                    .rows
+                    .try_into()
+                    .expect("reviewed case rows are nonzero"),
+                approved
+                    .size
+                    .cols
+                    .try_into()
+                    .expect("reviewed case cols are nonzero"),
+                0,
+            );
+            parser.process(
+                text.strip_suffix('\n')
+                    .unwrap_or(&text)
+                    .replace('\n', "\r\n")
+                    .as_bytes(),
+            );
+            let column = driver_panel_separator_column(parser.screen());
+            driver_publish(
+                &case.cwd.join("panel-separator.json"),
+                &json!({"schema_version":1,"case_id":approved.id,"separator_column":column}),
+                until,
+            )?;
+            ensure(
+                column.is_some(),
+                "the diff sidebar separator is not visible before the capture",
             )
         }
 
@@ -7584,8 +8383,8 @@ pub(crate) mod native_capture {
                 }
                 None => {
                     ensure(
-                        approved.file_probe.is_some(),
-                        "answer-stage cases name their probe",
+                        approved.file_probe.is_some() || approved.nudge.is_some(),
+                        "answer-stage cases name their probe or nudge",
                     )?;
                     None
                 }
@@ -7731,6 +8530,9 @@ pub(crate) mod native_capture {
                         "armed geometry changed",
                     )?;
                     if armed_output_seq.is_none() {
+                        if approved.panel_probe {
+                            driver_confirm_panel_separator(case, approved, pane, work_until)?;
+                        }
                         armed_output_seq = Some(driver_output_seq(conn, launched, work_until)?);
                     }
                 }
@@ -7880,10 +8682,18 @@ pub(crate) mod native_capture {
                 "fresh case without probe markers or arm required",
             )?;
             driver_create_outside(&case, approved)?;
-            let Some(config) = approved.claude_config_directory() else {
+            driver_create_panel_repository(&case, approved)?;
+            let (Some(config), Some(claude_config)) =
+                (approved.claude_config_directory(), approved.claude_config)
+            else {
                 return driver_launch_case(&case, approved, &case_bytes, case_until, work_until);
             };
-            let files = driver_seed_configuration(&case)?;
+            let files = driver_claude_files(
+                claude_config,
+                driver_read_seed()?,
+                &case.cwd,
+                approved.outside_directory().as_deref(),
+            )?;
             driver_private_directory(&config)?;
             let outcome = files
                 .iter()
@@ -8153,6 +8963,765 @@ pub(crate) mod native_capture {
 
             use crate::runtime::observation::native_capture::verification::*;
             use crate::runtime::service::test_support::*;
+
+            mod driver {
+                use crate::runtime::observation::native_capture::verification::*;
+                use serde_json::Value;
+                use serde_json::json;
+                use std::collections::BTreeMap;
+                use std::collections::BTreeSet;
+                use std::path::Path;
+
+                fn configured(
+                    id: &'static str,
+                    permission_mode: &'static str,
+                    config: ClaudeConfigCase,
+                ) -> ApprovedCase {
+                    ApprovedCase::claude(id, permission_mode, config, "guard.db", "guard")
+                }
+                fn refused<T>(result: Result<T>) -> String {
+                    match result {
+                        Ok(_) => panic!("the driver accepted a refused input"),
+                        Err(cause) => cause.message().to_string(),
+                    }
+                }
+                fn paths(list: &[&[&str]]) -> BTreeSet<Vec<String>> {
+                    list.iter()
+                        .map(|path| path.iter().map(|key| (*key).to_owned()).collect())
+                        .collect()
+                }
+
+                #[test]
+                fn every_reviewed_case_passes_the_driver_guards_with_isolated_resources() {
+                    let mut ids = BTreeSet::new();
+                    let mut databases = BTreeSet::new();
+                    let mut sockets = BTreeSet::new();
+                    for approved in &APPROVED_CASES {
+                        if let Err(cause) = approved.validate() {
+                            panic!("{}: {}", approved.id, cause.message());
+                        }
+                        assert!(ids.insert(approved.id), "{}", approved.id);
+                        assert!(databases.insert(approved.database), "{}", approved.id);
+                        assert!(sockets.insert(approved.socket), "{}", approved.id);
+                    }
+                }
+
+                #[test]
+                fn auto_file_tool_stages_refuse_persistent_choices_enter_and_tab() {
+                    let base = || configured("guard-auto", "auto", DRIVER_SEEDED).file(DRIVER_READ);
+                    for stages in [&["33"][..], &["34"]] {
+                        base()
+                            .answer("deny", stages, "claude-read-outside-cells-001")
+                            .validate()
+                            .unwrap();
+                    }
+                    for stages in [&["31"][..], &["32"], &["0d"], &["0a"], &["09"], &["3431"]] {
+                        assert_eq!(
+                            refused(
+                                base()
+                                    .answer("allow", stages, "claude-read-outside-cells-001")
+                                    .validate()
+                            ),
+                            "a file-tool case stage selects a persistent choice, Enter or Tab",
+                            "{stages:?}"
+                        );
+                    }
+                }
+
+                #[test]
+                fn default_file_tool_stages_send_only_the_single_request_digits() {
+                    let base =
+                        || configured("guard-default", "default", DRIVER_SEEDED).file(DRIVER_READ);
+                    for (decision, stages) in [("allow", &["31"][..]), ("deny", &["33"])] {
+                        base()
+                            .answer(decision, stages, "claude-read-file-cells-001")
+                            .validate()
+                            .unwrap();
+                    }
+                    for stages in [&["32"][..], &["34"], &["0d"], &["31", "0d"], &["3133"]] {
+                        assert_eq!(
+                            refused(
+                                base()
+                                    .answer("allow", stages, "claude-read-file-cells-001")
+                                    .validate()
+                            ),
+                            "a default-mode file-tool case may send only 31 or 33",
+                            "{stages:?}"
+                        );
+                    }
+                    assert_eq!(
+                        refused(
+                            configured("guard-plan", "plan", DRIVER_SEEDED)
+                                .file(DRIVER_READ)
+                                .validate()
+                        ),
+                        "a file-tool case runs in auto or default mode"
+                    );
+                }
+
+                #[test]
+                fn nudge_cases_send_exactly_their_dismissal_stages_and_never_escape() {
+                    let decline = || {
+                        configured("guard-decline", "auto", DRIVER_AUTO_DEFAULT_SETTINGS).choice(
+                            NudgeChoice::AutoDefaultDecline,
+                            "claude-auto-default-cells-001",
+                        )
+                    };
+                    let decline_case = decline();
+                    decline_case.validate().unwrap();
+                    assert_eq!(decline_case.stage_hex, ["0e", "0d"]);
+                    for (choice, stages) in [
+                        (NudgeChoice::EnvSetupNotNow, ["32"]),
+                        (NudgeChoice::EnvSetupDontShowAgain, ["33"]),
+                    ] {
+                        let offer = configured("guard-offer", "auto", DRIVER_ENV_SETUP_GLOBAL)
+                            .choice(choice, "claude-auto-env-setup-cells-001");
+                        offer.validate().unwrap();
+                        assert_eq!(offer.stage_hex, stages);
+                    }
+                    for stages in [&["0d"][..], &["0e", "0e", "0d"], &["31"], &["0e"]] {
+                        let mut tampered = decline();
+                        tampered.stage_hex = stages;
+                        assert_eq!(
+                            refused(tampered.validate()),
+                            "a nudge case sends exactly its dismissal stages",
+                            "{stages:?}"
+                        );
+                    }
+                    let mut yes = configured("guard-offer", "auto", DRIVER_ENV_SETUP_GLOBAL)
+                        .choice(
+                            NudgeChoice::EnvSetupNotNow,
+                            "claude-auto-env-setup-cells-001",
+                        );
+                    yes.stage_hex = &["31"];
+                    assert_eq!(
+                        refused(yes.validate()),
+                        "a nudge case sends exactly its dismissal stages"
+                    );
+                    for stages in [&["1b"][..], &["0e", "1b5b42"]] {
+                        let mut escape = decline();
+                        escape.stage_hex = stages;
+                        assert_eq!(
+                            refused(escape.validate()),
+                            "reviewed case stages differ from its driver mode or contain Escape",
+                            "{stages:?}"
+                        );
+                    }
+                }
+
+                #[test]
+                fn configured_answer_cases_name_a_matching_no_answer_baseline() {
+                    let mut missing = configured("guard-bash", "default", DRIVER_NO_TIP_SETTINGS)
+                        .bash("allow")
+                        .answer("allow", &["31"], "claude-bash-no-tip-cells-001");
+                    missing.validate().unwrap();
+                    missing.baseline = None;
+                    assert_eq!(
+                        refused(missing.validate()),
+                        "exactly every configured answer case names its baseline"
+                    );
+                    let mut stray =
+                        configured("guard-bash", "default", DRIVER_NO_TIP_SETTINGS).bash("allow");
+                    stray.baseline = Some("claude-bash-no-tip-cells-001");
+                    assert_eq!(
+                        refused(stray.validate()),
+                        "exactly every configured answer case names its baseline"
+                    );
+                    for baseline in [
+                        "claude-bash-no-tip-allow-001",
+                        "claude-read-file-cells-001",
+                        "claude-panel-auto-tip-cells-001",
+                    ] {
+                        assert_eq!(
+                            refused(
+                                configured("guard-bash", "default", DRIVER_NO_TIP_SETTINGS)
+                                    .bash("allow")
+                                    .answer("allow", &["31"], baseline)
+                                    .validate()
+                            ),
+                            "a baseline is a no-answer case with the same configuration and mode",
+                            "{baseline}"
+                        );
+                    }
+                    assert_eq!(
+                        refused(
+                            configured("guard-bash", "default", DRIVER_NO_TIP_SETTINGS)
+                                .bash("allow")
+                                .answer("allow", &["31"], "unreviewed-baseline")
+                                .validate()
+                        ),
+                        "a baseline names an unreviewed case"
+                    );
+                }
+
+                #[test]
+                fn fresh_onboarding_cases_answer_nothing() {
+                    configured(
+                        "guard-fresh",
+                        "default",
+                        ClaudeConfigCase::Fresh { settings: "{}" },
+                    )
+                    .bash("allow")
+                    .validate()
+                    .unwrap();
+                    let mut answered = configured(
+                        "guard-fresh",
+                        "auto",
+                        ClaudeConfigCase::Fresh {
+                            settings: r#"{"permissions":{"defaultMode":"default"}}"#,
+                        },
+                    )
+                    .choice(
+                        NudgeChoice::AutoDefaultDecline,
+                        "claude-primary-auto-default-cells-001",
+                    );
+                    assert_eq!(
+                        refused(answered.validate()),
+                        "a fresh onboarding case answers nothing"
+                    );
+                    answered.baseline = None;
+                    assert_eq!(
+                        refused(answered.validate()),
+                        "a fresh onboarding case answers nothing"
+                    );
+                }
+
+                #[test]
+                fn sidebar_cases_run_the_bash_probe_at_a_sidebar_size() {
+                    for size in [DRIVER_PANEL_SIZE, DRIVER_PANEL_MIN_SIZE] {
+                        configured("guard-panel", "default", DRIVER_PANEL_SETTINGS)
+                            .bash("allow")
+                            .panel(size)
+                            .validate()
+                            .unwrap();
+                    }
+                    for case in [
+                        configured("guard-panel", "default", DRIVER_PANEL_SETTINGS)
+                            .bash("allow")
+                            .panel(DRIVER_FULL_SIZE),
+                        configured("guard-panel", "default", DRIVER_PANEL_SETTINGS)
+                            .panel(DRIVER_PANEL_SIZE),
+                    ] {
+                        assert_eq!(
+                            refused(case.validate()),
+                            "a sidebar case runs the Bash probe at a sidebar size"
+                        );
+                    }
+                }
+
+                #[test]
+                fn settings_overlays_hold_only_tui_and_permissions() {
+                    configured(
+                        "guard-settings",
+                        "auto",
+                        ClaudeConfigCase::Seeded {
+                            settings: r#"{"tui":"fullscreen","permissions":{"defaultMode":"default"}}"#,
+                            global: r#"{"numStartups":5}"#,
+                        },
+                    )
+                    .validate()
+                    .unwrap();
+                    for settings in [r#"{"theme":"dark"}"#, r#"{"permissions":{},"model":"x"}"#] {
+                        assert_eq!(
+                            refused(
+                                configured(
+                                    "guard-settings",
+                                    "auto",
+                                    ClaudeConfigCase::Seeded {
+                                        settings,
+                                        global: "{}"
+                                    },
+                                )
+                                .validate()
+                            ),
+                            "a settings overlay may hold only tui and permissions",
+                            "{settings}"
+                        );
+                    }
+                    assert_eq!(
+                        refused(
+                            configured(
+                                "guard-settings",
+                                "auto",
+                                ClaudeConfigCase::Fresh {
+                                    settings: r#"{"theme":"dark"}"#
+                                },
+                            )
+                            .validate()
+                        ),
+                        "a settings overlay may hold only tui and permissions"
+                    );
+                }
+
+                #[test]
+                fn overlay_placeholders_expand_to_the_absolute_case_directories() {
+                    let overlay = driver_overlay(
+                        r#"{"permissions":{"allow":["Read(/{outside}/**)","Edit(/{cwd}/panel-probe.txt)"],"defaultMode":"default"},"numStartups":5}"#,
+                        Path::new("/tmp/cafleet-194/case"),
+                        Some(Path::new("/tmp/cafleet-194/case-outside")),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        Value::Object(overlay),
+                        json!({"permissions":{"allow":["Read(//tmp/cafleet-194/case-outside/**)","Edit(//tmp/cafleet-194/case/panel-probe.txt)"],"defaultMode":"default"},"numStartups":5})
+                    );
+                    assert_eq!(
+                        refused(driver_overlay(
+                            r#"{"permissions":{"allow":["Read(/{outside}/**)"]}}"#,
+                            Path::new("/tmp/cafleet-194/case"),
+                            None,
+                        )),
+                        "an overlay names {outside} without a file probe"
+                    );
+                    for overlay in ["[]", r#""{cwd}""#, "5"] {
+                        assert_eq!(
+                            refused(driver_overlay(
+                                overlay,
+                                Path::new("/tmp/cafleet-194/case"),
+                                None
+                            )),
+                            "a configuration overlay is a JSON object",
+                            "{overlay}"
+                        );
+                    }
+                }
+
+                #[test]
+                fn an_outside_placeholder_without_a_file_probe_refuses_the_case() {
+                    let outside = ClaudeConfigCase::Seeded {
+                        settings: r#"{"permissions":{"allow":["Read(/{outside}/**)"]}}"#,
+                        global: "{}",
+                    };
+                    assert_eq!(
+                        refused(
+                            configured("guard-outside", "default", outside)
+                                .bash("allow")
+                                .validate()
+                        ),
+                        "an overlay names {outside} without a file probe"
+                    );
+                    configured("guard-outside", "default", outside)
+                        .file(FileProbe::Edit)
+                        .validate()
+                        .unwrap();
+                    assert_eq!(
+                        refused(
+                            configured(
+                                "guard-outside",
+                                "auto",
+                                ClaudeConfigCase::Seeded {
+                                    settings: "{}",
+                                    global: r#"{"note":"{outside}"}"#,
+                                },
+                            )
+                            .validate()
+                        ),
+                        "an overlay names {outside} without a file probe"
+                    );
+                }
+
+                fn seed() -> DriverSeed {
+                    driver_validated_seed(
+                        br#"{"claudeAiOauth":{"accessToken":"t"}}"#.to_vec(),
+                        br#"{"numStartups":2,"hasCompletedOnboarding":true,"projects":{"/tmp/other":{"allowedTools":[]}}}"#,
+                        br#"{"theme":"dark"}"#,
+                        false,
+                    )
+                    .unwrap()
+                }
+                fn decoded(files: Vec<(&'static str, Vec<u8>)>) -> Vec<(&'static str, Value)> {
+                    files
+                        .into_iter()
+                        .map(|(name, bytes)| (name, serde_json::from_slice(&bytes).unwrap()))
+                        .collect()
+                }
+
+                #[test]
+                fn seeded_configuration_trusts_the_cwd_and_replaces_overlay_top_level_keys() {
+                    let files = driver_claude_files(
+                        ClaudeConfigCase::Seeded {
+                            settings: r#"{"permissions":{"allow":["Read(/{outside}/**)"]}}"#,
+                            global: r#"{"numStartups":5,"autoModeEnvSetup":{"denials":5}}"#,
+                        },
+                        seed(),
+                        Path::new("/tmp/cafleet-194/case"),
+                        Some(Path::new("/tmp/cafleet-194/case-outside")),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        decoded(files),
+                        [
+                            (
+                                ".credentials.json",
+                                json!({"claudeAiOauth":{"accessToken":"t"}})
+                            ),
+                            (
+                                ".claude.json",
+                                json!({"numStartups":5,"hasCompletedOnboarding":true,
+                                    "projects":{"/tmp/other":{"allowedTools":[]},
+                                        "/tmp/cafleet-194/case":{"hasTrustDialogAccepted":true}},
+                                    "autoModeEnvSetup":{"denials":5}})
+                            ),
+                            (
+                                "settings.json",
+                                json!({"theme":"dark","permissions":{"allow":["Read(//tmp/cafleet-194/case-outside/**)"]}})
+                            ),
+                        ]
+                    );
+                    assert_eq!(
+                        refused(driver_claude_files(
+                            DRIVER_SEEDED,
+                            seed(),
+                            Path::new("/tmp/other"),
+                            None
+                        )),
+                        "the seed already names the case cwd"
+                    );
+                }
+
+                #[test]
+                fn fresh_configuration_copies_only_the_credentials_and_its_settings_overlay() {
+                    let files = driver_claude_files(
+                        ClaudeConfigCase::Fresh {
+                            settings: r#"{"permissions":{"defaultMode":"default"}}"#,
+                        },
+                        seed(),
+                        Path::new("/tmp/cafleet-194/case"),
+                        None,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        decoded(files),
+                        [
+                            (
+                                ".credentials.json",
+                                json!({"claudeAiOauth":{"accessToken":"t"}})
+                            ),
+                            (
+                                "settings.json",
+                                json!({"permissions":{"defaultMode":"default"}})
+                            ),
+                        ]
+                    );
+                    let empty = driver_claude_files(
+                        ClaudeConfigCase::Fresh { settings: "{}" },
+                        seed(),
+                        Path::new("/tmp/cafleet-194/case"),
+                        None,
+                    )
+                    .unwrap();
+                    assert_eq!(decoded(empty)[1], ("settings.json", json!({})));
+                }
+
+                #[test]
+                fn the_seed_must_be_theme_only_without_local_settings_or_nudge_state() {
+                    let credentials = || b"{}".to_vec();
+                    assert_eq!(
+                        refused(driver_validated_seed(
+                            credentials(),
+                            b"{}",
+                            br#"{"theme":"dark"}"#,
+                            true
+                        )),
+                        "the Claude seed configuration must hold no local settings file"
+                    );
+                    for settings in [
+                        &br#"{}"#[..],
+                        br#"{"theme":"dark","permissions":{}}"#,
+                        br#"{"theme":1}"#,
+                        br#"["theme"]"#,
+                    ] {
+                        assert_eq!(
+                            refused(driver_validated_seed(credentials(), b"{}", settings, false)),
+                            "the seed settings.json must be exactly a theme-only object"
+                        );
+                    }
+                    for global in [
+                        &br#"{"hasSeenAutoDefaultNudge":true}"#[..],
+                        br#"{"autoModeEnvSetup":{"denials":1}}"#,
+                    ] {
+                        assert_eq!(
+                            refused(driver_validated_seed(
+                                credentials(),
+                                global,
+                                br#"{"theme":"dark"}"#,
+                                false
+                            )),
+                            "the seed .claude.json must hold no auto-mode nudge state"
+                        );
+                    }
+                    assert_eq!(
+                        refused(driver_validated_seed(
+                            credentials(),
+                            b"[]",
+                            br#"{"theme":"dark"}"#,
+                            false
+                        )),
+                        "seed .claude.json must be an object"
+                    );
+                }
+
+                #[test]
+                fn launch_policy_omits_the_backend_default_and_resolves_every_configured_case() {
+                    assert_eq!(
+                        configured("guard-mode", "auto", DRIVER_SEEDED).requested_mode(),
+                        None
+                    );
+                    assert_eq!(
+                        configured("guard-mode", "default", DRIVER_SEEDED).requested_mode(),
+                        Some("default")
+                    );
+                    for approved in APPROVED_CASES
+                        .iter()
+                        .filter(|approved| approved.claude_config.is_some())
+                    {
+                        let policy = approved
+                            .backend
+                            .resolve_policy(Some("2.1.312"), approved.requested_mode())
+                            .unwrap();
+                        assert_eq!(
+                            policy.resolved_mode, approved.permission_mode,
+                            "{}",
+                            approved.id
+                        );
+                    }
+                    for approved in APPROVED_CASES
+                        .iter()
+                        .filter(|approved| approved.backend == CodingAgent::Opencode)
+                    {
+                        assert_eq!(approved.requested_mode(), Some("cafleet-ask"));
+                    }
+                }
+
+                #[test]
+                fn every_configured_case_owns_a_private_claude_configuration_directory() {
+                    for approved in &APPROVED_CASES {
+                        let expected = approved.claude_config.map(|_| {
+                            (
+                                "CLAUDE_CONFIG_DIR".to_owned(),
+                                Path::new(DRIVER_PRIVATE_ROOT)
+                                    .join(format!("{}-claude", approved.id))
+                                    .to_string_lossy()
+                                    .into_owned(),
+                            )
+                        });
+                        let environment = approved.child_environment();
+                        assert_eq!(
+                            environment
+                                .iter()
+                                .find(|(name, _)| name == "CLAUDE_CONFIG_DIR")
+                                .cloned(),
+                            expected,
+                            "{}",
+                            approved.id
+                        );
+                    }
+                }
+
+                #[test]
+                fn sidebar_prompt_edits_the_untracked_probe_before_the_bash_probe() {
+                    let approved = configured("guard-panel", "default", DRIVER_PANEL_SETTINGS)
+                        .bash("allow")
+                        .panel(DRIVER_PANEL_SIZE);
+                    let cwd = Path::new("/tmp/cafleet-194/guard-panel");
+                    assert_eq!(
+                        approved.prompt(cwd, Some(&cwd.join("permission-probe"))),
+                        "Use the Edit tool to replace the text before with after in the file /tmp/cafleet-194/guard-panel/panel-probe.txt. Then use Bash to attempt exactly /tmp/cafleet-194/guard-panel/permission-probe allow as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation."
+                    );
+                }
+
+                #[test]
+                fn configuration_changes_mask_the_case_directories_and_name_new_files() {
+                    let before = BTreeMap::from([(
+                        ".claude.json".to_owned(),
+                        json!({"numStartups":5,"projects":{"/tmp/cafleet-194/case":{"hasTrustDialogAccepted":true}}}),
+                    )]);
+                    let after = BTreeMap::from([
+                        (
+                            ".claude.json".to_owned(),
+                            json!({"numStartups":6,"projects":{
+                                "/tmp/cafleet-194/case":{"hasTrustDialogAccepted":true,"lastCost":1},
+                                "/tmp/cafleet-194/case-outside":{"seen":true}}}),
+                        ),
+                        ("settings.json".to_owned(), json!({"theme":"dark"})),
+                    ]);
+                    assert_eq!(
+                        driver_changed_configuration(
+                            &before,
+                            &after,
+                            Path::new("/tmp/cafleet-194/case"),
+                            Some(Path::new("/tmp/cafleet-194/case-outside")),
+                        ),
+                        paths(&[
+                            &[".claude.json", "numStartups"],
+                            &[".claude.json", "projects", "<cwd>", "lastCost"],
+                            &[".claude.json", "projects", "<outside>"],
+                            &["settings.json"],
+                        ])
+                    );
+                }
+
+                #[test]
+                fn a_choice_answer_changes_exactly_the_baseline_paths_and_its_documented_key() {
+                    let baseline = paths(&[&[".claude.json", "numStartups"]]);
+                    let decline = Some(NudgeChoice::AutoDefaultDecline.documented_change());
+                    let declined = BTreeMap::from([(
+                        ".claude.json".to_owned(),
+                        json!({"numStartups":6,"hasSeenAutoDefaultNudge":true}),
+                    )]);
+                    let changed = paths(&[
+                        &[".claude.json", "numStartups"],
+                        &[".claude.json", "hasSeenAutoDefaultNudge"],
+                    ]);
+                    driver_compare_configuration(&changed, &baseline, decline, &declined).unwrap();
+                    assert_eq!(
+                        refused(driver_compare_configuration(
+                            &baseline, &baseline, decline, &declined
+                        )),
+                        "changed configuration key paths differ from the baseline plus the documented change"
+                    );
+                    let mut extra = changed.clone();
+                    extra.insert(vec![
+                        "settings.json".into(),
+                        "permissions".into(),
+                        "defaultMode".into(),
+                    ]);
+                    assert_eq!(
+                        refused(driver_compare_configuration(
+                            &extra, &baseline, decline, &declined
+                        )),
+                        "changed configuration key paths differ from the baseline plus the documented change"
+                    );
+                    let not_declined = BTreeMap::from([(
+                        ".claude.json".to_owned(),
+                        json!({"numStartups":6,"hasSeenAutoDefaultNudge":false}),
+                    )]);
+                    assert_eq!(
+                        refused(driver_compare_configuration(
+                            &changed,
+                            &baseline,
+                            decline,
+                            &not_declined
+                        )),
+                        "the answer's documented configuration change is absent"
+                    );
+                }
+
+                #[test]
+                fn environment_setup_answers_set_their_documented_keys() {
+                    let baseline = BTreeSet::new();
+                    let not_now = Some(NudgeChoice::EnvSetupNotNow.documented_change());
+                    let changed = paths(&[&[".claude.json", "autoModeEnvSetup", "dismissedAt"]]);
+                    let snoozed = BTreeMap::from([(
+                        ".claude.json".to_owned(),
+                        json!({"autoModeEnvSetup":{"denials":5,"dismissedAt":1793000000000_u64}}),
+                    )]);
+                    driver_compare_configuration(&changed, &baseline, not_now, &snoozed).unwrap();
+                    let unset = BTreeMap::from([(
+                        ".claude.json".to_owned(),
+                        json!({"autoModeEnvSetup":{"denials":5,"dismissedAt":null}}),
+                    )]);
+                    assert_eq!(
+                        refused(driver_compare_configuration(
+                            &changed, &baseline, not_now, &unset
+                        )),
+                        "the answer's documented configuration change is absent"
+                    );
+                    let dont_show = Some(NudgeChoice::EnvSetupDontShowAgain.documented_change());
+                    let dismissed = BTreeMap::from([(
+                        ".claude.json".to_owned(),
+                        json!({"autoModeEnvSetup":{"denials":5,"dismissed":true}}),
+                    )]);
+                    driver_compare_configuration(
+                        &paths(&[&[".claude.json", "autoModeEnvSetup", "dismissed"]]),
+                        &baseline,
+                        dont_show,
+                        &dismissed,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        refused(driver_compare_configuration(
+                            &changed, &baseline, dont_show, &dismissed
+                        )),
+                        "changed configuration key paths differ from the baseline plus the documented change"
+                    );
+                }
+
+                #[test]
+                fn a_permission_answer_changes_exactly_the_baseline_paths() {
+                    let baseline = paths(&[&[".claude.json", "numStartups"]]);
+                    let after = BTreeMap::new();
+                    driver_compare_configuration(&baseline, &baseline, None, &after).unwrap();
+                    for changed in [
+                        paths(&[]),
+                        paths(&[
+                            &[".claude.json", "numStartups"],
+                            &["settings.json", "permissions"],
+                        ]),
+                    ] {
+                        assert_eq!(
+                            refused(driver_compare_configuration(
+                                &changed, &baseline, None, &after
+                            )),
+                            "changed configuration key paths differ from the baseline plus the documented change"
+                        );
+                    }
+                }
+
+                const SIDEBAR_COLS: u16 = 166;
+                fn sidebar_screen(rows: &[String]) -> vt100::Parser {
+                    let mut parser = vt100::Parser::new(
+                        u16::try_from(rows.len()).unwrap().try_into().unwrap(),
+                        SIDEBAR_COLS.try_into().unwrap(),
+                        0,
+                    );
+                    parser.process(rows.join("\r\n").as_bytes());
+                    parser
+                }
+                fn panel_row(left: &str, column: usize, panel: &str) -> String {
+                    format!("{left:<column$}\x1b[2;48;5;235m│\x1b[22m {panel}\x1b[0m")
+                }
+
+                #[test]
+                fn the_sidebar_separator_is_one_shared_column_with_a_panel_background() {
+                    let rows = [
+                        panel_row(" Bash command", 92, "src/lib.rs"),
+                        panel_row(" ❯ 1. Yes", 92, "+after"),
+                        panel_row("", 92, ""),
+                        "─".repeat(SIDEBAR_COLS as usize),
+                        "❯\u{a0}".into(),
+                    ];
+                    assert_eq!(
+                        driver_panel_separator_column(sidebar_screen(&rows).screen()),
+                        Some(92)
+                    );
+                    let narrow = [panel_row(" Bash command", 80, "src/lib.rs")];
+                    assert_eq!(
+                        driver_panel_separator_column(sidebar_screen(&narrow).screen()),
+                        Some(80)
+                    );
+                }
+
+                #[test]
+                fn differing_columns_a_boxed_gutter_or_an_edge_glyph_are_no_separator() {
+                    let differing = [
+                        panel_row(" Bash command", 92, "src/lib.rs"),
+                        panel_row(" ❯ 1. Yes", 80, "+after"),
+                    ];
+                    let gutter = [format!("{:<50}│ touch /tmp/cafleet-f-out/p4.txt", "")];
+                    let shallow = [panel_row(" Bash", 30, "panel")];
+                    let edge = [format!("{:<165}\x1b[48;5;235m│\x1b[0m", " Bash command")];
+                    let empty = [" Bash command".to_owned()];
+                    for rows in [&differing[..], &gutter, &shallow, &edge, &empty] {
+                        assert_eq!(
+                            driver_panel_separator_column(sidebar_screen(rows).screen()),
+                            None,
+                            "{rows:?}"
+                        );
+                    }
+                }
+            }
+
             #[test]
             fn capture_ignored_entry_requires_explicit_configuration_before_launching() {
                 let directory = tempfile::tempdir().unwrap();
