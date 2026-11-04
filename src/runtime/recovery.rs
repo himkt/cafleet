@@ -1814,7 +1814,9 @@ mod tests {
                     interaction_id: event.interaction_id.unwrap(),
                     expected_owner_epoch: owner.owner_epoch,
                     request_token: "a".repeat(64),
-                    decision: PermissionDecision::Allow,
+                    key: crate::coding_agent::catalog::AnswerKey::Decision(
+                        PermissionDecision::Allow,
+                    ),
                     director_member_id: case.fixture.run.director_member_id,
                     director_mode: DirectorMode::Auto,
                     decision_source: DecisionSource::DirectorAuto,

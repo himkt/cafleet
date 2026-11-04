@@ -638,4 +638,73 @@ mod tests {
             "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=-\nRequest: token=- output_seq=5 rule=-\nCapability: native profile unavailable"
         );
     }
+
+    #[test]
+    fn permission_inspection_text_lists_a_questions_supported_choice_ids() {
+        let token = "a".repeat(64);
+        assert_eq!(
+            crate::output::text::format_permission_inspection(
+                &crate::runtime::control::test_support::question_inspection()
+            ),
+            format!(
+                "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=not-now,dont-show-again\nRequest: token={token} output_seq=5 rule=-"
+            )
+        );
+    }
+
+    #[test]
+    fn permission_inspection_json_places_supported_choices_after_supported_decisions() {
+        let value = crate::output::json::permission_inspection(
+            &crate::runtime::control::test_support::question_inspection(),
+        );
+        let keys = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let decisions = keys
+            .iter()
+            .position(|key| *key == "supported_decisions")
+            .unwrap();
+        assert_eq!(keys[decisions + 1], "supported_choices");
+        assert_eq!(value["supported_decisions"], serde_json::json!([]));
+        assert_eq!(
+            value["supported_choices"],
+            serde_json::json!([
+                {"choice_id":"not-now","label":"Not now","scope":"persistent"},
+                {"choice_id":"dont-show-again","label":"Don't show again","scope":"persistent"}
+            ])
+        );
+    }
+
+    #[test]
+    fn permission_response_text_names_the_decision_or_the_choice_with_a_dash_for_the_other() {
+        use crate::coding_agent::catalog::AnswerKey;
+        use crate::runtime::PermissionResponseResult;
+        use crate::runtime::SubmissionResult;
+        let result = |key: AnswerKey| PermissionResponseResult {
+            submission: SubmissionResult::held("another programmatic input is pending"),
+            member_id: 3,
+            run_id: 7,
+            owner_epoch: 2,
+            interaction_id: 12,
+            event_id: 11,
+            key,
+            decision_source: crate::broker::runtime::DecisionSource::DirectorAuto,
+        };
+        let decision = format_permission_response_result(&result(AnswerKey::Decision(
+            crate::broker::runtime::PermissionDecision::Deny,
+        )));
+        assert!(
+            decision.starts_with("Permission response: interaction=12 run=7 decision=deny choice=- source=director-auto status=held"),
+            "{decision}"
+        );
+        let choice =
+            format_permission_response_result(&result(AnswerKey::Choice("not-now".into())));
+        assert!(
+            choice.starts_with("Permission response: interaction=12 run=7 decision=- choice=not-now source=director-auto status=held"),
+            "{choice}"
+        );
+    }
 }

@@ -424,6 +424,7 @@ mod tests {
                     "expected_owner_epoch",
                     "request_token",
                     "decision",
+                    "choice_id",
                     "director_member_id",
                     "director_mode",
                     "decision_source",
@@ -437,12 +438,13 @@ mod tests {
             assert_eq!(output["input"]["deferred_at"], Value::Null);
             assert_eq!(output["input"]["defer_reason"], Value::Null);
             assert_eq!(audit["decision"], "allow");
+            assert_eq!(audit["choice_id"], Value::Null);
             assert_eq!(audit["director_mode"], "auto");
             assert_eq!(audit["decided_at"], receipt.response.decided_at);
             assert_eq!(
                 crate::output::format_input_operation(&receipt.input),
                 format!(
-                    "Input: {} run={} kind=permission_response state=in_progress disposition=- message=-\nPermission decision: interaction={} event={} decision=allow source=director-auto mode=auto director={} epoch={}",
+                    "Input: {} run={} kind=permission_response state=in_progress disposition=- message=-\nPermission decision: interaction={} event={} decision=allow choice=- source=director-auto mode=auto director={} epoch={}",
                     receipt.input.input_id,
                     fixture.owner.run_id,
                     fixture.request.metadata.interaction_id,
@@ -453,6 +455,27 @@ mod tests {
             );
             assert_no_secret(&fixture.base.conn, SECRET);
             assert_no_secret(&fixture.base.conn, &format!("fingerprint-{SECRET}"));
+        }
+        #[test]
+        fn runtime_choice_presentation_names_the_choice_beside_a_null_decision() {
+            let mut fixture = ResponseFixture::question("decline");
+            let receipt = fixture.reserve();
+            let output = crate::output::json::input_operation(&receipt.input);
+            let audit = &output["input"]["permission_response"];
+            assert_eq!(audit["decision"], Value::Null);
+            assert_eq!(audit["choice_id"], "decline");
+            assert_eq!(
+                crate::output::format_input_operation(&receipt.input),
+                format!(
+                    "Input: {} run={} kind=permission_response state=in_progress disposition=- message=-\nPermission decision: interaction={} event={} decision=- choice=decline source=director-auto mode=auto director={} epoch={}",
+                    receipt.input.input_id,
+                    fixture.owner.run_id,
+                    fixture.request.metadata.interaction_id,
+                    fixture.event.event_id,
+                    fixture.base.director,
+                    fixture.owner.owner_epoch
+                )
+            );
         }
         #[test]
         fn runtime_presentation_exposes_recorded_owner_snapshot_and_unresolved_inputs() {

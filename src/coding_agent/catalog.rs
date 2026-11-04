@@ -54,6 +54,25 @@ impl AnswerCapability {
         decision: PermissionDecision,
         fixture_ids: &[String],
     ) -> std::result::Result<Self, CafleetError> {
+        Self::fixture_key(
+            backend,
+            native_version,
+            request_rule_id,
+            answer_rule_id,
+            AnswerKey::Decision(decision),
+            fixture_ids,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_key(
+        backend: CodingAgent,
+        native_version: &str,
+        request_rule_id: &str,
+        answer_rule_id: &str,
+        key: AnswerKey,
+        fixture_ids: &[String],
+    ) -> std::result::Result<Self, CafleetError> {
         if [native_version, request_rule_id, answer_rule_id]
             .iter()
             .any(|value| value.trim().is_empty())
@@ -69,7 +88,7 @@ impl AnswerCapability {
             native_version: native_version.into(),
             request_rule_id: request_rule_id.into(),
             answer_rule_id: answer_rule_id.into(),
-            decision,
+            key,
             fixture_ids: fixture_ids.to_vec(),
         })
     }
@@ -1997,6 +2016,110 @@ pub(crate) mod test_support {
         )
         .into_bytes()
     }
+    pub(crate) const QUESTION_RULE: &str = "synthetic-question";
+    pub(crate) const QUESTION_NOTICE_RULE: &str = "synthetic-question-notice";
+    pub(crate) const QUESTION_DECLINE_PLAN: &str = "synthetic-question-decline";
+    pub(crate) const QUESTION_LATER_PLAN: &str = "synthetic-question-later";
+
+    pub(crate) fn question_stage(bytes: &str, choice: &str, focus: Option<&str>) -> Value {
+        let mut stage =
+            json!({"bytes_hex":bytes,"required_rule_id":QUESTION_RULE,"required_choice_id":choice});
+        if let Some(focus) = focus {
+            stage["required_focus_choice_id"] = json!(focus);
+        }
+        stage
+    }
+
+    pub(crate) fn choice_answer(request: &str, id: &str, choice: &str, stages: Value) -> Value {
+        json!({
+            "request_rule_id":request,"answer_rule_id":id,"choice_id":choice,
+            "focus_matcher_id":"focus","fixture_ids":[FIXTURE],"stages":stages
+        })
+    }
+
+    /// The permission profile plus a marker-focused question with a gated `decline` plan, an
+    /// ungated session-scoped `later` plan and a plan-less `accept` choice, and a choice-less
+    /// question notice.
+    pub(crate) fn question_fixture_definition() -> Value {
+        let mut value = synthetic_definitions();
+        let rules = value["profiles"][0]["rules"].as_array_mut().unwrap();
+        rules.push(json!({
+            "id":QUESTION_RULE,"priority":100,"observation":"question",
+            "region":{"screen":"either","start_pattern":"^Synthetic question\\?$","end_pattern":"^Question end$","max_rows":8,"cursor":"any"},
+            "matchers":[
+                {"id":"heading","scope":"line","pattern":"^Synthetic question\\?$"},
+                {"id":"focus","scope":"line","pattern":"^> \\S","focus_style":"marker"},
+                {"id":"accept","scope":"line","pattern":"^(?:> |  )(?P<label>Accept the change)$"},
+                {"id":"decline","scope":"line","pattern":"^(?:> |  )(?P<label>Keep \\S.*)$"},
+                {"id":"later","scope":"line","pattern":"^(?:> |  )(?P<label>Ask later)$"}
+            ],
+            "extract":{"operation":null,"choices":[
+                {"id":"accept","label":{"matcher_id":"accept","capture":"label"},"scope":"persistent"},
+                {"id":"decline","label":{"matcher_id":"decline","capture":"label"},"scope":"persistent"},
+                {"id":"later","label":{"matcher_id":"later","capture":"label"},"scope":"session"}
+            ],"native_request_id":null},
+            "verified_noninteraction":false,"sensitive":false
+        }));
+        rules.push(json!({
+            "id":QUESTION_NOTICE_RULE,"priority":100,"observation":"question",
+            "region":{"screen":"either","start_pattern":"^Synthetic notice$","end_pattern":"^Synthetic notice$","max_rows":1,"cursor":"any"},
+            "matchers":[{"id":"notice","scope":"line","pattern":"^Synthetic notice$"}],
+            "extract":{"operation":null,"choices":[],"native_request_id":null},
+            "verified_noninteraction":false,"sensitive":false
+        }));
+        value["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+            json!([RULE, QUESTION_RULE, QUESTION_NOTICE_RULE]);
+        value["profiles"][0]["capabilities"]["answers"] = json!([
+            answer(
+                "allow",
+                RULE,
+                "synthetic-question-profile-allow",
+                "allow-once",
+                "79"
+            ),
+            choice_answer(
+                QUESTION_RULE,
+                QUESTION_DECLINE_PLAN,
+                "decline",
+                json!([
+                    question_stage("0e", "decline", Some("accept")),
+                    question_stage("0d", "decline", Some("decline"))
+                ])
+            ),
+            choice_answer(
+                QUESTION_RULE,
+                QUESTION_LATER_PLAN,
+                "later",
+                json!([question_stage("33", "later", None)])
+            )
+        ]);
+        value
+    }
+
+    /// `focused` names the choices drawn with the `> ` marker: `accept`, `decline`, `later`,
+    /// several of them, or none.
+    pub(crate) fn question_fixture_form(focused: &[&str]) -> Vec<u8> {
+        let row = |choice: &str, label: &str| {
+            let marker = if focused.contains(&choice) {
+                "> "
+            } else {
+                "  "
+            };
+            format!("{marker}{label}")
+        };
+        format!(
+            "\x1b[0m\x1b[2J\x1b[19;1HSynthetic question?\r\n{}\r\n{}\r\n{}\r\nQuestion end",
+            row("accept", "Accept the change"),
+            row("decline", "Keep current"),
+            row("later", "Ask later")
+        )
+        .into_bytes()
+    }
+
+    pub(crate) fn question_notice_form() -> Vec<u8> {
+        b"\x1b[0m\x1b[2J\x1b[19;1HSynthetic notice".to_vec()
+    }
+
     pub(crate) const VERSION: &str = "0.0.1-synthetic";
     pub(crate) const RULE: &str = "synthetic-permission";
     pub(crate) const FIXTURE: &str = "synthetic-permission-1";
@@ -2198,6 +2321,398 @@ mod tests {
     use std::collections::BTreeSet;
     use std::time::Duration;
     use std::time::Instant;
+
+    mod question_answers {
+        use crate::coding_agent::catalog::tests::*;
+
+        const QUESTION: &str = "/profiles/0/rules/1";
+        const ANSWERS: &str = "/profiles/0/capabilities/answers";
+
+        fn refusal(value: &Value) -> String {
+            assert!(ProfileCatalog::from_definitions(&question_fixture_definition()).is_ok());
+            match ProfileCatalog::from_definitions(value) {
+                Err(cause) => cause.message().into_owned(),
+                Ok(_) => panic!("the changed definition loads"),
+            }
+        }
+        fn changed(change: impl FnOnce(&mut Value)) -> Value {
+            let mut value = question_fixture_definition();
+            change(&mut value);
+            value
+        }
+        fn answers(value: &mut Value) -> &mut Vec<Value> {
+            value.pointer_mut(ANSWERS).unwrap().as_array_mut().unwrap()
+        }
+        fn plan(catalog: &ProfileCatalog, request: &str, key: AnswerKey) -> Option<AnswerPlan> {
+            catalog.answer_plan(CodingAgent::Codex, VERSION, request, &key)
+        }
+        fn choice(id: &str) -> AnswerKey {
+            AnswerKey::Choice(id.into())
+        }
+
+        #[test]
+        fn a_choice_answer_resolves_by_its_question_rule_and_choice_key() {
+            let catalog = ProfileCatalog::from_definitions(&question_fixture_definition()).unwrap();
+            let decline = plan(&catalog, QUESTION_RULE, choice("decline")).expect("decline plan");
+            let capability = decline.capability();
+            assert_eq!(capability.key(), &choice("decline"));
+            assert_eq!(capability.backend(), CodingAgent::Codex);
+            assert_eq!(capability.native_version(), VERSION);
+            assert_eq!(capability.request_rule_id(), QUESTION_RULE);
+            assert_eq!(capability.answer_rule_id(), QUESTION_DECLINE_PLAN);
+            assert_eq!(capability.fixture_ids(), [FIXTURE.to_owned()]);
+            assert_eq!(decline.choice_id(), "decline");
+            assert_eq!(decline.focus_matcher_id(), "focus");
+            let stages = decline
+                .stages()
+                .iter()
+                .map(|stage| {
+                    (
+                        stage.bytes().to_vec(),
+                        stage.required_rule_id().to_owned(),
+                        stage.required_choice_id().to_owned(),
+                        stage.required_focus_choice_id().map(str::to_owned),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                stages,
+                [
+                    (
+                        vec![0x0e],
+                        QUESTION_RULE.to_owned(),
+                        "decline".to_owned(),
+                        Some("accept".to_owned())
+                    ),
+                    (
+                        vec![0x0d],
+                        QUESTION_RULE.to_owned(),
+                        "decline".to_owned(),
+                        Some("decline".to_owned())
+                    ),
+                ]
+            );
+            let later = plan(&catalog, QUESTION_RULE, choice("later")).expect("later plan");
+            assert_eq!(later.capability().answer_rule_id(), QUESTION_LATER_PLAN);
+            assert_eq!(later.stages().len(), 1);
+            assert_eq!(later.stages()[0].bytes(), b"3");
+            assert!(later.stages()[0].gate().is_none());
+            assert!(plan(&catalog, QUESTION_RULE, choice("accept")).is_none());
+            assert!(plan(&catalog, QUESTION_RULE, choice("missing")).is_none());
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                assert!(plan(&catalog, QUESTION_RULE, AnswerKey::Decision(decision)).is_none());
+            }
+            assert!(plan(&catalog, QUESTION_NOTICE_RULE, choice("decline")).is_none());
+            let allow = plan(
+                &catalog,
+                RULE,
+                AnswerKey::Decision(PermissionDecision::Allow),
+            )
+            .expect("the decision plan beside the choice plans");
+            assert_eq!(
+                allow.capability().key(),
+                &AnswerKey::Decision(PermissionDecision::Allow)
+            );
+            assert!(plan(&catalog, RULE, choice("allow-once")).is_none());
+            assert!(
+                plan(
+                    &catalog,
+                    RULE,
+                    AnswerKey::Decision(PermissionDecision::Deny)
+                )
+                .is_none()
+            );
+        }
+
+        #[test]
+        fn a_choice_answer_loads_for_every_declared_choice_scope() {
+            for scope in ["single_request", "session", "persistent"] {
+                let value = changed(|value| {
+                    value.pointer_mut(QUESTION).unwrap()["extract"]["choices"][2]["scope"] =
+                        json!(scope);
+                });
+                let catalog = ProfileCatalog::from_definitions(&value)
+                    .unwrap_or_else(|cause| panic!("{scope}: {}", cause.message()));
+                assert!(
+                    plan(&catalog, QUESTION_RULE, choice("later")).is_some(),
+                    "{scope}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_choice_answer_on_a_permission_rule_is_refused() {
+            let value = changed(|value| {
+                answers(value).push(choice_answer(
+                    RULE,
+                    "synthetic-choice-on-permission",
+                    "deny-once",
+                    json!([{"bytes_hex":"6e","required_rule_id":RULE,"required_choice_id":"deny-once"}]),
+                ));
+            });
+            assert_eq!(
+                refusal(&value),
+                "invalid native profile: choice answer requires question form"
+            );
+        }
+
+        #[test]
+        fn a_decision_answer_on_a_question_rule_is_refused() {
+            for (decision, choice) in [("allow", "decline"), ("deny", "later")] {
+                let value = changed(|value| {
+                    let mut entry = answers(value)[1].clone();
+                    entry["decision"] = json!(decision);
+                    entry["choice_id"] = json!(choice);
+                    entry["answer_rule_id"] = json!("synthetic-decision-on-question");
+                    entry["stages"] = json!([question_stage("33", choice, None)]);
+                    answers(value).push(entry);
+                });
+                assert_eq!(
+                    refusal(&value),
+                    "invalid native profile: answer requires permission form",
+                    "{decision}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_decision_answer_still_requires_a_single_request_choice() {
+            let value = changed(|value| {
+                value["profiles"][0]["rules"][0]["extract"]["choices"][0]["scope"] =
+                    json!("session");
+            });
+            assert_eq!(
+                refusal(&value),
+                "invalid native profile: answer requires single-request scope"
+            );
+        }
+
+        #[test]
+        fn a_choice_answer_naming_no_rule_choice_is_refused() {
+            let value = changed(|value| {
+                answers(value)[2]["choice_id"] = json!("never");
+                answers(value)[2]["stages"] = json!([question_stage("33", "never", None)]);
+            });
+            assert_eq!(
+                refusal(&value),
+                "invalid native profile: unknown answer choice"
+            );
+        }
+
+        #[test]
+        fn a_duplicate_question_rule_and_choice_pair_is_refused() {
+            let value = changed(|value| {
+                let mut duplicate = answers(value)[2].clone();
+                duplicate["answer_rule_id"] = json!("synthetic-question-later-again");
+                answers(value).push(duplicate);
+            });
+            assert!(ProfileCatalog::from_definitions(&value).is_err());
+            let other_choice = changed(|value| {
+                let mut accept = answers(value)[2].clone();
+                accept["answer_rule_id"] = json!("synthetic-question-decline-digit");
+                accept["choice_id"] = json!("decline");
+                accept["stages"] = json!([question_stage("32", "decline", None)]);
+                answers(value).push(accept);
+            });
+            assert!(
+                ProfileCatalog::from_definitions(&other_choice).is_err(),
+                "a second plan for the same choice is a duplicate"
+            );
+        }
+
+        #[test]
+        fn a_choice_id_follows_the_lowercase_hyphenated_shape_up_to_64_bytes() {
+            let renamed = |id: &str| {
+                changed(|value| {
+                    value.pointer_mut(QUESTION).unwrap()["extract"]["choices"][2]["id"] = json!(id);
+                    answers(value)[2]["choice_id"] = json!(id);
+                    answers(value)[2]["stages"] = json!([question_stage("33", id, None)]);
+                })
+            };
+            for id in ["ask-later-2", "a", &"a".repeat(64)] {
+                let catalog = ProfileCatalog::from_definitions(&renamed(id))
+                    .unwrap_or_else(|cause| panic!("{id}: {}", cause.message()));
+                assert!(plan(&catalog, QUESTION_RULE, choice(id)).is_some(), "{id}");
+            }
+            for id in [
+                "Later",
+                "ask_later",
+                "-later",
+                "later-",
+                "ask--later",
+                "ask later",
+                &"a".repeat(65),
+            ] {
+                assert!(
+                    ProfileCatalog::from_definitions(&renamed(id)).is_err(),
+                    "{id} is outside the choice-id shape"
+                );
+            }
+        }
+
+        #[test]
+        fn a_choice_answer_validates_its_stages_like_a_decision_answer() {
+            for (case, stages) in [
+                ("no stage", json!([])),
+                ("escape byte", json!([question_stage("1b", "later", None)])),
+                (
+                    "escape inside a stage",
+                    json!([question_stage("331b", "later", None)]),
+                ),
+                (
+                    "uppercase hex",
+                    json!([question_stage("0D", "later", None)]),
+                ),
+                (
+                    "another choice in a stage",
+                    json!([question_stage("33", "decline", None)]),
+                ),
+                (
+                    "another rule in a stage",
+                    json!([{"bytes_hex":"33","required_rule_id":RULE,"required_choice_id":"later"}]),
+                ),
+                (
+                    "partly gated",
+                    json!([
+                        question_stage("0e", "later", Some("accept")),
+                        question_stage("0d", "later", None)
+                    ]),
+                ),
+                (
+                    "gate ending on another choice",
+                    json!([question_stage("0d", "later", Some("decline"))]),
+                ),
+            ] {
+                let value = changed(|value| answers(value)[2]["stages"] = stages);
+                assert!(ProfileCatalog::from_definitions(&value).is_err(), "{case}");
+            }
+            for (case, fixtures) in [
+                ("no fixture", json!([])),
+                ("unknown fixture", json!(["missing"])),
+            ] {
+                let value = changed(|value| answers(value)[2]["fixture_ids"] = fixtures);
+                assert!(ProfileCatalog::from_definitions(&value).is_err(), "{case}");
+            }
+            let value = changed(|value| answers(value)[2]["focus_matcher_id"] = json!("missing"));
+            assert!(
+                ProfileCatalog::from_definitions(&value).is_err(),
+                "unknown focus matcher"
+            );
+        }
+
+        #[test]
+        fn marker_focus_loads_and_gates_a_choice_plan() {
+            let catalog = ProfileCatalog::from_definitions(&question_fixture_definition()).unwrap();
+            assert!(plan(&catalog, QUESTION_RULE, choice("decline")).is_some());
+            let unstyled = changed(|value| {
+                value.pointer_mut(QUESTION).unwrap()["matchers"][1]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("focus_style");
+            });
+            assert_eq!(
+                refusal(&unstyled),
+                "invalid native profile: a focus-gated plan needs a focus_style matcher"
+            );
+            let background = changed(|value| {
+                value.pointer_mut(QUESTION).unwrap()["matchers"][1]["focus_style"] =
+                    json!("background");
+            });
+            assert!(ProfileCatalog::from_definitions(&background).is_ok());
+            for style in [json!("Marker"), json!("glyph"), json!(""), Value::Null] {
+                let value = changed(|value| {
+                    value.pointer_mut(QUESTION).unwrap()["matchers"][1]["focus_style"] =
+                        style.clone();
+                });
+                assert!(ProfileCatalog::from_definitions(&value).is_err(), "{style}");
+            }
+        }
+
+        #[test]
+        fn marker_focus_gates_a_decision_plan_as_background_focus_does() {
+            let mut marker = gated_fixture_definition();
+            marker["profiles"][0]["rules"][0]["matchers"][2]["focus_style"] = json!("marker");
+            let catalog = ProfileCatalog::from_definitions(&marker).unwrap();
+            let deny = catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    GATED_RULE,
+                    &AnswerKey::Decision(PermissionDecision::Deny),
+                )
+                .expect("a marker-gated decision plan");
+            assert_eq!(
+                deny.stages()[0].required_focus_choice_id(),
+                Some("allow-once")
+            );
+        }
+
+        #[test]
+        fn an_interaction_frame_loads_with_a_reject_pattern_and_optional_require_patterns() {
+            for require in [json!([]), json!(["^Synthetic question\\?$"])] {
+                let value = changed(|value| {
+                    value.pointer_mut(QUESTION).unwrap()["frame"] =
+                        json!({"require_patterns":require,"reject_patterns":["^Live composer$"]});
+                });
+                ProfileCatalog::from_definitions(&value)
+                    .unwrap_or_else(|cause| panic!("{require}: {}", cause.message()));
+            }
+            let permission = changed(|value| {
+                value["profiles"][0]["rules"][0]["frame"] =
+                    json!({"require_patterns":[],"reject_patterns":["^Live composer$"]});
+            });
+            assert!(ProfileCatalog::from_definitions(&permission).is_ok());
+        }
+
+        #[test]
+        fn an_interaction_frame_requires_a_reject_pattern() {
+            for rule in [QUESTION, "/profiles/0/rules/0"] {
+                let value = changed(|value| {
+                    value.pointer_mut(rule).unwrap()["frame"] =
+                        json!({"require_patterns":[],"reject_patterns":[]});
+                });
+                assert_eq!(
+                    refusal(&value),
+                    "invalid native profile: interaction frame requires a reject pattern",
+                    "{rule}"
+                );
+            }
+            for (case, frame) in [
+                ("missing reject patterns", json!({"require_patterns":[]})),
+                (
+                    "missing require patterns",
+                    json!({"reject_patterns":["^Live composer$"]}),
+                ),
+                (
+                    "uncompilable reject pattern",
+                    json!({"require_patterns":[],"reject_patterns":["^(unclosed$"]}),
+                ),
+                (
+                    "unknown frame field",
+                    json!({"require_patterns":[],"reject_patterns":["^Live composer$"],"extra":true}),
+                ),
+            ] {
+                let value = changed(|value| value.pointer_mut(QUESTION).unwrap()["frame"] = frame);
+                assert!(ProfileCatalog::from_definitions(&value).is_err(), "{case}");
+            }
+        }
+
+        #[test]
+        fn an_annotation_frame_still_requires_a_live_screen_pattern() {
+            let mut value = crate::coding_agent::catalog::test_support::annotation::annotated();
+            crate::coding_agent::catalog::test_support::annotation::rule(
+                &mut value,
+                crate::coding_agent::catalog::test_support::annotation::REFUSAL,
+            )["frame"]["require_patterns"] = json!([]);
+            match ProfileCatalog::from_definitions(&value) {
+                Err(cause) => assert_eq!(
+                    cause.message(),
+                    "invalid native profile: annotation frame requires a live-screen pattern"
+                ),
+                Ok(_) => panic!("an annotation frame without a require pattern loads"),
+            }
+        }
+    }
 
     mod bundled_backend_files {
         use crate::coding_agent::catalog::ProfileCatalog;
@@ -2608,7 +3123,7 @@ mod tests {
                     CodingAgent::Codex,
                     "0.0.1-synthetic",
                     "synthetic-permission",
-                    decision,
+                    &AnswerKey::Decision(decision),
                 )
                 .unwrap();
             let capability = plan.capability();
@@ -2616,7 +3131,7 @@ mod tests {
             assert_eq!(capability.native_version(), "0.0.1-synthetic");
             assert_eq!(capability.request_rule_id(), "synthetic-permission");
             assert_eq!(capability.answer_rule_id(), rule);
-            assert_eq!(capability.decision(), decision);
+            assert_eq!(capability.key(), &AnswerKey::Decision(decision));
             assert_eq!(
                 capability.fixture_ids(),
                 &["synthetic-permission-1".to_owned()]
@@ -2637,7 +3152,7 @@ mod tests {
                     CodingAgent::Claude,
                     "0.0.1-synthetic",
                     "synthetic-permission",
-                    PermissionDecision::Allow
+                    &AnswerKey::Decision(PermissionDecision::Allow)
                 )
                 .is_none()
         );
@@ -2651,7 +3166,12 @@ mod tests {
         ] {
             assert!(
                 catalog
-                    .answer_plan(CodingAgent::Codex, version, rule, decision)
+                    .answer_plan(
+                        CodingAgent::Codex,
+                        version,
+                        rule,
+                        &AnswerKey::Decision(decision)
+                    )
                     .is_none()
             );
         }
@@ -2662,7 +3182,7 @@ mod tests {
                     CodingAgent::Codex,
                     "0.0.1-synthetic",
                     "synthetic-permission",
-                    PermissionDecision::Allow
+                    &AnswerKey::Decision(PermissionDecision::Allow)
                 )
                 .is_none()
         );
@@ -2681,7 +3201,7 @@ mod tests {
                 CodingAgent::Codex,
                 "0.0.1-synthetic",
                 "synthetic-permission",
-                PermissionDecision::Allow,
+                &AnswerKey::Decision(PermissionDecision::Allow),
             )
             .unwrap();
         assert_eq!(
@@ -2781,7 +3301,12 @@ mod tests {
             );
             assert_eq!(
                 catalog
-                    .answer_plan(CodingAgent::Codex, VERSION, RULE, decision)
+                    .answer_plan(
+                        CodingAgent::Codex,
+                        VERSION,
+                        RULE,
+                        &AnswerKey::Decision(decision)
+                    )
                     .unwrap()
                     .capability()
                     .answer_rule_id(),
@@ -2789,17 +3314,32 @@ mod tests {
             );
             assert!(
                 catalog
-                    .answer_plan(CodingAgent::Codex, VERSION, RULE, other)
+                    .answer_plan(
+                        CodingAgent::Codex,
+                        VERSION,
+                        RULE,
+                        &AnswerKey::Decision(other)
+                    )
                     .is_none()
             );
             assert!(
                 catalog
-                    .answer_plan(CodingAgent::Claude, VERSION, RULE, decision)
+                    .answer_plan(
+                        CodingAgent::Claude,
+                        VERSION,
+                        RULE,
+                        &AnswerKey::Decision(decision)
+                    )
                     .is_none()
             );
             assert!(
                 catalog
-                    .answer_plan(CodingAgent::Codex, VERSION, "another-form", decision)
+                    .answer_plan(
+                        CodingAgent::Codex,
+                        VERSION,
+                        "another-form",
+                        &AnswerKey::Decision(decision)
+                    )
                     .is_none()
             );
         }
@@ -3205,7 +3745,12 @@ mod tests {
         fn plan(decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::from_definitions(&gated_fixture_definition())
                 .unwrap()
-                .answer_plan(CodingAgent::Codex, VERSION, GATED_RULE, decision)
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    GATED_RULE,
+                    &AnswerKey::Decision(decision),
+                )
                 .expect("gated synthetic plan")
         }
 
@@ -3265,7 +3810,7 @@ mod tests {
                     CodingAgent::Codex,
                     VERSION,
                     "synthetic-permission",
-                    PermissionDecision::Allow,
+                    &AnswerKey::Decision(PermissionDecision::Allow),
                 )
                 .unwrap();
             let bundled = ProfileCatalog::bundled().unwrap();
@@ -3277,7 +3822,7 @@ mod tests {
                 for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                     plans.push(
                         bundled
-                            .answer_plan(backend, version, rule, decision)
+                            .answer_plan(backend, version, rule, &AnswerKey::Decision(decision))
                             .expect("bundled ungated plan"),
                     );
                 }
@@ -4348,7 +4893,12 @@ mod tests {
                 (PermissionDecision::Deny, "deny-once", b"2"),
             ] {
                 let plan = catalog
-                    .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, ASK_RULE, decision)
+                    .answer_plan(
+                        CodingAgent::Claude,
+                        CLAUDE_VERSION,
+                        ASK_RULE,
+                        &AnswerKey::Decision(decision),
+                    )
                     .expect("ask-rule answer plan");
                 assert_eq!(plan.choice_id(), choice);
                 assert_eq!(plan.stages().len(), 1, "{decision:?}");
@@ -4376,7 +4926,7 @@ mod tests {
                         CodingAgent::Claude,
                         CLAUDE_VERSION,
                         PERMISSION_RULE,
-                        decision,
+                        &AnswerKey::Decision(decision),
                     )
                     .unwrap();
                 assert!(
@@ -4441,7 +4991,12 @@ mod tests {
                 ),
             ] {
                 let plan = catalog
-                    .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, TIP_RULE, decision)
+                    .answer_plan(
+                        CodingAgent::Claude,
+                        CLAUDE_VERSION,
+                        TIP_RULE,
+                        &AnswerKey::Decision(decision),
+                    )
                     .expect("tip-rule answer plan");
                 assert_eq!(plan.choice_id(), choice);
                 assert_eq!(plan.stages().len(), 1, "{decision:?}");
@@ -4453,7 +5008,7 @@ mod tests {
                 let capability = plan.capability();
                 assert_eq!(capability.native_version(), CLAUDE_VERSION);
                 assert_eq!(capability.request_rule_id(), TIP_RULE);
-                assert_eq!(capability.decision(), decision);
+                assert_eq!(capability.key(), &AnswerKey::Decision(decision));
                 assert_eq!(
                     capability.fixture_ids(),
                     [pre_stage.to_owned()].as_slice(),
@@ -4474,7 +5029,12 @@ mod tests {
                         "{decision:?} tip plan on {other}"
                     );
                     let foreign = catalog
-                        .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, rule, decision)
+                        .answer_plan(
+                            CodingAgent::Claude,
+                            CLAUDE_VERSION,
+                            rule,
+                            &AnswerKey::Decision(decision),
+                        )
                         .unwrap();
                     assert!(
                         detector(&catalog)
@@ -4580,7 +5140,12 @@ mod tests {
                 ),
             ] {
                 let plan = catalog
-                    .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, READ_RULE, decision)
+                    .answer_plan(
+                        CodingAgent::Claude,
+                        CLAUDE_VERSION,
+                        READ_RULE,
+                        &AnswerKey::Decision(decision),
+                    )
                     .expect("read-outside answer plan");
                 assert_eq!(plan.choice_id(), choice);
                 assert_eq!(plan.stages().len(), 1, "{decision:?}");
@@ -4592,7 +5157,7 @@ mod tests {
                 let capability = plan.capability();
                 assert_eq!(capability.native_version(), CLAUDE_VERSION);
                 assert_eq!(capability.request_rule_id(), READ_RULE);
-                assert_eq!(capability.decision(), decision);
+                assert_eq!(capability.key(), &AnswerKey::Decision(decision));
                 assert_eq!(
                     capability.fixture_ids(),
                     [pre_stage.to_owned()].as_slice(),
@@ -4613,7 +5178,12 @@ mod tests {
                         "{decision:?} read-outside plan on {other}"
                     );
                     let foreign = catalog
-                        .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, rule, decision)
+                        .answer_plan(
+                            CodingAgent::Claude,
+                            CLAUDE_VERSION,
+                            rule,
+                            &AnswerKey::Decision(decision),
+                        )
                         .unwrap();
                     assert!(
                         detector(&catalog)
@@ -4645,7 +5215,12 @@ mod tests {
             for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                 assert!(
                     catalog
-                        .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, STARTUP_RULE, decision)
+                        .answer_plan(
+                            CodingAgent::Claude,
+                            CLAUDE_VERSION,
+                            STARTUP_RULE,
+                            &AnswerKey::Decision(decision)
+                        )
                         .is_none(),
                     "{decision:?}"
                 );
@@ -5620,7 +6195,12 @@ mod tests {
                 for answer in answers {
                     let decision = answer.decision;
                     let plan = bundled
-                        .answer_plan(backend, profile.version, rule, decision)
+                        .answer_plan(
+                            backend,
+                            profile.version,
+                            rule,
+                            &AnswerKey::Decision(decision),
+                        )
                         .expect("measured bundled answer plan");
                     assert_eq!(plan.choice_id(), answer.choice);
                     assert_eq!(plan.focus_matcher_id(), "focus");
@@ -5638,7 +6218,7 @@ mod tests {
                     assert_eq!(capability.native_version(), profile.version);
                     assert_eq!(capability.request_rule_id(), rule);
                     assert_eq!(capability.answer_rule_id(), answer.answer_rule);
-                    assert_eq!(capability.decision(), decision);
+                    assert_eq!(capability.key(), &AnswerKey::Decision(decision));
                     assert_eq!(
                         capability.fixture_ids(),
                         answer
@@ -5652,7 +6232,12 @@ mod tests {
                     for &other in CodingAgent::all().iter().filter(|&&other| other != backend) {
                         assert!(
                             bundled
-                                .answer_plan(other, profile.version, rule, decision)
+                                .answer_plan(
+                                    other,
+                                    profile.version,
+                                    rule,
+                                    &AnswerKey::Decision(decision)
+                                )
                                 .is_none(),
                             "{other:?} {}",
                             profile.version
@@ -5878,7 +6463,7 @@ mod tests {
                     CodingAgent::Opencode,
                     OPENCODE_VERSION,
                     PERMISSION_RULE,
-                    decision,
+                    &AnswerKey::Decision(decision),
                 )
                 .expect("measured bundled OpenCode answer plan")
         }
@@ -5951,7 +6536,7 @@ mod tests {
                         CodingAgent::Opencode,
                         OPENCODE_VERSION,
                         COMPACT_RULE,
-                        decision,
+                        &AnswerKey::Decision(decision),
                     )
                     .unwrap_or_else(|| panic!("compact {decision:?} plan"));
                 assert_eq!(plan.choice_id(), choice);
@@ -5974,7 +6559,7 @@ mod tests {
                 }
                 let capability = plan.capability();
                 assert_eq!(capability.request_rule_id(), COMPACT_RULE);
-                assert_eq!(capability.decision(), decision);
+                assert_eq!(capability.key(), &AnswerKey::Decision(decision));
                 let fixtures = if decision == PermissionDecision::Allow {
                     BTreeSet::from([COMPACT_FIXTURE, MIN_FIXTURE])
                 } else {
@@ -6008,7 +6593,12 @@ mod tests {
         fn plan_for(request: &str, decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
                 .unwrap()
-                .answer_plan(CodingAgent::Opencode, OPENCODE_VERSION, request, decision)
+                .answer_plan(
+                    CodingAgent::Opencode,
+                    OPENCODE_VERSION,
+                    request,
+                    &AnswerKey::Decision(decision),
+                )
                 .unwrap()
         }
 
@@ -6249,7 +6839,7 @@ mod tests {
                 assert_eq!(capability.native_version(), OPENCODE_VERSION);
                 assert_eq!(capability.request_rule_id(), PERMISSION_RULE);
                 assert_eq!(capability.answer_rule_id(), answer_rule);
-                assert_eq!(capability.decision(), decision);
+                assert_eq!(capability.key(), &AnswerKey::Decision(decision));
                 assert_eq!(
                     capability
                         .fixture_ids()
@@ -6268,7 +6858,7 @@ mod tests {
                 ] {
                     assert!(
                         bundled
-                            .answer_plan(backend, version, request, decision)
+                            .answer_plan(backend, version, request, &AnswerKey::Decision(decision))
                             .is_none(),
                         "{backend:?} {version} {request}"
                     );
@@ -7153,7 +7743,12 @@ mod tests {
                     assert_eq!(plan.fixture_ids(), std::slice::from_ref(&fixture));
                 }
                 let capability = catalog
-                    .answer_plan(CodingAgent::Codex, run, RULE, PermissionDecision::Allow)
+                    .answer_plan(
+                        CodingAgent::Codex,
+                        run,
+                        RULE,
+                        &AnswerKey::Decision(PermissionDecision::Allow),
+                    )
                     .unwrap_or_else(|| panic!("{run} answer plan"))
                     .capability()
                     .clone();
@@ -7188,10 +7783,15 @@ mod tests {
                     assert_eq!(reused.answer_decisions, at.answer_decisions, "{context}");
                     for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                         let exact = bundled
-                            .answer_plan(backend, boundary.min_version, request, decision)
+                            .answer_plan(
+                                backend,
+                                boundary.min_version,
+                                request,
+                                &AnswerKey::Decision(decision),
+                            )
                             .expect("bundled boundary answer plan");
                         let plan = bundled
-                            .answer_plan(backend, later, request, decision)
+                            .answer_plan(backend, later, request, &AnswerKey::Decision(decision))
                             .unwrap_or_else(|| panic!("{context} {decision:?}"));
                         assert_eq!(plan.capability().native_version(), later);
                         assert_eq!(

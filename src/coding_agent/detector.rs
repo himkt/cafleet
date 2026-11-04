@@ -1131,7 +1131,7 @@ mod tests {
                 CodingAgent::Codex,
                 "0.0.1-synthetic",
                 "synthetic-permission",
-                PermissionDecision::Allow,
+                &AnswerKey::Decision(PermissionDecision::Allow),
             )
             .unwrap();
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
@@ -2113,7 +2113,12 @@ mod tests {
             for (decision, id, choice, byte) in forms.answers {
                 let plan = ProfileCatalog::bundled()
                     .unwrap()
-                    .answer_plan(forms.backend, forms.version, forms.rule, decision)
+                    .answer_plan(
+                        forms.backend,
+                        forms.version,
+                        forms.rule,
+                        &AnswerKey::Decision(decision),
+                    )
                     .expect("measured bundled answer plan");
                 assert_eq!(plan.stages().len(), 1, "{id}");
                 assert_eq!(plan.stages()[0].bytes(), &[byte], "{id}");
@@ -2331,6 +2336,275 @@ mod tests {
     fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
         assert_no_debug_or_serialize!(AnswerMatch);
     }
+    mod question_answers {
+        use crate::coding_agent::detector::tests::*;
+
+        fn catalog() -> ProfileCatalog {
+            ProfileCatalog::from_definitions(&question_fixture_definition()).unwrap()
+        }
+        fn screen(bytes: &[u8]) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+            state.feed(bytes).unwrap();
+            state.snapshot()
+        }
+        fn detector() -> Detector {
+            Detector::new(&catalog(), CodingAgent::Codex, Some(VERSION))
+        }
+        fn plan(request: &str, key: AnswerKey) -> AnswerPlan {
+            catalog()
+                .answer_plan(CodingAgent::Codex, VERSION, request, &key)
+                .expect("synthetic question profile plan")
+        }
+        fn choice_plan(id: &str) -> AnswerPlan {
+            plan(QUESTION_RULE, AnswerKey::Choice(id.into()))
+        }
+        fn allow_plan() -> AnswerPlan {
+            plan(RULE, AnswerKey::Decision(PermissionDecision::Allow))
+        }
+        fn matched(focused: &[&str], id: &str) -> Option<AnswerMatch> {
+            detector()
+                .match_answer(&screen(&question_fixture_form(focused)), &choice_plan(id))
+                .unwrap()
+        }
+
+        #[test]
+        fn a_question_form_is_a_complete_question_with_its_choice_labels() {
+            let observation = detector()
+                .observe(&screen(&question_fixture_form(&["accept"])))
+                .unwrap();
+            assert_eq!(
+                observation.kind,
+                ObservationKind::Interaction(InteractionClass::Question)
+            );
+            assert_eq!(observation.rule_id, QUESTION_RULE);
+            assert_eq!(observation.match_evidence, MatchEvidence::Complete);
+            assert_eq!(
+                observation.raw_evidence["choices"],
+                json!(["Accept the change", "Keep current", "Ask later"])
+            );
+            assert!(observation.fingerprint.is_some());
+        }
+
+        #[test]
+        fn match_answer_matches_a_question_for_each_of_its_choice_plans() {
+            for id in ["decline", "later"] {
+                let matched = matched(&["accept"], id).expect("a choice plan matches its question");
+                assert!(matched.plan() == &choice_plan(id), "{id}");
+                assert_eq!(
+                    matched.choices(),
+                    ["Accept the change", "Keep current", "Ask later"],
+                    "{id}"
+                );
+            }
+        }
+
+        #[test]
+        fn match_answer_refuses_a_choice_plan_on_a_permission_form_and_a_decision_plan_on_a_question()
+         {
+            let permission = screen(&inspection_fixture_form(
+                "write disposable.txt",
+                "synthetic-only",
+            ));
+            let observed = detector().observe(&permission).unwrap();
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert!(
+                detector()
+                    .match_answer(&permission, &allow_plan())
+                    .unwrap()
+                    .is_some(),
+                "the decision plan answers its permission form"
+            );
+            for id in ["decline", "later"] {
+                assert!(
+                    detector()
+                        .match_answer(&permission, &choice_plan(id))
+                        .unwrap()
+                        .is_none(),
+                    "{id} on a permission form"
+                );
+            }
+            let question = screen(&question_fixture_form(&["accept"]));
+            assert!(
+                detector()
+                    .match_answer(&question, &allow_plan())
+                    .unwrap()
+                    .is_none(),
+                "a decision plan on a question"
+            );
+            assert!(
+                detector()
+                    .match_answer(&screen(&question_notice_form()), &choice_plan("decline"))
+                    .unwrap()
+                    .is_none(),
+                "a choice plan on another question rule"
+            );
+        }
+
+        #[test]
+        fn match_answer_refuses_a_choice_plan_from_another_profile_version() {
+            let other = Detector::new(&catalog(), CodingAgent::Codex, Some("0.0.2-synthetic"));
+            assert!(
+                other
+                    .match_answer(
+                        &screen(&question_fixture_form(&["accept"])),
+                        &choice_plan("decline")
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn marker_focus_resolves_the_one_choice_on_the_marker_row() {
+            for (focused, expected) in [
+                ("accept", "accept"),
+                ("decline", "decline"),
+                ("later", "later"),
+            ] {
+                for id in ["decline", "later"] {
+                    let matched = matched(&[focused], id).expect("the question matches");
+                    assert_eq!(
+                        matched.focused_choice_id(),
+                        Some(expected),
+                        "{focused} {id}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn marker_focus_resolves_no_choice_when_the_marker_row_holds_no_choice_label() {
+            let unlisted = b"\x1b[0m\x1b[2J\x1b[18;1HSynthetic question?\r\n  Accept the change\r\n  Keep current\r\n> Other option\r\n  Ask later\r\nQuestion end";
+            let matched = detector()
+                .match_answer(&screen(unlisted), &choice_plan("decline"))
+                .unwrap()
+                .expect("the question with an unlisted focused option matches");
+            assert_eq!(matched.focused_choice_id(), None);
+        }
+
+        #[test]
+        fn marker_focus_resolves_no_choice_when_the_marker_row_holds_several_choice_labels() {
+            let mut value = question_fixture_definition();
+            value["profiles"][0]["rules"][1]["matchers"][4]["pattern"] =
+                json!(" / (?P<label>Ask later)$");
+            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let plan = catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    QUESTION_RULE,
+                    &AnswerKey::Choice("decline".into()),
+                )
+                .unwrap();
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
+            let shared = b"\x1b[0m\x1b[2J\x1b[19;1HSynthetic question?\r\n  Accept the change\r\n> Keep current / Ask later\r\nQuestion end";
+            let matched = detector
+                .match_answer(&screen(shared), &plan)
+                .unwrap()
+                .expect("the question with two labels on the marker row matches");
+            assert_eq!(matched.focused_choice_id(), None);
+            let separate = b"\x1b[0m\x1b[2J\x1b[19;1HSynthetic question?\r\n> Accept the change\r\n  Keep current / Ask later\r\nQuestion end";
+            let matched = detector
+                .match_answer(&screen(separate), &plan)
+                .unwrap()
+                .expect("the question with one label on the marker row matches");
+            assert_eq!(matched.focused_choice_id(), Some("accept"));
+        }
+
+        #[test]
+        fn marker_focus_identity_is_the_capture_and_focused_choice_like_background_focus() {
+            let accept = matched(&["accept"], "decline").unwrap();
+            let decline = matched(&["decline"], "decline").unwrap();
+            for value in [&accept, &decline] {
+                assert_eq!(
+                    value.focus(),
+                    serde_json::to_string(&(value.focus_capture(), value.focused_choice_id()))
+                        .unwrap()
+                );
+            }
+            assert_ne!(accept.focus(), decline.focus());
+            assert!(accept.semantic() == decline.semantic());
+            assert!(!accept.same_request(&decline));
+            assert!(accept.same_request(&matched(&["accept"], "decline").unwrap()));
+            let a = detector()
+                .observe(&screen(&question_fixture_form(&["accept"])))
+                .unwrap();
+            let b = detector()
+                .observe(&screen(&question_fixture_form(&["decline"])))
+                .unwrap();
+            assert!(
+                a.fingerprint == b.fingerprint,
+                "a focus move keeps the episode identity"
+            );
+        }
+
+        fn framed_catalog() -> ProfileCatalog {
+            let mut value = question_fixture_definition();
+            value["profiles"][0]["rules"][1]["frame"] =
+                json!({"require_patterns":[],"reject_patterns":["^Live composer$"]});
+            ProfileCatalog::from_definitions(&value).unwrap()
+        }
+
+        #[test]
+        fn an_interaction_frame_reject_pattern_suppresses_the_rule_anywhere_on_the_screen() {
+            let catalog = framed_catalog();
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
+            let alone = detector
+                .observe(&screen(&question_fixture_form(&["accept"])))
+                .unwrap();
+            assert_eq!(
+                alone.kind,
+                ObservationKind::Interaction(InteractionClass::Question)
+            );
+            assert_eq!(alone.rule_id, QUESTION_RULE);
+            let mut quoted = question_fixture_form(&["accept"]);
+            quoted.extend_from_slice(b"\x1b[2;1HLive composer");
+            let quoted = detector.observe(&screen(&quoted)).unwrap();
+            assert_ne!(quoted.rule_id, QUESTION_RULE);
+            assert_ne!(
+                quoted.kind,
+                ObservationKind::Interaction(InteractionClass::Question)
+            );
+            let plan = catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    QUESTION_RULE,
+                    &AnswerKey::Choice("decline".into()),
+                )
+                .unwrap();
+            let mut quoted = question_fixture_form(&["accept"]);
+            quoted.extend_from_slice(b"\x1b[24;1HLive composer");
+            assert!(
+                detector
+                    .match_answer(&screen(&quoted), &plan)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn an_interaction_frame_require_pattern_must_appear_on_the_screen() {
+            let mut value = question_fixture_definition();
+            value["profiles"][0]["rules"][1]["frame"] = json!({
+                "require_patterns":["^Footer: question$"],"reject_patterns":["^Live composer$"]
+            });
+            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
+            let without = detector
+                .observe(&screen(&question_fixture_form(&["accept"])))
+                .unwrap();
+            assert_ne!(without.rule_id, QUESTION_RULE);
+            let mut with = question_fixture_form(&["accept"]);
+            with.extend_from_slice(b"\x1b[2;1HFooter: question");
+            let with = detector.observe(&screen(&with)).unwrap();
+            assert_eq!(with.rule_id, QUESTION_RULE);
+        }
+    }
+
     mod focus_resolution {
         use crate::coding_agent::detector::tests::*;
 
@@ -2350,7 +2624,12 @@ mod tests {
 
         fn gated_plan(decision: PermissionDecision) -> AnswerPlan {
             gated_catalog()
-                .answer_plan(CodingAgent::Codex, VERSION, GATED_RULE, decision)
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    GATED_RULE,
+                    &AnswerKey::Decision(decision),
+                )
                 .unwrap()
         }
 
@@ -3545,7 +3824,7 @@ mod tests {
                     CodingAgent::Opencode,
                     VERSION,
                     PERMISSION_RULE,
-                    PermissionDecision::Allow,
+                    &AnswerKey::Decision(PermissionDecision::Allow),
                 )
                 .unwrap();
             bundled_detector(CodingAgent::Opencode, VERSION)
@@ -4018,7 +4297,12 @@ mod tests {
         fn plan(rule: &str, decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
                 .unwrap()
-                .answer_plan(CodingAgent::Hermes, VERSION, rule, decision)
+                .answer_plan(
+                    CodingAgent::Hermes,
+                    VERSION,
+                    rule,
+                    &AnswerKey::Decision(decision),
+                )
                 .expect("measured bundled Hermes answer plan")
         }
 
@@ -4153,7 +4437,7 @@ mod tests {
                 assert_eq!(plan.capability().backend(), CodingAgent::Hermes);
                 assert_eq!(plan.capability().native_version(), VERSION);
                 assert_eq!(plan.capability().request_rule_id(), rule);
-                assert_eq!(plan.capability().decision(), decision);
+                assert_eq!(plan.capability().key(), &AnswerKey::Decision(decision));
                 assert_eq!(plan.stages().len(), 1, "{rule} {decision:?}");
                 let stage = &plan.stages()[0];
                 assert_eq!(stage.bytes(), &[byte], "{rule} {decision:?}");
@@ -4179,7 +4463,12 @@ mod tests {
                 assert!(
                     ProfileCatalog::bundled()
                         .unwrap()
-                        .answer_plan(CodingAgent::Hermes, VERSION, IDLE, decision)
+                        .answer_plan(
+                            CodingAgent::Hermes,
+                            VERSION,
+                            IDLE,
+                            &AnswerKey::Decision(decision)
+                        )
                         .is_none()
                 );
             }

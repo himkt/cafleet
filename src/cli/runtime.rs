@@ -331,6 +331,7 @@ mod tests {
     use crate::cli::CliArgs;
     use crate::cli::runtime::*;
     use crate::cli::test_support::usage_error;
+    use crate::coding_agent::catalog::AnswerKey;
     use crate::config::Settings;
     use crate::pane_lock::PaneLock;
     use crate::time::Deadline;
@@ -456,6 +457,10 @@ mod tests {
         use crate::runtime::input_client_test_support::Retained;
         let mut case = Case::new(Retained::Uncertain);
         let input = case.command();
+        let (decision, choice) = match &input.key {
+            AnswerKey::Decision(decision) => (Some(*decision), None),
+            AnswerKey::Choice(choice) => (None, Some(choice.clone())),
+        };
         let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
         assert_eq!(
             receipt.input.uncertain_cause,
@@ -471,7 +476,8 @@ mod tests {
                 expected_run_id: input.expected_run_id,
                 expected_owner_epoch: input.expected_owner_epoch,
                 request_token: input.request_token.clone(),
-                decision: input.decision,
+                decision,
+                choice,
                 decision_source: input.decision_source,
                 director_mode: input.director_mode,
                 mode_evidence_ref: input.mode_evidence_ref.clone(),
@@ -626,6 +632,81 @@ mod tests {
                     set(&mut args, "--director-mode", mode);
                     accepted(&args);
                 }
+            }
+        }
+        fn respond_choice(choice: &str) -> Vec<String> {
+            let mut args = respond();
+            let index = args
+                .iter()
+                .position(|arg| arg == "--decision")
+                .expect("the fixture names its decision");
+            args[index] = "--choice".into();
+            args[index + 1] = choice.into();
+            args
+        }
+        fn parsed_answer(args: &[String]) -> (Option<storage::PermissionDecision>, Option<String>) {
+            match CliArgs::try_parse_from(args).unwrap().command {
+                crate::cli::Command::Permission(PermissionCommand::Respond {
+                    decision,
+                    choice,
+                    ..
+                }) => (decision, choice),
+                _ => panic!("a permission respond command"),
+            }
+        }
+        #[test]
+        fn permission_respond_accepts_a_choice_in_place_of_a_decision() {
+            for choice in [
+                "decline",
+                "not-now",
+                "dont-show-again",
+                "a",
+                &"a".repeat(64),
+            ] {
+                let args = respond_choice(choice);
+                accepted(&args);
+                assert_eq!(
+                    parsed_answer(&args),
+                    (None, Some(choice.to_owned())),
+                    "{choice}"
+                );
+            }
+            assert_eq!(
+                parsed_answer(&respond()),
+                (Some(storage::PermissionDecision::Allow), None)
+            );
+        }
+        #[test]
+        fn permission_respond_requires_exactly_one_of_a_decision_and_a_choice() {
+            let mut both = respond();
+            both.extend(["--choice".into(), "decline".into()]);
+            rejected(&both);
+            let mut both_choice_first = respond_choice("decline");
+            both_choice_first.extend(["--decision".into(), "deny".into()]);
+            rejected(&both_choice_first);
+            let mut neither = respond();
+            let index = neither.iter().position(|arg| arg == "--decision").unwrap();
+            neither.drain(index..index + 2);
+            rejected(&neither);
+            let mut repeated = respond_choice("decline");
+            repeated.extend(["--choice".into(), "not-now".into()]);
+            rejected(&repeated);
+        }
+        #[test]
+        fn permission_respond_rejects_a_choice_outside_the_choice_id_shape() {
+            for choice in [
+                "",
+                " ",
+                "Decline",
+                "ask_later",
+                "-decline",
+                "decline-",
+                "dont--show",
+                "dont show",
+                "décline",
+                &"a".repeat(65),
+            ] {
+                rejected(&respond_choice(choice));
             }
         }
         fn required(mut args: Vec<String>, flags: &[&str]) {

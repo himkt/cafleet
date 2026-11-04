@@ -1720,15 +1720,35 @@ pub(crate) mod test_support {
             "classification":"permission_request","visibility":"visible",
             "backend":"opencode","native_version":"2.1.4","answer_rule_id":"opencode-shell-allow-enter",
             "answer_capability":"tested","capability_reason":null,"supported_decisions":["allow","deny"],
+            "supported_choices":[],
             "request_token":"a".repeat(64),"output_seq":5,"evidence":{"rule_id":"opencode-shell-permission"},
             "missing_evidence":["arguments","cwd"]
         }))
         .expect("the fixture inspection matches the reply shape")
     }
+
+    /// A tested, visible question inspection offering two dismissal choices.
+    pub(crate) fn question_inspection() -> PermissionInspection {
+        serde_json::from_value(json!({
+            "event_id":11,"message_id":14,"member_id":3,"fleet_id":2,"director_member_id":1,
+            "run_id":7,"owner_epoch":2,"interaction_id":12,"episode_seq":1,
+            "classification":"question","visibility":"visible",
+            "backend":"claude","native_version":"2.1.312","answer_rule_id":null,
+            "answer_capability":"tested","capability_reason":null,"supported_decisions":[],
+            "supported_choices":[
+                {"choice_id":"not-now","label":"Not now","scope":"persistent"},
+                {"choice_id":"dont-show-again","label":"Don't show again","scope":"persistent"}
+            ],
+            "request_token":"a".repeat(64),"output_seq":5,"evidence":{"rule_id":"claude-auto-startup"},
+            "missing_evidence":[]
+        }))
+        .expect("the fixture question inspection matches the reply shape")
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::coding_agent::catalog::AnswerKey;
     use crate::runtime::control::test_support::feed_values;
     use crate::runtime::control::test_support::independent_frame as frame;
     use crate::runtime::control::*;
@@ -2973,7 +2993,7 @@ mod tests {
                 }
                 "permission_respond" => {
                     json!({"interaction_id":12,"event_id":11,"director_member_id":run.director_member_id,
-                    "expected_run_id":run.run_id,"expected_owner_epoch":run.owner_epoch,"request_token":"a".repeat(64),"decision":"allow",
+                    "expected_run_id":run.run_id,"expected_owner_epoch":run.owner_epoch,"request_token":"a".repeat(64),"decision":"allow","choice":null,
                     "decision_source":"director-auto","director_mode":"auto","mode_evidence_ref":"fixture:mode","decision_evidence_ref":"fixture:decision","operation_key":"fixture:response"})
                 }
                 "receipt" => match action.expect("receipt fixture specifies its action") {
@@ -3004,14 +3024,44 @@ mod tests {
                 "backend":"codex","native_version":run.native_version,
                 "answer_rule_id":if supported {json!("fixture-rule")} else {Value::Null},
                 "answer_capability":if supported {"tested"} else {"unknown"},"capability_reason":if supported {Value::Null} else {json!("fixture unsupported")},
-                "supported_decisions":if supported {json!(["allow","deny"])} else {json!([])},"request_token":if supported {json!("a".repeat(64))} else {Value::Null},
+                "supported_decisions":if supported {json!(["allow","deny"])} else {json!([])},"supported_choices":[],
+                "request_token":if supported {json!("a".repeat(64))} else {Value::Null},
                 "output_seq":2,"evidence":evidence,
                 "missing_evidence":["operation","arguments","cwd","environment","targets","effects","choice_scope"]})
+        }
+        fn question_inspection(&self, supported: bool) -> Value {
+            let mut value = self.inspection(supported);
+            value["classification"] = json!("question");
+            value["visibility"] = json!("visible");
+            value["supported_decisions"] = json!([]);
+            value["missing_evidence"] = json!([]);
+            if supported {
+                value["answer_rule_id"] = json!("fixture-question-decline");
+                value["supported_choices"] = json!([
+                    {"choice_id":"decline","label":"No, keep manual mode","scope":"persistent"},
+                    {"choice_id":"later","label":"Ask later","scope":"session"}
+                ]);
+            } else {
+                value["capability_reason"] = json!("question has no tested answer");
+            }
+            value
+        }
+        fn choice_request(&self, choice: &str) -> Value {
+            let mut value = self.request("permission_respond", None);
+            value["decision"] = Value::Null;
+            value["choice"] = json!(choice);
+            value
         }
         fn response(&self) -> Value {
             let run = &self.fixture.run;
             json!({"status":"accepted","input_id":13,"member_id":run.member_id,"run_id":run.run_id,"owner_epoch":run.owner_epoch,
-                "interaction_id":12,"event_id":11,"decision":"allow","decision_source":"director-auto","stage":"submitted","output_seq":2,"reason":null})
+                "interaction_id":12,"event_id":11,"decision":"allow","choice":null,"decision_source":"director-auto","stage":"submitted","output_seq":2,"reason":null})
+        }
+        fn choice_response(&self, choice: &str) -> Value {
+            let mut value = self.response();
+            value["decision"] = Value::Null;
+            value["choice"] = json!(choice);
+            value
         }
     }
     fn bytes(value: &Value) -> Vec<u8> {
@@ -3616,11 +3666,220 @@ mod tests {
         assert_eq!(actual.owner_epoch, case.fixture.run.owner_epoch);
         assert_eq!(actual.interaction_id, 12);
         assert_eq!(actual.event_id, 11);
-        assert_eq!(actual.decision, PermissionDecision::Allow);
+        assert_eq!(actual.key, AnswerKey::Decision(PermissionDecision::Allow));
         assert_eq!(actual.decision_source, DecisionSource::DirectorAuto);
         let mut nested = good.clone();
         nested["result"]["response"]["submission"] = submission("accepted", "submitted", Some(13));
         reject_reply(&good, &bytes(&nested), &request);
+    }
+
+    #[test]
+    fn request_permission_respond_carries_exactly_one_of_a_decision_and_a_choice() {
+        let case = Case::new();
+        let decision = case.request("permission_respond", None);
+        match decoded(&decision).operation {
+            InputControlOperation::PermissionRespond(input) => {
+                assert_eq!(input.key, AnswerKey::Decision(PermissionDecision::Allow))
+            }
+            _ => panic!("permission response operation"),
+        }
+        for choice in [
+            "decline",
+            "dont-show-again",
+            "not-now",
+            "a",
+            &"a".repeat(64),
+        ] {
+            let good = case.choice_request(choice);
+            match decoded(&good).operation {
+                InputControlOperation::PermissionRespond(input) => {
+                    assert_eq!(input.key, AnswerKey::Choice(choice.into()), "{choice}")
+                }
+                _ => panic!("permission response operation"),
+            }
+            assert_frame(&encode_input_request(&decoded(&good)).unwrap(), &good);
+        }
+        let good = case.choice_request("decline");
+        let mut both = good.clone();
+        both["decision"] = json!("deny");
+        rejection(&good, &bytes(&both));
+        let mut neither = good.clone();
+        neither["choice"] = Value::Null;
+        rejection(&good, &bytes(&neither));
+        for invalid in [
+            json!("Decline"),
+            json!("ask_later"),
+            json!("-decline"),
+            json!("decline-"),
+            json!("dont--show"),
+            json!("dont show"),
+            json!(""),
+            json!("a".repeat(65)),
+            json!(1),
+            json!(["decline"]),
+        ] {
+            let mut bad = good.clone();
+            bad["choice"] = invalid;
+            rejection(&good, &bytes(&bad));
+        }
+        let mut missing = good.clone();
+        missing.as_object_mut().unwrap().remove("choice");
+        rejection(&good, &bytes(&missing));
+        rejection(&good, &duplicate(&good, "choice"));
+    }
+
+    #[test]
+    fn reply_question_inspection_carries_its_supported_choices_and_no_decisions() {
+        let case = Case::new();
+        let request = case.request("permission_inspect", None);
+        for supported in [true, false] {
+            let payload = case.question_inspection(supported);
+            let good = reply("inspection", "request", payload.clone());
+            let actual = match decoded_reply(&good, &request) {
+                InputControlReply::Inspection(actual) => actual,
+                _ => panic!("inspection result has exact kind"),
+            };
+            assert_eq!(
+                serde_json::to_value(actual.classification).unwrap(),
+                json!("question")
+            );
+            assert!(actual.supported_decisions.is_empty());
+            assert_eq!(
+                serde_json::to_value(&actual.supported_choices).unwrap(),
+                payload["supported_choices"]
+            );
+            assert_eq!(
+                actual.capability_reason.as_deref(),
+                payload["capability_reason"].as_str()
+            );
+            assert_eq!(
+                actual.request_token.as_deref(),
+                payload["request_token"].as_str()
+            );
+            assert!(actual.missing_evidence.is_empty());
+            let encoded = encode_input_reply(Ok(&InputControlReply::Inspection(actual))).unwrap();
+            assert_frame(&encoded, &good);
+            assert_eq!(
+                serde_json::from_slice::<Value>(body(&encoded)).unwrap()["result"]["request"]
+                    ["supported_choices"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|choice| choice.as_object().unwrap().keys().cloned().collect::<Vec<_>>())
+                    .collect::<Vec<_>>(),
+                if supported {
+                    vec![vec!["choice_id", "label", "scope"]; 2]
+                } else {
+                    Vec::<Vec<&str>>::new()
+                }
+            );
+        }
+        let good = reply("inspection", "request", case.question_inspection(true));
+        for (case_name, choices) in [
+            (
+                "unknown scope",
+                json!([{"choice_id":"decline","label":"Keep","scope":"forever"}]),
+            ),
+            (
+                "missing label",
+                json!([{"choice_id":"decline","scope":"persistent"}]),
+            ),
+            (
+                "extra field",
+                json!([{"choice_id":"decline","label":"Keep","scope":"persistent","stage":"0d"}]),
+            ),
+            (
+                "choice id outside its shape",
+                json!([{"choice_id":"Decline","label":"Keep","scope":"persistent"}]),
+            ),
+            (
+                "duplicate choice",
+                json!([
+                    {"choice_id":"decline","label":"Keep","scope":"persistent"},
+                    {"choice_id":"decline","label":"Keep","scope":"persistent"}
+                ]),
+            ),
+            ("non-array", json!({"choice_id":"decline"})),
+        ] {
+            let mut bad = good.clone();
+            bad["result"]["request"]["supported_choices"] = choices;
+            assert!(
+                decode_input_reply(&bytes(&bad), &decoded(&request)).is_err(),
+                "{case_name}"
+            );
+        }
+        let mut both = good.clone();
+        both["result"]["request"]["supported_decisions"] = json!(["allow"]);
+        reject_reply(&good, &bytes(&both), &request);
+    }
+
+    #[test]
+    fn reply_choice_response_names_the_requested_choice_after_a_null_decision() {
+        let case = Case::new();
+        let request = case.choice_request("decline");
+        let good = reply(
+            "permission_response",
+            "response",
+            case.choice_response("decline"),
+        );
+        let actual = match decoded_reply(&good, &request) {
+            InputControlReply::PermissionResponse(actual) => actual,
+            _ => panic!("response result has exact kind"),
+        };
+        assert_eq!(actual.key, AnswerKey::Choice("decline".into()));
+        let encoded =
+            encode_input_reply(Ok(&InputControlReply::PermissionResponse(actual))).unwrap();
+        assert_frame(&encoded, &good);
+        for (field, value) in [
+            ("choice", json!("later")),
+            ("choice", Value::Null),
+            ("decision", json!("allow")),
+        ] {
+            let mut bad = good.clone();
+            bad["result"]["response"][field] = value;
+            reject_reply(&good, &bytes(&bad), &request);
+        }
+        let decision_request = case.request("permission_respond", None);
+        let decision_good = reply("permission_response", "response", case.response());
+        let mut chose = decision_good.clone();
+        chose["result"]["response"]["choice"] = json!("decline");
+        reject_reply(&decision_good, &bytes(&chose), &decision_request);
+    }
+
+    #[test]
+    fn reply_rejected_answer_kind_mismatches_decode_with_their_reasons() {
+        let case = Case::new();
+        for (request, mut response, reason) in [
+            (
+                case.choice_request("decline"),
+                case.choice_response("decline"),
+                "choice answers apply only to question interactions",
+            ),
+            (
+                case.request("permission_respond", None),
+                case.response(),
+                "decision answers apply only to permission requests",
+            ),
+            (
+                case.choice_request("decline"),
+                case.choice_response("decline"),
+                "choice decline has no tested answer for this question",
+            ),
+        ] {
+            response["status"] = json!("rejected");
+            response["input_id"] = Value::Null;
+            response["stage"] = json!("zero_bytes");
+            response["output_seq"] = Value::Null;
+            response["reason"] = json!(reason);
+            let good = reply("permission_response", "response", response);
+            let actual = match decoded_reply(&good, &request) {
+                InputControlReply::PermissionResponse(actual) => actual,
+                _ => panic!("response result has exact kind"),
+            };
+            assert_eq!(actual.submission.status, SubmissionStatus::Rejected);
+            assert_eq!(actual.submission.stage, SubmissionStage::ZeroBytes);
+            assert_eq!(actual.submission.reason.as_deref(), Some(reason));
+        }
     }
     #[test]
     fn reply_receipt_variants_require_exact_ids_and_nulls() {
@@ -3981,10 +4240,10 @@ mod tests {
             let encoded = encode_input_reply(Ok(&actual)).unwrap();
             assert_frame(&encoded, &expected);
             if request["kind"] == "permission_inspect" {
-                assert_eq!(result_keys(&encoded, "request"),"event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence".split(',').collect::<Vec<_>>());
+                assert_eq!(result_keys(&encoded, "request"),"event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,supported_choices,request_token,output_seq,evidence,missing_evidence".split(',').collect::<Vec<_>>());
             }
             if request["kind"] == "permission_respond" {
-                assert_eq!(result_keys(&encoded, "response"),"status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,decision_source,stage,output_seq,reason".split(',').collect::<Vec<_>>());
+                assert_eq!(result_keys(&encoded, "response"),"status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,decision_source,stage,output_seq,reason".split(',').collect::<Vec<_>>());
             }
         }
         let expected = json!({"protocol_version":1,"error":"fixture failure"});
