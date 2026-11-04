@@ -1,7 +1,7 @@
 # Hermes Director: Persistent Heartbeat-Woken Message Listener
 
 **Status**: Approved
-**Progress**: 0/18 tasks complete
+**Progress**: 18/18 tasks complete
 **Last Updated**: 2026-11-04
 
 ## Overview
@@ -120,14 +120,15 @@ A run type with three invalid runs is `not established` and blocks like `Fail`.
 
 Filled by the implementer. One row per run attempt; `Basis` is `observed` for every row.
 
-Versions: `<hermes --version first line>`; `<cafleet --version>`.
+Versions: `Hermes Agent vunknown (2026.9.24)`; `cafleet 0.31.2`.
 
 | Run | Attempt | Date (UTC) | `session_id` | T0 | Message IDs and send times | First observation per record (heartbeat `seq`, time) | ACK times | Heartbeats after T0 | Turns within Q1/Q2 | Shutdown (`closed` reason, exit, leak check) | Basis | Classification |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| A | 1 | | | | | | | | — | | observed | |
-| B | 1 | | | | | | | | | | observed | |
+| A | 1 | 2026-11-04 | `proc_28dd020` | — (never reached) | — (none sent) | — | — | — | — | `fleet delete 1` teardown at ~15:33:40; no `cafleet message listen 1` process remains | observed | Invalid: probe member 2 stayed on Claude Code's folder-trust dialog for the fresh `mktemp -d` directory and never sent `ready`; the Director blocked on a `clarify` question, so T0 required user input (cause outside reception) |
+| A | 2 | 2026-11-04 | `proc_8415e2ada441` | 15:36:20 (end of heartbeat seq 1 replay turn) | A1 = 3 @ 15:36:53.744; A2 = 4 @ 15:38:54.983; A3 = 5 @ 15:41:24.381 | A1 seq 2 @ 15:37:05.340; A2 seq 3 @ 15:39:05.811; A3 seq 4 @ 15:42:04.597; each injected into an idle Director before any `log`/`poll`/`wait`/`show` | 3 @ 15:37:21.587; 4 @ 15:39:15.709; 5 @ 15:42:13.496; each once; seq 1 replay turn issued no ACK | 3 (seq 2–4); quiet ticks emitted nothing | — | `closed` `fleet_deleted`, exit 0, exit notification treated as history; no `listen 3` process, `processes.json` `[]` | observed | Pass |
+| B | 1 | 2026-11-04 | `proc_c4345d1ee7bf` | 15:48:17 (end of heartbeat seq 1 replay turn) | B1–B5 = 8–12 @ 15:48:51.282, 15:50:16.172, 15:51:42.957, 15:53:07.966, 15:54:32.636; B6a–f = 13–18 @ 15:59:40.151–.361 (800-character bodies); B7 = 19 @ 16:01:04.954; B8 = 20 @ 16:02:30.631, event-8 prompt 16:02:38.0; B9–B14 = 21–26 @ 16:07:25.564, 16:08:50.084, 16:10:16.595, 16:11:40.684, 16:13:06.935, 16:14:31.190 | B1–B5 seq 2–6 @ 15:49:10.124, 15:51:10.557, 15:52:10.765, 15:53:11.017, 15:55:09.482; B6a–f seq 7 @ 16:00:10.519 (`omitted` 4168, all six consumed from the `log` read); B7 seq 8 @ 16:01:10.727; B8 prompted `poll` @ 16:02:37.610, then seq 9 @ 16:03:11.066 as replay; B9–B14 seq 10–15 @ 16:08:09.897, 16:09:10.074, 16:11:10.428, 16:12:10.624, 16:13:10.804, 16:15:11.163 | 8–12 @ 15:49:19.152, 15:51:18.007, 15:52:19.587, 15:53:17.795, 15:55:18.818; 13–18 @ 16:00:39.686–16:00:40.210; 19 @ 16:01:22.946; 20 @ 16:02:48.944 (prompted turn; none at seq 9); 21–26 @ 16:08:22.220, 16:09:28.047, 16:11:20.736, 16:12:21.939, 16:13:19.465, 16:15:19.636; each once | 14 (seq 2–15), same `session_id`, no joined notifications | Q1 (15:55:27–15:59:27): none; Q2 (16:03:22–16:07:22): none | `closed` `fleet_deleted`, exit 0, exit notification treated as history; no `listen 5` process, `processes.json` `[]` | observed | Pass |
 
-Selected outcome: `<both Pass | blocked>`; `<run date>` = the later run's date.
+Selected outcome: both Pass; `<run date>` = 2026-11-04.
 
 ### Replacement texts
 
@@ -200,42 +201,42 @@ The paragraph beginning "**hermes**: Hermes 2026.9.24 ships" is replaced in full
 
 ### Step 1: Prepare the live environment
 
-- [ ] Confirm `hermes --version` prints `Hermes Agent vunknown (2026.9.24)` (or another `v… (2026.9.24)` build) and record it with `cafleet --version` on the § Live evidence `Versions:` line. <!-- completed: -->
-- [ ] Create the isolated probe database per `docs/docs/contributing.md` § Run a CAFleet stream probe step 1, run plain `cafleet setup` against it, and confirm its output includes the Hermes passthrough line required by § Live verification. <!-- completed: -->
-- [ ] Create the hidden `probe/` directory beside this design doc for session exports and pane captures. <!-- completed: -->
+- [x] Confirm `hermes --version` prints `Hermes Agent vunknown (2026.9.24)` (or another `v… (2026.9.24)` build) and record it with `cafleet --version` on the § Live evidence `Versions:` line. <!-- completed: 2026-11-04T15:47 -->
+- [x] Create the isolated probe database per `docs/docs/contributing.md` § Run a CAFleet stream probe step 1, run plain `cafleet setup` against it, and confirm its output includes the Hermes passthrough line required by § Live verification. <!-- completed: 2026-11-04T15:47 -->
+- [x] Create the hidden `probe/` directory beside this design doc for session exports and pane captures. <!-- completed: 2026-11-04T15:47 -->
 
 ### Step 2: Run A (clean first observation)
 
-- [ ] Start the Director, send the § Live verification task prompt and run § Run A steps 1–4. <!-- completed: -->
-- [ ] Fill the Run A row of § Live evidence and classify it; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: -->
+- [x] Start the Director, send the § Live verification task prompt and run § Run A steps 1–4. <!-- completed: 2026-11-04T15:47 -->
+- [x] Fill the Run A row of § Live evidence and classify it; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: 2026-11-04T15:47 -->
 
 ### Step 3: Run B (extended)
 
-- [ ] In a fresh fleet, send the task prompt and execute the § Run B schedule, appending records when fewer than 12 heartbeats were delivered by event 14. <!-- completed: -->
-- [ ] Run the post-shutdown leak checks (`ps -eo pid,args`, `<hermes home>/processes.json`) and export the session. <!-- completed: -->
-- [ ] Fill the Run B row of § Live evidence and classify it; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: -->
+- [x] In a fresh fleet, send the task prompt and execute the § Run B schedule, appending records when fewer than 12 heartbeats were delivered by event 14. <!-- completed: 2026-11-04T16:21 -->
+- [x] Run the post-shutdown leak checks (`ps -eo pid,args`, `<hermes home>/processes.json`) and export the session. <!-- completed: 2026-11-04T16:21 -->
+- [x] Fill the Run B row of § Live evidence and classify it; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: 2026-11-04T16:21 -->
 
 ### Step 4: Outcome gate
 
-- [ ] Record the selected outcome and `<run date>` in § Live evidence. <!-- completed: -->
-- [ ] When either run is `Fail` or `not established`, add the Programmer's paired blocker marker (coordination protocol, role `programmer`) in § Live evidence naming the failed condition and its evidence, send `blocked (paragraph-Specification > Live evidence)` and stop until the user decides; otherwise check this task and continue. <!-- completed: -->
+- [x] Record the selected outcome and `<run date>` in § Live evidence. <!-- completed: 2026-11-04T16:21 -->
+- [x] When either run is `Fail` or `not established`, add the Programmer's paired blocker marker (coordination protocol, role `programmer`) in § Live evidence naming the failed condition and its evidence, send `blocked (paragraph-Specification > Live evidence)` and stop until the user decides; otherwise check this task and continue. <!-- completed: 2026-11-04T16:21 -->
 
 ### Step 5: Update `skills/cafleet/reference/coding-agents.md`
 
-- [ ] Replace the Hermes Director-wake Note row per § Replacement texts. <!-- completed: -->
-- [ ] Replace the `#### Hermes native Director reception` subsection per § Replacement texts. <!-- completed: -->
-- [ ] Replace the Hermes Director Role eligibility Evidence cell per § Replacement texts, substituting `<run date>`. <!-- completed: -->
+- [x] Replace the Hermes Director-wake Note row per § Replacement texts. <!-- completed: 2026-11-04T16:24 -->
+- [x] Replace the `#### Hermes native Director reception` subsection per § Replacement texts. <!-- completed: 2026-11-04T16:24 -->
+- [x] Replace the Hermes Director Role eligibility Evidence cell per § Replacement texts, substituting `<run date>`. <!-- completed: 2026-11-04T16:24 -->
 
 ### Step 6: Update `SPEC.md` §6.7
 
-- [ ] Replace the hermes backend paragraph per § Replacement texts. <!-- completed: -->
-- [ ] Replace the `hermes` Director row's Evidence cell in § Role eligibility per § Replacement texts, substituting `<run date>`. <!-- completed: -->
+- [x] Replace the hermes backend paragraph per § Replacement texts. <!-- completed: 2026-11-04T16:25 -->
+- [x] Replace the `hermes` Director row's Evidence cell in § Role eligibility per § Replacement texts, substituting `<run date>`. <!-- completed: 2026-11-04T16:25 -->
 
 ### Step 7: Verify
 
-- [ ] `grep -rn "woken only by the receiver's exit notification\|<absolute cafleet path> message listen <director-id> --timeout 300" SPEC.md skills` returns nothing. <!-- completed: -->
-- [ ] `grep -rn "heartbeat" docs/docs` returns nothing, and `git diff --stat` lists only `SPEC.md` and `skills/cafleet/reference/coding-agents.md`. <!-- completed: -->
-- [ ] The Hermes Director Evidence cells in `SPEC.md` and `coding-agents.md` are identical, and the replaced subsection's links (`#director-wake`, `#receiver-recovery`) resolve to existing headings in `skills/cafleet/roles/director.md`. <!-- completed: -->
+- [x] `grep -rn "woken only by the receiver's exit notification\|<absolute cafleet path> message listen <director-id> --timeout 300" SPEC.md skills` returns nothing. <!-- completed: 2026-11-04T16:26 -->
+- [x] `grep -rn "heartbeat" docs/docs` returns nothing, and `git diff --stat` lists only `SPEC.md` and `skills/cafleet/reference/coding-agents.md`. <!-- completed: 2026-11-04T16:26 -->
+- [x] The Hermes Director Evidence cells in `SPEC.md` and `coding-agents.md` are identical, and the replaced subsection's links (`#director-wake`, `#receiver-recovery`) resolve to existing headings in `skills/cafleet/roles/director.md`. <!-- completed: 2026-11-04T16:26 -->
 
 ---
 
