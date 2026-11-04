@@ -803,7 +803,7 @@ mod tests {
             ),
             (
                 "member_permission_responses",
-                "input_id event_id interaction_id expected_owner_epoch request_token decision director_member_id director_mode decision_source mode_evidence_ref decision_evidence_ref answer_rule_id decided_at",
+                "input_id event_id interaction_id expected_owner_epoch request_token decision choice_id director_member_id director_mode decision_source mode_evidence_ref decision_evidence_ref answer_rule_id decided_at",
             ),
         ] {
             assert_eq!(
@@ -1200,7 +1200,7 @@ mod tests {
                 ),
                 (
                     "member_permission_responses",
-                    "input_id event_id interaction_id expected_owner_epoch request_token decision director_member_id director_mode decision_source mode_evidence_ref decision_evidence_ref answer_rule_id decided_at",
+                    "input_id event_id interaction_id expected_owner_epoch request_token decision choice_id director_member_id director_mode decision_source mode_evidence_ref decision_evidence_ref answer_rule_id decided_at",
                 ),
             ] {
                 let actual = fixture

@@ -3195,7 +3195,7 @@ mod tests {
                 }
                 InputControlOperation::PermissionRespond(input) => {
                     assert_eq!(input.expected_run_id, case.fixture.run.run_id);
-                    assert_eq!(input.decision, PermissionDecision::Allow);
+                    assert_eq!(input.key, AnswerKey::Decision(PermissionDecision::Allow));
                     assert_eq!(input.request_token, "a".repeat(64));
                 }
                 InputControlOperation::Receipt(ReceiptAction::Query { operation_key }) => {

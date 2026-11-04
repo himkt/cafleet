@@ -927,6 +927,7 @@ mod tests {
                     "answer_capability",
                     "capability_reason",
                     "supported_decisions",
+                    "supported_choices",
                     "request_token",
                     "output_seq",
                     "evidence",

@@ -654,9 +654,10 @@ mod tests {
 
     #[test]
     fn permission_inspection_json_places_supported_choices_after_supported_decisions() {
-        let value = crate::output::json::permission_inspection(
+        let output = crate::output::json::permission_inspection(
             &crate::runtime::control::test_support::question_inspection(),
         );
+        let value = &output["request"];
         let keys = value
             .as_object()
             .unwrap()

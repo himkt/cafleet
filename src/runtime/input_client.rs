@@ -5692,6 +5692,7 @@ mod tests {
         }
 
         mod entry {
+            use crate::coding_agent::catalog::AnswerKey;
             use crate::runtime::InputCommandHost;
             use crate::runtime::InputControlReply;
             use crate::runtime::InputControlRequest;
