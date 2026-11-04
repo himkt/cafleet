@@ -9904,9 +9904,18 @@ mod tests {
                     "each input is delivered once, in order"
                 );
                 assert!(h.pty.manual.is_empty(), "{:?}", h.pty.manual);
-                for id in queued_ids {
+                for (index, id) in queued_ids.into_iter().enumerate() {
                     let input = storage::get_input(&h.fixture.conn, id).unwrap();
-                    assert_eq!(input.state, storage::InputState::Accepted, "{id}");
+                    if index == 0 {
+                        assert_eq!(input.state, storage::InputState::Settled, "preview {id}");
+                        assert_eq!(
+                            input.disposition,
+                            Some(storage::InputDisposition::Submitted),
+                            "preview {id}"
+                        );
+                    } else {
+                        assert_eq!(input.state, storage::InputState::Accepted, "{id}");
+                    }
                     assert_eq!(
                         input.delivery_method,
                         Some(crate::broker::runtime::DeliveryMethod::Profile)

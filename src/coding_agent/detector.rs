@@ -1070,6 +1070,28 @@ mod tests {
     use serde_json::Value;
     use serde_json::json;
 
+    /// Claude rules read either screen, so a primary-screen replay is the same live screen.
+    fn assert_primary_matches_alternate(
+        case: &str,
+        primary: &ScreenObservation,
+        alternate: &ScreenObservation,
+    ) {
+        assert_eq!(primary.kind, alternate.kind, "{case}");
+        assert_eq!(primary.rule_id, alternate.rule_id, "{case}");
+        assert_eq!(primary.match_evidence, alternate.match_evidence, "{case}");
+        assert_eq!(
+            primary.verified_noninteraction, alternate.verified_noninteraction,
+            "{case}"
+        );
+        for field in ["operation", "operation_rows", "choices"] {
+            assert_eq!(
+                primary.raw_evidence[field], alternate.raw_evidence[field],
+                "{case}: {field}"
+            );
+        }
+        assert!(primary.fingerprint == alternate.fingerprint, "{case}");
+    }
+
     /// The Claude auto-tip permission form; `padding` written spaces follow the question and
     /// operation rows, as Claude leaves them when it repaints only the changed cells of a row
     /// that was earlier wider.
@@ -1215,9 +1237,11 @@ mod tests {
         assert_eq!(quoted.kind, ObservationKind::ComposerEmpty);
         assert!(quoted.fingerprint.is_none());
 
-        let primary = read_outside_observation(&read_outside_screen(|_| {}, false));
-        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
-        assert_ne!(primary.rule_id, READ_OUTSIDE_RULE);
+        assert_primary_matches_alternate(
+            "read-outside dialog",
+            &read_outside_observation(&read_outside_screen(|_| {}, false)),
+            &read_outside_observation(&read_outside_screen(|_| {}, true)),
+        );
 
         let cursor_outside = read_outside_observation(&replay_native_fixture(
             &bundled_screen(READ_OUTSIDE),
@@ -1389,8 +1413,11 @@ mod tests {
     #[test]
     fn bundled_claude_detector_rejects_copies_that_are_not_the_live_permission_form() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
-        let primary = claude_observation(&native_screen(|_| {}, false));
-        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
+        assert_primary_matches_alternate(
+            "permission form",
+            &claude_observation(&native_screen(|_| {}, false)),
+            &claude_observation(&native_screen(|_| {}, true)),
+        );
         let unfocused = claude_observation(&native_screen(
             |lines| lines[23] = lines[23].replace('❯', " "),
             true,
@@ -1855,8 +1882,11 @@ mod tests {
     #[test]
     fn bundled_claude_wrapped_form_keeps_the_false_positive_guards() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
-        let primary = claude_observation(&wrapped_screen(|_| {}, false));
-        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
+        assert_primary_matches_alternate(
+            "wrapped form",
+            &claude_observation(&wrapped_screen(|_| {}, false)),
+            &claude_observation(&wrapped_screen(|_| {}, true)),
+        );
         let quoted = claude_observation(&wrapped_screen(
             |lines| lines[15] = " Bash command".into(),
             true,
@@ -2293,7 +2323,17 @@ mod tests {
                     "{id} without its focus glyph"
                 );
                 let primary = replay_native_fixture(&fixture, |_| {}, false, None);
-                assert!(answer(&primary, &plan).is_none(), "{id} primary screen");
+                if forms.backend == CodingAgent::Claude {
+                    let replayed = answer(&primary, &plan)
+                        .expect("a Claude primary-screen replay is the live form");
+                    assert!(
+                        replayed.semantic() == matched.semantic(),
+                        "{id} primary screen"
+                    );
+                    assert_eq!(replayed.choices(), matched.choices(), "{id} primary screen");
+                } else {
+                    assert!(answer(&primary, &plan).is_none(), "{id} primary screen");
+                }
             }
         }
     }
@@ -2431,11 +2471,20 @@ mod tests {
             );
             assert!(!draft.verified_noninteraction, "{}", composer.idle);
             let primary = observe(&|_: &mut Vec<String>| {}, false, None);
-            assert!(
-                !primary.verified_noninteraction,
-                "{} primary-screen copy",
-                composer.idle
-            );
+            if composer.backend == CodingAgent::Claude {
+                assert_primary_matches_alternate(
+                    composer.idle,
+                    &primary,
+                    &observe(&|_: &mut Vec<String>| {}, true, None),
+                );
+                assert!(primary.verified_noninteraction, "{}", composer.idle);
+            } else {
+                assert!(
+                    !primary.verified_noninteraction,
+                    "{} primary-screen copy",
+                    composer.idle
+                );
+            }
             let away = observe(&|_: &mut Vec<String>| {}, true, Some((row, 0)));
             assert!(
                 !away.verified_noninteraction,

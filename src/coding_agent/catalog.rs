@@ -4824,9 +4824,9 @@ mod tests {
             (STARTUP_WIZARD, QUESTION, WIZARD_RULE, &[]),
             (
                 "claude-2.1.302-auto-fresh-first-launch-notice-1",
-                UNKNOWN,
-                UNMATCHED,
-                &[],
+                COMPOSER,
+                IDLE_RULE,
+                &[INDICATOR],
             ),
             (
                 "claude-2.1.302-auto-fresh-onboarding-theme-1",
@@ -5660,8 +5660,12 @@ mod tests {
                 .observe(&replay(NOTICE_IDLE, false))
                 .unwrap();
             assert!(
-                primary.annotations.is_empty(),
-                "scrollback and primary-screen copies"
+                primary
+                    .annotations
+                    .iter()
+                    .any(|block| block.rule_id == INDICATOR_RULE),
+                "a primary-screen replay keeps the live indicator: {:?}",
+                annotation_set(&primary)
             );
             let mut quoted = replay_run(redacted());
             let held = quoted.hold(VERBOSE_QUOTE, 0, 300);
