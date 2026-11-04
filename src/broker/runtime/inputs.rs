@@ -1,5 +1,6 @@
 use crate::broker::runtime::*;
 use crate::coding_agent::AnswerCapability;
+use crate::coding_agent::catalog::valid_choice_id;
 use crate::runtime::with_database_deadline;
 use crate::time::now_stamp;
 use rusqlite::Connection;
@@ -818,6 +819,13 @@ fn validate_metadata(metadata: &PermissionResponseMetadata) -> Result<(), Caflee
             "nonblank reference of 1-2048 UTF-8 bytes without controls required",
         )?;
     }
+    if let AnswerKey::Choice(choice) = &metadata.key {
+        require(
+            valid_choice_id(choice),
+            "choice_id",
+            "lowercase hyphenated choice id of 1-64 bytes required",
+        )?;
+    }
     nonblank(&metadata.answer_rule_id, "answer_rule_id")
 }
 
@@ -829,12 +837,26 @@ pub(crate) fn permission_response_digest(
     validate_metadata(metadata)?;
     let object = json!({"run_id":run_id,"owner_epoch":metadata.expected_owner_epoch,
         "interaction_id":metadata.interaction_id,"event_id":metadata.event_id,"director_member_id":metadata.director_member_id,
-        "request_token":metadata.request_token,"decision":metadata.decision,"director_mode":metadata.director_mode,
+        "request_token":metadata.request_token,"decision":metadata.key.decision(),"choice_id":metadata.key.choice(),
+        "director_mode":metadata.director_mode,
         "decision_source":metadata.decision_source,"mode_evidence_ref":metadata.mode_evidence_ref,
         "decision_evidence_ref":metadata.decision_evidence_ref,"answer_rule_id":metadata.answer_rule_id});
     Ok(crate::digest::sha256_hex(
         crate::digest::canonical_json(&object).as_bytes(),
     ))
+}
+
+fn stored_key(
+    decision: Option<PermissionDecision>,
+    choice_id: Option<String>,
+) -> rusqlite::Result<AnswerKey> {
+    match (decision, choice_id) {
+        (Some(decision), None) => Ok(AnswerKey::Decision(decision)),
+        (None, Some(choice)) => Ok(AnswerKey::Choice(choice)),
+        _ => Err(rusqlite::Error::InvalidColumnName(
+            "member_permission_responses requires exactly one of decision and choice_id".into(),
+        )),
+    }
 }
 
 fn map_response(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionResponseRecord> {
@@ -845,7 +867,7 @@ fn map_response(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionResponseR
             interaction_id: row.get("interaction_id")?,
             expected_owner_epoch: row.get("expected_owner_epoch")?,
             request_token: row.get("request_token")?,
-            decision: row.get("decision")?,
+            key: stored_key(row.get("decision")?, row.get("choice_id")?)?,
             director_member_id: row.get("director_member_id")?,
             director_mode: row.get("director_mode")?,
             decision_source: row.get("decision_source")?,
@@ -951,6 +973,13 @@ pub(super) fn validate_input_response(
     Ok(Some(response))
 }
 
+fn answered_class(key: &AnswerKey) -> InteractionClass {
+    match key {
+        AnswerKey::Decision(_) => InteractionClass::PermissionRequest,
+        AnswerKey::Choice(_) => InteractionClass::Question,
+    }
+}
+
 fn permission_event_matches(
     event: &RuntimeEventView,
     run_id: i64,
@@ -962,7 +991,7 @@ fn permission_event_matches(
         && event.event.kind == RuntimeEventKind::InteractionOpened
         && event.event.notification_state == NotificationState::Inbox
         && event.interaction.as_ref().is_some_and(|interaction| {
-            interaction.classification == InteractionClass::PermissionRequest
+            interaction.classification == answered_class(&metadata.key)
                 && (!require_open || interaction.closed_at.is_none())
         })
 }
@@ -1062,7 +1091,7 @@ pub(crate) fn reserve_permission_response(
         let now = now_stamp();
         tx.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,?2,'permission_response',?3,'in_progress',?4,?4)",params![run.run_id,request.operation_key,digest,now])?;
         let input_id = tx.last_insert_rowid();
-        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.decision.as_str(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_rule_id,now])?;
+        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,choice_id,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.key.decision().map(PermissionDecision::as_str),metadata.key.choice(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_rule_id,now])?;
         tx.execute(
             "INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)",
             params![metadata.interaction_id, input_id],
@@ -1143,7 +1172,7 @@ fn validate_current_capability(
                 == event.event.payload_json["evidence"]["rule_id"]
                     .as_str()
                     .ok_or_else(|| invalid("rule_id", "event request rule required"))?
-            && cap.decision() == metadata.decision
+            && cap.key() == &metadata.key
             && !cap.fixture_ids().is_empty(),
         "answer_capability",
         "answer capability does not match this request",

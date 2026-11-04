@@ -9,6 +9,9 @@ use crate::broker::runtime::InputState;
 use crate::broker::runtime::InteractionClass;
 use crate::broker::runtime::PermissionDecision;
 use crate::broker::runtime::RunRecord;
+use crate::coding_agent::catalog::AnswerKey;
+use crate::coding_agent::catalog::ChoiceScope;
+use crate::coding_agent::catalog::valid_choice_id;
 use crate::runtime::*;
 use rusqlite::Connection;
 use serde::Deserializer;
@@ -226,7 +229,7 @@ pub(crate) struct PermissionInspectInput {
     pub(crate) event_id: i64,
     pub(crate) director_member_id: i64,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone)]
 pub(crate) struct PermissionRespondInput {
     pub(crate) interaction_id: i64,
     pub(crate) event_id: i64,
@@ -234,7 +237,7 @@ pub(crate) struct PermissionRespondInput {
     pub(crate) expected_run_id: i64,
     pub(crate) expected_owner_epoch: i64,
     pub(crate) request_token: String,
-    pub(crate) decision: PermissionDecision,
+    pub(crate) key: AnswerKey,
     pub(crate) decision_source: DecisionSource,
     pub(crate) director_mode: DirectorMode,
     pub(crate) mode_evidence_ref: String,
@@ -242,6 +245,15 @@ pub(crate) struct PermissionRespondInput {
     pub(crate) operation_key: String,
 }
 impl PermissionRespondInput {
+    fn wire(&self) -> Value {
+        json!({"interaction_id":self.interaction_id,"event_id":self.event_id,
+            "director_member_id":self.director_member_id,"expected_run_id":self.expected_run_id,
+            "expected_owner_epoch":self.expected_owner_epoch,"request_token":self.request_token,
+            "decision":self.key.decision(),"choice":self.key.choice(),
+            "decision_source":self.decision_source,"director_mode":self.director_mode,
+            "mode_evidence_ref":self.mode_evidence_ref,"decision_evidence_ref":self.decision_evidence_ref,
+            "operation_key":self.operation_key})
+    }
     pub(crate) fn inspection(&self) -> PermissionInspectInput {
         PermissionInspectInput {
             interaction_id: self.interaction_id,
@@ -257,7 +269,7 @@ pub(crate) struct PermissionResponseResult {
     pub(crate) owner_epoch: i64,
     pub(crate) interaction_id: i64,
     pub(crate) event_id: i64,
-    pub(crate) decision: PermissionDecision,
+    pub(crate) key: AnswerKey,
     pub(crate) decision_source: DecisionSource,
 }
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -286,6 +298,13 @@ impl MissingEvidence {
         Self::VALUES[*self as usize]
     }
 }
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SupportedChoice {
+    pub(crate) choice_id: String,
+    pub(crate) label: String,
+    pub(crate) scope: ChoiceScope,
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PermissionInspection {
@@ -306,6 +325,7 @@ pub(crate) struct PermissionInspection {
     pub(crate) answer_capability: crate::broker::runtime::Coverage,
     pub(crate) capability_reason: Option<String>,
     pub(crate) supported_decisions: Vec<PermissionDecision>,
+    pub(crate) supported_choices: Vec<SupportedChoice>,
     pub(crate) request_token: Option<String>,
     pub(crate) output_seq: u64,
     pub(crate) evidence: Value,
@@ -564,6 +584,7 @@ fn request_fields(kind: &str, value: &Value) -> Result<Vec<&'static str>> {
             "expected_owner_epoch",
             "request_token",
             "decision",
+            "choice",
             "decision_source",
             "director_mode",
             "mode_evidence_ref",
@@ -651,7 +672,7 @@ fn decode_request_value(value: &Value) -> Result<InputControlRequest> {
                 expected_run_id: object.positive("expected_run_id")?,
                 expected_owner_epoch: object.positive("expected_owner_epoch")?,
                 request_token: object.get("request_token")?,
-                decision: object.get("decision")?,
+                key: answer_key(&object)?,
                 decision_source: object.get("decision_source")?,
                 director_mode: object.get("director_mode")?,
                 mode_evidence_ref: object.get("mode_evidence_ref")?,
@@ -699,6 +720,24 @@ fn decode_request_value(value: &Value) -> Result<InputControlRequest> {
     })
 }
 
+fn answer_key(object: &Object<'_>) -> Result<AnswerKey> {
+    let decision: Option<PermissionDecision> = object.get("decision")?;
+    let choice: Option<String> = object.get("choice")?;
+    match (decision, choice) {
+        (Some(decision), None) => Ok(AnswerKey::Decision(decision)),
+        (None, Some(choice)) => {
+            ensure(
+                valid_choice_id(&choice),
+                "control choice requires the choice-id shape",
+            )?;
+            Ok(AnswerKey::Choice(choice))
+        }
+        _ => Err(error(
+            "control answer requires exactly one decision or choice",
+        )),
+    }
+}
+
 fn decode_input_request(body: &[u8]) -> Result<InputControlRequest> {
     decode_request_value(&decode_strict_json(body)?)
 }
@@ -732,10 +771,7 @@ pub(in crate::runtime) fn encode_input_request(request: &InputControlRequest) ->
             "permission_inspect",
             serde_json::to_value(input).map_err(io_error)?,
         ),
-        InputControlOperation::PermissionRespond(input) => (
-            "permission_respond",
-            serde_json::to_value(input).map_err(io_error)?,
-        ),
+        InputControlOperation::PermissionRespond(input) => ("permission_respond", input.wire()),
         InputControlOperation::Receipt(action) => (
             "receipt",
             match action {
@@ -788,6 +824,7 @@ const RESPONSE_FIELDS: &[&str] = &[
     "interaction_id",
     "event_id",
     "decision",
+    "choice",
     "decision_source",
     "stage",
     "output_seq",
@@ -811,6 +848,7 @@ const INSPECTION_FIELDS: &[&str] = &[
     "answer_capability",
     "capability_reason",
     "supported_decisions",
+    "supported_choices",
     "request_token",
     "output_seq",
     "evidence",
@@ -865,7 +903,7 @@ fn response(value: &Value) -> Result<PermissionResponseResult> {
         owner_epoch: object.positive("owner_epoch")?,
         interaction_id: object.positive("interaction_id")?,
         event_id: object.positive("event_id")?,
-        decision: object.get("decision")?,
+        key: answer_key(&object)?,
         decision_source: object.get("decision_source")?,
     })
 }
@@ -900,6 +938,20 @@ fn inspection(value: &Value) -> Result<Box<PermissionInspection>> {
     validate_order(
         result.missing_evidence.iter().map(MissingEvidence::as_str),
         MissingEvidence::VALUES,
+    )?;
+    let mut choices = std::collections::BTreeSet::new();
+    ensure(
+        result
+            .supported_choices
+            .iter()
+            .all(|choice| valid_choice_id(&choice.choice_id) && choices.insert(&choice.choice_id)),
+        "control inspection choices require unique shaped choice ids",
+    )?;
+    ensure(
+        result.supported_choices.is_empty()
+            || (result.supported_decisions.is_empty()
+                && result.classification == Some(InteractionClass::Question)),
+        "control inspection choices belong only to a question",
     )?;
     crate::broker::runtime::evidence::validate(&result.evidence)
         .map_err(|_| error("invalid control inspection evidence"))?;
@@ -1014,7 +1066,7 @@ fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) ->
                 && result.member_id == identity.member_id
                 && result.run_id == input.expected_run_id
                 && result.owner_epoch == input.expected_owner_epoch
-                && result.decision == input.decision
+                && result.key == input.key
                 && result.decision_source == input.decision_source
         }
         (InputControlOperation::Receipt(action), InputControlReply::Receipt(result)) => {

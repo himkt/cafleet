@@ -365,9 +365,13 @@ impl ObservationController {
             _ => None,
         };
         let next = (|| -> Result<Option<ObservedRequest>> {
-            if observed.kind
-                != ObservationKind::Interaction(storage::InteractionClass::PermissionRequest)
-                || observed.match_evidence != MatchEvidence::Complete
+            if !matches!(
+                observed.kind,
+                ObservationKind::Interaction(
+                    storage::InteractionClass::PermissionRequest
+                        | storage::InteractionClass::Question
+                )
+            ) || observed.match_evidence != MatchEvidence::Complete
                 || self.eligibility != InputEligibility::Hold(GateReason::Interaction)
             {
                 return Ok(None);
@@ -381,15 +385,11 @@ impl ObservationController {
             let backend = crate::coding_agent::coding_agent(&self.run.backend)
                 .expect("validated observer backend");
             let mut answer_matches = Vec::new();
-            for decision in [
-                storage::PermissionDecision::Allow,
-                storage::PermissionDecision::Deny,
-            ] {
-                if let Some(plan) =
-                    self.catalog
-                        .answer_plan(backend, version, &observed.rule_id, decision)
-                    && let Some(matched) = self.detector.match_answer(screen, &plan)?
-                {
+            for plan in self
+                .catalog
+                .answer_plans(backend, version, &observed.rule_id)
+            {
+                if let Some(matched) = self.detector.match_answer(screen, &plan)? {
                     answer_matches.push(matched);
                 }
             }

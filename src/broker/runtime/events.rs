@@ -841,6 +841,7 @@ pub(crate) fn persist_transition_in_transaction(
 }
 
 const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
+const QUESTION_INSTRUCTION: &str = "Verify this event and the current question. Inspect it for the choices CAFleet can answer and their scope. In the Director session's effective auto mode, choose one of those choices; otherwise obtain the user's choice. Submit it through the request-bound CAFleet response command with that choice, or give that complete command to the user. When the inspection lists no choice, ask the user to answer on the member's native surface. Inspect the native result and continuation afterward.";
 const AUTOMATIC_REFUSAL_INSTRUCTION: &str = "Verify this event. The member's automatic reviewer refused the operation and no native request is waiting. Dispatch evidence comes only from the member's routed request with its exact command, cwd, environment and refusal; this event and screen captures corroborate it. With no routed request, dispatch nothing and ask the member whether the refused operation is still needed when it next reports or goes idle. For a routed request, decide in the Director session's effective auto mode whether to authorize a separate execution through the routed-command path or to refuse; otherwise obtain the user's permission first. Inspect the actual result and the member's continuation afterward.";
 const AUTOMATIC_REVIEW_UNAVAILABLE_INSTRUCTION: &str = "Verify this event. Automatic review is unavailable for this member, so native permission forms may appear and each needs a decision, and refusals may stop its work. Supervise the member as interactive, and tell the user when the selected automatic mode cannot apply.";
 const MULTI_ROW_INSTRUCTION: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
@@ -884,15 +885,20 @@ fn director_action(
         return Ok(json!({"kind":action,"instruction":instruction,
             "inspect_argv":["cafleet","event","show",event_id.to_string(),"--json"]}));
     }
-    if kind != RuntimeEventKind::InteractionOpened
-        || classification != Some(InteractionClass::PermissionRequest)
-    {
-        return Ok(Value::Null);
-    }
+    let (action, instruction) = match (kind, classification) {
+        (RuntimeEventKind::InteractionOpened, Some(InteractionClass::PermissionRequest)) => (
+            "review_permission_request",
+            with_multi_row_sentence(REVIEW_INSTRUCTION, evidence),
+        ),
+        (RuntimeEventKind::InteractionOpened, Some(InteractionClass::Question)) => {
+            ("review_question", QUESTION_INSTRUCTION.to_owned())
+        }
+        _ => return Ok(Value::Null),
+    };
     let interaction_id = interaction_id.ok_or_else(|| {
         invalid(
             "interaction_id",
-            "permission opening requires an interaction",
+            "an answerable opening requires an interaction",
         )
     })?;
     require(
@@ -900,10 +906,8 @@ fn director_action(
         "director_action",
         "allocated positive action identities required",
     )?;
-    Ok(
-        json!({"kind":"review_permission_request","instruction":with_multi_row_sentence(REVIEW_INSTRUCTION, evidence),
-        "inspect_argv":["cafleet","permission","inspect",interaction_id.to_string(),"--event-id",event_id.to_string(),"--from-member-id",run.director_member_id.to_string(),"--json"]}),
-    )
+    Ok(json!({"kind":action,"instruction":instruction,
+        "inspect_argv":["cafleet","permission","inspect",interaction_id.to_string(),"--event-id",event_id.to_string(),"--from-member-id",run.director_member_id.to_string(),"--json"]}))
 }
 
 pub(crate) fn update_interaction_evidence(

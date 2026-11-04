@@ -10,6 +10,7 @@ use crate::coding_agent::AnswerStage;
 use crate::coding_agent::ComposerOperation;
 use crate::coding_agent::ProfileCatalog;
 use crate::coding_agent::StageGate;
+use crate::coding_agent::catalog::AnswerKey;
 use crate::coding_agent::coding_agent;
 use crate::db::bounded_by_inherited;
 use crate::db::with_database_budget;
@@ -213,7 +214,11 @@ pub(super) fn inspection_association(
             && view.event.message_id.is_some_and(|id| id > 0)
             && view.interaction.as_ref().is_some_and(|i| {
                 i.run_id == run.run_id
-                    && i.classification == storage::InteractionClass::PermissionRequest
+                    && matches!(
+                        i.classification,
+                        storage::InteractionClass::PermissionRequest
+                            | storage::InteractionClass::Question
+                    )
                     && i.closed_at.is_none()
             }),
         "permission inspection current event/interaction/message mismatch",
@@ -229,6 +234,19 @@ pub(super) fn inspection_association(
     let live: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM fleets WHERE fleet_id=?1 AND director_member_id=?2 AND deleted_at IS NULL)", rusqlite::params![run.fleet_id, run.director_member_id], |r| r.get(0))?;
     ensure(live, "permission fleet/Director changed")?;
     Ok(view)
+}
+
+/// The operation-centred facts an inspected interaction lacks; a question lacks none of them.
+pub(super) fn interaction_missing_evidence(
+    classification: storage::InteractionClass,
+    evidence: &serde_json::Value,
+) -> Result<Vec<MissingEvidence>> {
+    if classification == storage::InteractionClass::Question {
+        storage::evidence::validate(evidence)?;
+        Ok(Vec::new())
+    } else {
+        inspection_missing_evidence(evidence)
+    }
 }
 
 pub(super) fn inspection_missing_evidence(
@@ -252,6 +270,29 @@ pub(super) fn inspection_missing_evidence(
         MissingEvidence::ChoiceScope,
     ]);
     Ok(missing)
+}
+
+fn answered_classification(key: &AnswerKey) -> storage::InteractionClass {
+    match key {
+        AnswerKey::Decision(_) => storage::InteractionClass::PermissionRequest,
+        AnswerKey::Choice(_) => storage::InteractionClass::Question,
+    }
+}
+
+fn answer_kind_mismatch(
+    classification: storage::InteractionClass,
+    key: &AnswerKey,
+) -> Option<&'static str> {
+    let question = classification == storage::InteractionClass::Question;
+    match key {
+        AnswerKey::Decision(_) if question => {
+            Some("decision answers apply only to permission requests")
+        }
+        AnswerKey::Choice(_) if !question => {
+            Some("choice answers apply only to question interactions")
+        }
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -743,7 +784,8 @@ impl InputCoordinator {
                     .current_evidence()
                     .ok_or_else(|| error("current inspection observation unavailable"))?
                     .clone();
-                let missing_evidence = inspection_missing_evidence(&evidence)?;
+                let missing_evidence =
+                    interaction_missing_evidence(interaction.classification, &evidence)?;
                 let fresh = match transport.take_input_drain() {
                     Some(proof) => {
                         transport.validate_observation_drain(&proof, deadline)?;
@@ -760,6 +802,7 @@ impl InputCoordinator {
                     self.current_request = None;
                 }
                 let mut supported_decisions = Vec::new();
+                let mut supported_choices = Vec::new();
                 let mut answer_rule_id = None;
                 let mut request_token = None;
                 let blocker = self.permission_blocker(observation);
@@ -806,15 +849,29 @@ impl InputCoordinator {
                         }) {
                             answer_rule_id = Some(first.answer_rule_id().to_owned());
                         }
-                        supported_decisions = current
-                            .observed
-                            .answer_matches
-                            .iter()
-                            .map(|m| m.plan().capability().decision())
-                            .collect();
+                        for matched in &current.observed.answer_matches {
+                            match matched.plan().capability().key() {
+                                AnswerKey::Decision(decision) => {
+                                    supported_decisions.push(*decision)
+                                }
+                                AnswerKey::Choice(choice) => supported_choices.push(
+                                    crate::runtime::control::SupportedChoice {
+                                        choice_id: choice.clone(),
+                                        label: matched.choice_label().to_owned(),
+                                        scope: matched.plan().choice_scope(),
+                                    },
+                                ),
+                            }
+                        }
                         request_token = Some(token.clone());
                         reason = None;
                     }
+                }
+                if request_token.is_none()
+                    && blocker.is_none()
+                    && interaction.classification == storage::InteractionClass::Question
+                {
+                    reason = Some("question has no tested answer".into());
                 }
                 check_deadline(Instant::now(), deadline)?;
                 Ok(InputControlReply::Inspection(Box::new(
@@ -840,6 +897,7 @@ impl InputCoordinator {
                         },
                         capability_reason: reason,
                         supported_decisions,
+                        supported_choices,
                         request_token,
                         output_seq: transport.snapshot().screen_seq,
                         evidence,
@@ -979,7 +1037,8 @@ impl InputCoordinator {
                 && self.manual_generation == bound.manual_generation
                 && observation.request_generation() == bound.observed.request_generation
                 && observed.request_generation == bound.observed.request_generation
-                && observed.classification == storage::InteractionClass::PermissionRequest
+                && observed.classification
+                    == answered_classification(&selection.request.metadata.key)
                 && observed.same_request(&bound.observed),
             "permission request token or current plan binding changed",
         )?;
@@ -1287,14 +1346,31 @@ impl InputCoordinator {
                     && binding.identity == request.identity,
                 "permission response token identity changed",
             )?;
-            let plan = binding
+            if let Some(reason) = answer_kind_mismatch(binding.observed.classification, &input.key)
+            {
+                return Ok(Some(InputControlReply::PermissionResponse(
+                    self.rejected_response(input, reason),
+                )));
+            }
+            let Some(matched) = binding
                 .observed
                 .answer_matches
                 .iter()
-                .find(|matched| matched.plan().capability().decision() == input.decision)
-                .ok_or_else(|| error("selected permission decision is unsupported"))?
-                .plan()
-                .clone();
+                .find(|matched| matched.plan().capability().key() == &input.key)
+            else {
+                return match &input.key {
+                    AnswerKey::Decision(_) => {
+                        Err(error("selected permission decision is unsupported"))
+                    }
+                    AnswerKey::Choice(choice) => Ok(Some(InputControlReply::PermissionResponse(
+                        self.rejected_response(
+                            input,
+                            format!("choice {choice} has no tested answer for this question"),
+                        ),
+                    ))),
+                };
+            };
+            let plan = matched.plan().clone();
             let cap = plan.capability();
             let selection = Arc::new(PermissionSelection {
                 request: storage::NewPermissionResponse {
@@ -1304,7 +1380,7 @@ impl InputCoordinator {
                         interaction_id: input.interaction_id,
                         expected_owner_epoch: input.expected_owner_epoch,
                         request_token: input.request_token.clone(),
-                        decision: input.decision,
+                        key: input.key.clone(),
                         director_member_id: input.director_member_id,
                         director_mode: input.director_mode,
                         decision_source: input.decision_source,
@@ -1387,8 +1463,32 @@ impl InputCoordinator {
             owner_epoch: metadata.expected_owner_epoch,
             interaction_id: metadata.interaction_id,
             event_id: metadata.event_id,
-            decision: metadata.decision,
+            key: metadata.key.clone(),
             decision_source: metadata.decision_source,
+        }
+    }
+
+    fn rejected_response(
+        &self,
+        input: &crate::runtime::PermissionRespondInput,
+        reason: impl Into<String>,
+    ) -> PermissionResponseResult {
+        PermissionResponseResult {
+            submission: SubmissionResult {
+                status: SubmissionStatus::Rejected,
+                input_id: None,
+                stage: SubmissionStage::ZeroBytes,
+                output_seq: None,
+                reason: Some(reason.into()),
+                delivery: None,
+            },
+            member_id: self.run.member_id,
+            run_id: self.run.run_id,
+            owner_epoch: input.expected_owner_epoch,
+            interaction_id: input.interaction_id,
+            event_id: input.event_id,
+            key: input.key.clone(),
+            decision_source: input.decision_source,
         }
     }
 

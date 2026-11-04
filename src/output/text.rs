@@ -328,8 +328,8 @@ pub(crate) fn format_input_operation(input: &InputOperation) -> String {
     );
     if let Some(response) = &input.permission_response {
         let metadata = &response.metadata;
-        text.push_str(&format!("\nPermission decision: interaction={} event={} decision={} source={} mode={} director={} epoch={}",
-            metadata.interaction_id,metadata.event_id,metadata.decision.as_str(),metadata.decision_source.as_str(),metadata.director_mode.as_str(),metadata.director_member_id,metadata.expected_owner_epoch));
+        text.push_str(&format!("\nPermission decision: interaction={} event={} decision={} choice={} source={} mode={} director={} epoch={}",
+            metadata.interaction_id,metadata.event_id,metadata.key.decision().map_or("-", |decision| decision.as_str()),metadata.key.choice().unwrap_or("-"),metadata.decision_source.as_str(),metadata.director_mode.as_str(),metadata.director_member_id,metadata.expected_owner_epoch));
     }
     text
 }
@@ -338,10 +338,11 @@ pub(crate) fn format_permission_response_result(
     row: &crate::runtime::PermissionResponseResult,
 ) -> String {
     let mut text = format!(
-        "Permission response: interaction={} run={} decision={} source={} status={} input={} stage={} output_seq={}",
+        "Permission response: interaction={} run={} decision={} choice={} source={} status={} input={} stage={} output_seq={}",
         row.interaction_id,
         row.run_id,
-        row.decision.as_str(),
+        row.key.decision().map_or("-", |decision| decision.as_str()),
+        row.key.choice().unwrap_or("-"),
         row.decision_source.as_str(),
         row.submission.status.as_str(),
         row.submission
@@ -363,6 +364,11 @@ pub(crate) fn format_permission_inspection(row: &crate::runtime::PermissionInspe
         .supported_decisions
         .iter()
         .map(|value| value.as_str())
+        .chain(
+            row.supported_choices
+                .iter()
+                .map(|choice| choice.choice_id.as_str()),
+        )
         .collect::<Vec<_>>()
         .join(",");
     let visibility = row.visibility.as_str();

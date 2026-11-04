@@ -39,6 +39,7 @@ pub(crate) use crate::broker::runtime::inputs::settle_preview;
 pub(crate) use crate::broker::runtime::inputs::settle_zero_byte_deferred;
 pub(crate) use crate::broker::runtime::inputs::unpublished_delivery_results;
 use crate::broker::stored_enum;
+use crate::coding_agent::catalog::AnswerKey;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::time::Deadline;
@@ -810,7 +811,7 @@ pub(crate) struct PermissionResponseMetadata {
     pub(crate) interaction_id: i64,
     pub(crate) expected_owner_epoch: i64,
     pub(crate) request_token: String,
-    pub(crate) decision: PermissionDecision,
+    pub(crate) key: AnswerKey,
     pub(crate) director_member_id: i64,
     pub(crate) director_mode: DirectorMode,
     pub(crate) decision_source: DecisionSource,

@@ -1,8 +1,10 @@
 use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::coding_agent::CodingAgent;
+use crate::coding_agent::catalog::AnswerKey;
 use crate::coding_agent::catalog::Capture;
 use crate::coding_agent::catalog::CursorRule;
+use crate::coding_agent::catalog::FocusStyle;
 use crate::coding_agent::catalog::MarginRows;
 use crate::coding_agent::catalog::MatcherScope;
 use crate::coding_agent::catalog::Profile;
@@ -141,6 +143,7 @@ pub(crate) struct AnswerMatch {
     plan: AnswerPlan,
     semantic: SemanticFingerprint,
     choices: Vec<String>,
+    choice_label: String,
     focus: String,
     focus_capture: String,
     focused_choice: Option<String>,
@@ -164,6 +167,10 @@ impl AnswerMatch {
     pub(crate) fn choices(&self) -> &[String] {
         &self.choices
     }
+    /// The extracted label of the choice the plan selects.
+    pub(crate) fn choice_label(&self) -> &str {
+        &self.choice_label
+    }
     pub(crate) fn focus(&self) -> &str {
         &self.focus
     }
@@ -184,9 +191,18 @@ struct LogicalLine {
     boundaries: Vec<(u16, u16)>,
 }
 fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
+    clipped_logical_lines(screen, &BTreeMap::new())
+}
+/// `clips` maps a panel row to its separator column; such a row keeps only the cells left of
+/// the separator and always ends its logical line.
+fn clipped_logical_lines(
+    screen: &ScreenSnapshot,
+    clips: &BTreeMap<u16, u16>,
+) -> Result<Vec<LogicalLine>> {
     let mut lines = Vec::new();
     let mut current: Option<LogicalLine> = None;
     for row in 0..screen.rows {
+        let width = clips.get(&row).copied().unwrap_or(screen.cols);
         let line = current.get_or_insert_with(|| LogicalLine {
             text: String::new(),
             start: row,
@@ -194,7 +210,7 @@ fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
             boundaries: vec![(row, 0)],
         });
         line.end = row;
-        let end = (0..screen.cols)
+        let end = (0..width)
             .rev()
             .find(|&col| {
                 screen
@@ -227,11 +243,70 @@ fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
             }
             *line.boundaries.last_mut().expect("cell end boundary") = (row, col + width);
         }
-        if !screen.screen.row_wrapped(row) || row + 1 == screen.rows {
+        if clips.contains_key(&row) || !screen.screen.row_wrapped(row) || row + 1 == screen.rows {
             lines.push(current.take().expect("current logical line"));
         }
     }
     Ok(lines)
+}
+/// The separator column of every panel row, when every panel row shares one column.
+fn panel_clips(screen: &ScreenSnapshot, separator: char) -> BTreeMap<u16, u16> {
+    let mut glyph = [0; 4];
+    let glyph = &*separator.encode_utf8(&mut glyph);
+    let mut clips = BTreeMap::new();
+    for row in 0..screen.rows {
+        let column = (40..screen.cols.saturating_sub(1)).find(|&col| {
+            let cell = |col| screen.screen.cell(row, col);
+            match (cell(col - 1), cell(col), cell(col + 1)) {
+                (Some(before), Some(at), Some(after)) => {
+                    at.contents() == glyph
+                        && at.bgcolor() != before.bgcolor()
+                        && at.bgcolor() == after.bgcolor()
+                }
+                _ => false,
+            }
+        });
+        if let Some(column) = column {
+            clips.insert(row, column);
+        }
+    }
+    let mut columns = clips.values();
+    match columns.next() {
+        Some(first) if columns.all(|column| column == first) => clips,
+        _ => BTreeMap::new(),
+    }
+}
+/// The unclipped logical lines and, per declared separator glyph, the clipped ones.
+struct ScreenLines {
+    full: Vec<LogicalLine>,
+    clipped: BTreeMap<char, Vec<LogicalLine>>,
+}
+impl ScreenLines {
+    fn new(screen: &ScreenSnapshot, profile: &Profile) -> Result<Self> {
+        let mut clipped = BTreeMap::new();
+        for separator in profile
+            .rules
+            .iter()
+            .filter_map(|rule| rule.region.panel_separator)
+        {
+            if let std::collections::btree_map::Entry::Vacant(entry) = clipped.entry(separator) {
+                entry.insert(clipped_logical_lines(
+                    screen,
+                    &panel_clips(screen, separator),
+                )?);
+            }
+        }
+        Ok(Self {
+            full: logical_lines(screen)?,
+            clipped,
+        })
+    }
+    fn of(&self, rule: &Rule) -> &[LogicalLine] {
+        match rule.region.panel_separator {
+            Some(separator) => &self.clipped[&separator],
+            None => &self.full,
+        }
+    }
 }
 struct Matched {
     rule: Rule,
@@ -242,6 +317,7 @@ struct Matched {
     mode: Option<String>,
     excerpt: String,
     focuses: BTreeMap<String, String>,
+    matcher_lines: BTreeMap<String, usize>,
     label_cells: Vec<(String, Vec<(u16, u16)>)>,
 }
 fn captured(
@@ -256,16 +332,16 @@ fn captured(
 }
 type Candidate = (usize, usize, ScreenRegion);
 fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Option<Matched> {
+    if rule.frame.is_some() && !frame_guard_holds(rule, lines) {
+        return None;
+    }
     match qualifying_regions(rule, screen, lines).as_slice() {
         [candidate] => extract(rule, lines, *candidate),
         _ => None,
     }
 }
 fn frame_guard_holds(rule: &Rule, lines: &[LogicalLine]) -> bool {
-    let frame = rule
-        .frame
-        .as_ref()
-        .expect("annotation rules declare a frame");
+    let frame = rule.frame.as_ref().expect("guarded rules declare a frame");
     frame
         .require
         .iter()
@@ -382,6 +458,7 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
         .join("\n");
     let mut values = BTreeMap::new();
     let mut focuses = BTreeMap::new();
+    let mut matcher_lines = BTreeMap::new();
     let mut spans = BTreeMap::new();
     for matcher in &rule.matchers {
         let texts = if matcher.scope == MatcherScope::Region {
@@ -408,19 +485,21 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
                     .get(0)
                     .expect("regex match has full capture")
                     .as_str();
-                captured_values.push((named, full.to_owned(), located));
+                captured_values.push((named, full.to_owned(), located, line_index));
             }
         }
         if captured_values.len() != 1 {
             return None;
         }
-        let (named, full, located) = captured_values.pop().expect("single matcher capture");
+        let (named, full, located, line_index) =
+            captured_values.pop().expect("single matcher capture");
         focuses.insert(
             matcher.id.clone(),
             serde_json::to_string(&(&matcher.id, &full, &named)).expect("focus strings serialize"),
         );
         if matcher.scope == MatcherScope::Line {
             spans.insert(matcher.id.clone(), located);
+            matcher_lines.insert(matcher.id.clone(), line_index);
         }
         values.insert(matcher.id.clone(), named);
     }
@@ -470,6 +549,7 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
         mode,
         excerpt: region_text,
         focuses,
+        matcher_lines,
         label_cells,
     })
 }
@@ -513,6 +593,29 @@ fn background_focus(screen: &ScreenSnapshot, matched: &Matched) -> Option<String
         _ => None,
     }
 }
+/// The line of each choice label: the marker moves between these lines, so they stay equal while
+/// only the focus moves and change when the choice rows' layout does.
+fn marker_layout(rule: &Rule, matched: &Matched) -> String {
+    let lines = rule
+        .choices
+        .iter()
+        .map(|choice| (&choice.id, matched.matcher_lines.get(&choice.label.matcher)))
+        .collect::<Vec<_>>();
+    serde_json::to_string(&lines).expect("focus strings serialize")
+}
+/// The focused choice is the one choice whose label matcher matched the focus matcher's row.
+fn marker_focus(rule: &Rule, matched: &Matched, focus_matcher: &str) -> Option<String> {
+    let focus_line = matched.matcher_lines.get(focus_matcher)?;
+    let focused = rule
+        .choices
+        .iter()
+        .filter(|choice| matched.matcher_lines.get(&choice.label.matcher) == Some(focus_line))
+        .collect::<Vec<_>>();
+    match focused.as_slice() {
+        [choice] => Some(choice.id.clone()),
+        _ => None,
+    }
+}
 impl Detector {
     pub(crate) fn match_answer(
         &self,
@@ -529,15 +632,19 @@ impl Detector {
                 .answer_plan(
                     capability.native_version(),
                     capability.request_rule_id(),
-                    capability.decision(),
+                    capability.key(),
                 )
                 .as_ref()
                 != Some(plan)
         {
             return Ok(None);
         }
+        let answered = match capability.key() {
+            AnswerKey::Decision(_) => InteractionClass::PermissionRequest,
+            AnswerKey::Choice(_) => InteractionClass::Question,
+        };
         let observed = self.observe(screen)?;
-        if observed.kind != ObservationKind::Interaction(InteractionClass::PermissionRequest)
+        if observed.kind != ObservationKind::Interaction(answered)
             || observed.match_evidence != MatchEvidence::Complete
             || observed.rule_id != capability.request_rule_id()
         {
@@ -548,33 +655,45 @@ impl Detector {
             .iter()
             .find(|r| r.id == observed.rule_id)
             .expect("selected compiled request rule");
-        let Some(matched) = match_rule(rule, screen, &logical_lines(screen)?) else {
+        let lines = ScreenLines::new(screen, profile)?;
+        let Some(matched) = match_rule(rule, screen, lines.of(rule)) else {
             return Ok(None);
         };
-        let capture = matched
-            .focuses
-            .get(plan.focus_matcher_id())
-            .expect("validated focus matcher")
-            .clone();
-        let background = rule
+        let style = rule
             .matchers
             .iter()
             .find(|matcher| matcher.id == plan.focus_matcher_id())
             .expect("validated focus matcher")
-            .background_focus;
-        let focused_choice = background
-            .then(|| background_focus(screen, &matched))
-            .flatten();
-        let focus = if background {
+            .focus_style;
+        let capture = match style {
+            Some(FocusStyle::Marker) => marker_layout(rule, &matched),
+            _ => matched
+                .focuses
+                .get(plan.focus_matcher_id())
+                .expect("validated focus matcher")
+                .clone(),
+        };
+        let focused_choice = match style {
+            Some(FocusStyle::Background) => background_focus(screen, &matched),
+            Some(FocusStyle::Marker) => marker_focus(rule, &matched, plan.focus_matcher_id()),
+            None => None,
+        };
+        let focus = if style.is_some() {
             serde_json::to_string(&(&capture, &focused_choice)).expect("focus strings serialize")
         } else {
             capture.clone()
         };
+        let choice_index = rule
+            .choices
+            .iter()
+            .position(|choice| choice.id == plan.choice_id())
+            .expect("validated answer choice");
         Ok(Some(AnswerMatch {
+            choice_label: matched.choices[choice_index].clone(),
             plan: plan.clone(),
             semantic: observed
                 .fingerprint
-                .expect("complete permission fingerprint"),
+                .expect("complete interaction fingerprint"),
             choices: matched.choices,
             focus,
             focus_capture: capture,
@@ -597,7 +716,7 @@ impl Detector {
         &self,
         profile: &Profile,
         screen: &ScreenSnapshot,
-        lines: &[LogicalLine],
+        lines: &ScreenLines,
         unmatched_evidence: &Value,
     ) -> Vec<AnnotationBlock> {
         let Some(group) = &profile.annotations else {
@@ -607,7 +726,7 @@ impl Detector {
             .rules
             .iter()
             .filter(|rule| group.rules.contains(&rule.id))
-            .flat_map(|rule| match_annotation_blocks(rule, screen, lines))
+            .flat_map(|rule| match_annotation_blocks(rule, screen, lines.of(rule)))
             .map(|matched| {
                 let mut raw_evidence = unmatched_evidence.clone();
                 raw_evidence["rule_id"] = json!(matched.rule.id);
@@ -662,7 +781,7 @@ impl Detector {
         let Some(profile) = &self.profile else {
             return Ok(observation);
         };
-        let lines = logical_lines(screen)?;
+        let lines = ScreenLines::new(screen, profile)?;
         observation.annotations =
             self.annotation_blocks(profile, screen, &lines, &observation.raw_evidence);
         observation.guarded_annotation_rules = profile
@@ -673,7 +792,7 @@ impl Detector {
                     .annotations
                     .as_ref()
                     .is_some_and(|group| group.rules.contains(&rule.id))
-                    && frame_guard_holds(rule, &lines)
+                    && frame_guard_holds(rule, lines.of(rule))
             })
             .map(|rule| rule.id.clone())
             .collect();
@@ -687,7 +806,7 @@ impl Detector {
                         .flatten()
                         .any(|cap| cap.rules.contains(&rule.id))
             })
-            .filter_map(|rule| match_rule(rule, screen, &lines))
+            .filter_map(|rule| match_rule(rule, screen, lines.of(rule)))
             .collect::<Vec<_>>();
         let Some(priority) = matched.iter().map(|m| m.rule.priority).max() else {
             return Ok(observation);

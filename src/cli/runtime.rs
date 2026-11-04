@@ -2,6 +2,7 @@ use crate::broker::runtime;
 use crate::cli::checked;
 use crate::cli::emit;
 use crate::cli::nonblank;
+use crate::coding_agent::catalog::AnswerKey;
 use crate::error::CafleetError;
 use crate::runtime::validate_operation_key;
 use crate::runtime::validate_permission_reference;
@@ -10,6 +11,14 @@ use clap::Subcommand;
 use clap::builder::PossibleValuesParser;
 use clap::builder::TypedValueParser;
 use rusqlite::Connection;
+
+fn choice_id(value: &str) -> Result<String, String> {
+    if crate::coding_agent::catalog::valid_choice_id(value) {
+        Ok(value.into())
+    } else {
+        Err("a choice id is 1-64 bytes of lowercase hyphen-separated words".into())
+    }
+}
 
 fn positive_id(value: &str) -> Result<i64, String> {
     let id = value
@@ -150,7 +159,9 @@ pub(crate) enum PermissionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Answer the inspected native permission request with a semantic decision.
+    /// Answer the inspected native permission request with a semantic decision, or the inspected
+    /// question with a tested choice.
+    #[command(group(clap::ArgGroup::new("answer").required(true).args(["decision", "choice"])))]
     Respond {
         /// The interaction carrying the request.
         #[arg(value_parser = positive_id)]
@@ -170,9 +181,12 @@ pub(crate) enum PermissionCommand {
         /// The request token reported by inspection.
         #[arg(long, value_parser = checked(validate_request_token))]
         request_token: String,
-        /// The semantic answer.
+        /// The semantic answer to a permission request.
         #[arg(long, value_parser = stored_enum::<runtime::PermissionDecision>(runtime::PermissionDecision::VALUES))]
-        decision: runtime::PermissionDecision,
+        decision: Option<runtime::PermissionDecision>,
+        /// The tested choice that answers a question.
+        #[arg(long, value_parser = choice_id)]
+        choice: Option<String>,
         /// Who made the decision.
         #[arg(long, value_parser = stored_enum::<runtime::DecisionSource>(runtime::DecisionSource::VALUES))]
         decision_source: runtime::DecisionSource,
@@ -236,6 +250,7 @@ pub(crate) fn permission(
             expected_owner_epoch,
             request_token,
             decision,
+            choice,
             decision_source,
             director_mode,
             mode_evidence_ref,
@@ -243,6 +258,11 @@ pub(crate) fn permission(
             operation_key,
             json,
         } => {
+            let key = match (decision, choice) {
+                (Some(decision), None) => AnswerKey::Decision(decision),
+                (None, Some(choice)) => AnswerKey::Choice(choice),
+                _ => unreachable!("clap requires exactly one answer argument"),
+            };
             let response = crate::runtime::respond_permission(
                 conn,
                 settings,
@@ -253,7 +273,7 @@ pub(crate) fn permission(
                     expected_run_id,
                     expected_owner_epoch,
                     request_token,
-                    decision,
+                    key,
                     decision_source,
                     director_mode,
                     mode_evidence_ref,

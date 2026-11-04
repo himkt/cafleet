@@ -157,7 +157,7 @@ fn permission_response(row: &crate::broker::runtime::PermissionResponseRecord) -
     let metadata = &row.metadata;
     json!({"input_id":row.input_id,"event_id":metadata.event_id,"interaction_id":metadata.interaction_id,
         "expected_owner_epoch":metadata.expected_owner_epoch,"request_token":metadata.request_token,
-        "decision":metadata.decision.as_str(),"director_member_id":metadata.director_member_id,
+        "decision":metadata.key.decision(),"choice_id":metadata.key.choice(),"director_member_id":metadata.director_member_id,
         "director_mode":metadata.director_mode.as_str(),"decision_source":metadata.decision_source.as_str(),
         "mode_evidence_ref":metadata.mode_evidence_ref,"decision_evidence_ref":metadata.decision_evidence_ref,
         "answer_rule_id":metadata.answer_rule_id,"decided_at":row.decided_at})
@@ -166,7 +166,7 @@ fn permission_response(row: &crate::broker::runtime::PermissionResponseRecord) -
 pub(crate) fn permission_response_result(row: &crate::runtime::PermissionResponseResult) -> Value {
     json!({"response":{"status":row.submission.status.as_str(),"input_id":row.submission.input_id,"member_id":row.member_id,
         "run_id":row.run_id,"owner_epoch":row.owner_epoch,"interaction_id":row.interaction_id,"event_id":row.event_id,
-        "decision":row.decision.as_str(),"decision_source":row.decision_source.as_str(),"stage":row.submission.stage.as_str(),
+        "decision":row.key.decision(),"choice":row.key.choice(),"decision_source":row.decision_source.as_str(),"stage":row.submission.stage.as_str(),
         "output_seq":row.submission.output_seq,"reason":row.submission.reason}})
 }
 
@@ -176,7 +176,8 @@ pub(crate) fn permission_inspection(row: &crate::runtime::PermissionInspection) 
         "interaction_id":row.interaction_id,"episode_seq":row.episode_seq,"classification":row.classification,
         "visibility":row.visibility,"backend":row.backend,"native_version":row.native_version,
         "answer_rule_id":row.answer_rule_id,"answer_capability":row.answer_capability,
-        "capability_reason":row.capability_reason,"supported_decisions":row.supported_decisions,"request_token":row.request_token,
+        "capability_reason":row.capability_reason,"supported_decisions":row.supported_decisions,
+        "supported_choices":row.supported_choices,"request_token":row.request_token,
         "output_seq":row.output_seq,"evidence":row.evidence,"missing_evidence":row.missing_evidence}})
 }
 

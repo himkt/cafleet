@@ -1,4 +1,5 @@
 use crate::broker::runtime::Coverage;
+use crate::broker::runtime::InteractionClass;
 use crate::broker::runtime::PermissionDecision;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::NativeVersion;
@@ -17,12 +18,43 @@ use crate::coding_agent::detector::AnnotationBlock;
 use crate::coding_agent::detector::Detector;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AnswerKey {
+    Decision(PermissionDecision),
+    Choice(String),
+}
+impl AnswerKey {
+    pub(crate) fn decision(&self) -> Option<PermissionDecision> {
+        match self {
+            Self::Decision(decision) => Some(*decision),
+            Self::Choice(_) => None,
+        }
+    }
+    pub(crate) fn choice(&self) -> Option<&str> {
+        match self {
+            Self::Decision(_) => None,
+            Self::Choice(choice) => Some(choice),
+        }
+    }
+}
+
+pub(crate) fn valid_choice_id(value: &str) -> bool {
+    value.len() <= 64
+        && !value.is_empty()
+        && value.split('-').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AnswerCapability {
     backend: CodingAgent,
     native_version: String,
     request_rule_id: String,
     answer_rule_id: String,
-    decision: PermissionDecision,
+    key: AnswerKey,
     fixture_ids: Vec<String>,
 }
 impl AnswerCapability {
@@ -38,8 +70,8 @@ impl AnswerCapability {
     pub(crate) fn answer_rule_id(&self) -> &str {
         &self.answer_rule_id
     }
-    pub(crate) fn decision(&self) -> PermissionDecision {
-        self.decision
+    pub(crate) fn key(&self) -> &AnswerKey {
+        &self.key
     }
     pub(crate) fn fixture_ids(&self) -> &[String] {
         &self.fixture_ids
@@ -182,8 +214,9 @@ pub(super) enum MarginRows {
     All,
     Continuation,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum ChoiceScope {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ChoiceScope {
     SingleRequest,
     Session,
     Persistent,
@@ -204,7 +237,12 @@ pub(super) struct Matcher {
     pub(crate) id: String,
     pub(crate) scope: MatcherScope,
     pub(crate) regex: Regex,
-    pub(crate) background_focus: bool,
+    pub(crate) focus_style: Option<FocusStyle>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum FocusStyle {
+    Background,
+    Marker,
 }
 #[derive(Clone)]
 pub(super) struct Continuation {
@@ -232,6 +270,7 @@ pub(super) struct Region {
     pub(crate) end: Regex,
     pub(crate) max_rows: u16,
     pub(crate) cursor: CursorRule,
+    pub(crate) panel_separator: Option<char>,
 }
 #[derive(Clone)]
 pub(super) struct Frame {
@@ -259,7 +298,7 @@ pub(super) struct Capability {
 }
 #[derive(Clone)]
 pub(super) struct Answer {
-    pub(crate) decision: PermissionDecision,
+    pub(crate) key: AnswerKey,
     pub(crate) request: String,
     pub(crate) id: String,
     pub(crate) fixtures: Vec<String>,
@@ -312,6 +351,7 @@ impl AnswerStage {
 pub(crate) struct AnswerPlan {
     capability: AnswerCapability,
     choice_id: String,
+    choice_scope: ChoiceScope,
     focus_matcher_id: String,
     stages: Vec<AnswerStage>,
 }
@@ -321,6 +361,9 @@ impl AnswerPlan {
     }
     pub(crate) fn choice_id(&self) -> &str {
         &self.choice_id
+    }
+    pub(crate) fn choice_scope(&self) -> ChoiceScope {
+        self.choice_scope
     }
     pub(crate) fn focus_matcher_id(&self) -> &str {
         &self.focus_matcher_id
@@ -358,25 +401,50 @@ impl Profile {
         &self,
         version: &str,
         request: &str,
-        decision: PermissionDecision,
+        key: &AnswerKey,
     ) -> Option<AnswerPlan> {
         let answer = self
             .answers
             .iter()
-            .find(|a| a.request == request && a.decision == decision)?;
+            .find(|a| a.request == request && &a.key == key)?;
+        let choice_scope = self
+            .rules
+            .iter()
+            .find(|rule| rule.id == request)
+            .and_then(|rule| rule.choices.iter().find(|c| c.id == answer.choice_id))
+            .expect("validated answer request rule and choice")
+            .scope;
         Some(AnswerPlan {
             capability: AnswerCapability {
                 backend: self.backend,
                 native_version: version.into(),
                 request_rule_id: request.into(),
                 answer_rule_id: answer.id.clone(),
-                decision,
+                key: key.clone(),
                 fixture_ids: answer.fixtures.clone(),
             },
             choice_id: answer.choice_id.clone(),
+            choice_scope,
             focus_matcher_id: answer.focus_matcher_id.clone(),
             stages: answer.stages.clone(),
         })
+    }
+    /// Every plan of the request rule: decisions in `allow`, `deny` order, then choices in the
+    /// rule's choice order.
+    pub(super) fn answer_plans(&self, version: &str, request: &str) -> Vec<AnswerPlan> {
+        let Some(rule) = self.rules.iter().find(|rule| rule.id == request) else {
+            return Vec::new();
+        };
+        [PermissionDecision::Allow, PermissionDecision::Deny]
+            .into_iter()
+            .map(AnswerKey::Decision)
+            .chain(
+                rule.choices
+                    .iter()
+                    .map(|choice| AnswerKey::Choice(choice.id.clone())),
+            )
+            .filter_map(|key| self.answer_plan(version, request, &key))
+            .collect()
     }
 }
 #[derive(Clone)]
@@ -482,6 +550,13 @@ fn operation_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Captu
         ..capture(&Value::Object(plain), matchers)?
     }))
 }
+const REGION_FIELDS: [&str; 5] = [
+    "screen",
+    "start_pattern",
+    "end_pattern",
+    "max_rows",
+    "cursor",
+];
 const RULE_FIELDS: [&str; 8] = [
     "id",
     "priority",
@@ -501,13 +576,15 @@ fn compile_rule(value: &Value) -> Result<Rule> {
     )?)?;
     let continues = kind == ObservationKind::PermissionContinuation;
     let annotation = kind.is_annotation();
+    let interaction_frame =
+        matches!(kind, ObservationKind::Interaction(_)) && value.get("frame").is_some();
     let fields = if continues {
         RULE_FIELDS
             .iter()
             .chain(&CONTINUATION_FIELDS)
             .copied()
             .collect()
-    } else if annotation {
+    } else if annotation || interaction_frame {
         RULE_FIELDS.iter().chain(&["frame"]).copied().collect()
     } else {
         RULE_FIELDS.to_vec()
@@ -537,16 +614,13 @@ fn compile_rule(value: &Value) -> Result<Rule> {
     } else {
         None
     };
-    let r = object(
-        &m["region"],
-        &[
-            "screen",
-            "start_pattern",
-            "end_pattern",
-            "max_rows",
-            "cursor",
-        ],
-    )?;
+    let separated = m["region"].get("panel_separator").is_some();
+    let region_fields = REGION_FIELDS
+        .iter()
+        .copied()
+        .chain(separated.then_some("panel_separator"))
+        .collect::<Vec<_>>();
+    let r = object(&m["region"], &region_fields)?;
     let region = Region {
         screen: one_of(
             &r["screen"],
@@ -568,19 +642,32 @@ fn compile_rule(value: &Value) -> Result<Rule> {
                 ("any", CursorRule::Any),
             ],
         )?,
+        panel_separator: if separated {
+            Some(panel_separator(&r["panel_separator"])?)
+        } else {
+            None
+        },
     };
     let mut ids = BTreeSet::new();
     let mut matchers = Vec::new();
     for v in array(&m["matchers"])? {
-        let background_focus = v.get("focus_style").is_some();
-        let m = if background_focus {
+        let styled = v.get("focus_style").is_some();
+        let m = if styled {
             object(v, &["id", "scope", "pattern", "focus_style"])?
         } else {
             object(v, &["id", "scope", "pattern"])?
         };
-        if background_focus {
-            one_of(&m["focus_style"], &[("background", ())])?;
-        }
+        let focus_style = if styled {
+            Some(one_of(
+                &m["focus_style"],
+                &[
+                    ("background", FocusStyle::Background),
+                    ("marker", FocusStyle::Marker),
+                ],
+            )?)
+        } else {
+            None
+        };
         let id = text(&m["id"])?;
         unique(&mut ids, &id)?;
         matchers.push(Matcher {
@@ -593,7 +680,7 @@ fn compile_rule(value: &Value) -> Result<Rule> {
                 ],
             )?,
             regex: expression(&m["pattern"])?,
-            background_focus,
+            focus_style,
         });
     }
     require(!matchers.is_empty(), "required matchers cannot be empty")?;
@@ -635,7 +722,9 @@ fn compile_rule(value: &Value) -> Result<Rule> {
             operation.is_some() == (kind == ObservationKind::AutomaticRefusal),
             "only automatic refusal annotations capture an operation",
         )?;
-        Some(compile_frame(&m["frame"])?)
+        Some(compile_frame(&m["frame"], FrameOwner::Annotation)?)
+    } else if interaction_frame {
+        Some(compile_frame(&m["frame"], FrameOwner::Interaction)?)
     } else {
         None
     };
@@ -654,7 +743,22 @@ fn compile_rule(value: &Value) -> Result<Rule> {
         frame,
     })
 }
-fn compile_frame(value: &Value) -> Result<Frame> {
+fn panel_separator(value: &Value) -> Result<char> {
+    let glyph = value
+        .as_str()
+        .ok_or_else(|| invalid("panel separator text required"))?;
+    let mut chars = glyph.chars();
+    match (chars.next(), chars.next()) {
+        (Some(separator), None) if !separator.is_whitespace() => Ok(separator),
+        _ => Err(invalid("panel separator requires one non-whitespace glyph")),
+    }
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FrameOwner {
+    Annotation,
+    Interaction,
+}
+fn compile_frame(value: &Value, owner: FrameOwner) -> Result<Frame> {
     let m = object(value, &["require_patterns", "reject_patterns"])?;
     let patterns = |value: &Value| {
         array(value)?
@@ -663,15 +767,31 @@ fn compile_frame(value: &Value) -> Result<Frame> {
             .collect::<Result<Vec<_>>>()
     };
     let require_patterns = patterns(&m["require_patterns"])?;
-    require(
-        !require_patterns.is_empty(),
-        "annotation frame requires a live-screen pattern",
-    )?;
+    let reject_patterns = patterns(&m["reject_patterns"])?;
+    match owner {
+        FrameOwner::Annotation => require(
+            !require_patterns.is_empty(),
+            "annotation frame requires a live-screen pattern",
+        )?,
+        FrameOwner::Interaction => require(
+            !reject_patterns.is_empty(),
+            "interaction frame requires a reject pattern",
+        )?,
+    }
     Ok(Frame {
         require: require_patterns,
-        reject: patterns(&m["reject_patterns"])?,
+        reject: reject_patterns,
     })
 }
+const ANSWER_FIELDS: [&str; 7] = [
+    "decision",
+    "request_rule_id",
+    "answer_rule_id",
+    "choice_id",
+    "focus_matcher_id",
+    "stages",
+    "fixture_ids",
+];
 const STAGE_FIELDS: [&str; 3] = ["bytes_hex", "required_rule_id", "required_choice_id"];
 fn stage_fields(value: &Value) -> Result<(&Map<String, Value>, Option<StageGate>)> {
     let focus = value.get("required_focus_choice_id").is_some();
@@ -766,7 +886,7 @@ fn validate_gates(
             .find(|matcher| matcher.id == focus_matcher)
             .expect("validated focus matcher");
         require(
-            matcher.background_focus,
+            matcher.focus_style.is_some(),
             "a focus-gated plan needs a focus_style matcher",
         )?;
         for choice in &request.choices {
@@ -1308,46 +1428,60 @@ impl ProfileCatalog {
             )?;
             let submissions = composer_submissions(&c["composer"], backend, &interval, &fixtures)?;
             let mut answers = Vec::new();
-            let mut decisions = BTreeSet::new();
+            let mut keys = BTreeSet::new();
             for v in array(&c["answers"])? {
+                let decided = v.get("decision").is_some();
                 let a = object(
                     v,
-                    &[
-                        "decision",
-                        "request_rule_id",
-                        "answer_rule_id",
-                        "choice_id",
-                        "focus_matcher_id",
-                        "stages",
-                        "fixture_ids",
-                    ],
+                    if decided {
+                        &ANSWER_FIELDS
+                    } else {
+                        &ANSWER_FIELDS[1..]
+                    },
                 )?;
-                let decision = PermissionDecision::try_from(text(&a["decision"])?.as_str())?;
                 let request = text(&a["request_rule_id"])?;
                 let id = text(&a["answer_rule_id"])?;
                 unique(&mut rule_ids, &id)?;
-                unique(&mut decisions, &format!("{request}:{}", decision.as_str()))?;
                 let rule = rules
                     .iter()
                     .find(|r| r.id == request)
                     .ok_or_else(|| invalid("unknown answer request rule"))?;
-                require(
-                    matches!(
-                        rule.kind,
-                        ObservationKind::Interaction(
-                            crate::broker::runtime::InteractionClass::PermissionRequest
-                        )
-                    ),
-                    "answer requires permission form",
-                )?;
                 let choice_id = text(&a["choice_id"])?;
+                let key = if decided {
+                    let decision = PermissionDecision::try_from(text(&a["decision"])?.as_str())?;
+                    require(
+                        rule.kind
+                            == ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                        "answer requires permission form",
+                    )?;
+                    AnswerKey::Decision(decision)
+                } else {
+                    require(
+                        rule.kind == ObservationKind::Interaction(InteractionClass::Question),
+                        "choice answer requires question form",
+                    )?;
+                    require(
+                        valid_choice_id(&choice_id),
+                        "choice id requires lowercase hyphenated words of at most 64 bytes",
+                    )?;
+                    AnswerKey::Choice(choice_id.clone())
+                };
+                unique(
+                    &mut keys,
+                    &match &key {
+                        AnswerKey::Decision(decision) => {
+                            format!("{request}:decision:{}", decision.as_str())
+                        }
+                        AnswerKey::Choice(choice) => format!("{request}:choice:{choice}"),
+                    },
+                )?;
                 let choice = rule
                     .choices
                     .iter()
                     .find(|c| c.id == choice_id)
                     .ok_or_else(|| invalid("unknown answer choice"))?;
                 require(
-                    choice.scope == ChoiceScope::SingleRequest,
+                    !decided || choice.scope == ChoiceScope::SingleRequest,
                     "answer requires single-request scope",
                 )?;
                 let focus = text(&a["focus_matcher_id"])?;
@@ -1388,7 +1522,7 @@ impl ProfileCatalog {
                 let fixture_ids = texts(&a["fixture_ids"])?;
                 provenance(&fixture_ids, backend, &interval, &fixtures)?;
                 answers.push(Answer {
-                    decision,
+                    key,
                     request,
                     id,
                     fixtures: fixture_ids,
@@ -1486,9 +1620,9 @@ impl ProfileCatalog {
             answer_decisions: profile
                 .map(|p| {
                     let mut decisions = Vec::new();
-                    for answer in &p.answers {
-                        if !decisions.contains(&answer.decision) {
-                            decisions.push(answer.decision);
+                    for decision in p.answers.iter().filter_map(|answer| answer.key.decision()) {
+                        if !decisions.contains(&decision) {
+                            decisions.push(decision);
                         }
                     }
                     decisions
@@ -1502,15 +1636,29 @@ impl ProfileCatalog {
             },
         }
     }
+    pub(crate) fn answer_plans(
+        &self,
+        backend: CodingAgent,
+        version: &str,
+        request: &str,
+    ) -> Vec<AnswerPlan> {
+        self.matching(backend, Some(version))
+            .map(|profile| profile.answer_plans(version, request))
+            .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+impl ProfileCatalog {
     pub(crate) fn answer_plan(
         &self,
         backend: CodingAgent,
         version: &str,
         request: &str,
-        decision: PermissionDecision,
+        key: &AnswerKey,
     ) -> Option<AnswerPlan> {
         self.matching(backend, Some(version))?
-            .answer_plan(version, request, decision)
+            .answer_plan(version, request, key)
     }
 }
 

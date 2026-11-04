@@ -172,7 +172,9 @@ CREATE TABLE member_permission_responses (
     interaction_id INTEGER NOT NULL REFERENCES member_interactions(interaction_id) ON DELETE RESTRICT,
     expected_owner_epoch INTEGER NOT NULL CHECK(expected_owner_epoch > 0),
     request_token TEXT NOT NULL CHECK(length(request_token) = 64 AND request_token NOT GLOB '*[^0-9a-f]*'),
-    decision TEXT NOT NULL CHECK(decision IN ('allow','deny')),
+    decision TEXT CHECK(decision IS NULL OR decision IN ('allow','deny')),
+    choice_id TEXT CHECK(choice_id IS NULL OR (length(choice_id) BETWEEN 1 AND 64
+        AND choice_id NOT GLOB '*[^a-z0-9-]*')),
     director_member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
     director_mode TEXT NOT NULL CHECK(director_mode IN ('auto','manual','unknown')),
     decision_source TEXT NOT NULL CHECK(decision_source IN ('director-auto','user')),
@@ -181,7 +183,8 @@ CREATE TABLE member_permission_responses (
     answer_rule_id TEXT NOT NULL CHECK(length(trim(answer_rule_id)) > 0),
     decided_at TEXT NOT NULL CHECK(length(trim(decided_at)) > 0),
     UNIQUE(interaction_id, input_id),
-    CHECK(decision_source != 'director-auto' OR director_mode = 'auto')
+    CHECK(decision_source != 'director-auto' OR director_mode = 'auto'),
+    CHECK((decision IS NULL) != (choice_id IS NULL))
 );
 
 CREATE TABLE member_permission_response_claims (
