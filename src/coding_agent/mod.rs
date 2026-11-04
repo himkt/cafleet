@@ -263,7 +263,7 @@ impl CodingAgent {
     }
     pub(crate) fn policy_choices(self, native_version: Option<&str>) -> Vec<String> {
         let choices: &[&str] = match (self, native_version) {
-            (Self::Claude, None | Some("2.1.302")) => &[
+            (Self::Claude, None | Some("2.1.302" | "2.1.312")) => &[
                 "default",
                 "manual",
                 "dontAsk",
@@ -1619,10 +1619,11 @@ mod tests {
         versions(backend)[0]
     }
 
-    /// The bundled exact version, an unprobed launch and unbundled versions.
+    /// The bundled exact version, any further explicit-mode adapter versions, an unprobed
+    /// launch and unbundled versions.
     fn versions(backend: CodingAgent) -> &'static [Option<&'static str>] {
         match backend {
-            CodingAgent::Claude => &[Some("2.1.302"), None, Some("2.1.306")],
+            CodingAgent::Claude => &[Some("2.1.302"), Some("2.1.312"), None, Some("2.1.306")],
             CodingAgent::Codex => &[Some("0.163.0"), None, Some("0.164.0")],
             CodingAgent::Opencode => &[None, Some("2.1.4"), Some("2.1.3"), Some("9.0.0-beta.1")],
             CodingAgent::Hermes => &[Some("2026.9.24"), None, Some("2026.10.1"), Some("1.0.0")],
@@ -1630,10 +1631,11 @@ mod tests {
     }
 
     /// The versions with an explicit-choice catalog: Claude and Codex offer one
-    /// only at the bundled version or unprobed; OpenCode and Hermes at every version.
+    /// only at their adapter versions or unprobed; OpenCode and Hermes at every version.
     fn catalog_versions(backend: CodingAgent) -> &'static [Option<&'static str>] {
         match backend {
-            CodingAgent::Claude | CodingAgent::Codex => &versions(backend)[..2],
+            CodingAgent::Claude => &versions(backend)[..3],
+            CodingAgent::Codex => &versions(backend)[..2],
             CodingAgent::Opencode | CodingAgent::Hermes => versions(backend),
         }
     }
@@ -1752,6 +1754,49 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_claude_2_1_312_records_exactly_the_2_1_302_explicit_choices() {
+        let expected = [
+            "default",
+            "manual",
+            "dontAsk",
+            "acceptEdits",
+            "auto",
+            "bypassPermissions",
+            "plan",
+        ];
+        for native_version in ["2.1.302", "2.1.312"] {
+            assert_eq!(
+                CodingAgent::Claude.policy_choices(Some(native_version)),
+                expected,
+                "{native_version}"
+            );
+            for mode in expected {
+                let selection = CodingAgent::Claude
+                    .resolve_policy(Some(native_version), Some(mode))
+                    .unwrap();
+                assert_eq!(selection.resolved_mode, mode);
+                assert_eq!(selection.mode_source, ModeSource::Explicit);
+                assert_eq!(
+                    selection.permission_argv,
+                    ["--permission-mode".to_owned(), mode.to_owned()]
+                );
+            }
+        }
+        for unbundled in ["2.1.306", "2.1.311", "2.1.313"] {
+            assert!(
+                CodingAgent::Claude
+                    .policy_choices(Some(unbundled))
+                    .is_empty(),
+                "{unbundled}"
+            );
+            assert!(matches!(
+                CodingAgent::Claude.resolve_policy(Some(unbundled), Some("default")),
+                Err(CafleetError::Usage(_))
+            ));
         }
     }
 
