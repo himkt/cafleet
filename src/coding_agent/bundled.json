@@ -1512,6 +1512,46 @@
       "sha256": "ab67be584708731805870b21aac4c8904032533f54c1e1f041ddc33548fca9ca"
     },
     {
+      "id": "claude-2.1.312-read-file-batched-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "a51dec9e30e33e9e5d88eae2ea862fc69afd2fecdfeb7b3b272f84cfac77905b"
+    },
+    {
+      "id": "claude-2.1.312-read-file-batched-allow-post-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "dc83a7244b88b540995c4bb7d0134ba8bcbb4b2cbabce620b019ca58af37594c"
+    },
+    {
+      "id": "claude-2.1.312-read-file-batched-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "87642cef562eec8b13d18afdce6df5db7d382de90f17b4ed7770b45127f94f1a"
+    },
+    {
+      "id": "claude-2.1.312-bash-batched-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.312",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude.json",
+      "sha256": "56324c5a9b7262adae8ce3ca267e823d1572def34b2d9d1b61912bc6f0090aa1"
+    },
+    {
       "id": "hermes-2026.9.24-escalate-tmux-120-1",
       "kind": "native",
       "backend": "hermes",

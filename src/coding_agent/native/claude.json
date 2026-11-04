@@ -7950,6 +7950,390 @@
           }
         }
       ]
+    },
+    "claude-2.1.312-read-file-batched-permission-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 8132,
+      "cursor_row": 23,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  disposable operation.                                                                                                 ",
+        "",
+        "● Reading /tmp/cafleet-194/claude-read-file-batched-cells-001-outside/batched-probe.txt",
+        "  ⎿  /tmp/cafleet-194/claude-read-file-batched-cells-001-outside/batched-probe.txt",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Read file                                                                                                       1 of 2",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Read(/tmp/cafleet-194/claude-read-file-batched-cells-001-outside/probe.txt)",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, allow reading from /tmp/cafleet-194/claude-read-file-batched-cells-001-outside during this session",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-read-file-batched-allow-post-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 8133,
+      "cursor_row": 23,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  disposable operation.",
+        "",
+        "● Reading /tmp/cafleet-194/claude-read-file-batched-cells-001-outside/batched-probe.txt",
+        "  ⎿  /tmp/cafleet-194/claude-read-file-batched-cells-001-outside/batched-probe.txt",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Read file                                                                                                       2 of 2",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Read(/tmp/cafleet-194/claude-read-file-batched-cells-001-outside/batched-probe.txt)",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, allow reading from /tmp/cafleet-194/claude-read-file-batched-cells-001-outside during this session",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-read-file-batched-deny-pre-stage-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 8597,
+      "cursor_row": 23,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  disposable operation.                                                                                                 ",
+        "",
+        "  Reading /tmp/cafleet-194/claude-read-file-batched-deny-001-outside/batched-probe.txt",
+        "  ⎿  /tmp/cafleet-194/claude-read-file-batched-deny-001-outside/batched-probe.txt",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Read file                                                                                                       1 of 2",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Read(/tmp/cafleet-194/claude-read-file-batched-deny-001-outside/probe.txt)",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, allow reading from /tmp/cafleet-194/claude-read-file-batched-deny-001-outside during this session",
+        "   3. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
+    },
+    "claude-2.1.312-bash-batched-permission-1": {
+      "rows": 36,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 8649,
+      "cursor_row": 27,
+      "cursor_col": 1,
+      "lines": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "  inside this disposable operation.                                                                                     ",
+        "",
+        "  Running permission-probe with allow (second attempt)",
+        "  ⎿  $ /tmp/cafleet-194/claude-bash-batched-cells-001/permission-probe allow",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Bash command",
+        " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below",
+        " Run permission-probe with allow (first attempt)",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " /tmp/cafleet-194/claude-bash-batched-cells-001/permission-probe allow",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " This command requires approval",
+        "",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, and don’t ask again for: /tmp/cafleet-194/claude-bash-batched-cells-001/permission-probe allow *",
+        "   3. Yes, and switch to auto mode · auto mode handles these prompts for you",
+        "   4. No",
+        "",
+        " Esc to cancel · Tab to amend",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 3,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 4,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 7,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 8,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 11,
+          "reason": "reviewed_privacy"
+        }
+      ]
     }
   }
 }
