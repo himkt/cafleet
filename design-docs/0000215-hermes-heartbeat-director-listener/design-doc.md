@@ -1,6 +1,6 @@
 # Hermes Director: Persistent Heartbeat-Woken Message Listener
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 18/18 tasks complete
 **Last Updated**: 2026-11-04
 
@@ -10,11 +10,11 @@ A Hermes Director receives member messages through one persistent `cafleet messa
 
 ## Success Criteria
 
-- [ ] § Live evidence records the installed versions and a classified Run A and Run B on Hermes 2026.9.24, every row labelled `observed`.
-- [ ] With both runs `Pass`, `coding-agents.md` § hermes carries the § Replacement texts Note row, `#### Hermes native Director reception` subsection and Director eligibility row verbatim, with placeholders substituted.
-- [ ] With both runs `Pass`, `SPEC.md` §6.7 carries the § Replacement texts hermes backend paragraph and Hermes Director eligibility row verbatim, with placeholders substituted.
-- [ ] `grep -rn "woken only by the receiver's exit notification\|<absolute cafleet path> message listen <director-id> --timeout 300" SPEC.md skills` returns nothing.
-- [ ] `grep -rn "heartbeat" docs/docs` returns nothing; no Rust source, CLI flag, test or other backend section changes; the Director requirements in `SPEC.md` §6.7 Role requirements and `coding-agents.md` § Role requirements are unchanged.
+- [x] § Live evidence records the installed versions and a classified Run A and Run B on Hermes 2026.9.24, every row labelled `observed`.
+- [x] With both runs `Pass`, `coding-agents.md` § hermes carries the § Replacement texts Note row, `#### Hermes native Director reception` subsection and Director eligibility row verbatim, with placeholders substituted.
+- [x] With both runs `Pass`, `SPEC.md` §6.7 carries the § Replacement texts hermes backend paragraph and Hermes Director eligibility row verbatim, with placeholders substituted.
+- [x] `grep -rn "woken only by the receiver's exit notification\|<absolute cafleet path> message listen <director-id> --timeout 300" SPEC.md skills` returns nothing.
+- [x] `grep -rn "heartbeat" docs/docs` returns nothing; no Rust source, CLI flag, test or other backend section changes; the Director requirements in `SPEC.md` §6.7 Role requirements and `coding-agents.md` § Role requirements are unchanged.
 - [ ] With any run `Fail` or `not established`, § Live evidence holds the Programmer's paired blocker marker, `blocked (paragraph-Specification > Live evidence)` was sent, and Steps 5–7 remain unchecked until the user decides.
 
 ---
