@@ -6019,6 +6019,7 @@ pub(crate) mod native_capture {
             nudge: Option<NudgeChoice>,
             baseline: Option<&'static str>,
             panel_probe: bool,
+            batched: bool,
             size: TerminalSize,
         }
         const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
@@ -6034,6 +6035,7 @@ pub(crate) mod native_capture {
             cols: 144,
         };
         const DRIVER_PANEL_PROBE: &str = "panel-probe.txt";
+        const DRIVER_BATCHED_READ_PROBE: &str = "batched-probe.txt";
         const DRIVER_PANEL_COMMITTED: &str = "panel-committed.txt";
         const DRIVER_AUTO_DEFAULT_SETTINGS: ClaudeConfigCase = ClaudeConfigCase::Seeded {
             settings: r#"{"permissions":{"defaultMode":"default"}}"#,
@@ -6085,7 +6087,7 @@ pub(crate) mod native_capture {
             ("TERM_PROGRAM_VERSION", "0.9.5"),
             ("HERDR_ENV", "1"),
         ];
-        static APPROVED_CASES: [ApprovedCase; 95] = [
+        static APPROVED_CASES: [ApprovedCase; 98] = [
             ApprovedCase {
                 id: "cells-002",
                 backend: CodingAgent::Claude,
@@ -6102,6 +6104,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6120,6 +6123,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6138,6 +6142,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6156,6 +6161,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6174,6 +6180,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6192,6 +6199,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6210,6 +6218,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6228,6 +6237,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6246,6 +6256,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6264,6 +6275,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_WRAPPED_SIZE,
             },
             ApprovedCase {
@@ -6282,6 +6294,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_WRAPPED_SIZE,
             },
             ApprovedCase {
@@ -6300,6 +6313,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_WRAPPED_SIZE,
             },
             ApprovedCase {
@@ -6318,6 +6332,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_BOXED_WRAP_SIZE,
             },
             ApprovedCase {
@@ -6336,6 +6351,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6354,6 +6370,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6372,6 +6389,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6390,6 +6408,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6408,6 +6427,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6426,6 +6446,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6444,6 +6465,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6462,6 +6484,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6480,6 +6503,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_FULL_SIZE,
             },
             ApprovedCase {
@@ -6498,6 +6522,7 @@ pub(crate) mod native_capture {
                 nudge: None,
                 baseline: None,
                 panel_probe: false,
+                batched: false,
                 size: DRIVER_HERDR_ENV_SIZE,
             },
             ApprovedCase::opencode_survey("opencode-survey-096", "os096.db", "os096", 96),
@@ -6915,6 +6940,35 @@ pub(crate) mod native_capture {
             )
             .file(FileProbe::BashTouch),
             ApprovedCase::claude(
+                "claude-read-file-batched-cells-001",
+                "default",
+                DRIVER_SEEDED,
+                "rbc1.db",
+                "rbc1",
+            )
+            .file(DRIVER_READ)
+            .batched()
+            .answer("allow", &["31"], "claude-read-file-cells-001"),
+            ApprovedCase::claude(
+                "claude-read-file-batched-deny-001",
+                "default",
+                DRIVER_SEEDED,
+                "rbd1.db",
+                "rbd1",
+            )
+            .file(DRIVER_READ)
+            .batched()
+            .answer("deny", &["33"], "claude-read-file-cells-001"),
+            ApprovedCase::claude(
+                "claude-bash-batched-cells-001",
+                "default",
+                DRIVER_SEEDED,
+                "bbc1.db",
+                "bbc1",
+            )
+            .bash("allow")
+            .batched(),
+            ApprovedCase::claude(
                 "claude-panel-auto-tip-cells-001",
                 "default",
                 DRIVER_PANEL_SETTINGS,
@@ -6993,6 +7047,7 @@ pub(crate) mod native_capture {
                     nudge: None,
                     baseline: None,
                     panel_probe: false,
+                    batched: false,
                     size,
                 }
             }
@@ -7019,6 +7074,7 @@ pub(crate) mod native_capture {
                     nudge: None,
                     baseline: None,
                     panel_probe: false,
+                    batched: false,
                     size: DRIVER_FULL_SIZE,
                 }
             }
@@ -7028,6 +7084,10 @@ pub(crate) mod native_capture {
             }
             const fn bash(mut self, argument: &'static str) -> Self {
                 self.probe_argument = Some(argument);
+                self
+            }
+            const fn batched(mut self) -> Self {
+                self.batched = true;
                 self
             }
             const fn panel(mut self, size: TerminalSize) -> Self {
@@ -7096,6 +7156,17 @@ pub(crate) mod native_capture {
                         "a nudge case sends exactly its dismissal stages",
                     )?;
                 }
+                ensure(
+                    !self.batched
+                        || (self.claude_config.is_some()
+                            && self.permission_mode == "default"
+                            && !self.panel_probe
+                            && matches!(
+                                (self.file_probe, self.probe_argument),
+                                (Some(FileProbe::Read { .. }), None) | (None, Some(_))
+                            )),
+                    "a batched case issues two Read or two Bash probe calls in a configured default-mode case",
+                )?;
                 let Some(config) = self.claude_config else {
                     return ensure(
                         self.file_probe.is_none()
@@ -7223,6 +7294,18 @@ pub(crate) mod native_capture {
                         outside.join(FileProbe::BashTouch.target()).display()
                     );
                 }
+                if let (true, Some(probe), Some(outside)) =
+                    (self.batched, self.file_probe, self.outside_directory())
+                {
+                    return format!(
+                        "In one turn, issue two parallel {} tool calls: one to {} on exactly {} and one to {} on exactly {}. Preserve every native permission request for the operator. After the native decisions, report the actual results and stop. Keep work inside this disposable operation.",
+                        probe.tool(),
+                        probe.operation(),
+                        outside.join(probe.target()).display(),
+                        probe.operation(),
+                        outside.join(DRIVER_BATCHED_READ_PROBE).display()
+                    );
+                }
                 if let (Some(probe), Some(outside)) = (self.file_probe, self.outside_directory()) {
                     return format!(
                         "Use the {} tool to {} on exactly {}. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
@@ -7232,6 +7315,12 @@ pub(crate) mod native_capture {
                     );
                 }
                 let helper = helper.expect("a shell-probe case binds its helper");
+                if let (true, Some(argument)) = (self.batched, self.probe_argument) {
+                    return format!(
+                        "In one turn, issue two parallel Bash tool calls: one attempting exactly {helper} {argument} first and one attempting exactly {helper} {argument} second, each as one command. Preserve every native permission request for the operator. After the native decisions, report the actual results and stop. Keep work inside this disposable operation.",
+                        helper = helper.display()
+                    );
+                }
                 if let (true, Some(argument)) = (self.panel_probe, self.probe_argument) {
                     return format!(
                         "Use the Edit tool to replace the text before with after in the file {}. Then use Bash to attempt exactly {} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
@@ -7886,6 +7975,12 @@ pub(crate) mod native_capture {
                 driver_private_directory(&directory)?;
             }
             driver_private_file(&probe_path, DRIVER_READ_PROBE_CONTENT.as_bytes())?;
+            if approved.batched {
+                driver_private_file(
+                    &outside.join(DRIVER_BATCHED_READ_PROBE),
+                    DRIVER_READ_PROBE_CONTENT.as_bytes(),
+                )?;
+            }
             driver_private_file(
                 &outside.join("edit-target.txt"),
                 DRIVER_EDIT_TARGET_CONTENT.as_bytes(),
@@ -9551,6 +9646,75 @@ pub(crate) mod native_capture {
                         "Use the Bash tool to run exactly touch /tmp/cafleet-194/guard-no-tip-access-outside/no-tip-access.txt as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation."
                     );
                     assert!(approved.claude_config_directory().is_some());
+                }
+
+                #[test]
+                fn batched_cases_issue_two_read_or_two_bash_calls_in_default_mode() {
+                    configured("guard-batched", "default", DRIVER_SEEDED)
+                        .file(DRIVER_READ)
+                        .batched()
+                        .answer("deny", &["33"], "claude-read-file-cells-001")
+                        .validate()
+                        .unwrap();
+                    configured("guard-batched", "default", DRIVER_SEEDED)
+                        .bash("allow")
+                        .batched()
+                        .validate()
+                        .unwrap();
+                    for case in [
+                        configured("guard-batched", "auto", DRIVER_SEEDED)
+                            .file(DRIVER_READ)
+                            .batched(),
+                        configured("guard-batched", "default", DRIVER_SEEDED)
+                            .file(FileProbe::Edit)
+                            .batched(),
+                        configured("guard-batched", "default", DRIVER_SEEDED)
+                            .file(FileProbe::BashTouch)
+                            .batched(),
+                        configured("guard-batched", "default", DRIVER_SEEDED).batched(),
+                        configured("guard-batched", "default", DRIVER_PANEL_SETTINGS)
+                            .bash("allow")
+                            .panel(DRIVER_PANEL_SIZE)
+                            .batched(),
+                        ApprovedCase::opencode_survey("guard-batched", "guard.db", "guard", 120)
+                            .batched(),
+                    ] {
+                        assert_eq!(
+                            refused(case.validate()),
+                            "a batched case issues two Read or two Bash probe calls in a configured default-mode case"
+                        );
+                    }
+                }
+
+                #[test]
+                fn batched_read_prompt_names_two_outside_files_in_one_turn() {
+                    let approved = configured("guard-batched", "default", DRIVER_SEEDED)
+                        .file(DRIVER_READ)
+                        .batched();
+                    assert_eq!(
+                        approved.prompt(Path::new("/tmp/cafleet-194/guard-batched"), None),
+                        "In one turn, issue two parallel Read tool calls: one to read the file on exactly /tmp/cafleet-194/guard-batched-outside/probe.txt and one to read the file on exactly /tmp/cafleet-194/guard-batched-outside/batched-probe.txt. Preserve every native permission request for the operator. After the native decisions, report the actual results and stop. Keep work inside this disposable operation."
+                    );
+                }
+
+                #[test]
+                fn batched_bash_prompt_runs_the_probe_helper_twice_in_one_turn() {
+                    let approved = configured("guard-batched", "default", DRIVER_SEEDED)
+                        .bash("allow")
+                        .batched();
+                    let cwd = Path::new("/tmp/cafleet-194/guard-batched");
+                    assert_eq!(
+                        approved.prompt(cwd, Some(&cwd.join("permission-probe"))),
+                        "In one turn, issue two parallel Bash tool calls: one attempting exactly /tmp/cafleet-194/guard-batched/permission-probe allow first and one attempting exactly /tmp/cafleet-194/guard-batched/permission-probe allow second, each as one command. Preserve every native permission request for the operator. After the native decisions, report the actual results and stop. Keep work inside this disposable operation."
+                    );
+                    assert_eq!(
+                        approved.requested_marker().as_deref(),
+                        Some("allow.executed")
+                    );
+                    assert_eq!(
+                        approved.forbidden_markers(),
+                        ["allow.executed", "deny.executed"]
+                    );
                 }
 
                 #[test]
