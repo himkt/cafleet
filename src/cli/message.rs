@@ -1415,4 +1415,672 @@ mod tests {
         assert_eq!(flags.contains(OFlag::O_NONBLOCK), nonblocking);
         (read_end, write_end, retained, original)
     }
+
+    mod codex_forwarding {
+        use crate::cli::message::tests::*;
+        use crate::runtime::system::test_support::TestChild;
+        use std::os::unix::process::CommandExt;
+        use std::path::PathBuf;
+        use std::process::Command;
+        use std::process::Stdio;
+
+        const SESSION_CONFIG: &str = "CAFLEET_TEST_CODEX_SESSION";
+        const THREAD: &str = "019a5c3e-7f21-7c11-9d3b-2b6f0c8e4a10";
+        const RECORD_PREFIX: &str = "[cafleet listen record] ";
+        const RECORD_LIMIT: usize = 65_536;
+
+        /// Appends the stub's argv to the log: fields end with US, invocations with RS.
+        const LOG_ARGV: &str = r#"{ for arg in "$@"; do printf '%s\037' "$arg"; done; printf '\036'; } >>"$CAFLEET_TEST_CODEX_LOG""#;
+
+        /// Runs the listener as a child of this shell and records its pid and exit status.
+        const LISTENER_WRAPPER: &str = r#""$@" >"$CAFLEET_TEST_LISTENER_STDOUT" 2>"$CAFLEET_TEST_LISTENER_STDERR" </dev/null &
+listener=$!
+printf '%s' "$listener" >"$CAFLEET_TEST_LISTENER_PID"
+wait "$listener"
+printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
+
+        fn harness_args(test: &'static str) -> [&'static str; 6] {
+            [
+                "--exact",
+                test,
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+                "--quiet",
+            ]
+        }
+
+        fn listener_command(wrapper: &str) -> Command {
+            let mut command = Command::new("/bin/sh");
+            command
+                .args(["-c", wrapper, "sh"])
+                .arg(std::env::current_exe().unwrap())
+                .args(harness_args(crate::cli::tests::isolated_cli_child_path()));
+            command
+        }
+
+        /// Plays the Codex session process: its argv[0] is `codex`, and with `sandbox`
+        /// it reaches the listener through a `codex-linux-sandbox` intermediate.
+        #[test]
+        #[ignore = "owned codex session subprocess entry"]
+        fn codex_session_child() {
+            let config: Value = serde_json::from_str(
+                &std::env::var(SESSION_CONFIG).expect("explicit codex session configuration"),
+            )
+            .unwrap();
+            let mut command = if config["role"] == "session" && config["sandbox"] == true {
+                let mut sandbox = Command::new(std::env::current_exe().unwrap());
+                sandbox
+                    .arg0("codex-linux-sandbox")
+                    .args(harness_args(test_path!(codex_session_child)))
+                    .env(SESSION_CONFIG, json!({"role":"sandbox"}).to_string());
+                sandbox
+            } else {
+                listener_command(LISTENER_WRAPPER)
+            };
+            let status = command.stdin(Stdio::null()).status().unwrap();
+            std::process::exit(status.code().unwrap_or(1));
+        }
+
+        enum Launch {
+            Session,
+            SandboxedSession,
+            /// The listener's parent shell is orphaned, so no ancestor is a Codex session.
+            Orphan,
+        }
+
+        struct Forwarder {
+            dir: tempfile::TempDir,
+            top: TestChild,
+        }
+
+        impl Forwarder {
+            fn start(
+                database_url: &str,
+                args: &[&str],
+                codex: Option<&str>,
+                launch: Launch,
+            ) -> Self {
+                let dir = tempfile::tempdir().unwrap();
+                let bin = dir.path().join("bin");
+                std::fs::create_dir(&bin).unwrap();
+                let path = match codex {
+                    Some(body) => {
+                        crate::coding_agent::test_support::executable_stub(&bin, "codex", body);
+                        format!("{}:/usr/bin:/bin", bin.display())
+                    }
+                    None => bin.display().to_string(),
+                };
+                let mut command = match launch {
+                    Launch::Session | Launch::SandboxedSession => {
+                        let mut session = Command::new(std::env::current_exe().unwrap());
+                        session
+                            .arg0("codex")
+                            .args(harness_args(test_path!(codex_session_child)))
+                            .env(
+                                SESSION_CONFIG,
+                                json!({
+                                    "role": "session",
+                                    "sandbox": matches!(launch, Launch::SandboxedSession),
+                                })
+                                .to_string(),
+                            );
+                        session
+                    }
+                    Launch::Orphan => listener_command(&format!("( {LISTENER_WRAPPER} ) &")),
+                };
+                let file = |name: &str| dir.path().join(name);
+                command
+                    .env("PATH", path)
+                    .env("CAFLEET_TEST_CODEX_LOG", file("codex.log"))
+                    .env("CAFLEET_TEST_LISTENER_STDOUT", file("stdout"))
+                    .env("CAFLEET_TEST_LISTENER_STDERR", file("stderr"))
+                    .env("CAFLEET_TEST_LISTENER_PID", file("pid"))
+                    .env("CAFLEET_TEST_LISTENER_STATUS", file("status"))
+                    .env(
+                        "CAFLEET_TEST_ISOLATED_CLI",
+                        json!({"database_url": database_url, "args": args}).to_string(),
+                    )
+                    .env_remove("CAFLEET_MEMBER_ID")
+                    .env_remove("CAFLEET_DATABASE_URL")
+                    .env("RUST_BACKTRACE", "0")
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                let top = TestChild::new(command.spawn().unwrap());
+                Self { dir, top }
+            }
+
+            fn file(&self, name: &str) -> PathBuf {
+                self.dir.path().join(name)
+            }
+
+            fn read(&self, name: &str) -> String {
+                std::fs::read_to_string(self.file(name)).unwrap_or_default()
+            }
+
+            /// Complete JSON lines only; the test harness adds its own non-JSON lines.
+            fn stdout_records(&self) -> Vec<Value> {
+                self.read("stdout")
+                    .split_inclusive('\n')
+                    .filter(|line| line.starts_with('{') && line.ends_with('\n'))
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect()
+            }
+
+            fn stderr(&self) -> String {
+                self.read("stderr")
+            }
+
+            fn status(&self) -> Option<i32> {
+                self.read("status").parse().ok()
+            }
+
+            fn forwarded(&self) -> Vec<Vec<String>> {
+                self.read("codex.log")
+                    .split('\u{1e}')
+                    .filter(|invocation| !invocation.is_empty())
+                    .map(|invocation| {
+                        invocation
+                            .strip_suffix('\u{1f}')
+                            .unwrap_or_else(|| panic!("complete invocation: {invocation:?}"))
+                            .split('\u{1f}')
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .collect()
+            }
+
+            fn wait_for(&self, what: &str, within: Duration, mut done: impl FnMut(&Self) -> bool) {
+                let deadline = Instant::now() + within;
+                while !done(self) {
+                    assert!(
+                        Instant::now() < deadline,
+                        "{what} within {within:?}: stdout {:?} stderr {:?} forwarded {:?}",
+                        self.read("stdout"),
+                        self.stderr(),
+                        self.forwarded()
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+
+            fn wait_ready(&self) {
+                self.wait_for("ready", Duration::from_secs(10), |forwarder| {
+                    forwarder
+                        .stdout_records()
+                        .first()
+                        .is_some_and(|record| record["event"] == "ready")
+                });
+            }
+
+            fn wait_forwarded(&self, count: usize) {
+                self.wait_for(
+                    &format!("{count} forwarded records"),
+                    Duration::from_secs(10),
+                    |forwarder| forwarder.forwarded().len() >= count,
+                );
+            }
+
+            fn wait_exit(&self, within: Duration) -> i32 {
+                self.wait_for("listener exit", within, |forwarder| {
+                    forwarder.status().is_some()
+                });
+                self.status().unwrap()
+            }
+
+            fn end_session(&mut self) {
+                self.top.kill().unwrap();
+                self.top.wait().unwrap();
+            }
+        }
+
+        impl Drop for Forwarder {
+            fn drop(&mut self) {
+                if self.status().is_none()
+                    && let Ok(pid) = self.read("pid").parse::<i32>()
+                {
+                    nix::sys::signal::kill(
+                        nix::unistd::Pid::from_raw(pid),
+                        nix::sys::signal::Signal::SIGKILL,
+                    )
+                    .ok();
+                }
+            }
+        }
+
+        struct Broker {
+            _dir: tempfile::TempDir,
+            conn: Connection,
+            url: String,
+            fleet: i64,
+            director: i64,
+            worker: i64,
+        }
+
+        fn broker() -> Broker {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet_fixture(&mut conn, "codex forwarding");
+            let worker = register(&mut conn, fleet, "worker", Some("%2"));
+            let url = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None)
+                .database_url;
+            Broker {
+                _dir: dir,
+                conn,
+                url,
+                fleet,
+                director,
+                worker,
+            }
+        }
+
+        impl Broker {
+            fn send(&mut self, from: i64, to: i64, body: &str) -> i64 {
+                broker::send_message(&mut self.conn, from, to, body)
+                    .unwrap()
+                    .message_id
+            }
+
+            fn record_text(&self, message_id: i64) -> String {
+                let message = broker::get_message(&self.conn, message_id).unwrap();
+                format!(
+                    "{RECORD_PREFIX}{}",
+                    crate::output::json::listen_message(&message)
+                )
+            }
+        }
+
+        fn listen_args(member_id: i64, timeout: Option<u64>) -> Vec<String> {
+            let mut args = vec![
+                "message".to_owned(),
+                "listen".to_owned(),
+                member_id.to_string(),
+            ];
+            if let Some(timeout) = timeout {
+                args.extend(["--timeout".to_owned(), timeout.to_string()]);
+            }
+            args.extend(["--codex-thread".to_owned(), THREAD.to_owned()]);
+            args
+        }
+
+        fn start(
+            broker: &Broker,
+            args: &[String],
+            codex: Option<&str>,
+            launch: Launch,
+        ) -> Forwarder {
+            let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+            Forwarder::start(&broker.url, &args, codex, launch)
+        }
+
+        fn queued(text: &str) -> Vec<String> {
+            ["queue", "--thread", THREAD, "--message", text]
+                .map(str::to_owned)
+                .to_vec()
+        }
+
+        fn closed_text(member_id: i64, reason: &str) -> String {
+            format!(
+                "{RECORD_PREFIX}{}",
+                crate::output::json::listen_closed(member_id, reason)
+            )
+        }
+
+        fn accepting_codex() -> String {
+            format!("{LOG_ARGV}\nexit 0")
+        }
+
+        /// Accepts only the closed notice and answers every record with `record_reply`.
+        fn codex_refusing_records(record_reply: &str) -> String {
+            format!(
+                "{LOG_ARGV}\ncase \"$*\" in\n  *'[cafleet listen closed]'*) exit 0 ;;\nesac\n{record_reply}"
+            )
+        }
+
+        fn assert_stdout_has_no_forwarded_records(forwarder: &Forwarder, broker: &Broker) {
+            let records = forwarder.stdout_records();
+            assert_eq!(
+                records.first(),
+                Some(&crate::output::json::listen_ready(
+                    broker.director,
+                    broker.fleet
+                )),
+                "{records:?}"
+            );
+            assert!(
+                records[1..]
+                    .iter()
+                    .all(|record| record["event"] == "closed"),
+                "stdout carries no record between ready and closed: {records:?}"
+            );
+        }
+
+        #[test]
+        fn forwarding_queues_each_message_then_the_closing_record_and_stdout_keeps_only_ready_and_closed()
+         {
+            let mut broker = broker();
+            let (director, worker) = (broker.director, broker.worker);
+            let backlog =
+                ["first", "second", "third"].map(|body| broker.send(worker, director, body));
+            let forwarder = start(
+                &broker,
+                &listen_args(director, Some(4)),
+                Some(&accepting_codex()),
+                Launch::Session,
+            );
+            forwarder.wait_forwarded(3);
+            let later = broker.send(worker, director, "fourth");
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(15)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            let mut expected = backlog
+                .iter()
+                .chain([&later])
+                .map(|id| queued(&broker.record_text(*id)))
+                .collect::<Vec<_>>();
+            expected.push(queued(&closed_text(director, "timeout")));
+            assert_eq!(forwarder.forwarded(), expected, "ready is never forwarded");
+            assert_eq!(
+                forwarder.stdout_records(),
+                [
+                    crate::output::json::listen_ready(director, broker.fleet),
+                    crate::output::json::listen_closed(director, "timeout"),
+                ]
+            );
+            assert_eq!(
+                broker::poll_messages(&broker.conn, director).unwrap().len(),
+                4,
+                "forwarding consumes nothing"
+            );
+        }
+
+        #[test]
+        fn forwarding_queues_a_member_inactive_closure_and_writes_it_last_on_stdout() {
+            let mut broker = broker();
+            let worker = broker.worker;
+            let forwarder = start(
+                &broker,
+                &listen_args(worker, None),
+                Some(&accepting_codex()),
+                Launch::Session,
+            );
+            forwarder.wait_ready();
+            assert!(
+                crate::broker::members::test_support::deregister_member(&mut broker.conn, worker)
+                    .unwrap()
+            );
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(10)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            assert_eq!(
+                forwarder.forwarded(),
+                [queued(&closed_text(worker, "member_inactive"))]
+            );
+            assert_eq!(
+                forwarder.stdout_records(),
+                [
+                    crate::output::json::listen_ready(worker, broker.fleet),
+                    crate::output::json::listen_closed(worker, "member_inactive"),
+                ]
+            );
+        }
+
+        #[test]
+        fn a_record_text_above_the_argument_limit_is_forwarded_as_a_message_reference() {
+            let mut broker = broker();
+            let (director, worker) = (broker.director, broker.worker);
+            let probe = broker.send(worker, director, &"x".repeat(1000));
+            let overhead = broker.record_text(probe).len() - 1000;
+            broker::ack_message(&mut broker.conn, probe).unwrap();
+            let fits = broker.send(worker, director, &"x".repeat(RECORD_LIMIT - overhead));
+            let exceeds = broker.send(worker, director, &"x".repeat(RECORD_LIMIT + 1 - overhead));
+            assert_eq!(broker.record_text(fits).len(), RECORD_LIMIT);
+            assert_eq!(broker.record_text(exceeds).len(), RECORD_LIMIT + 1);
+            let forwarder = start(
+                &broker,
+                &listen_args(director, Some(3)),
+                Some(&accepting_codex()),
+                Launch::Session,
+            );
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(15)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            let forwarded = forwarder.forwarded();
+            assert_eq!(forwarded.len(), 3, "{forwarded:?}");
+            assert_eq!(forwarded[0], queued(&broker.record_text(fits)));
+            assert_eq!(forwarded[2], queued(&closed_text(director, "timeout")));
+            assert_eq!(forwarded[1][..4], queued("")[..4]);
+            let reference = forwarded[1][4]
+                .strip_prefix(RECORD_PREFIX)
+                .and_then(|rest| {
+                    rest.strip_suffix(&format!(
+                        " — read it with: cafleet message show {exceeds} --json"
+                    ))
+                })
+                .unwrap_or_else(|| panic!("{}", forwarded[1][4]));
+            let reference: Value = serde_json::from_str(reference).unwrap();
+            crate::broker::runtime::test_support::assert_key_order(
+                &reference,
+                &["event", "message_id", "from_member_id", "bytes"],
+            );
+            assert_eq!(reference["event"], "message_ref");
+            assert_eq!(reference["message_id"], exceeds);
+            assert_eq!(reference["from_member_id"], worker);
+            let bytes = reference["bytes"].as_u64().unwrap();
+            assert!(bytes > RECORD_LIMIT as u64 - overhead as u64, "{bytes}");
+        }
+
+        #[test]
+        fn a_failed_codex_queue_exits_one_after_forwarding_the_closed_notice() {
+            let mut broker = broker();
+            let (director, worker) = (broker.director, broker.worker);
+            let message = broker.send(worker, director, "refused");
+            let forwarder = start(
+                &broker,
+                &listen_args(director, None),
+                Some(&codex_refusing_records(&format!(
+                    "printf '%s\\n' 'thread {THREAD} not found' >&2\nexit 2"
+                ))),
+                Launch::Session,
+            );
+            assert_eq!(forwarder.wait_exit(Duration::from_secs(15)), 1);
+            let stderr = forwarder.stderr();
+            let diagnostic = stderr
+                .lines()
+                .find(|line| {
+                    line.contains(&format!(
+                        "failed to forward record to codex thread {THREAD}: "
+                    ))
+                })
+                .unwrap_or_else(|| panic!("{stderr}"));
+            assert!(
+                diagnostic.contains(&format!("thread {THREAD} not found")),
+                "{stderr}"
+            );
+            let forwarded = forwarder.forwarded();
+            assert_eq!(forwarded.len(), 2, "{forwarded:?}");
+            assert_eq!(forwarded[0], queued(&broker.record_text(message)));
+            assert_eq!(forwarded[1][..4], queued("")[..4]);
+            let notice = &forwarded[1][4];
+            assert!(
+                notice.starts_with(&format!(
+                    "[cafleet listen closed] exit 1: failed to forward record to codex thread {THREAD}: "
+                )) && notice.contains(&format!("thread {THREAD} not found")),
+                "{notice}"
+            );
+            assert_stdout_has_no_forwarded_records(&forwarder, &broker);
+        }
+
+        #[test]
+        fn a_codex_queue_past_its_deadline_is_killed_and_the_closed_notice_names_the_deadline() {
+            let mut broker = broker();
+            let (director, worker) = (broker.director, broker.worker);
+            broker.send(worker, director, "slow");
+            let started = Instant::now();
+            let forwarder = start(
+                &broker,
+                &listen_args(director, None),
+                Some(&codex_refusing_records("exec sleep 30")),
+                Launch::Session,
+            );
+            assert_eq!(forwarder.wait_exit(Duration::from_secs(25)), 1);
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed >= Duration::from_secs(10) && elapsed < Duration::from_secs(25),
+                "{elapsed:?}"
+            );
+            let diagnostic = format!("codex queue for thread {THREAD} did not finish within 10 s");
+            assert!(
+                forwarder.stderr().contains(&diagnostic),
+                "{}",
+                forwarder.stderr()
+            );
+            let forwarded = forwarder.forwarded();
+            assert_eq!(forwarded.len(), 2, "{forwarded:?}");
+            assert_eq!(
+                forwarded[1],
+                queued(&format!("[cafleet listen closed] exit 1: {diagnostic}"))
+            );
+            assert_stdout_has_no_forwarded_records(&forwarder, &broker);
+        }
+
+        #[test]
+        fn a_failed_closed_notice_keeps_the_original_diagnostic_and_exit_one() {
+            let mut broker = broker();
+            let (director, worker) = (broker.director, broker.worker);
+            broker.send(worker, director, "unforwardable");
+            let forwarder = start(
+                &broker,
+                &listen_args(director, None),
+                Some(&format!(
+                    "{LOG_ARGV}\nprintf '%s\\n' 'codex unavailable' >&2\nexit 4"
+                )),
+                Launch::Session,
+            );
+            assert_eq!(forwarder.wait_exit(Duration::from_secs(25)), 1);
+            let stderr = forwarder.stderr();
+            assert!(
+                stderr.contains(&format!(
+                    "failed to forward record to codex thread {THREAD}: "
+                )),
+                "{stderr}"
+            );
+            assert!(
+                stderr.contains(&format!(
+                    "failed to forward the closed notice to codex thread {THREAD}: "
+                )),
+                "{stderr}"
+            );
+            let forwarded = forwarder.forwarded();
+            assert_eq!(
+                forwarded.len(),
+                2,
+                "one record attempt and one notice: {forwarded:?}"
+            );
+            assert!(forwarded[1][4].starts_with("[cafleet listen closed] exit 1: "));
+        }
+
+        #[test]
+        fn a_missing_codex_binary_fails_before_ready() {
+            let broker = broker();
+            let forwarder = start(
+                &broker,
+                &listen_args(broker.director, None),
+                None,
+                Launch::Session,
+            );
+            assert_eq!(forwarder.wait_exit(Duration::from_secs(10)), 1);
+            assert!(
+                forwarder
+                    .stderr()
+                    .contains("Error: binary codex not found on PATH"),
+                "{}",
+                forwarder.stderr()
+            );
+            assert!(forwarder.stdout_records().is_empty());
+        }
+
+        #[test]
+        fn a_listener_without_a_codex_ancestor_fails_before_ready() {
+            let broker = broker();
+            let forwarder = start(
+                &broker,
+                &listen_args(broker.director, None),
+                Some(&accepting_codex()),
+                Launch::Orphan,
+            );
+            assert_eq!(forwarder.wait_exit(Duration::from_secs(10)), 1);
+            assert!(
+                forwarder
+                    .stderr()
+                    .contains("Error: --codex-thread requires a codex ancestor process"),
+                "{}",
+                forwarder.stderr()
+            );
+            assert!(forwarder.stdout_records().is_empty());
+            assert!(forwarder.forwarded().is_empty());
+        }
+
+        #[test]
+        fn the_session_pinned_past_a_sandbox_helper_ending_closes_the_listener_with_session_exited()
+        {
+            let broker = broker();
+            let mut forwarder = start(
+                &broker,
+                &listen_args(broker.director, None),
+                Some(&accepting_codex()),
+                Launch::SandboxedSession,
+            );
+            forwarder.wait_ready();
+            forwarder.end_session();
+            let ended = Instant::now();
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(5)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            assert!(
+                ended.elapsed() < Duration::from_secs(3),
+                "{:?}",
+                ended.elapsed()
+            );
+            assert_eq!(
+                forwarder.stdout_records(),
+                [
+                    crate::output::json::listen_ready(broker.director, broker.fleet),
+                    crate::output::json::listen_closed(broker.director, "session_exited"),
+                ]
+            );
+            assert!(
+                forwarder.forwarded().is_empty(),
+                "nothing is forwarded to an exited session"
+            );
+        }
+
+        #[test]
+        fn a_listener_keeps_running_while_its_codex_session_lives() {
+            let broker = broker();
+            let forwarder = start(
+                &broker,
+                &listen_args(broker.director, None),
+                Some(&accepting_codex()),
+                Launch::Session,
+            );
+            forwarder.wait_ready();
+            std::thread::sleep(Duration::from_secs(3));
+            assert_eq!(forwarder.status(), None, "{}", forwarder.stderr());
+            assert!(forwarder.forwarded().is_empty());
+        }
+    }
 }
