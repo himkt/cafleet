@@ -2425,7 +2425,8 @@ Claude Code opens a diff sidebar beside the transcript at 144 columns or more (1
 | Bash title variants `Run command`, `Bash command (unsandboxed)`, `Bash command (runs on <host>)` | Not rendered in the captures; an `unknown` frame |
 | File forms in `acceptEdits` or `plan`, a wrapped path or question, panes narrower than 120 columns | Uncaptured; a differing rendering is an `unknown` frame |
 | A Bash form with a request counter | Unobserved: two parallel Bash calls in one turn rendered the form without a counter. The Bash rules accept the counter as the Read file rule does; batched Edit file and Create file forms were not captured either |
-| Sidebar widths other than 144 and 166 columns | The separator is found per frame, so other widths clip the same way; fixtures exist for the two captured widths only |
+| Sidebar widths other than 144, 166 and 180 columns | The separator is found per frame, so other widths clip the same way. Live acceptance observed 166 and 180 columns (separator at column 92 and 99 on tmux), and 144 columns rests on its fixture only |
+| The pending-question notice, the `1. Yes` wizard, `Make auto mode your default permission mode?` on an onboarding process's primary screen, and its `No, keep accept edits` label | Not produced in live acceptance; their rules rest on the native fixtures |
 
 Claude renders an automatic refusal in one of two native forms, depending on the user's Verbose output setting, and the profile claims both. Every Claude annotation rule (priority 40, primary or alternate screen, cursor any) declares the same frame guard: require `^❯\u{a0}` (the live composer prefix) and reject `^  Showing detailed transcript · ctrl\+o to toggle` (the transcript viewer's footer).
 
