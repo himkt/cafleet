@@ -4,6 +4,7 @@ use crate::config::EnvLookup;
 use crate::config::opencode_skills_base;
 use crate::error::CafleetError;
 use rusqlite::Connection;
+use serde_json::Value;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -12,14 +13,33 @@ pub(crate) struct AgentPaths {
     pub(crate) identity: String,
     skills_dir: PathBuf,
     presets: Vec<(String, PathBuf)>,
+    plugins_dir: Option<PathBuf>,
+}
+
+/// A `hermes` process that ran to completion.
+#[derive(Debug)]
+pub(crate) struct HermesOutput {
+    pub(crate) exit_code: i32,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
 }
 
 /// Runs `hermes` subcommands for setup with `HERMES_HOME` set to the resolved base.
 pub(crate) trait HermesConfigRunner {
     fn binary_available(&self) -> bool;
-    /// `args` follow the `hermes` binary; the result is its stdout.
-    fn run(&mut self, args: &[String]) -> Result<String, CafleetError>;
+    /// `args` follow the `hermes` binary. `Err` is a spawn failure or an expired deadline.
+    fn run(&mut self, args: &[String]) -> Result<HermesOutput, CafleetError>;
 }
+
+pub(crate) const OPENCODE_EXTENSION_PREFIX: &str = "opencode/";
+pub(crate) const OPENCODE_EXECUTABLE_RECORD: &str = "cafleet.executable";
+pub(crate) const HERMES_EXTENSION_PREFIX: &str = "hermes/cafleet/";
+pub(crate) const HERMES_PLUGIN_DIR: &str = "plugins/cafleet";
+pub(crate) const HERMES_EXECUTABLE_RECORD: &str = "executable";
+pub(crate) const PLUGINS_DISABLED_KEY: &str = "plugins.disabled";
+pub(crate) const PLUGINS_ENABLED_KEY: &str = "plugins.enabled";
+pub(crate) const GATEWAY_INJECTION_KEY: &str = "plugins.entries.cafleet.allow_gateway_injection";
+pub(crate) const PLUGIN_NAME: &str = "cafleet";
 
 pub(crate) fn agent_paths(
     env: EnvLookup<'_>,
@@ -49,11 +69,38 @@ pub(crate) fn agent_paths(
             .collect(),
         CodingAgent::Hermes => vec![],
     };
+    let plugins_dir = (agent == CodingAgent::Opencode).then(|| opencode_plugins_dir(&base));
     Ok(AgentPaths {
         identity: base.display().to_string(),
         skills_dir,
         presets,
+        plugins_dir,
     })
+}
+
+pub(crate) fn opencode_plugins_dir(preset_base: &Path) -> PathBuf {
+    preset_base.join("plugins")
+}
+
+/// The plugin directory under the Hermes home that owns `config_path`.
+pub(crate) fn hermes_plugin_dir(config_path: &str) -> Result<PathBuf, String> {
+    Path::new(config_path)
+        .parent()
+        .filter(|home| home.is_absolute())
+        .map(|home| home.join(HERMES_PLUGIN_DIR))
+        .ok_or_else(|| {
+            format!("'hermes config path' printed '{config_path}', not an absolute file path")
+        })
+}
+
+/// Every embedded extension file under `prefix`, with its path relative to the extension root.
+pub(crate) fn embedded_extension(prefix: &str) -> Vec<(&'static str, &'static [u8])> {
+    let files = EXTENSIONS
+        .iter()
+        .filter_map(|(path, bytes)| path.strip_prefix(prefix).map(|rest| (rest, *bytes)))
+        .collect::<Vec<_>>();
+    assert!(!files.is_empty(), "the {prefix} extension is embedded");
+    files
 }
 
 pub(crate) fn install_agent(
@@ -118,20 +165,222 @@ pub(crate) fn install_agent(
             target.display()
         ))?;
     }
+    let extension_line = |target: &Path| {
+        format!(
+            "{}: installed extension (v{version}) -> {}",
+            agent.name(),
+            target.display()
+        )
+    };
+    if let Some(plugins) = &paths.plugins_dir {
+        for target in install_opencode_extension(plugins)? {
+            report(extension_line(&target))?;
+        }
+    }
     if agent == CodingAgent::Hermes {
         match hermes {
             Some(runner) => {
                 let config = runner
                     .run(&hermes_args(&["config", "path"]))
+                    .map_err(|cause| cause.message().into_owned())
+                    .and_then(succeeded)
                     .map(|stdout| stdout.trim().to_owned())
-                    .map_err(|cause| passthrough_failure(&paths.identity, &cause.message()))?;
+                    .map_err(|cause| passthrough_failure(&paths.identity, &cause))?;
+                let plugin_dir = hermes_plugin_dir(&config)
+                    .map_err(|cause| passthrough_failure(&paths.identity, &cause))?;
+                install_hermes_extension(&plugin_dir)?;
+                report(extension_line(&plugin_dir))?;
                 report(merge_client_env_passthrough(runner, &config)?)?;
+                report(enable_hermes_plugin(runner, &config)?)?;
             }
-            None => report("hermes: skipped terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
+            None => report("hermes: skipped the plugin and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
         }
     }
     crate::broker::record_asset_install(conn, agent.name(), &paths.identity, version)?;
     Ok(())
+}
+
+fn extension_failure(target: &Path, cause: impl std::fmt::Display) -> CafleetError {
+    CafleetError::App(format!(
+        "failed to install extension into {}: {cause}",
+        target.display()
+    ))
+}
+
+/// Writes each OpenCode plugin file, then the executable record, and returns the plugin files.
+fn install_opencode_extension(plugins: &Path) -> Result<Vec<PathBuf>, CafleetError> {
+    let mut installed = Vec::new();
+    for (relative, bytes) in embedded_extension(OPENCODE_EXTENSION_PREFIX) {
+        let target = plugins.join(relative);
+        let fail = |error: std::io::Error| extension_failure(&target, error);
+        std::fs::create_dir_all(target.parent().expect("plugin file has a parent"))
+            .map_err(fail)?;
+        remove_existing_target(&target).map_err(fail)?;
+        std::fs::write(&target, bytes).map_err(fail)?;
+        installed.push(target);
+    }
+    write_executable_record(&plugins.join(OPENCODE_EXECUTABLE_RECORD))?;
+    Ok(installed)
+}
+
+/// Replaces the Hermes plugin directory with exactly the embedded files and the executable record.
+fn install_hermes_extension(plugin_dir: &Path) -> Result<(), CafleetError> {
+    let fail = |error: std::io::Error| extension_failure(plugin_dir, error);
+    remove_existing_target(plugin_dir).map_err(fail)?;
+    std::fs::create_dir_all(plugin_dir).map_err(fail)?;
+    for (relative, bytes) in embedded_extension(HERMES_EXTENSION_PREFIX) {
+        let target = plugin_dir.join(relative);
+        std::fs::create_dir_all(target.parent().expect("plugin file has a parent"))
+            .map_err(fail)?;
+        std::fs::write(&target, bytes).map_err(fail)?;
+    }
+    write_executable_record(&plugin_dir.join(HERMES_EXECUTABLE_RECORD))
+}
+
+fn write_executable_record(record: &Path) -> Result<(), CafleetError> {
+    let running = std::env::current_exe()
+        .and_then(|path| path.canonicalize())
+        .map_err(|error| {
+            extension_failure(
+                record,
+                format!("cannot resolve the running cafleet: {error}"),
+            )
+        })?;
+    let fail = |error: std::io::Error| extension_failure(record, error);
+    remove_existing_target(record).map_err(fail)?;
+    std::fs::write(record, format!("{}\n", running.display())).map_err(fail)
+}
+
+/// Why an installed executable record is unusable, or `None` when it names an executable file.
+pub(crate) fn executable_record_problem(record: &Path) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let text = match std::fs::read_to_string(record) {
+        Ok(text) => text,
+        Err(error) => return Some(error.to_string()),
+    };
+    let target = text.trim();
+    if target.is_empty() {
+        return Some("the record is empty".into());
+    }
+    match std::fs::metadata(target) {
+        Ok(metadata) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 => None,
+        Ok(_) => Some(format!("{target} is not an executable file")),
+        Err(error) => Some(format!("{target}: {error}")),
+    }
+}
+
+/// Why an installed extension file is unusable, or `None` when it equals the embedded bytes.
+pub(crate) fn extension_file_problem(target: &Path, embedded: &[u8]) -> Option<String> {
+    match std::fs::read(target) {
+        Ok(bytes) if bytes == embedded => None,
+        Ok(_) => Some("differs from the embedded copy".into()),
+        Err(error) => Some(error.to_string()),
+    }
+}
+
+/// The stdout of a command that exited 0, or its stderr text as the cause.
+pub(crate) fn succeeded(output: HermesOutput) -> Result<String, String> {
+    if output.exit_code == 0 {
+        return Ok(output.stdout);
+    }
+    let stderr = output.stderr.trim();
+    Err(if stderr.is_empty() {
+        format!("exited with code {}", output.exit_code)
+    } else {
+        stderr.to_owned()
+    })
+}
+
+/// Reads one key through `hermes config get --json`; `None` is the *not set* answer.
+pub(crate) fn hermes_config_get(
+    runner: &mut dyn HermesConfigRunner,
+    key: &str,
+) -> Result<Option<Value>, String> {
+    let output = runner
+        .run(&hermes_args(&["config", "get", "--json", key]))
+        .map_err(|cause| cause.message().into_owned())?;
+    let not_set = format!("Config key not set: {key}");
+    if output.exit_code == 1 && output.stderr.lines().any(|line| line.trim() == not_set) {
+        return Ok(None);
+    }
+    let stdout = succeeded(output)?;
+    serde_json::from_str(&stdout)
+        .map(Some)
+        .map_err(|cause| format!("{key} printed no JSON value: {cause}"))
+}
+
+/// A set plugin list, which must be a JSON array of strings.
+pub(crate) fn plugin_list(key: &str, value: Option<Value>) -> Result<Vec<String>, String> {
+    match value {
+        None => Ok(Vec::new()),
+        Some(value) => serde_json::from_value(value)
+            .map_err(|cause| format!("{key} is not a JSON array of strings: {cause}")),
+    }
+}
+
+fn hermes_config_set(
+    runner: &mut dyn HermesConfigRunner,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    runner
+        .run(&hermes_args(&["config", "set", key, value]))
+        .map_err(|cause| cause.message().into_owned())
+        .and_then(succeeded)
+        .map(drop)
+}
+
+/// Adds `cafleet` to `plugins.enabled` and allows its gateway injection, keeping an operator's
+/// `plugins.disabled` entry, and returns the setup line describing the result.
+fn enable_hermes_plugin(
+    runner: &mut dyn HermesConfigRunner,
+    config: &str,
+) -> Result<String, CafleetError> {
+    let fail = |cause: String| {
+        CafleetError::App(format!(
+            "failed to enable hermes plugin {PLUGIN_NAME} in {config}: {cause}"
+        ))
+    };
+    let disabled = hermes_config_get(runner, PLUGINS_DISABLED_KEY)
+        .and_then(|value| plugin_list(PLUGINS_DISABLED_KEY, value))
+        .map_err(fail)?;
+    if disabled.iter().any(|name| name == PLUGIN_NAME) {
+        return Err(fail(format!(
+            "{PLUGINS_DISABLED_KEY} lists {PLUGIN_NAME}; remove it from {PLUGINS_DISABLED_KEY}, then rerun 'cafleet setup --coding-agent hermes'"
+        )));
+    }
+    let mut enabled = hermes_config_get(runner, PLUGINS_ENABLED_KEY)
+        .and_then(|value| plugin_list(PLUGINS_ENABLED_KEY, value))
+        .map_err(fail)?;
+    let mut wrote = false;
+    if !enabled.iter().any(|name| name == PLUGIN_NAME) {
+        enabled.push(PLUGIN_NAME.to_owned());
+        let value = serde_json::to_string(&enabled).expect("a list of strings serializes as JSON");
+        hermes_config_set(runner, PLUGINS_ENABLED_KEY, &value).map_err(fail)?;
+        wrote = true;
+    }
+    if hermes_config_get(runner, GATEWAY_INJECTION_KEY).map_err(fail)? != Some(Value::Bool(true)) {
+        hermes_config_set(runner, GATEWAY_INJECTION_KEY, "true").map_err(fail)?;
+        wrote = true;
+    }
+    let enabled = hermes_config_get(runner, PLUGINS_ENABLED_KEY)
+        .and_then(|value| plugin_list(PLUGINS_ENABLED_KEY, value))
+        .map_err(fail)?;
+    if !enabled.iter().any(|name| name == PLUGIN_NAME) {
+        return Err(fail(format!(
+            "{PLUGINS_ENABLED_KEY} still lacks {PLUGIN_NAME} after the write"
+        )));
+    }
+    if hermes_config_get(runner, GATEWAY_INJECTION_KEY).map_err(fail)? != Some(Value::Bool(true)) {
+        return Err(fail(format!(
+            "{GATEWAY_INJECTION_KEY} is still not true after the write"
+        )));
+    }
+    Ok(if wrote {
+        format!("hermes: enabled plugin {PLUGIN_NAME} -> {config}")
+    } else {
+        format!("hermes: plugin {PLUGIN_NAME} already enabled -> {config}")
+    })
 }
 
 const PASSTHROUGH_KEY: &str = "terminal.client_env_passthrough";
@@ -153,9 +402,7 @@ fn merge_client_env_passthrough(
     let mut merged = existing;
     merged.extend(missing.iter().map(|name| (*name).to_owned()));
     let value = serde_json::to_string(&merged).expect("a list of strings serializes as JSON");
-    runner
-        .run(&hermes_args(&["config", "set", PASSTHROUGH_KEY, &value]))
-        .map_err(|cause| fail(cause.message().into_owned()))?;
+    hermes_config_set(runner, PASSTHROUGH_KEY, &value).map_err(fail)?;
     let absent = missing_member_names(&read_passthrough(runner).map_err(fail)?);
     if !absent.is_empty() {
         return Err(fail(format!(
@@ -172,7 +419,8 @@ fn merge_client_env_passthrough(
 fn read_passthrough(runner: &mut dyn HermesConfigRunner) -> Result<Vec<String>, String> {
     let stdout = runner
         .run(&hermes_args(&["config", "get", "--json", PASSTHROUGH_KEY]))
-        .map_err(|cause| cause.message().into_owned())?;
+        .map_err(|cause| cause.message().into_owned())
+        .and_then(succeeded)?;
     serde_json::from_str::<Vec<String>>(&stdout)
         .map_err(|cause| format!("{PASSTHROUGH_KEY} is not a JSON array of strings: {cause}"))
 }

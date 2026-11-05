@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 27/50 tasks complete
+**Progress**: 35/50 tasks complete
 **Last Updated**: 2026-11-05
 
 ## Overview
@@ -588,14 +588,14 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 
 ### Step 7: Setup and doctor
 
-- [ ] `src/assets.rs`: extension paths per agent (`<hermes home>` from `hermes config path`), installation after presets, the executable record, output lines, failure string, and the `asset_installs` row covering extensions <!-- completed: -->
-- [ ] `src/assets.rs` and `src/cli/setup.rs`: change `HermesConfigRunner::run` to return `HermesOutput { exit_code, stdout, stderr }`, keep the passthrough merge's failure rule, and add the *not set* line match <!-- completed: -->
-- [ ] `src/assets.rs`: the Hermes enablement merge (§2.3) and the combined skip line <!-- completed: -->
-- [ ] `src/cli/setup.rs`: doctor rows `opencode.extension`, `hermes.extension` and `hermes.plugin_enabled`, and their summary phrases (§2.4) <!-- completed: -->
-- [ ] Unit tests in `src/assets.rs`: installed bytes equal embedded bytes at the selected targets, the executable record content, install order and output lines, and a failure records nothing <!-- completed: -->
-- [ ] Unit tests in `src/assets.rs`: the Hermes merge appends `cafleet` after existing entries, sets `allow_gateway_injection`, treats *not set* as empty only for an exact stderr line, fails on `plugins.disabled` and on other non-zero exits, and is idempotent <!-- completed: -->
-- [ ] Update `hermes_setup_reads_only_the_config_path_and_the_passthrough` (`src/assets.rs:761`) to assert the complete new call sequence <!-- completed: -->
-- [ ] Unit tests in `src/cli/setup.rs`: doctor `ok` and every `info`/`error` state of the three rows, and the summary phrases <!-- completed: -->
+- [x] `src/assets.rs`: extension paths per agent (`<hermes home>` from `hermes config path`), installation after presets, the executable record, output lines, failure string, and the `asset_installs` row covering extensions <!-- completed: 2026-11-05T22:57 -->
+- [x] `src/assets.rs` and `src/cli/setup.rs`: change `HermesConfigRunner::run` to return `HermesOutput { exit_code, stdout, stderr }`, keep the passthrough merge's failure rule, and add the *not set* line match <!-- completed: 2026-11-05T22:57 -->
+- [x] `src/assets.rs`: the Hermes enablement merge (§2.3) and the combined skip line <!-- completed: 2026-11-05T22:57 -->
+- [x] `src/cli/setup.rs`: doctor rows `opencode.extension`, `hermes.extension` and `hermes.plugin_enabled`, and their summary phrases (§2.4) <!-- completed: 2026-11-05T22:57 -->
+- [x] Unit tests in `src/assets.rs`: installed bytes equal embedded bytes at the selected targets, the executable record content, install order and output lines, and a failure records nothing <!-- completed: 2026-11-05T22:57 -->
+- [x] Unit tests in `src/assets.rs`: the Hermes merge appends `cafleet` after existing entries, sets `allow_gateway_injection`, treats *not set* as empty only for an exact stderr line, fails on `plugins.disabled` and on other non-zero exits, and is idempotent <!-- completed: 2026-11-05T22:57 -->
+- [x] Update `hermes_setup_reads_only_the_config_path_and_the_passthrough` (`src/assets.rs:761`) to assert the complete new call sequence <!-- completed: 2026-11-05T22:57 -->
+- [x] Unit tests in `src/cli/setup.rs`: doctor `ok` and every `info`/`error` state of the three rows, and the summary phrases <!-- completed: 2026-11-05T22:57 -->
 
 ### Step 8: Codex forwarder
 

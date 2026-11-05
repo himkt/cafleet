@@ -1,4 +1,5 @@
 use crate::assets::HermesConfigRunner;
+use crate::assets::HermesOutput;
 use crate::assets::agent_paths;
 use crate::assets::install_agent;
 use crate::broker::MemberRunRegistry;
@@ -48,20 +49,62 @@ impl HermesConfigRunner for SystemHermes<'_> {
         SystemProbe.resolve_binary("hermes").is_some()
     }
 
-    fn run(&mut self, args: &[String]) -> Result<String, CafleetError> {
+    fn run(&mut self, args: &[String]) -> Result<HermesOutput, CafleetError> {
         let executable = SystemProbe
             .resolve_binary("hermes")
             .ok_or_else(|| CafleetError::App("binary hermes not found on PATH".into()))?;
         let base = CodingAgent::Hermes.config_dir(self.env, self.home)?;
-        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-        crate::coding_agent::run_bounded(
-            &executable,
-            &args,
-            &[("HERMES_HOME", &base)],
-            std::time::Instant::now() + std::time::Duration::from_secs(10),
-        )
-        .map_err(CafleetError::App)
+        run_hermes(&executable, &base, args, Duration::from_secs(10))
     }
+}
+
+/// Doctor's read-only `hermes` calls, bounded like the passthrough check.
+struct DoctorHermes<'a> {
+    executable: &'a Path,
+    base: &'a Path,
+}
+
+impl HermesConfigRunner for DoctorHermes<'_> {
+    fn binary_available(&self) -> bool {
+        true
+    }
+
+    fn run(&mut self, args: &[String]) -> Result<HermesOutput, CafleetError> {
+        run_hermes(self.executable, self.base, args, Duration::from_secs(2))
+    }
+}
+
+fn run_hermes(
+    executable: &Path,
+    base: &Path,
+    args: &[String],
+    budget: Duration,
+) -> Result<HermesOutput, CafleetError> {
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let output = crate::coding_agent::run_bounded_output(
+        executable,
+        &args,
+        &[("HERMES_HOME", base)],
+        Instant::now() + budget,
+    )
+    .map_err(CafleetError::App)?;
+    let exit_code = output.status.code().ok_or_else(|| {
+        CafleetError::App(format!(
+            "hermes {} ended by {}",
+            args.join(" "),
+            output.status
+        ))
+    })?;
+    Ok(HermesOutput {
+        exit_code,
+        stdout: String::from_utf8(output.stdout).map_err(|_| {
+            CafleetError::App(format!(
+                "hermes {} printed non-UTF-8 output",
+                args.join(" ")
+            ))
+        })?,
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
 }
 
 fn prepare_database(settings: &Settings) -> Result<Connection, CafleetError> {
@@ -656,9 +699,12 @@ fn agent_checks(
                     available,
                 ));
             }
+            checks.push(opencode_extension_check(&paths, available));
         }
         if *agent == CodingAgent::Hermes {
             checks.push(hermes_passthrough_check(probe, &paths));
+            checks.push(hermes_extension_check(probe, &paths));
+            checks.push(hermes_plugin_enabled_check(probe, &paths));
         }
         let install_name = format!("{name}.installation");
         checks.push(match (&paths, schema) {
@@ -763,6 +809,202 @@ fn hermes_passthrough_check(
         }
         Err(cause) => Check::new(NAME, "error", cause.message()).problem(cause.message(), false),
     }
+}
+
+/// The configured base a backend extension row reads, or the `info` row that replaces it when
+/// the configuration or the executable is unusable.
+fn extension_base<'a>(
+    name: &str,
+    paths: &'a Result<PathBuf, CafleetError>,
+    available: bool,
+) -> Result<&'a Path, Check> {
+    match (paths, available) {
+        (Err(cause), _) => Err(Check::new(
+            name,
+            "info",
+            format!("unavailable: configuration failed: {cause}"),
+        )),
+        (_, false) => Err(Check::new(
+            name,
+            "info",
+            "unavailable: executable is absent",
+        )),
+        (Ok(base), true) => Ok(base),
+    }
+}
+
+fn hermes_inputs<'a>(
+    name: &str,
+    probe: &dyn SpawnProbe,
+    paths: &'a Result<PathBuf, CafleetError>,
+) -> Result<(&'a Path, PathBuf), Check> {
+    let executable = probe.resolve_binary(CodingAgent::Hermes.name());
+    let base = extension_base(name, paths, executable.is_some())?;
+    Ok((
+        base,
+        executable.expect("an available hermes resolved its executable"),
+    ))
+}
+
+/// Compares installed extension files with the embedded copies, then checks the executable record.
+fn extension_check(
+    name: &str,
+    agent: CodingAgent,
+    files: &[(PathBuf, &'static [u8])],
+    record: &Path,
+    ok_detail: String,
+) -> Check {
+    let fix = format!("run 'cafleet setup --coding-agent {}'", agent.name());
+    for (target, embedded) in files {
+        if let Some(cause) = crate::assets::extension_file_problem(target, embedded) {
+            return Check::new(
+                name,
+                "error",
+                format!("{}: {cause}; {fix}", target.display()),
+            )
+            .problem(
+                format!(
+                    "extension {} is missing or differs from the embedded copy",
+                    target.display()
+                ),
+                true,
+            );
+        }
+    }
+    if let Some(cause) = crate::assets::executable_record_problem(record) {
+        return Check::new(
+            name,
+            "error",
+            format!("{}: {cause}; {fix}", record.display()),
+        )
+        .problem(
+            format!(
+                "extension executable record {} is unusable: {cause}",
+                record.display()
+            ),
+            true,
+        );
+    }
+    Check::new(name, "ok", ok_detail)
+}
+
+fn extension_files(root: &Path, prefix: &str) -> Vec<(PathBuf, &'static [u8])> {
+    crate::assets::embedded_extension(prefix)
+        .into_iter()
+        .map(|(relative, bytes)| (root.join(relative), bytes))
+        .collect()
+}
+
+fn opencode_extension_check(paths: &Result<PathBuf, CafleetError>, available: bool) -> Check {
+    const NAME: &str = "opencode.extension";
+    let base = match extension_base(NAME, paths, available) {
+        Ok(base) => base,
+        Err(check) => return check,
+    };
+    let plugins = crate::assets::opencode_plugins_dir(base);
+    let files = extension_files(&plugins, crate::assets::OPENCODE_EXTENSION_PREFIX);
+    let ok_detail = files
+        .iter()
+        .map(|(target, _)| target.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    extension_check(
+        NAME,
+        CodingAgent::Opencode,
+        &files,
+        &plugins.join(crate::assets::OPENCODE_EXECUTABLE_RECORD),
+        ok_detail,
+    )
+}
+
+fn hermes_extension_check(probe: &dyn SpawnProbe, paths: &Result<PathBuf, CafleetError>) -> Check {
+    const NAME: &str = "hermes.extension";
+    let (base, executable) = match hermes_inputs(NAME, probe, paths) {
+        Ok(inputs) => inputs,
+        Err(check) => return check,
+    };
+    let mut runner = DoctorHermes {
+        executable: &executable,
+        base,
+    };
+    let plugin_dir = runner
+        .run(&["config".to_owned(), "path".to_owned()])
+        .map_err(|cause| cause.message().into_owned())
+        .and_then(crate::assets::succeeded)
+        .and_then(|stdout| crate::assets::hermes_plugin_dir(stdout.trim()));
+    let plugin_dir = match plugin_dir {
+        Ok(plugin_dir) => plugin_dir,
+        Err(cause) => {
+            let detail =
+                format!("cannot read hermes configuration through 'hermes config path': {cause}");
+            return Check::new(NAME, "error", detail.clone()).problem(detail, false);
+        }
+    };
+    extension_check(
+        NAME,
+        CodingAgent::Hermes,
+        &extension_files(&plugin_dir, crate::assets::HERMES_EXTENSION_PREFIX),
+        &plugin_dir.join(crate::assets::HERMES_EXECUTABLE_RECORD),
+        plugin_dir.display().to_string(),
+    )
+}
+
+fn hermes_plugin_enabled_check(
+    probe: &dyn SpawnProbe,
+    paths: &Result<PathBuf, CafleetError>,
+) -> Check {
+    use crate::assets::GATEWAY_INJECTION_KEY;
+    use crate::assets::PLUGIN_NAME;
+    use crate::assets::PLUGINS_DISABLED_KEY;
+    use crate::assets::PLUGINS_ENABLED_KEY;
+    const NAME: &str = "hermes.plugin_enabled";
+    let (base, executable) = match hermes_inputs(NAME, probe, paths) {
+        Ok(inputs) => inputs,
+        Err(check) => return check,
+    };
+    let mut runner = DoctorHermes {
+        executable: &executable,
+        base,
+    };
+    let read = (|| {
+        let mut list = |key: &str| {
+            crate::assets::hermes_config_get(&mut runner, key)
+                .and_then(|value| crate::assets::plugin_list(key, value))
+        };
+        let disabled = list(PLUGINS_DISABLED_KEY)?;
+        let enabled = list(PLUGINS_ENABLED_KEY)?;
+        let injection = crate::assets::hermes_config_get(&mut runner, GATEWAY_INJECTION_KEY)?;
+        Ok::<_, String>((disabled, enabled, injection))
+    })();
+    let (disabled, enabled, injection) = match read {
+        Ok(values) => values,
+        Err(cause) => {
+            let detail =
+                format!("cannot read hermes configuration through 'hermes config get': {cause}");
+            return Check::new(NAME, "error", detail.clone()).problem(detail, false);
+        }
+    };
+    let fix = "run 'cafleet setup --coding-agent hermes'";
+    if disabled.iter().any(|name| name == PLUGIN_NAME) {
+        let phrase = format!("hermes {PLUGINS_DISABLED_KEY} lists {PLUGIN_NAME}");
+        return Check::new(NAME, "error", format!("{phrase}; remove it, then {fix}"))
+            .problem(phrase, false);
+    }
+    let mut missing = Vec::new();
+    if !enabled.iter().any(|name| name == PLUGIN_NAME) {
+        missing.push(PLUGINS_ENABLED_KEY);
+    }
+    if injection != Some(serde_json::Value::Bool(true)) {
+        missing.push(GATEWAY_INJECTION_KEY);
+    }
+    if missing.is_empty() {
+        return Check::new(NAME, "ok", "cafleet enabled with gateway injection");
+    }
+    let phrase = format!(
+        "hermes plugin {PLUGIN_NAME} is not enabled: {}",
+        missing.join(", ")
+    );
+    Check::new(NAME, "error", format!("{phrase}; {fix}")).problem(phrase, true)
 }
 
 fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {

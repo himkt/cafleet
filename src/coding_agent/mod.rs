@@ -542,6 +542,13 @@ fn bounded_output(source: impl Read + Send + 'static) -> mpsc::Receiver<std::io:
     receiver
 }
 
+/// A native command that ran to completion within its deadline.
+pub(crate) struct BoundedOutput {
+    pub(crate) status: std::process::ExitStatus,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
+}
+
 /// Runs a native command with null stdin and bounded output, returning its
 /// UTF-8 stdout or the failure detail that callers prefix with the command.
 pub(crate) fn run_bounded(
@@ -550,6 +557,32 @@ pub(crate) fn run_bounded(
     environment: &[(&str, &Path)],
     deadline: Instant,
 ) -> Result<String, String> {
+    let BoundedOutput {
+        status,
+        stdout,
+        stderr,
+    } = run_bounded_output(executable, args, environment, deadline)?;
+    if !status.success() {
+        let first = String::from_utf8_lossy(&stderr)
+            .lines()
+            .next()
+            .map(str::to_owned);
+        return Err(match first {
+            Some(line) if !line.trim().is_empty() => format!("exited with {status}: {line}"),
+            _ => format!("exited with {status}"),
+        });
+    }
+    String::from_utf8(stdout).map_err(|_| "printed non-UTF-8 output".to_owned())
+}
+
+/// Runs a native command like [`run_bounded`] and returns its exit status and
+/// both output streams; only a start failure or the deadline is an error.
+pub(crate) fn run_bounded_output(
+    executable: &Path,
+    args: &[&str],
+    environment: &[(&str, &Path)],
+    deadline: Instant,
+) -> Result<BoundedOutput, String> {
     let mut child = Command::new(executable)
         .args(args)
         .envs(environment.iter().copied())
@@ -585,19 +618,11 @@ pub(crate) fn run_bounded(
             .map_err(|_| "output did not close within its deadline".to_owned())?
             .map_err(|cause| format!("output could not be read: {cause}"))
     };
-    let output = collect(stdout)?;
-    let diagnostic = collect(stderr)?;
-    if !status.success() {
-        let first = String::from_utf8_lossy(&diagnostic)
-            .lines()
-            .next()
-            .map(str::to_owned);
-        return Err(match first {
-            Some(line) if !line.trim().is_empty() => format!("exited with {status}: {line}"),
-            _ => format!("exited with {status}"),
-        });
-    }
-    String::from_utf8(output).map_err(|_| "printed non-UTF-8 output".to_owned())
+    Ok(BoundedOutput {
+        status,
+        stdout: collect(stdout)?,
+        stderr: collect(stderr)?,
+    })
 }
 
 impl CodingAgent {
