@@ -807,7 +807,9 @@ fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {
 
 #[cfg(test)]
 mod tests {
+    use crate::assets::EXTENSIONS;
     use crate::assets::test_support::FakeHermes;
+    use crate::assets::test_support::PASSTHROUGH_KEY;
     use crate::cli::CliArgs;
     use crate::cli::Command;
     use crate::cli::setup::*;
@@ -819,6 +821,51 @@ mod tests {
 
     fn complete_hermes() -> FakeHermes {
         FakeHermes::complete()
+    }
+
+    fn running_cafleet_record() -> String {
+        format!(
+            "{}\n",
+            std::env::current_exe()
+                .unwrap()
+                .canonicalize()
+                .unwrap()
+                .display()
+        )
+    }
+
+    fn install_embedded_extension(prefix: &str, root: &Path, record: &Path) -> Vec<PathBuf> {
+        let mut installed = Vec::new();
+        for (path, bytes) in EXTENSIONS {
+            if let Some(rest) = path.strip_prefix(prefix) {
+                let target = root.join(rest);
+                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                std::fs::write(&target, bytes).unwrap();
+                installed.push(target);
+            }
+        }
+        assert!(!installed.is_empty(), "{prefix} is embedded");
+        std::fs::write(record, running_cafleet_record()).unwrap();
+        installed
+    }
+
+    /// Returns the plugin file and its executable record.
+    fn install_opencode_extension(base: &Path) -> (PathBuf, PathBuf) {
+        let plugins = base.join("plugins");
+        let record = plugins.join("cafleet.executable");
+        let installed = install_embedded_extension("opencode/", &plugins, &record);
+        let plugin = plugins.join("cafleet.ts");
+        assert!(installed.contains(&plugin));
+        (plugin, record)
+    }
+
+    /// Returns every installed plugin file under `plugin_dir`.
+    fn install_hermes_plugin(plugin_dir: &Path) -> Vec<PathBuf> {
+        install_embedded_extension(
+            "hermes/cafleet/",
+            plugin_dir,
+            &plugin_dir.join("executable"),
+        )
     }
 
     fn installed_agents(conn: &Connection) -> Vec<String> {
@@ -1178,10 +1225,11 @@ mod tests {
                 .position(|name| *name == "opencode.executable")
                 .unwrap();
             assert_eq!(
-                names[position + 1..position + 4],
+                names[position + 1..position + 5],
                 [
                     "opencode.preset",
                     "opencode.preset.cafleet-ask",
+                    "opencode.extension",
                     "opencode.installation"
                 ],
                 "{context}"
@@ -1218,6 +1266,178 @@ mod tests {
         }
     }
 
+    enum ExtensionState {
+        Installed,
+        Plugin(Option<&'static str>),
+        Record,
+    }
+
+    fn assert_extension_check(
+        check: &Check,
+        state: &ExtensionState,
+        agent: &str,
+        plugin: &Path,
+        record: &Path,
+        context: &str,
+    ) {
+        let fix = format!("; run 'cafleet setup --coding-agent {agent}'");
+        match state {
+            ExtensionState::Installed => {
+                assert_eq!(check.status, "ok", "{context}: {}", check.detail);
+                assert_eq!(check.detail, plugin.display().to_string(), "{context}");
+                assert!(check.problem.is_none(), "{context}");
+            }
+            ExtensionState::Plugin(expected) => {
+                assert_eq!(check.status, "error", "{context}: {}", check.detail);
+                let cause = check
+                    .detail
+                    .strip_prefix(&format!("{}: ", plugin.display()))
+                    .and_then(|rest| rest.strip_suffix(&fix))
+                    .unwrap_or_else(|| panic!("{context}: {}", check.detail));
+                match expected {
+                    Some(expected) => assert_eq!(cause, *expected, "{context}"),
+                    None => assert!(!cause.is_empty(), "{context}"),
+                }
+                let problem = check
+                    .problem
+                    .as_ref()
+                    .expect("an extension error has a phrase");
+                assert_eq!(
+                    problem.phrase,
+                    format!(
+                        "extension {} is missing or differs from the embedded copy",
+                        plugin.display()
+                    ),
+                    "{context}"
+                );
+                assert!(problem.setup_fix, "{context}");
+            }
+            ExtensionState::Record => {
+                assert_eq!(check.status, "error", "{context}: {}", check.detail);
+                let cause = check
+                    .detail
+                    .strip_prefix(&format!("{}: ", record.display()))
+                    .and_then(|rest| rest.strip_suffix(&fix))
+                    .unwrap_or_else(|| panic!("{context}: {}", check.detail));
+                assert!(!cause.is_empty(), "{context}");
+                let problem = check.problem.as_ref().expect("a record error has a phrase");
+                assert_eq!(
+                    problem.phrase,
+                    format!(
+                        "extension executable record {} is unusable: {cause}",
+                        record.display()
+                    ),
+                    "{context}"
+                );
+                assert!(problem.setup_fix, "{context}");
+            }
+        }
+    }
+
+    #[test]
+    fn opencode_extension_check_reports_each_plugin_and_record_state() {
+        type Mutation = fn(&Path, &Path);
+        let cases: [(&str, Mutation, ExtensionState); 9] = [
+            ("installed", |_, _| {}, ExtensionState::Installed),
+            (
+                "missing plugin",
+                |plugin, _| std::fs::remove_file(plugin).unwrap(),
+                ExtensionState::Plugin(None),
+            ),
+            (
+                "tampered plugin",
+                |plugin, _| std::fs::write(plugin, "tampered").unwrap(),
+                ExtensionState::Plugin(Some("differs from the embedded copy")),
+            ),
+            (
+                "unreadable plugin",
+                |plugin, _| {
+                    std::fs::remove_file(plugin).unwrap();
+                    std::fs::create_dir(plugin).unwrap();
+                },
+                ExtensionState::Plugin(None),
+            ),
+            (
+                "missing record",
+                |_, record| std::fs::remove_file(record).unwrap(),
+                ExtensionState::Record,
+            ),
+            (
+                "record names a missing file",
+                |_, record| std::fs::write(record, "/nonexistent/cafleet\n").unwrap(),
+                ExtensionState::Record,
+            ),
+            (
+                "record names a file that is not executable",
+                |_, record| {
+                    let plain = record.with_file_name("not-executable");
+                    std::fs::write(&plain, "plain").unwrap();
+                    std::fs::write(record, format!("{}\n", plain.display())).unwrap();
+                },
+                ExtensionState::Record,
+            ),
+            (
+                "record names a directory",
+                |_, record| {
+                    std::fs::write(record, format!("{}\n", record.parent().unwrap().display()))
+                        .unwrap()
+                },
+                ExtensionState::Record,
+            ),
+            (
+                "empty record",
+                |_, record| std::fs::write(record, "").unwrap(),
+                ExtensionState::Record,
+            ),
+        ];
+        for (context, mutate, state) in &cases {
+            let home = tempfile::tempdir().unwrap();
+            let (plugin, record) =
+                install_opencode_extension(&home.path().join(".config/opencode"));
+            mutate(&plugin, &record);
+            let probe = Probe::new(home.path(), true, None);
+            let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
+            assert_extension_check(
+                find(&checks, "opencode.extension"),
+                state,
+                "opencode",
+                &plugin,
+                &record,
+                context,
+            );
+        }
+    }
+
+    #[test]
+    fn opencode_extension_check_is_unavailable_without_the_executable_or_configuration() {
+        let home = tempfile::tempdir().unwrap();
+        install_opencode_extension(&home.path().join(".config/opencode"));
+        let absent = Probe::new(home.path(), false, None);
+        let check = find(
+            &agent_checks(None, &SchemaState::Missing, &absent, Ok(home.path())),
+            "opencode.extension",
+        )
+        .detail
+        .clone();
+        assert_eq!(check, "unavailable: executable is absent");
+        let invalid = Probe::new(home.path(), true, Some("OPENCODE_CONFIG_DIR"));
+        let checks = agent_checks(None, &SchemaState::Missing, &invalid, Ok(home.path()));
+        let check = find(&checks, "opencode.extension");
+        assert_eq!(check.status, "info");
+        assert!(
+            check
+                .detail
+                .starts_with("unavailable: configuration failed: "),
+            "{}",
+            check.detail
+        );
+        for probe in [&absent, &invalid] {
+            let checks = agent_checks(None, &SchemaState::Missing, probe, Ok(home.path()));
+            assert_eq!(find(&checks, "opencode.extension").status, "info");
+            assert!(find(&checks, "opencode.extension").problem.is_none());
+        }
+    }
+
     mod hermes {
         use crate::cli::setup::tests::*;
 
@@ -1235,18 +1455,32 @@ mod tests {
                     .join(".hermes/skills/cafleet/SKILL.md")
                     .is_file()
             );
+            assert!(!home.path().join(".hermes/plugins").exists());
+            assert!(!hermes.plugin_dir().exists());
         }
 
         #[test]
-        fn plain_setup_with_hermes_on_path_merges_only_the_passthrough_names() {
+        fn plain_setup_with_hermes_on_path_installs_the_plugin_and_merges_the_configuration() {
             let home = tempfile::tempdir().unwrap();
             let mut conn = prepare_database(&settings(home.path())).unwrap();
             let mut hermes = FakeHermes::holding(&[]);
             install_selected(&mut conn, &[], &|_| None, home.path(), &mut hermes).unwrap();
             assert_eq!(hermes.calls[0], FakeHermes::path_call());
             assert_eq!(
-                hermes.passthrough,
-                serde_json::json!(HERMES_CLIENT_ENV_PASSTHROUGH)
+                hermes.value(PASSTHROUGH_KEY),
+                Some(&serde_json::json!(HERMES_CLIENT_ENV_PASSTHROUGH))
+            );
+            assert_eq!(
+                hermes.value(crate::assets::test_support::ENABLED_KEY),
+                Some(&serde_json::json!(["cafleet"]))
+            );
+            assert_eq!(
+                hermes.value(crate::assets::test_support::INJECTION_KEY),
+                Some(&serde_json::json!(true))
+            );
+            assert_eq!(
+                std::fs::read_to_string(hermes.plugin_dir().join("executable")).unwrap(),
+                running_cafleet_record()
             );
             assert!(installed_agents(&conn).contains(&"hermes".to_owned()));
         }
@@ -1313,8 +1547,13 @@ mod tests {
                 .position(|name| *name == "hermes.executable")
                 .expect("hermes executable row");
             assert_eq!(
-                names[position + 1..position + 3],
-                ["hermes.client_env_passthrough", "hermes.installation"]
+                names[position + 1..position + 5],
+                [
+                    "hermes.client_env_passthrough",
+                    "hermes.extension",
+                    "hermes.plugin_enabled",
+                    "hermes.installation"
+                ]
             );
             assert_eq!(names[position - 1], "hermes.configuration");
             let check = &checks[position + 1];
@@ -1406,6 +1645,33 @@ mod tests {
                 )
             );
         }
+
+        #[test]
+        fn doctor_marks_the_hermes_plugin_rows_unavailable_without_the_executable_or_configuration()
+        {
+            let home = tempfile::tempdir().unwrap();
+            for (executable, invalid, prefix) in [
+                (false, None, "unavailable: executable is absent"),
+                (
+                    true,
+                    Some("HERMES_HOME"),
+                    "unavailable: configuration failed: ",
+                ),
+            ] {
+                let probe = Probe::new(home.path(), executable, invalid);
+                let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
+                for name in ["hermes.extension", "hermes.plugin_enabled"] {
+                    let check = find(&checks, name);
+                    assert_eq!(check.status, "info", "{name}");
+                    assert!(check.detail.starts_with(prefix), "{name}: {}", check.detail);
+                    if !executable {
+                        assert_eq!(check.detail, prefix, "{name}");
+                    }
+                    assert!(check.problem.is_none(), "{name}");
+                }
+                assert!(probe.passthrough_reads.borrow().is_empty());
+            }
+        }
     }
 
     mod doctor_summary {
@@ -1473,6 +1739,64 @@ mod tests {
                 assert_eq!(format_id_ranges(ids), expected, "{ids:?}");
             }
         }
+
+        const DISABLED_KEY: &str = crate::assets::test_support::DISABLED_KEY;
+        const ENABLED_KEY: &str = crate::assets::test_support::ENABLED_KEY;
+        const INJECTION_KEY: &str = crate::assets::test_support::INJECTION_KEY;
+        const HERMES_NOISE: &str = "⚠ install out of sync with its lockfile";
+
+        /// A fake `hermes` command's reply; `NotSet` prints the not-set line for its key.
+        enum Answer {
+            Print(String),
+            NotSet,
+            Exit1(&'static str),
+            Fail(&'static str),
+        }
+
+        impl Answer {
+            fn body(&self, key: &str) -> String {
+                match self {
+                    Answer::Print(text) => format!("printf '%s\\n' '{text}'"),
+                    Answer::NotSet => format!(
+                        "printf '%s\\n' '{HERMES_NOISE}' 'Config key not set: {key}' >&2; exit 1"
+                    ),
+                    Answer::Exit1(stderr) => {
+                        format!("printf '%s\\n' '{HERMES_NOISE}' '{stderr}' >&2; exit 1")
+                    }
+                    Answer::Fail(stderr) => {
+                        format!("printf '%s\\n' '{HERMES_NOISE}' '{stderr}' >&2; exit 2")
+                    }
+                }
+            }
+        }
+
+        fn named_row<'a>(rows: &'a [String], name: &str) -> &'a str {
+            let matching = rows
+                .iter()
+                .filter(|line| row_name(line) == name)
+                .collect::<Vec<_>>();
+            assert_eq!(matching.len(), 1, "{name}: {rows:?}");
+            matching[0]
+        }
+
+        fn names_after<'a>(rows: &'a [String], anchor: &str, count: usize) -> Vec<&'a str> {
+            let names = rows.iter().map(|line| row_name(line)).collect::<Vec<_>>();
+            let position = names
+                .iter()
+                .position(|name| *name == anchor)
+                .unwrap_or_else(|| panic!("{anchor}: {names:?}"));
+            names[position + 1..position + 1 + count].to_vec()
+        }
+
+        fn replace_answer(answers: &mut [(&'static str, Answer)], key: &str, answer: Answer) {
+            let slot = answers
+                .iter_mut()
+                .find(|(name, _)| *name == key)
+                .unwrap_or_else(|| panic!("{key} has an answer"));
+            slot.1 = answer;
+        }
+
+        const HERMES_FIX: &str = "run 'cafleet setup --coding-agent hermes'";
 
         const CHILD_CONFIG: &str = "CAFLEET_TEST_DOCTOR";
         const CHILD_STDOUT_MARKER: &str = "cafleet-doctor-child-stdout-begins";
@@ -1577,12 +1901,44 @@ mod tests {
                 self.executables.push((name, body.to_owned()));
             }
 
-            fn hermes_passthrough(&mut self, names: &[&str]) {
-                let body = format!(
-                    "case \"$*\" in\n  'config get --json terminal.client_env_passthrough') printf '%s\\n' '{}' ;;\n  *) exit 3 ;;\nesac",
-                    serde_json::json!(names)
-                );
+            /// The active-profile home that `hermes config path` names, distinct from `HERMES_HOME`.
+            fn hermes_home(&self) -> PathBuf {
+                self.path("hermes-profile")
+            }
+
+            fn hermes_plugin_dir(&self) -> PathBuf {
+                self.hermes_home().join("plugins/cafleet")
+            }
+
+            fn hermes(&mut self, path: Answer, keys: &[(&str, Answer)]) {
+                let mut arms = vec![format!("  'config path') {} ;;", path.body("path"))];
+                arms.extend(keys.iter().map(|(key, answer)| {
+                    format!("  'config get --json {key}') {} ;;", answer.body(key))
+                }));
+                let body = format!("case \"$*\" in\n{}\n  *) exit 3 ;;\nesac", arms.join("\n"));
                 self.executable("hermes", &body);
+            }
+
+            fn ready_hermes_answers(&self, passthrough: &[&str]) -> Vec<(&'static str, Answer)> {
+                vec![
+                    (
+                        PASSTHROUGH_KEY,
+                        Answer::Print(serde_json::json!(passthrough).to_string()),
+                    ),
+                    (DISABLED_KEY, Answer::NotSet),
+                    (ENABLED_KEY, Answer::Print(r#"["cafleet"]"#.into())),
+                    (INJECTION_KEY, Answer::Print("true".into())),
+                ]
+            }
+
+            fn hermes_config_path(&self) -> Answer {
+                Answer::Print(self.hermes_home().join("config.yaml").display().to_string())
+            }
+
+            fn hermes_ready(&mut self, passthrough: &[&str]) {
+                install_hermes_plugin(&self.hermes_plugin_dir());
+                let answers = self.ready_hermes_answers(passthrough);
+                self.hermes(self.hermes_config_path(), &answers);
             }
 
             fn opencode_presets(&self) {
@@ -1591,6 +1947,25 @@ mod tests {
                 for preset in ["cafleet.md", "cafleet-ask.md"] {
                     std::fs::write(agents.join(preset), "preset").unwrap();
                 }
+            }
+
+            fn opencode_extension(&self) -> (PathBuf, PathBuf) {
+                install_opencode_extension(&self.path("opencode"))
+            }
+
+            fn summary_and_rows(&self, code: i32) -> (Vec<String>, Vec<String>) {
+                let text = self.run(&["doctor"]);
+                let verbose = self.run(&["doctor", "--verbose"]);
+                for outcome in [&text, &verbose] {
+                    assert_eq!(
+                        outcome.code,
+                        Some(code),
+                        "{:?} {}",
+                        outcome.lines,
+                        outcome.stderr
+                    );
+                }
+                (text.lines, verbose.lines)
             }
 
             fn run(&self, args: &[&str]) -> Outcome {
@@ -1837,8 +2212,9 @@ mod tests {
             for name in ["claude", "codex", "opencode"] {
                 scenario.executable(name, "exit 0");
             }
-            scenario.hermes_passthrough(&crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH);
+            scenario.hermes_ready(&crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH);
             scenario.opencode_presets();
+            scenario.opencode_extension();
             for agent in [
                 CodingAgent::Claude,
                 CodingAgent::Opencode,
@@ -1981,7 +2357,7 @@ mod tests {
             }
             let mut without_member_id = crate::coding_agent::HERMES_CLIENT_ENV_PASSTHROUGH.to_vec();
             without_member_id.retain(|name| *name != "CAFLEET_MEMBER_ID");
-            scenario.hermes_passthrough(&without_member_id);
+            scenario.hermes_ready(&without_member_id);
             record(
                 &mut conn,
                 &scenario,
@@ -2190,6 +2566,7 @@ mod tests {
             scenario
                 .environment
                 .push(("CLAUDE_CONFIG_DIR", "relative".into()));
+            scenario.opencode_extension();
             let (fleet, director) = create_fleet_fixture(&mut conn, "doctor-ended");
             let ended = register_member_run(&mut conn, fleet, director, "ended");
             conn.execute(
@@ -2346,6 +2723,331 @@ mod tests {
             assert_eq!(
                 members_entry(&payload, "check_failed")["member_ids"],
                 serde_json::json!([PHANTOM_MEMBER])
+            );
+        }
+
+        fn healthy_scenario() -> (Scenario, Connection) {
+            let mut scenario = Scenario::new("system");
+            let mut conn = scenario.connect();
+            healthy_backends(&mut scenario, &mut conn);
+            (scenario, conn)
+        }
+
+        #[test]
+        fn doctor_reports_healthy_extension_rows_after_their_backend_rows() {
+            let (scenario, _conn) = healthy_scenario();
+            let (summary, rows) = scenario.summary_and_rows(0);
+            assert_eq!(
+                names_after(&rows, "opencode.executable", 4),
+                [
+                    "opencode.preset",
+                    "opencode.preset.cafleet-ask",
+                    "opencode.extension",
+                    "opencode.installation"
+                ]
+            );
+            assert_eq!(
+                names_after(&rows, "hermes.executable", 4),
+                [
+                    "hermes.client_env_passthrough",
+                    "hermes.extension",
+                    "hermes.plugin_enabled",
+                    "hermes.installation"
+                ]
+            );
+            assert_eq!(
+                named_row(&rows, "opencode.extension"),
+                format!(
+                    "ok opencode.extension: {}",
+                    scenario
+                        .path("opencode")
+                        .join("plugins/cafleet.ts")
+                        .display()
+                )
+            );
+            assert_eq!(
+                named_row(&rows, "hermes.extension"),
+                format!(
+                    "ok hermes.extension: {}",
+                    scenario.hermes_plugin_dir().display()
+                )
+            );
+            assert_eq!(
+                named_row(&rows, "hermes.plugin_enabled"),
+                "ok hermes.plugin_enabled: cafleet enabled with gateway injection"
+            );
+            assert_eq!(named_row(&summary, "hermes"), "ok hermes: ready");
+            assert_eq!(named_row(&summary, "opencode"), "ok opencode: ready");
+        }
+
+        #[test]
+        fn doctor_reports_each_hermes_extension_error_on_its_row_and_summary() {
+            let plugin_file = |scenario: &Scenario| {
+                install_hermes_plugin(&scenario.hermes_plugin_dir())
+                    .into_iter()
+                    .next()
+                    .unwrap()
+            };
+
+            let (scenario, _conn) = healthy_scenario();
+            let file = plugin_file(&scenario);
+            std::fs::write(&file, "tampered").unwrap();
+            let (summary, rows) = scenario.summary_and_rows(1);
+            assert_eq!(
+                named_row(&rows, "hermes.extension"),
+                format!(
+                    "error hermes.extension: {}: differs from the embedded copy; {HERMES_FIX}",
+                    file.display()
+                )
+            );
+            assert_eq!(
+                named_row(&summary, "hermes"),
+                format!(
+                    "error hermes: extension {} is missing or differs from the embedded copy — {HERMES_FIX}",
+                    file.display()
+                )
+            );
+
+            let (scenario, _conn) = healthy_scenario();
+            let file = plugin_file(&scenario);
+            std::fs::remove_file(&file).unwrap();
+            let (summary, rows) = scenario.summary_and_rows(1);
+            let row = named_row(&rows, "hermes.extension");
+            let cause = row
+                .strip_prefix(&format!("error hermes.extension: {}: ", file.display()))
+                .and_then(|rest| rest.strip_suffix(&format!("; {HERMES_FIX}")))
+                .unwrap_or_else(|| panic!("{row}"));
+            assert!(
+                !cause.is_empty() && cause != "differs from the embedded copy",
+                "{row}"
+            );
+            assert_eq!(
+                named_row(&summary, "hermes"),
+                format!(
+                    "error hermes: extension {} is missing or differs from the embedded copy — {HERMES_FIX}",
+                    file.display()
+                )
+            );
+
+            let (scenario, _conn) = healthy_scenario();
+            let record = scenario.hermes_plugin_dir().join("executable");
+            std::fs::remove_file(&record).unwrap();
+            let (summary, rows) = scenario.summary_and_rows(1);
+            let row = named_row(&rows, "hermes.extension");
+            let cause = row
+                .strip_prefix(&format!("error hermes.extension: {}: ", record.display()))
+                .and_then(|rest| rest.strip_suffix(&format!("; {HERMES_FIX}")))
+                .unwrap_or_else(|| panic!("{row}"));
+            assert!(!cause.is_empty(), "{row}");
+            assert_eq!(
+                named_row(&summary, "hermes"),
+                format!(
+                    "error hermes: extension executable record {} is unusable: {cause} — {HERMES_FIX}",
+                    record.display()
+                )
+            );
+
+            let (mut scenario, _conn) = healthy_scenario();
+            let answers = scenario.ready_hermes_answers(&HERMES_CLIENT_ENV_PASSTHROUGH);
+            scenario.hermes(Answer::Fail("no configuration found"), &answers);
+            let (summary, rows) = scenario.summary_and_rows(1);
+            let row = named_row(&rows, "hermes.extension");
+            let detail = row
+                .strip_prefix("error hermes.extension: ")
+                .unwrap_or_else(|| panic!("{row}"));
+            assert!(
+                detail
+                    .starts_with("cannot read hermes configuration through 'hermes config path': "),
+                "{row}"
+            );
+            assert_eq!(
+                named_row(&summary, "hermes"),
+                format!("error hermes: {detail}"),
+                "an unreadable config path has no setup fix"
+            );
+            assert_eq!(
+                named_row(&rows, "hermes.plugin_enabled"),
+                "ok hermes.plugin_enabled: cafleet enabled with gateway injection"
+            );
+        }
+
+        enum Enablement {
+            Row(&'static str),
+            Unreadable,
+        }
+
+        type EnablementCase = (
+            &'static str,
+            Answer,
+            Option<(&'static str, Answer)>,
+            Option<Enablement>,
+        );
+
+        #[test]
+        fn doctor_reports_each_hermes_plugin_enablement_state_on_its_row_and_summary() {
+            let not_enabled = |keys: &str| format!("hermes plugin cafleet is not enabled: {keys}");
+            let cases: Vec<EnablementCase> = vec![
+                (
+                    DISABLED_KEY,
+                    Answer::Print(r#"["other"]"#.into()),
+                    None,
+                    None,
+                ),
+                (
+                    DISABLED_KEY,
+                    Answer::Print(r#"["other","cafleet"]"#.into()),
+                    None,
+                    Some(Enablement::Row("disabled")),
+                ),
+                (
+                    ENABLED_KEY,
+                    Answer::NotSet,
+                    None,
+                    Some(Enablement::Row("enabled")),
+                ),
+                (
+                    ENABLED_KEY,
+                    Answer::Print(r#"["other"]"#.into()),
+                    Some((INJECTION_KEY, Answer::Print("false".into()))),
+                    Some(Enablement::Row("both")),
+                ),
+                (
+                    INJECTION_KEY,
+                    Answer::NotSet,
+                    None,
+                    Some(Enablement::Row("injection")),
+                ),
+                (
+                    INJECTION_KEY,
+                    Answer::Print(r#""true""#.into()),
+                    None,
+                    Some(Enablement::Row("injection")),
+                ),
+                (
+                    ENABLED_KEY,
+                    Answer::Print(r#""cafleet""#.into()),
+                    None,
+                    Some(Enablement::Unreadable),
+                ),
+                (
+                    DISABLED_KEY,
+                    Answer::Print("{}".into()),
+                    None,
+                    Some(Enablement::Unreadable),
+                ),
+                (
+                    DISABLED_KEY,
+                    Answer::Fail("permission denied"),
+                    None,
+                    Some(Enablement::Unreadable),
+                ),
+                (
+                    ENABLED_KEY,
+                    Answer::Exit1("Config key not set: plugins.enabledx"),
+                    None,
+                    Some(Enablement::Unreadable),
+                ),
+            ];
+            for (key, answer, extra, expected) in cases {
+                let (mut scenario, _conn) = healthy_scenario();
+                let mut answers = scenario.ready_hermes_answers(&HERMES_CLIENT_ENV_PASSTHROUGH);
+                replace_answer(&mut answers, key, answer);
+                if let Some((key, answer)) = extra {
+                    replace_answer(&mut answers, key, answer);
+                }
+                scenario.hermes(scenario.hermes_config_path(), &answers);
+                let code = if expected.is_some() { 1 } else { 0 };
+                let (summary, rows) = scenario.summary_and_rows(code);
+                let row = named_row(&rows, "hermes.plugin_enabled");
+                let hermes = named_row(&summary, "hermes");
+                match expected {
+                    None => {
+                        assert_eq!(
+                            row, "ok hermes.plugin_enabled: cafleet enabled with gateway injection",
+                            "{key}"
+                        );
+                        assert_eq!(hermes, "ok hermes: ready", "{key}");
+                    }
+                    Some(Enablement::Row("disabled")) => {
+                        assert_eq!(
+                            row,
+                            format!(
+                                "error hermes.plugin_enabled: hermes plugins.disabled lists cafleet; remove it, then {HERMES_FIX}"
+                            )
+                        );
+                        assert_eq!(
+                            hermes, "error hermes: hermes plugins.disabled lists cafleet",
+                            "the operator's disable has no setup fix"
+                        );
+                    }
+                    Some(Enablement::Row(missing)) => {
+                        let keys = match missing {
+                            "enabled" => ENABLED_KEY.to_owned(),
+                            "injection" => INJECTION_KEY.to_owned(),
+                            "both" => format!("{ENABLED_KEY}, {INJECTION_KEY}"),
+                            other => unreachable!("{other}"),
+                        };
+                        assert_eq!(
+                            row,
+                            format!(
+                                "error hermes.plugin_enabled: {}; {HERMES_FIX}",
+                                not_enabled(&keys)
+                            ),
+                            "{key}"
+                        );
+                        assert_eq!(
+                            hermes,
+                            format!("error hermes: {} — {HERMES_FIX}", not_enabled(&keys)),
+                            "{key}"
+                        );
+                    }
+                    Some(Enablement::Unreadable) => {
+                        let detail = row
+                            .strip_prefix("error hermes.plugin_enabled: ")
+                            .unwrap_or_else(|| panic!("{row}"));
+                        assert!(
+                            detail.starts_with(
+                                "cannot read hermes configuration through 'hermes config get': "
+                            ),
+                            "{key}: {row}"
+                        );
+                        assert_eq!(hermes, format!("error hermes: {detail}"), "{key}");
+                    }
+                }
+                assert!(
+                    named_row(&rows, "hermes.extension").starts_with("ok "),
+                    "{key}"
+                );
+            }
+        }
+
+        #[test]
+        fn doctor_folds_every_hermes_and_opencode_extension_problem_into_the_summary() {
+            let (mut scenario, _conn) = healthy_scenario();
+            let file = install_hermes_plugin(&scenario.hermes_plugin_dir())
+                .into_iter()
+                .next()
+                .unwrap();
+            std::fs::write(&file, "tampered").unwrap();
+            let mut answers = scenario.ready_hermes_answers(&HERMES_CLIENT_ENV_PASSTHROUGH);
+            replace_answer(&mut answers, ENABLED_KEY, Answer::NotSet);
+            scenario.hermes(scenario.hermes_config_path(), &answers);
+            let (plugin, _) = scenario.opencode_extension();
+            std::fs::write(&plugin, "tampered").unwrap();
+            let (summary, _) = scenario.summary_and_rows(1);
+            assert_eq!(
+                named_row(&summary, "hermes"),
+                format!(
+                    "error hermes: extension {} is missing or differs from the embedded copy; hermes plugin cafleet is not enabled: plugins.enabled — {HERMES_FIX}",
+                    file.display()
+                )
+            );
+            assert_eq!(
+                named_row(&summary, "opencode"),
+                format!(
+                    "error opencode: extension {} is missing or differs from the embedded copy — run 'cafleet setup --coding-agent opencode'",
+                    plugin.display()
+                )
             );
         }
     }
