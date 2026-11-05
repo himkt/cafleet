@@ -203,7 +203,7 @@ Answer rule id `claude-auto-default-decline`, `choice_id` `decline`, `focus_matc
 | Field | Value |
 |---|---|
 | `priority` / `observation` | `100` / `question` |
-| `region` | `either`; start and end the notice row `^ *Claude has a question for you — it shows once you send or clear what you're typing\.\s*$`; `max_rows` `1`; cursor `any`; `panel_separator` `│` |
+| `region` | `either`; start and end the notice row `^Claude has a question for you — it shows once you send or clear what you're typing\.\s*$` (column 0, pinned in Step 1); `max_rows` `1`; cursor `any`; `panel_separator` `│` |
 | `frame` | `require_patterns` `["^❯\\u{a0}"]`, `reject_patterns` `["^  Showing detailed transcript · ctrl\\+o to toggle"]` |
 | matchers, choices, operation | the notice line; no choices; operation null; no answer plan |
 
@@ -339,8 +339,8 @@ A command inside the working directories renders the approval variant instead (`
 | Rule | Allow | Deny | Measured on 2.1.312 |
 |---|---|---|---|
 | `claude-read-file-permission` | `31`, `claude-read-file-allow-digit` | `33`, `claude-read-file-deny-digit` | `1` read; `3` refused with `Interrupted · What should Claude do instead?` |
-| `claude-edit-file-permission` | `31`, `claude-edit-file-allow-digit` | `33`, `claude-edit-file-deny-digit` | `1` applied the edit; `3` not measured |
-| `claude-create-file-permission` | `31`, `claude-create-file-allow-digit` | `33`, `claude-create-file-deny-digit` | `3` refused with `User rejected write to <path>`; `1` not measured |
+| `claude-edit-file-permission` | `31`, `claude-edit-file-allow-digit` | `33`, `claude-edit-file-deny-digit` | `1` applied the edit; `3` refused with `User rejected update to <path>` |
+| `claude-create-file-permission` | `31`, `claude-create-file-allow-digit` | `33`, `claude-create-file-deny-digit` | `1` created the file; `3` refused with no file written |
 | `claude-bash-permission-no-tip` | `31` | `33` | `1` ran; `3` refused |
 
 Each plan is one ungated stage and ships only when its Step 1 digit check passes: the digit alone closes a fresh form and the operation runs (allow) or does not run (deny), with no Enter and no persistent change. A failed check leaves that decision unsupported.
@@ -549,3 +549,4 @@ Not observed live: batched Bash forms with a counter, the sidebar at 144 columns
 | 2026-11-04 | Execution Step 1 evidence: Dialog B also requires `hasSeenAutoModeEntryWarning` (added to the Dialog B case overlay), ignores choices for 500 ms after mounting and resolves Escape as `Not now`; a draft typed during a turn is sent by one Enter (pending-notice send row, Director guidance, `claude-question-pending-cells-002` fixtures and tracker test revised); the no-tip Bash form has an approval variant for in-cwd commands, so its choice-2 matcher (`remember`) accepts both labels and case `claude-bash-no-tip-access-cells-001` captures the access variant |
 | 2026-11-04 | Execution Step 1 report: Dialog A cursor on the focused choice row and primary-screen Dialog A after the first turn; primary and sidebar cases render the four-choice `claude-bash-permission` form, whose wrapped Tip and choice-2 rows beside the sidebar stay unmatched inside its region; sidebar fixtures carry `cell_backgrounds` runs; the no-tip access variant's boxed gutter, kept in the operation as `claude-bash-permission` keeps it |
 | 2026-11-04 | Step 6 acceptance found that batched permission forms carry a `N of M` heading counter: § Batched request forms, Step 5b |
+| 2026-11-05 | Execution review round 1: the pending-notice row pattern pinned at column 0 (`^Claude has a question …`) as shipped; the Edit-deny and Create-allow outcomes recorded from the Step 1 digit checks |
