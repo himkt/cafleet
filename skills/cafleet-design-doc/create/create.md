@@ -10,7 +10,7 @@ Preserve BASE/output paths and role boundaries.
 
 ## Director responsibilities
 
-Preserve the user's scope, answers and existing annotations. Assign explicit owned paths and report evidence rather than inferring completion from idle time. Read full durable messages and ACK consumption. Maintain native reception and supervise outstanding work under the shared Director procedure.
+Preserve the user's scope, answers and existing annotations. Assign explicit owned paths and report evidence rather than inferring completion from idle time. Read full durable messages and ACK consumption. Maintain native reception for the fleet's lifetime and supervise outstanding work under the shared Director procedure.
 
 ### Step 0: Path Resolution & Resume Detection (Director)
 
@@ -59,4 +59,4 @@ Route ordinary-language feedback and existing user markers to the Drafter withou
 
 After user approval, send the Drafter exactly `ready (doc) — user approved; finalize`: incorporate accepted decisions, resolve coordination markers, set Status to Approved and keep implementation progress accurate. Verify the final artifact and apply host Git/publication rules. Honor abort without marking the design approved.
 
-Collect receiver closure and observed process exit, delete owned ordinary members, verify the root-only roster, then delete the owned fleet and confirm closure. Preserve resources outside this team's ownership.
+Delete owned ordinary members, verify the root-only roster, delete the owned fleet, then collect the receiver's `fleet_deleted` closure and observed process exit and confirm the fleet's absence. When a deletion fails and the fleet stays registered, keep native reception active, resolve the cause and rerun. Preserve resources outside this team's ownership.
