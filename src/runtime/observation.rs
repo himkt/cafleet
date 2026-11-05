@@ -142,6 +142,7 @@ pub(crate) struct ObservationController {
     transit_request: Option<ObservedRequest>,
     request_region: Option<RequestRegion>,
     current_classification: Option<storage::InteractionClass>,
+    unplanned_question_episode: Option<i64>,
     pending_error: Option<CafleetError>,
     delivery_results: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     #[cfg(test)]
@@ -293,6 +294,7 @@ impl ObservationController {
             transit_request: None,
             request_region: None,
             current_classification: None,
+            unplanned_question_episode: None,
             pending_error: None,
             delivery_results: std::sync::Mutex::default(),
             #[cfg(test)]
@@ -335,6 +337,10 @@ impl ObservationController {
     pub(super) fn current_classification(&self) -> Option<storage::InteractionClass> {
         self.current_classification
     }
+    /// The episode of the current, completely matched question whose rule has no answer plan.
+    pub(super) fn unplanned_question_episode(&self) -> Option<i64> {
+        self.unplanned_question_episode
+    }
     fn invalidate_request(&mut self) -> Result<()> {
         self.current_request = None;
         self.current_continuation = None;
@@ -364,6 +370,7 @@ impl ObservationController {
             ObservationKind::Interaction(class) => Some(class),
             _ => None,
         };
+        let mut unplanned_question_episode = None;
         let next = (|| -> Result<Option<ObservedRequest>> {
             if !matches!(
                 observed.kind,
@@ -384,11 +391,14 @@ impl ObservationController {
             };
             let backend = crate::coding_agent::coding_agent(&self.run.backend)
                 .expect("validated observer backend");
-            let mut answer_matches = Vec::new();
-            for plan in self
+            let plans = self
                 .catalog
-                .answer_plans(backend, version, &observed.rule_id)
-            {
+                .answer_plans(backend, version, &observed.rule_id);
+            if plans.is_empty() && classification == storage::InteractionClass::Question {
+                unplanned_question_episode = Some(episode_seq);
+            }
+            let mut answer_matches = Vec::new();
+            for plan in plans {
                 if let Some(matched) = self.detector.match_answer(screen, &plan)? {
                     answer_matches.push(matched);
                 }
@@ -410,6 +420,7 @@ impl ObservationController {
                 answer_matches,
             }))
         })()?;
+        self.unplanned_question_episode = unplanned_question_episode;
         if next.is_none() && self.cursor_transit(screen, observed) {
             if let Some(request) = self.current_request.take() {
                 self.transit_request = Some(request);
@@ -541,6 +552,7 @@ impl ObservationController {
     fn gap(&mut self, reason: ObservationFailure, now: &ObservationMoment) -> Result<()> {
         self.invalidate_request()?;
         self.current_classification = None;
+        self.unplanned_question_episode = None;
         self.gap_count = self
             .gap_count
             .checked_add(1)

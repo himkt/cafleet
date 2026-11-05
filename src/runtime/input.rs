@@ -866,10 +866,9 @@ impl InputCoordinator {
                         request_token = Some(token.clone());
                         reason = None;
                     }
-                }
-                if request_token.is_none()
+                } else if fresh
                     && blocker.is_none()
-                    && interaction.classification == storage::InteractionClass::Question
+                    && observation.unplanned_question_episode() == Some(interaction.episode_seq)
                 {
                     reason = Some("question has no tested answer".into());
                 }
