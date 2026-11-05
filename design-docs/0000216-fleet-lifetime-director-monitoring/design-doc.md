@@ -1,7 +1,7 @@
 # Fleet-Lifetime Director Monitoring
 
 **Status**: Approved
-**Progress**: 12/27 tasks complete
+**Progress**: 27/27 tasks complete
 **Last Updated**: 2026-11-05
 
 ## Overview
@@ -40,7 +40,7 @@ The Claude Monitor recipe uses `--timeout 210` / `timeout_ms 240000`, re-arming 
 | Finite leases | Hermes uses `--timeout` only when a host policy requires finite leases ("bounded supervision phase" is removed). Every backend renews a clean `timeout` closure while the fleet exists, regardless of outstanding assignments. |
 | Timeouts and crashes | Recovery conditions, never successful completion. Existing safeguards stay: verified termination of the old receiver, a fresh successful health/inbox check before replacement, exactly one receiver. |
 | Hermes `action=kill` | Allowed in exactly two places: (a) recovery replacement of a receiver whose liveness is in doubt or that is wedged, or of a second receiver left by a session change; each kill is followed by verified exit, a fresh successful health/inbox check and exactly one running receiver; (b) a receiver still running after its `closed` `fleet_deleted` record, as part of fleet deletion, with verified exit and no restart. |
-| Wedged receiver | A live process while `poll --json` shows a pending delivery whose ID the receiver has never emitted and that was created after its last emitted record, with no heartbeat carrying output and no read returning new lines across at least two heartbeat intervals. Rolling-log overflow (heartbeats carry output while reads return no lines or a `total_lines` below the retained offset) and emitted-but-unACKed deliveries, which `listen` never re-emits, are healthy states reconciled through `poll --json`, never treated as wedged. |
+| Wedged receiver | A live process while `poll --json` shows a pending delivery whose ID the receiver has never emitted and that was created after its last emitted record, with no heartbeat carrying output and no read returning new lines across at least two heartbeat intervals. Rolling-log overflow (a heartbeat with a nonzero `omitted`, a read whose `total_lines` is below the retained offset, or heartbeat-turn reads returning fewer records than the heartbeat carried) and emitted-but-unACKed deliveries, which `listen` never re-emits, are healthy states reconciled through `poll --json`, never treated as wedged. |
 | Partial deletion | Whenever `fleet delete` exits 1, the fleet stays registered, reception stays active and a lease expiring in that window is renewed. This covers every `fleet was not deleted` outcome in `SPEC.md` § `fleet delete`: a member that could not be ended, pane-input lock contention and a placement or ownership change. |
 | No receiver at deletion | When the receiver had exited and was not yet replaced when the fleet is deleted, the Director confirms deletion with `cafleet fleet list` and a final `cafleet message poll <director-member-id> --json`, starting no replacement. |
 | Quiet reception | Idle monitoring sends no check-in message, invents no assignment and gives no "nothing received" update. Message-ID deduplication and ACK semantics stay unchanged. |
@@ -159,13 +159,13 @@ Omit `--timeout`: the receiver runs until its `closed` record or failure. Requir
 
 Every 60 seconds Hermes injects a heartbeat notification carrying the output the running receiver emitted since the previous one, which wakes an idle Director without user input; a tick with no new output sends nothing. Keep `heartbeat=60`; Hermes raises smaller values to 60. A heartbeat is a batched wake signal: it can carry several records, keeps only the newest 2,000 characters (its `omitted` field counts the rest), can arrive after its records were consumed, and turn admission adds latency beyond the interval.
 
-On every heartbeat turn and between work steps, read the receiver with `process_manage` `action=log`, `offset` advanced past lines already read and repeated until no new lines remain, on the retained `session_id`. Accumulate incomplete JSONL, consume complete records and follow [Director wake](../roles/director.md#director-wake), whose `cafleet message poll <director-id> --json` is the completeness check. Hermes keeps a 200,000-character rolling log; once the receiver's output outgrows it, older lines drop and `total_lines` stops growing. When a read returns a `total_lines` below the retained offset, or returns no lines on a turn whose heartbeat carried output, reconcile through `poll --json` and set the offset to the returned `total_lines`. Deduplicate by message ID: a record already consumed, including the startup output the first heartbeat repeats, is replay, never reported as new or ACKed again. Then end the turn with the same receiver running, inventing no assignment and sending no check-in message or "nothing received" update. Start no `message wait` as a wake or rearm mechanism; a finite `wait` for ordinary-member retry rotation under Director wake step 4 remains available.
+On every heartbeat turn and between work steps, read the receiver with `process_manage` `action=log`, `offset` advanced past lines already read and repeated until no new lines remain, on the retained `session_id`. Accumulate incomplete JSONL, consume complete records and follow [Director wake](../roles/director.md#director-wake), whose `cafleet message poll <director-id> --json` is the completeness check. Hermes keeps a 200,000-character rolling log; once the receiver's output outgrows it, older lines drop, `total_lines` counts only the retained lines and the retained offset no longer marks the unread position, so records can be absent from every read. Treat the log as overflowed when a heartbeat carries a nonzero `omitted`, a read returns a `total_lines` below the retained offset, or a heartbeat turn's reads return fewer records than its heartbeat carried; then reconcile through `poll --json` and set the offset to the returned `total_lines`. Deduplicate by message ID: a record already consumed, including the startup output the first heartbeat repeats, is replay, never reported as new or ACKed again. Then end the turn with the same receiver running, inventing no assignment and sending no check-in message or "nothing received" update. Start no `message wait` as a wake or rearm mechanism; a finite `wait` for ordinary-member retry rotation under Director wake step 4 remains available.
 
 Hermes documents `heartbeat` for bounded jobs rather than servers. This receiver is bounded by the fleet's lifetime; it ends with `closed` `fleet_deleted`. Keep it running while the fleet exists, including after a creation-only request, the `ready` handshake, a final reply, completed work, an empty assignment queue, idle periods and user handoffs.
 
 When a host policy requires finite leases, add `--timeout <seconds>` (`1..=1800`) to the same call; after its `closed` `timeout` record, verify termination and start one replacement while the fleet exists. Add `persist_on_release=True` only when the operator explicitly asks for reception to survive conversation cleanup; it does not survive Hermes host exit and does not guarantee notification ownership after a session change, so reconcile with `poll --json` after any such change.
 
-The exit notification follows the receiver's `closed` record or exit: verify termination and follow [receiver recovery](../roles/director.md#receiver-recovery). While the fleet exists, a `timeout` closure, unexpected exit or failure is a recovery condition, never the end of monitoring. Use `process_manage`, `action=kill` on a retained `session_id` only for recovery replacement: of a receiver whose liveness is in doubt, of a wedged receiver, or of a second receiver left by a session change. A receiver is wedged when `poll --json` shows a pending delivery whose ID the receiver has never emitted and that was created after its last emitted record, while no heartbeat carries output and no read returns new lines across at least two heartbeat intervals. Rolling-log overflow (heartbeats carry output while reads return no lines or a `total_lines` below the retained offset) and emitted-but-unACKed deliveries, which the receiver never re-emits, are healthy states reconciled through `poll --json`, never wedged. Verify that the killed receiver exited, complete a fresh successful health/inbox check, then run exactly one receiver: the replacement, or the retained one when a duplicate was ended. After `fleet_deleted`, reconcile the exit output as history, verify that the receiver exited and start no replacement; a receiver still running after that record ends with `action=kill` as part of fleet deletion, followed by verified exit. Preserve the process `session_id`, log offset, incomplete JSONL and unfinished actions across compaction. When the background facility is unavailable or denied, follow [receiver recovery](../roles/director.md#receiver-recovery).
+The exit notification follows the receiver's `closed` record or exit: verify termination and follow [receiver recovery](../roles/director.md#receiver-recovery). While the fleet exists, a `timeout` closure, unexpected exit or failure is a recovery condition, never the end of monitoring. Use `process_manage`, `action=kill` on a retained `session_id` only for recovery replacement: of a receiver whose liveness is in doubt, of a wedged receiver, or of a second receiver left by a session change. A receiver is wedged when `poll --json` shows a pending delivery whose ID the receiver has never emitted and that was created after its last emitted record, while no heartbeat carries output and no read returns new lines across at least two heartbeat intervals. Rolling-log overflow and emitted-but-unACKed deliveries, which the receiver never re-emits, are healthy states reconciled through `poll --json`, never wedged. Verify that the killed receiver exited, complete a fresh successful health/inbox check, then run exactly one receiver: the replacement, or the retained one when a duplicate was ended. After `fleet_deleted`, reconcile the exit output as history, verify that the receiver exited and start no replacement; a receiver still running after that record ends with `action=kill` as part of fleet deletion, followed by verified exit. Preserve the process `session_id`, log offset, incomplete JSONL and unfinished actions across compaction. When the background facility is unavailable or denied, follow [receiver recovery](../roles/director.md#receiver-recovery).
 
 Reception uses process output, heartbeat notifications and broker reads, makes no pane input and leaves `/goal` `gate`/`wait` authority with the host; heartbeat wake needs no `/goal`.
 ````
@@ -235,7 +235,7 @@ Hermes Director, persistent recipe (no `--timeout`). Phases run in order in one 
 | Phase | Action | Pass conditions |
 |---|---|---|
 | 1. Creation-only idle | After T0, send nothing for 60 minutes; sample "one receiver" at T0 + 30 min and T0 + 60 min. Then send `lifetime-probe H1`. | Same `session_id` throughout; no `process_manage` `kill`, new `terminal` listener or `message wait`; no Director turn and no Director-sent message between T0 and H1's heartbeat; both samples show one receiver; H1 is first observed in a heartbeat injected into the idle Director and consumed once. |
-| 2. Rolling-log overflow | Generate 24 bodies of exactly 10,000 characters, each starting `overflow-probe NN`. Send 12 within 10 s; once the Director has consumed them and is idle, send the other 12 within 10 s. Only each burst's first send waits for an idle Director. Then send `lifetime-probe H2`. | The receiver's output exceeds 200,000 characters (an offset-0 `log` read no longer starts with the `ready` record); at least one Director read shows `total_lines` below the retained offset or no lines on a heartbeat turn with output, followed by `poll --json` reconciliation; all 24 IDs and H2 are consumed once; same `session_id`, one receiver. |
+| 2. Rolling-log overflow | Generate 24 bodies of exactly 10,000 characters, each starting `overflow-probe NN`. Send 12 within 10 s; once the Director has consumed them and is idle, send the other 12 within 10 s. Only each burst's first send waits for an idle Director. Then send `lifetime-probe H2`. | The receiver's output exceeds 200,000 characters (an offset-0 `log` read no longer starts with the `ready` record); on at least one heartbeat turn an overflow signal of the recipe (a nonzero heartbeat `omitted`, a `total_lines` below the retained offset, or reads returning fewer records than the heartbeat carried) is followed by `poll --json` reconciliation and an offset reset to the returned `total_lines`; all 24 IDs and H2 are consumed once; same `session_id`, one receiver. |
 | 3. Unexpected exit | From the operator shell, `kill -TERM <listener pid>`. After the Director's recovery turn ends, sample "one receiver", then send `lifetime-probe H3`. | The Director inspects the exit, completes a fresh successful `poll --json` before starting exactly one replacement with `heartbeat=60`, retains its new `session_id`; one receiver; H3 is consumed once through the replacement. |
 | 4. Failed deletion | Hold the probe's pane input lock with the recipe below the table, then prompt the Director: "Delete the fleet. If deletion fails, report the failure and end your turn; I will tell you when to retry." After `flock` exits, send `lifetime-probe H4`. | `fleet delete` exits 1 with `fleet <fleet-id> pane input remained busy for 5 seconds at member <probe-id>; fleet was not deleted.` and `cafleet fleet list` still shows the fleet; the receiver keeps its `session_id` with no `kill`; one receiver; H4 is consumed once through a heartbeat. |
 | 5. Deletion | Prompt the Director: "Retry the fleet deletion." | `fleet delete` succeeds; the receiver emits `closed` `fleet_deleted` and exits 0; the Director treats the exit notification as history, starts no replacement and confirms the fleet's absence; no leak. |
@@ -283,12 +283,16 @@ A run with three invalid attempts is `not established` and blocks like `Fail`.
 
 Filled by the implementer. One row per attempt.
 
-Versions: `<hermes --version output>`; `<claude --version output>`; `<cafleet --version output>`.
+Versions: `Hermes Agent vunknown (2026.9.24)`; `2.1.309 (Claude Code)`; `cafleet 0.31.3`.
 
 | Run | Attempt | Date (UTC) | Receiver handles | Key times (T0/M0, sends, first observations, closures) | Message IDs and ACKs | Receiver samples | Shutdown (`closed` reason, exit, leak check) | Classification |
 |---|---|---|---|---|---|---|---|---|
+| H-A | 1 | 2026-11-05 | `proc_6136b0f00cbb` (pid 4049835, 06:59:36–08:13:08), then `proc_b00c1e5f3ead` (pid 4071259, 08:13:20–08:21), each `listen 1` with `heartbeat=60`, no `--timeout` | T0 07:01:00; no Director turn 07:00:47–08:02:37; H1 08:01:37 → heartbeat #2 08:02:37; bursts 08:03:41.9–42.4 and 08:06:41.5–42.0; H2 08:10:23 → heartbeat #5 08:10:36; SIGTERM 08:13:08, exit notice 08:13:10, log read + `doctor` + `poll --json` before replacement 08:13:20; H3 08:15:22 → heartbeat 08:16:21; H4 08:18:56 → heartbeat 08:19:22 | ready 1, H1 2, overflow 3–26, H2 27, H3 28, H4 29 each ACKed once and `completed` (bursts ACKed by one loop each, with read-back) | one receiver at 07:31:20, 08:01:32, 08:13:00, 08:14:36, 08:15:17, 08:18:35, 08:20:42 | phase 4 `fleet delete` 08:17:44 exit 1 `fleet 1 pane input remained busy for 5 seconds at member 2; fleet was not deleted.`, fleet listed, no `kill`; phase 5 `fleet delete` 08:21:02, `closed` `fleet_deleted`, exit 0, no replacement, fleet absent; no receiver and no live `processes.json` entry at 08:22:06 | Fail: the 08:07:43 heartbeat-#4 read (offset 15) returned 5 of 12 burst records with `total_lines` 20, firing no overflow signal of the pre-revision rule. `poll --json` still consumed every ID once. |
+| H-A | 2 | 2026-11-05 | `proc_545523210e65` (pid 4076971, 08:32:53–09:46:13), then `proc_a02210a19f6b` (pid 4093178, 09:46:28–09:54), each `listen 1` with `heartbeat=60`, no `--timeout`; Hermes skill/memory review disabled | T0 08:35:00; no Director turn 08:34–09:36:57; H1 09:36:09 → heartbeat #2 09:36:57; bursts 09:38:14.2–14.8 and 09:41:14.4–14.9; heartbeat #4 09:41:58 `omitted` 120,736 and read at offset 15 returned 5 of 12 records (`total_lines` 20), then `poll --json` reconciliation and offset reset to 20; H2 09:43:58 → heartbeat #5 09:44:57; SIGTERM 09:46:13, exit notice 09:46:16, log read + `doctor` + `poll --json` before replacement 09:46:28; H3 09:48:15 → heartbeat 09:48:33; H4 09:51:57 → heartbeat 09:52:32 | ready 1, H1 2, overflow 3–26, H2 27, H3 28, H4 29 each ACKed once and `completed` (bursts ACKed by one loop each, with read-back) | one receiver at 08:35:24, 09:05:54, 09:36:04, 09:46:07, 09:48:10, 09:51:51, 09:53:43 | phase 4 `fleet delete` 09:50:27 exit 1 `fleet 1 pane input remained busy for 5 seconds at member 2; fleet was not deleted.`, fleet listed, no `kill`; phase 5 `fleet delete` 09:54:01, `closed` `fleet_deleted`, exit 0, no replacement, fleet absent; no receiver and no live `processes.json` entry at 09:54:59 | Pass |
+| H-B | 1 | 2026-11-05 | `proc_961f3f5ab7e4`, `proc_841fd59b1fd6`, `proc_7b217f34f6c6`, `proc_5e8512ccb0f9`, `proc_75fd002cce09`, each `listen 1 --timeout 120` | T0 07:10:00 (heartbeat replay turn end); `closed` `timeout` exit notifications at 07:10:41, 07:13:01, 07:15:17 and 07:17:29, each followed by log read, `poll --json`, `doctor` and one replacement (07:10:56, 07:13:12, 07:15:24, 07:17:40); HB sent 07:16:03, first observed in heartbeat 07:16:28 | ready 1 ACKed once 07:09:37; HB 2 ACKed once 07:16:38, `completed`; no Director `message send` after the ready ACK | one receiver at 07:11:47, 07:14:02, 07:15:57, 07:18:31 | "Delete the fleet." 07:18:43 (submitted 1 s after heartbeat #1 of the fifth receiver and redirected that turn); `fleet delete` 07:18:53, `closed` `fleet_deleted`, exit 0, no replacement; no receiver and no live H-B entry in `processes.json` at 07:19:55 | Pass |
+| C-A | 1 | 2026-11-05 | Monitor `b1c32oyps`, then `bj8iu4oww`, each `{"command":"cafleet message listen 1 --timeout 1770","description":"CAFleet Director inbox","timeout_ms":1800000}` | M0 07:04:02; `closed` `timeout` with stream completion (`status` `completed`, "stream ended") 07:33:32.9 = M0 + 1,770.9 s, before the 07:34:02 Monitor deadline, no Monitor timeout; one re-arm 07:33:38 after the completion; C1 sent 07:36:21, first observed as a Monitor event 07:36:22 | ready 1 ACKed once 07:04:22; C1 2 ACKed once 07:36:29, `completed` | one receiver (pid 4061449) and one running Monitor task at 07:35:37 | "Delete the fleet." 07:37:19; `fleet delete` 07:37:26, `closed` `fleet_deleted`, Monitor exit 0, no re-arm; no receiver and no running Monitor at 07:38:31 | Pass |
 
-Selected outcome: `<all Pass | blocked>`; `<hermes run date>` = `<date>`; `<claude run date>` = `<date>`.
+Selected outcome: `all Pass` (Run H-A attempt 2, Run H-B attempt 1, Run C-A attempt 1); `<hermes run date>` = `2026-11-05`; `<claude run date>` = `2026-11-05`.
 
 ---
 
@@ -320,42 +324,42 @@ Selected outcome: `<all Pass | blocked>`; `<hermes run date>` = `<date>`; `<clau
 
 ### Step 5: Update `skills/cafleet-design-doc`
 
-- [x] Apply the `SKILL.md` Dispatch edit. <!-- completed: 2026-11-05T06:56 -->
-- [x] Apply both `create/create.md` edits. <!-- completed: 2026-11-05T06:56 -->
-- [x] Replace the `execute/execute.md` Step 8 cleanup paragraph. <!-- completed: 2026-11-05T06:56 -->
+- [x] Apply the `SKILL.md` Dispatch edit. <!-- completed: 2026-11-05T06:55 -->
+- [x] Apply both `create/create.md` edits. <!-- completed: 2026-11-05T06:55 -->
+- [x] Replace the `execute/execute.md` Step 8 cleanup paragraph. <!-- completed: 2026-11-05T06:55 -->
 
 ### Step 6: Prepare the live environment
 
-- [ ] Record `hermes --version`, `claude --version` and `cafleet --version` on the § Live evidence `Versions:` line. <!-- completed: -->
-- [ ] Create the hidden `probe/` directory beside this design doc and generate the 24 Run H-A phase 2 bodies there. <!-- completed: -->
-- [ ] For each run, create its isolated database and run `cafleet setup --coding-agent <director backend>` against it per § Live verification. <!-- completed: -->
+- [x] Record `hermes --version`, `claude --version` and `cafleet --version` on the § Live evidence `Versions:` line. <!-- completed: 2026-11-05T06:55 -->
+- [x] Create the hidden `probe/` directory beside this design doc and generate the 24 Run H-A phase 2 bodies there. <!-- completed: 2026-11-05T06:55 -->
+- [x] For each run, create its isolated database and run `cafleet setup --coding-agent <director backend>` against it per § Live verification. <!-- completed: 2026-11-05T06:55 -->
 
 ### Step 7: Run H-A (Hermes fleet lifetime)
 
-- [ ] Start the Hermes Director, send the task prompt and run phases 1–5. <!-- completed: -->
-- [ ] Export the session with `hermes sessions export` and capture the Director pane into `probe/`. <!-- completed: -->
-- [ ] Fill and classify the Run H-A row; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: -->
+- [x] Start the Hermes Director, send the task prompt and run phases 1–5. <!-- completed: 2026-11-05T08:22 -->
+- [x] Export the session with `hermes sessions export` and capture the Director pane into `probe/`. <!-- completed: 2026-11-05T08:22 -->
+- [x] Fill and classify the Run H-A row; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: 2026-11-05T08:23 -->
 
 ### Step 8: Run H-B (Hermes finite lease)
 
-- [ ] Start a fresh Hermes Director with the lease clause and run steps 1–3; export the session and capture the pane. <!-- completed: -->
-- [ ] Fill and classify the Run H-B row; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: -->
+- [x] Start a fresh Hermes Director with the lease clause and run steps 1–3; export the session and capture the pane. <!-- completed: 2026-11-05T07:21 -->
+- [x] Fill and classify the Run H-B row; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: 2026-11-05T07:21 -->
 
 ### Step 9: Run C-A (Claude Monitor lease)
 
-- [ ] Start a fresh Claude Director and run steps 1–4; capture the pane and retain the session transcript. <!-- completed: -->
-- [ ] Fill and classify the Run C-A row; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: -->
+- [x] Start a fresh Claude Director and run steps 1–4; capture the pane and retain the session transcript. <!-- completed: 2026-11-05T07:39 -->
+- [x] Fill and classify the Run C-A row; repeat an `Invalid` attempt as a new row, up to three attempts. <!-- completed: 2026-11-05T07:39 -->
 
 ### Step 10: Outcome gate and evidence
 
-- [ ] When any run is `Fail` or `not established`, add the Programmer's paired blocker marker in § Live evidence naming the failed condition and its evidence, send `blocked (paragraph-Specification > Live evidence)` and stop until the user decides; otherwise record the selected outcome and run dates. <!-- completed: -->
-- [ ] Replace the `claude` and `hermes` Director Evidence cells in `SPEC.md` § Role eligibility and `coding-agents.md` per § Replacement texts, substituting versions and run dates. <!-- completed: -->
+- [x] When any run is `Fail` or `not established`, add the Programmer's paired blocker marker in § Live evidence naming the failed condition and its evidence, send `blocked (paragraph-Specification > Live evidence)` and stop until the user decides; otherwise record the selected outcome and run dates. <!-- completed: 2026-11-05T09:56 -->
+- [x] Replace the `claude` and `hermes` Director Evidence cells in `SPEC.md` § Role eligibility and `coding-agents.md` per § Replacement texts, substituting versions and run dates. <!-- completed: 2026-11-05T09:56 -->
 
 ### Step 11: Verify
 
-- [ ] Run the Success Criteria `grep` checks and confirm every `action=kill` placement. <!-- completed: -->
-- [ ] Confirm every link in the replaced texts (`#director-wake`, `#receiver-recovery`, `#shutdown`, the SPEC `message-listen` anchor) resolves to an existing heading. <!-- completed: -->
-- [ ] Run `mise //:lint`, `mise //:test` and `mise //docs:build`; confirm `git diff --stat` lists only § Change surface files and this design doc. <!-- completed: -->
+- [x] Run the Success Criteria `grep` checks and confirm every `action=kill` placement. <!-- completed: 2026-11-05T10:08 -->
+- [x] Confirm every link in the replaced texts (`#director-wake`, `#receiver-recovery`, `#shutdown`, the SPEC `message-listen` anchor) resolves to an existing heading. <!-- completed: 2026-11-05T10:08 -->
+- [x] Run `mise //:lint`, `mise //:test` and `mise //docs:build`; confirm `git diff --stat` lists only § Change surface files and this design doc. <!-- completed: 2026-11-05T10:08 -->
 
 ---
 
@@ -364,3 +368,4 @@ Selected outcome: `<all Pass | blocked>`; `<hermes run date>` = `<date>`; `<clau
 | Date | Changes |
 |------|---------|
 | 2026-11-05 | Initial draft |
+| 2026-11-05 | Run H-A attempt 1 showed that rolling-log overflow keeps `total_lines` at the retained count; overflow detection now also uses a nonzero heartbeat `omitted` and heartbeat-turn reads returning fewer records than the heartbeat carried |
