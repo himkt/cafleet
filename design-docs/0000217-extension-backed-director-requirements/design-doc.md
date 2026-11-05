@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 35/50 tasks complete
+**Progress**: 37/50 tasks complete
 **Last Updated**: 2026-11-05
 
 ## Overview
@@ -599,8 +599,8 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 
 ### Step 8: Codex forwarder
 
-- [ ] `src/cli/message.rs`: `--codex-thread` option, `codex` resolution, ancestor pinning by argv[0], liveness with start-time check, forwarding-mode stdout, forwarded event set, `message_ref` above 65,536 bytes, 10 s deadline, failures, the closed notice and `session_exited` closure (§3.1–3.2) <!-- completed: -->
-- [ ] Unit tests in `src/cli/message.rs`, using a fake `codex` executable and re-executed children via `test_path!`:
+- [x] `src/cli/message.rs`: `--codex-thread` option, `codex` resolution, ancestor pinning by argv[0], liveness with start-time check, forwarding-mode stdout, forwarded event set, `message_ref` above 65,536 bytes, 10 s deadline, failures, the closed notice and `session_exited` closure (§3.1–3.2) <!-- completed: 2026-11-05T23:05 -->
+- [x] Unit tests in `src/cli/message.rs`, using a fake `codex` executable and re-executed children via `test_path!`:
   - forwarded events, order and text
   - `message_ref` above the threshold
   - non-zero exit and deadline expiry
@@ -610,7 +610,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
   - stdout holds `ready` and the final `closed` record only
   - the closed notice is forwarded before a non-zero exit after `ready`
   - a failed notice keeps the original diagnostic and exit 1
-  <!-- completed: -->
+  <!-- completed: 2026-11-05T23:05 -->
 
 ### Step 9: Validation
 

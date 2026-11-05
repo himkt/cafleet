@@ -96,6 +96,9 @@ pub(crate) enum MessageCommand {
         /// Optional monotonic lease in seconds.
         #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..=1800))]
         timeout: Option<u64>,
+        /// Forward each record into this Codex thread through `codex queue`.
+        #[arg(long = "codex-thread", value_name = "THREAD")]
+        codex_thread: Option<String>,
     },
     /// Acknowledge a received message.
     Ack {
@@ -205,8 +208,16 @@ pub(crate) fn run(
             });
             Ok(())
         }
-        MessageCommand::Listen { member_id, timeout } => {
-            run_listener(conn, member_id, timeout.map(std::time::Duration::from_secs))
+        MessageCommand::Listen {
+            member_id,
+            timeout,
+            codex_thread,
+        } => {
+            let timeout = timeout.map(std::time::Duration::from_secs);
+            match codex_thread {
+                Some(thread) => run_forwarder(conn, member_id, timeout, &thread),
+                None => run_listener(conn, member_id, timeout),
+            }
         }
         MessageCommand::Ack { message_id, json } => {
             let message = broker::ack_message(conn, message_id)?;
@@ -289,6 +300,11 @@ const IDLE_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(crate) trait ListenIo {
     fn snapshot(&mut self, deadline: Deadline) -> Result<InboxSnapshot, CafleetError>;
+    /// Whether the session that owns this listener has ended; a listener without an owning
+    /// session never ends this way.
+    fn session_exited(&mut self) -> Result<bool, CafleetError> {
+        Ok(false)
+    }
 }
 
 pub(crate) trait ListenOutput {
@@ -428,6 +444,9 @@ pub(crate) fn listen(
         if expired(clock.now(), expiry) {
             return close(clock, output, member_id, "timeout");
         }
+        if io.session_exited()? {
+            return close(clock, output, member_id, "session_exited");
+        }
         snapshot = io.snapshot(work_deadline(clock.now(), expiry))?;
     }
 }
@@ -524,23 +543,31 @@ fn run_on_descriptor(
     timeout: Option<Duration>,
     descriptor: BorrowedFd<'_>,
 ) -> Result<(), CafleetError> {
+    with_nonblocking(descriptor, || {
+        listen(
+            &SystemClock,
+            &mut BrokerListener {
+                conn,
+                member_id,
+                fleet_id: None,
+            },
+            &mut DescriptorOutput(descriptor),
+            member_id,
+            timeout,
+        )
+    })
+}
+
+/// Runs `body` with `descriptor` switched to nonblocking writes, restoring its flags afterwards.
+fn with_nonblocking(
+    descriptor: BorrowedFd<'_>,
+    body: impl FnOnce() -> Result<(), CafleetError>,
+) -> Result<(), CafleetError> {
     let original = fcntl(descriptor, FcntlArg::F_GETFL).map_err(output_error)?;
     let flags = OFlag::from_bits_retain(original);
     let result = fcntl(descriptor, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))
         .map_err(output_error)
-        .and_then(|_| {
-            listen(
-                &SystemClock,
-                &mut BrokerListener {
-                    conn,
-                    member_id,
-                    fleet_id: None,
-                },
-                &mut DescriptorOutput(descriptor),
-                member_id,
-                timeout,
-            )
-        });
+        .and_then(|_| body());
     let cleanup = fcntl(descriptor, FcntlArg::F_SETFL(flags)).map_err(output_error);
     let cleanup = cleanup.map(|_| ()).map_err(|cleanup| {
         if result.is_err() {
@@ -550,6 +577,273 @@ fn run_on_descriptor(
         }
     });
     CafleetError::merge_cleanup(result, cleanup)
+}
+
+const FORWARDED_TEXT_LIMIT: usize = 65_536;
+const CODEX_QUEUE_BUDGET: Duration = Duration::from_secs(10);
+const LISTEN_RECORD_PREFIX: &str = "[cafleet listen record] ";
+
+/// Streams `member_id`'s inbox into a Codex thread: every record goes through `codex queue`, and
+/// stdout keeps only the `ready` and final `closed` records.
+fn run_forwarder(
+    conn: &mut Connection,
+    member_id: i64,
+    timeout: Option<Duration>,
+    thread: &str,
+) -> Result<(), CafleetError> {
+    use crate::coding_agent::SpawnProbe;
+    let codex = crate::runtime::system::SystemProbe
+        .resolve_binary("codex")
+        .ok_or_else(|| CafleetError::App("binary codex not found on PATH".into()))?;
+    let session = pin_codex_session()?.ok_or_else(|| {
+        CafleetError::App("--codex-thread requires a codex ancestor process".into())
+    })?;
+    let descriptor = io::stdout();
+    let mut output = CodexForwarding {
+        stdout: DescriptorOutput(descriptor.as_fd()),
+        queue: CodexQueue { codex, thread },
+        ready: false,
+    };
+    let result = with_nonblocking(descriptor.as_fd(), || {
+        listen(
+            &SystemClock,
+            &mut SessionBoundListener {
+                broker: BrokerListener {
+                    conn,
+                    member_id,
+                    fleet_id: None,
+                },
+                session,
+            },
+            &mut output,
+            member_id,
+            timeout,
+        )
+    });
+    match result {
+        Err(error) if output.ready => Err(output.queue.closed_notice(error)),
+        result => result,
+    }
+}
+
+struct SessionBoundListener<'a> {
+    broker: BrokerListener<'a>,
+    session: crate::runtime::ProcessIdentity,
+}
+
+impl ListenIo for SessionBoundListener<'_> {
+    fn snapshot(&mut self, deadline: Deadline) -> Result<InboxSnapshot, CafleetError> {
+        self.broker.snapshot(deadline)
+    }
+
+    fn session_exited(&mut self) -> Result<bool, CafleetError> {
+        let pid = nix::unistd::Pid::from_raw(
+            i32::try_from(self.session.pid).expect("a pinned pid fits the platform pid"),
+        );
+        if nix::sys::signal::kill(pid, None) == Err(Errno::ESRCH) {
+            return Ok(true);
+        }
+        Ok(!self.session.matches()?)
+    }
+}
+
+/// Pins the nearest ancestor whose argv[0] basename is exactly `codex`, skipping shells,
+/// sandbox wrappers and the `codex-linux-sandbox` helper, which shares the Codex executable.
+fn pin_codex_session() -> Result<Option<crate::runtime::ProcessIdentity>, CafleetError> {
+    let mut pid = i64::from(nix::unistd::getppid().as_raw());
+    while pid > 1 {
+        let Some((parent, argv0)) = process_parent_and_argv0(pid)? else {
+            return Ok(None);
+        };
+        if argv0.rsplit('/').next() == Some("codex") {
+            return crate::runtime::ProcessIdentity::read(pid);
+        }
+        pid = parent;
+    }
+    Ok(None)
+}
+
+#[cfg(target_os = "linux")]
+fn process_parent_and_argv0(pid: i64) -> Result<Option<(i64, String)>, CafleetError> {
+    let read = |file: &str| match std::fs::read(format!("/proc/{pid}/{file}")) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CafleetError::App(format!(
+            "cannot read /proc/{pid}/{file}: {error}"
+        ))),
+    };
+    let (Some(stat), Some(cmdline)) = (read("stat")?, read("cmdline")?) else {
+        return Ok(None);
+    };
+    let stat = String::from_utf8_lossy(&stat);
+    let parent = stat
+        .rsplit_once(')')
+        .and_then(|(_, tail)| tail.split_whitespace().nth(1))
+        .and_then(|field| field.parse().ok())
+        .ok_or_else(|| CafleetError::App(format!("malformed /proc/{pid}/stat")))?;
+    let argv0 = cmdline.split(|byte| *byte == 0).next().unwrap_or_default();
+    Ok(Some((parent, String::from_utf8_lossy(argv0).into_owned())))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_parent_and_argv0(pid: i64) -> Result<Option<(i64, String)>, CafleetError> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "ppid=", "-o", "args=", "-p", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|error| CafleetError::App(format!("cannot run ps: {error}")))?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let Some(line) = text.lines().find(|line| !line.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let mut fields = line.split_whitespace();
+    let parent = fields
+        .next()
+        .and_then(|field| field.parse().ok())
+        .ok_or_else(|| CafleetError::App(format!("ps printed no parent for {pid}: {line}")))?;
+    Ok(Some((parent, fields.next().unwrap_or_default().to_owned())))
+}
+
+struct CodexForwarding<'a> {
+    stdout: DescriptorOutput<'a>,
+    queue: CodexQueue<'a>,
+    ready: bool,
+}
+
+impl ListenOutput for CodexForwarding<'_> {
+    fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<(), CafleetError> {
+        match record["event"].as_str() {
+            Some("ready") => {
+                self.stdout.emit(record, deadline)?;
+                self.ready = true;
+                Ok(())
+            }
+            Some("message") => self.queue.forward_record(record),
+            Some("closed") => {
+                if record["reason"] != "session_exited" {
+                    self.queue.forward_record(record)?;
+                }
+                // The final record may target the exited session's PTY; the exit status
+                // reflects reception, never this write.
+                self.stdout.emit(record, deadline).ok();
+                Ok(())
+            }
+            other => unreachable!("the listener emits no {other:?} record"),
+        }
+    }
+}
+
+enum QueueFailure {
+    Exit(String),
+    Deadline,
+}
+
+struct CodexQueue<'a> {
+    codex: std::path::PathBuf,
+    thread: &'a str,
+}
+
+impl CodexQueue<'_> {
+    fn forward_record(&self, record: &Value) -> Result<(), CafleetError> {
+        let mut text = format!("{LISTEN_RECORD_PREFIX}{record}");
+        if text.len() > FORWARDED_TEXT_LIMIT {
+            let message = &record["message"];
+            text = format!(
+                "{LISTEN_RECORD_PREFIX}{} — read it with: cafleet message show {} --json",
+                serde_json::json!({
+                    "event": "message_ref",
+                    "message_id": message["message_id"],
+                    "from_member_id": message["from_member_id"],
+                    "bytes": text.len(),
+                }),
+                message["message_id"],
+            );
+        }
+        self.queue(&text).map_err(|failure| {
+            CafleetError::App(match failure {
+                QueueFailure::Exit(cause) => format!(
+                    "failed to forward record to codex thread {}: {cause}",
+                    self.thread
+                ),
+                QueueFailure::Deadline => self.deadline_diagnostic(),
+            })
+        })
+    }
+
+    /// Makes one bounded attempt to tell the session that reception ended, keeping `error`.
+    fn closed_notice(&self, error: CafleetError) -> CafleetError {
+        let notice = format!("[cafleet listen closed] exit 1: {}", error.message());
+        match self.queue(&notice) {
+            Ok(()) => error,
+            Err(failure) => {
+                let cause = match failure {
+                    QueueFailure::Exit(cause) => cause,
+                    QueueFailure::Deadline => self.deadline_diagnostic(),
+                };
+                CafleetError::App(format!(
+                    "{}\nfailed to forward the closed notice to codex thread {}: {cause}",
+                    error.message(),
+                    self.thread
+                ))
+            }
+        }
+    }
+
+    fn deadline_diagnostic(&self) -> String {
+        format!(
+            "codex queue for thread {} did not finish within {} s",
+            self.thread,
+            CODEX_QUEUE_BUDGET.as_secs()
+        )
+    }
+
+    fn queue(&self, text: &str) -> Result<(), QueueFailure> {
+        use std::io::Read;
+        let mut child = std::process::Command::new(&self.codex)
+            .args(["queue", "--thread", self.thread, "--message", text])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|error| QueueFailure::Exit(format!("could not start codex: {error}")))?;
+        let mut stderr = child.stderr.take().expect("piped codex stderr");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            sender
+                .send(stderr.read_to_string(&mut text).map(|_| text))
+                .ok();
+        });
+        let deadline = Instant::now() + CODEX_QUEUE_BUDGET;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if Instant::now() >= deadline => {
+                    child.kill().ok();
+                    child.wait().ok();
+                    return Err(QueueFailure::Deadline);
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                Err(error) => {
+                    return Err(QueueFailure::Exit(format!(
+                        "could not wait for codex: {error}"
+                    )));
+                }
+            }
+        };
+        if status.success() {
+            return Ok(());
+        }
+        let stderr = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .ok()
+            .and_then(Result::ok)
+            .map(|text| text.trim().to_owned())
+            .filter(|text| !text.is_empty());
+        Err(QueueFailure::Exit(
+            stderr.unwrap_or_else(|| format!("codex exited with {status}")),
+        ))
+    }
 }
 
 #[cfg(test)]
