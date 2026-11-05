@@ -202,7 +202,7 @@ Reception uses process output, heartbeat notifications and broker reads, makes n
 
 The implementing execute-team member performs every run. Each run starts its own fleet Director in a separate multiplexer pane against an isolated database, so the executing fleet's installed runtime and assets stay intact.
 
-**Environment.** Follow `docs/docs/contributing.md` § Run a CAFleet stream probe step 1 for an isolated database in a fresh short `mktemp -d` directory, and run `cafleet setup --coding-agent <director backend>` against it with the installed binary, which reinstalls that binary's own embedded assets unchanged. Start the Director in a directory Claude Code already trusts, so the probe member opens without a folder-trust dialog (0000215 Run A attempt 1 was invalidated by one). Write session exports, pane captures and generated bodies to the hidden `probe/` directory beside this design doc.
+**Environment.** Follow `docs/docs/contributing.md` § Run a CAFleet stream probe step 1 for an isolated database in a fresh short `mktemp -d` directory, and run `cafleet setup --coding-agent <director backend>` against it with the installed binary, which reinstalls that binary's own embedded assets unchanged. Start the Director in a directory Claude Code already trusts, so the probe member opens without a folder-trust dialog (0000215 Run A attempt 1 was invalidated by one). Write session exports, pane captures and generated bodies to the hidden `probe/` directory beside this design doc. Before each Hermes run, back up `<hermes home>/config.yaml` and set `skills.creation_nudge_interval: 0` and `memory.nudge_interval: 0`, so Hermes's self-improvement review does not rewrite the installed `cafleet` skill mid-run (Run H-A attempt 1 recorded one such rewrite); restore the backup after the run.
 
 **Director pane (herdr).** Runs use herdr, the issue's environment. `<db url>` is `sqlite:///<probe dir>/director.db`.
 
@@ -211,7 +211,7 @@ The implementing execute-team member performs every run. Each run starts its own
 | Open the Director pane | `herdr tab create --cwd <trusted dir> --label <run name> --env CAFLEET_DATABASE_URL=<db url> --no-focus`; take the new tab's pane ID from its JSON result, or from `herdr pane list` |
 | Launch a Hermes Director | `herdr pane run <pane> "hermes chat --cli"` |
 | Launch a Claude Director | `herdr pane run <pane> "claude"`, in the operator's configured permission mode with Monitor authorized |
-| Type the task prompt or a scheduled prompt | `herdr pane run <pane> "<one-line prompt>"`, which sends the text and Enter |
+| Type the task prompt or a scheduled prompt | `herdr pane run <pane> "<one-line prompt>"`, which sends the text and Enter; when the Hermes composer keeps the text without starting a turn, submit it with one `herdr pane send-keys <pane> enter` |
 | Capture the Director pane | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines 2000` |
 
 The Director pane is not a CAFleet member, so the implementer types into it with herdr directly rather than `cafleet member prompt`. On tmux, the equivalents are `tmux new-window -d -c <trusted dir> -e CAFLEET_DATABASE_URL=<db url> -P -F '#{pane_id}'`, `tmux send-keys -t <pane> -l '<text>'` followed by `tmux send-keys -t <pane> Enter`, and `tmux capture-pane -p -e -t <pane> -S -2000`. `cafleet setup --coding-agent hermes` puts `CAFLEET_DATABASE_URL` in `terminal.client_env_passthrough`, so the Hermes Director's terminal tools see the pane's database. Every operator `cafleet` call (sends, `member show`, `message show`, `fleet list`) carries the leading assignment `CAFLEET_DATABASE_URL=<db url>`.
@@ -282,6 +282,8 @@ A run with three invalid attempts is `not established` and blocks like `Fail`.
 ### Live evidence
 
 Filled by the implementer. One row per attempt.
+
+Run H-A attempt 1 failed the phase 2 overflow condition under the Step 10 outcome gate. The user then approved revising the overflow rule in § Replacement texts and the phase 2 Pass condition, restoring the installed Hermes skill and running attempt 2 against the revised recipe; attempt 2 supplies the selected Run H-A outcome.
 
 Versions: `Hermes Agent vunknown (2026.9.24)`; `2.1.309 (Claude Code)`; `cafleet 0.31.3`.
 
