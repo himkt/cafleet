@@ -2406,12 +2406,12 @@ Besides the shared operation matcher with its one-space `row_margin` (which keep
 
 When Claude Code 2.1.312 issues several tool calls in one turn, it asks for them one form at a time and right-aligns a request counter `N of M` at the end of each form's heading row (` Read file` … `1 of 2`). The `claude-read-file-permission`, `claude-edit-file-permission` and `claude-create-file-permission` rules and every rule anchored on the ` Bash command` heading (`claude-bash-permission`, `claude-bash-permission-auto-tip`, `claude-bash-permission-no-tip` and `claude-auto-ask-permission`) accept an optional `(?:\s+\d+ of \d+)?` before the end of their region start pattern and their heading matcher; the Edit and Create rules also accept it on the heading line of their operation matcher. The counter is not evidence, not part of the operation and not part of the request identity, so a batched form classifies with the same rule and evidence as its single form. The answer plans stay the single-stage digits:
 
-| Answer on a `1 of 2` Read file form | Native outcome in the 2.1.312 captures |
+| Answer on a batched Read file form | Native outcome in the 2.1.312 captures |
 |---|---|
-| Allow `31` | The first read ran, and the form redrew as `2 of 2` with the second call's `Read(<path>)` operation, a new request |
-| Deny `33` | Both reads were refused: the transcript shows `Read 2 files` and `Interrupted · What should Claude do instead?`, and no form remains |
+| Allow `31` on `1 of 2` | The answer settles only the current form: it redraws as `2 of 2` with the second call's `Read(<path>)` operation, a new request |
+| Deny `33` on `1 of 2`, or on `2 of 2` after that allow | The turn is interrupted: the transcript shows `Read 2 files` and `Interrupted · What should Claude do instead?`, no form remains and no file content is reported |
 
-A deny answer on a batched form therefore refuses every call of the batch, and no answer changed a persistent setting.
+A deny answer on any batched form therefore interrupts the turn and refuses every call that has not completed. A read leaves no artifact, so whether an allowed call runs before the later forms are answered is not established. No answer changed a persistent setting.
 
 The Claude process that performs first-launch onboarding (theme, security notes and folder trust on the native surface) renders on the primary screen for its whole lifetime, with the composer, forms and dialogs in the same rows as on the alternate screen; in that process `Make auto mode your default permission mode?` appears after the first turn. Every Claude rule therefore matches on either screen. Earlier transcript rows stay visible above the live region on the primary screen, and the cursor rules, the frame guards and the transcript prompt prefix `❯` followed by U+0020 (the live composer uses U+00A0) keep them from matching; in the captures neither a closed form nor a resize left a matching remnant.
 
