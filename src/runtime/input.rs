@@ -12002,6 +12002,35 @@ mod tests {
             }
 
             #[test]
+            fn a_non_fresh_question_with_tested_plans_keeps_the_generic_reason() {
+                with_question(b"3", |h| {
+                    let ids = question(h, &["accept"]);
+                    let first = inspect(h, ids)
+                        .request_token
+                        .expect("a fresh tested question token");
+                    let stale = inspect_request(h, inspection_target(h, ids), h.until).unwrap();
+                    assert_eq!(
+                        stale.classification,
+                        Some(storage::InteractionClass::Question)
+                    );
+                    assert_eq!(stale.visibility, Visibility::Visible);
+                    assert_eq!(
+                        stale.capability_reason.as_deref(),
+                        Some("current executable permission request unavailable"),
+                        "a question with tested plans is reinspected, not unanswerable"
+                    );
+                    assert_eq!(stale.answer_capability, storage::Coverage::Unknown);
+                    assert!(stale.request_token.is_none());
+                    assert!(stale.answer_rule_id.is_none());
+                    assert!(stale.supported_choices.is_empty());
+                    let reinspected = inspect(h, ids);
+                    assert_eq!(reinspected.request_token.as_deref(), Some(first.as_str()));
+                    assert!(reinspected.capability_reason.is_none());
+                    assert!(h.pty.offers.is_empty());
+                });
+            }
+
+            #[test]
             fn an_ungated_choice_writes_its_stage_and_records_the_choice_audit() {
                 with_question(b"3", |h| {
                     let ids = question(h, &["accept"]);
