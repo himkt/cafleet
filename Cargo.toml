@@ -1,6 +1,6 @@
 [package]
 name = "cafleet"
-version = "0.31.3"
+version = "0.31.4"
 edition = "2024"
 
 [lints.rust]
