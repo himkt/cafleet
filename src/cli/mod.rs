@@ -766,9 +766,18 @@ mod tests {
             parse(&["message", "listen", "17"]),
             Command::Message(message::MessageCommand::Listen {
                 member_id: 17,
-                timeout: None
+                timeout: None,
+                codex_thread: None,
             })
         ));
+        match parse(&["message", "listen", "17", "--codex-thread", "THREAD"]) {
+            Command::Message(message::MessageCommand::Listen {
+                member_id: 17,
+                timeout: None,
+                codex_thread,
+            }) => assert_eq!(codex_thread.as_deref(), Some("THREAD")),
+            _ => panic!("expected a forwarding listener"),
+        }
         for command in ["wait", "listen"] {
             for seconds in ["1", "1800"] {
                 let parsed = parse(&["message", command, "17", "--timeout", seconds]);
