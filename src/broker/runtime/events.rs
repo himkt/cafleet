@@ -841,6 +841,7 @@ pub(crate) fn persist_transition_in_transaction(
 }
 
 const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
+const QUESTION_INSTRUCTION: &str = "Verify this event and the current question. Inspect it for the choices CAFleet can answer and their scope. In the Director session's effective auto mode, choose one of those choices; otherwise obtain the user's choice. Submit it through the request-bound CAFleet response command with that choice, or give that complete command to the user. When the inspection lists no choice, ask the user to answer on the member's native surface. Inspect the native result and continuation afterward.";
 const AUTOMATIC_REFUSAL_INSTRUCTION: &str = "Verify this event. The member's automatic reviewer refused the operation and no native request is waiting. Dispatch evidence comes only from the member's routed request with its exact command, cwd, environment and refusal; this event and screen captures corroborate it. With no routed request, dispatch nothing and ask the member whether the refused operation is still needed when it next reports or goes idle. For a routed request, decide in the Director session's effective auto mode whether to authorize a separate execution through the routed-command path or to refuse; otherwise obtain the user's permission first. Inspect the actual result and the member's continuation afterward.";
 const AUTOMATIC_REVIEW_UNAVAILABLE_INSTRUCTION: &str = "Verify this event. Automatic review is unavailable for this member, so native permission forms may appear and each needs a decision, and refusals may stop its work. Supervise the member as interactive, and tell the user when the selected automatic mode cannot apply.";
 const MULTI_ROW_INSTRUCTION: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
@@ -884,15 +885,20 @@ fn director_action(
         return Ok(json!({"kind":action,"instruction":instruction,
             "inspect_argv":["cafleet","event","show",event_id.to_string(),"--json"]}));
     }
-    if kind != RuntimeEventKind::InteractionOpened
-        || classification != Some(InteractionClass::PermissionRequest)
-    {
-        return Ok(Value::Null);
-    }
+    let (action, instruction) = match (kind, classification) {
+        (RuntimeEventKind::InteractionOpened, Some(InteractionClass::PermissionRequest)) => (
+            "review_permission_request",
+            with_multi_row_sentence(REVIEW_INSTRUCTION, evidence),
+        ),
+        (RuntimeEventKind::InteractionOpened, Some(InteractionClass::Question)) => {
+            ("review_question", QUESTION_INSTRUCTION.to_owned())
+        }
+        _ => return Ok(Value::Null),
+    };
     let interaction_id = interaction_id.ok_or_else(|| {
         invalid(
             "interaction_id",
-            "permission opening requires an interaction",
+            "an answerable opening requires an interaction",
         )
     })?;
     require(
@@ -900,10 +906,8 @@ fn director_action(
         "director_action",
         "allocated positive action identities required",
     )?;
-    Ok(
-        json!({"kind":"review_permission_request","instruction":with_multi_row_sentence(REVIEW_INSTRUCTION, evidence),
-        "inspect_argv":["cafleet","permission","inspect",interaction_id.to_string(),"--event-id",event_id.to_string(),"--from-member-id",run.director_member_id.to_string(),"--json"]}),
-    )
+    Ok(json!({"kind":action,"instruction":instruction,
+        "inspect_argv":["cafleet","permission","inspect",interaction_id.to_string(),"--event-id",event_id.to_string(),"--from-member-id",run.director_member_id.to_string(),"--json"]}))
 }
 
 pub(crate) fn update_interaction_evidence(
@@ -2224,32 +2228,109 @@ mod tests {
         fn runtime_payload_v2_other_interaction_classes_have_explicit_null_action() {
             let mut events = Vec::new();
             for class in [
-                InteractionClass::Question,
                 InteractionClass::Trust,
                 InteractionClass::Update,
                 InteractionClass::UnknownInteraction,
             ] {
                 let mut fixture = Fixture::new();
                 let owner = fixture.activate();
-                fixture.reserve(&owner);
-                let transition = ObservedTransition {
-                    classification: Some(class),
-                    ..opening(owner.run_id, 1, 1, metadata())
-                };
-                events.push(
-                    storage::persist_event(
-                        &mut fixture.conn,
-                        &owner,
-                        &transition,
-                        PersistenceMode::Live,
-                    )
-                    .unwrap(),
-                );
+                events.push(fixture.open_as(&owner, class));
             }
             for event in events {
                 assert_v2(&event);
                 assert_eq!(event.payload_json["director_action"], Value::Null);
             }
+        }
+
+        const QUESTION_INSTRUCTION: &str = "Verify this event and the current question. Inspect it for the choices CAFleet can answer and their scope. In the Director session's effective auto mode, choose one of those choices; otherwise obtain the user's choice. Submit it through the request-bound CAFleet response command with that choice, or give that complete command to the user. When the inspection lists no choice, ask the user to answer on the member's native surface. Inspect the native result and continuation afterward.";
+
+        fn question_action(fixture: &Fixture, event: &RuntimeEventRecord) -> Value {
+            json!({
+                "kind":"review_question",
+                "instruction":QUESTION_INSTRUCTION,
+                "inspect_argv":["cafleet","permission","inspect",event.interaction_id.unwrap().to_string(),"--event-id",event.event_id.to_string(),"--from-member-id",fixture.director.to_string(),"--json"],
+            })
+        }
+
+        #[test]
+        fn runtime_payload_v2_question_opening_has_the_constant_bound_review_question_action() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let event = fixture.open_as(&owner, InteractionClass::Question);
+            assert_v2(&event);
+            assert_eq!(
+                event.payload_json["director_action"],
+                question_action(&fixture, &event)
+            );
+            let message =
+                crate::broker::get_message(&fixture.conn, event.message_id.unwrap()).unwrap();
+            assert_eq!(message.text, event.payload_json.to_string());
+            assert_eq!(
+                storage::get_event(&fixture.conn, event.event_id)
+                    .unwrap()
+                    .event
+                    .payload_json["director_action"],
+                question_action(&fixture, &event)
+            );
+        }
+
+        #[test]
+        fn runtime_payload_v2_reader_rejects_a_forged_question_action() {
+            for changed in [
+                "kind",
+                "permission-kind",
+                "instruction",
+                "permission-instruction",
+                "interaction",
+                "event",
+                "director",
+                "extra",
+                "null",
+            ] {
+                let mut fixture = Fixture::new();
+                let owner = fixture.activate();
+                let event = fixture.open_as(&owner, InteractionClass::Question);
+                let mut payload = event.payload_json.clone();
+                match changed {
+                    "kind" => payload["director_action"]["kind"] = json!("answer_question"),
+                    "permission-kind" => {
+                        payload["director_action"]["kind"] = json!("review_permission_request")
+                    }
+                    "instruction" => {
+                        payload["director_action"]["instruction"] = json!("choose yes")
+                    }
+                    "permission-instruction" => {
+                        payload["director_action"]["instruction"] = json!(REVIEW_INSTRUCTION)
+                    }
+                    "interaction" => {
+                        payload["director_action"]["inspect_argv"][3] = json!("999999")
+                    }
+                    "event" => payload["director_action"]["inspect_argv"][5] = json!("999999"),
+                    "director" => {
+                        payload["director_action"]["inspect_argv"][7] =
+                            json!(fixture.member.to_string())
+                    }
+                    "extra" => payload["director_action"]["choice"] = json!("accept"),
+                    "null" => payload["director_action"] = Value::Null,
+                    _ => unreachable!(),
+                }
+                replace_public_payload(&mut fixture.conn, &event, payload);
+                assert!(
+                    storage::get_event(&fixture.conn, event.event_id).is_err(),
+                    "{changed}"
+                );
+            }
+        }
+
+        #[test]
+        fn runtime_payload_v2_reader_rejects_a_question_action_on_a_permission_opening() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let event = fixture.open(&owner);
+            let mut payload = event.payload_json.clone();
+            payload["director_action"] = question_action(&fixture, &event);
+            replace_public_payload(&mut fixture.conn, &event, payload);
+            assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
         }
 
         #[test]

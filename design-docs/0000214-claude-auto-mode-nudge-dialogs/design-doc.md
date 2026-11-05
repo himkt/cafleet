@@ -1,8 +1,8 @@
 # Claude Auto-Mode Nudge Dialogs and Claude Detection Gaps
 
-**Status**: Approved
-**Progress**: 0/33 tasks complete
-**Last Updated**: 2026-11-04
+**Status**: Complete
+**Progress**: 36/36 tasks complete
+**Last Updated**: 2026-11-05
 
 ## Overview
 
@@ -10,15 +10,15 @@ The Director answers Claude Code's two auto-mode nudge dialogs — "Make auto mo
 
 ## Success Criteria
 
-- [ ] On Claude Code 2.1.312 under the runner, "Make auto mode your default permission mode?" yields a `question` observation from rule `claude-auto-default-nudge`, an `interaction_opened` event with `director_action.kind=review_question`, and a non-null `runtime.current_interaction_id`; a preview, a `member prompt` and a `member exec` sent while it is open each queue with zero bytes and drain once after it closes.
-- [ ] `permission inspect` on that interaction returns `answer_capability=tested`, a token and `supported_choices=[{"choice_id":"decline",…,"scope":"persistent"}]`; `permission respond --choice decline` sends exactly `0e` while `Yes` is focused, then `0d` while `No, keep …` is focused, closes the dialog and changes only `hasSeenAutoDefaultNudge` in the native configuration.
-- [ ] "Teach auto mode about your environment?" yields a `question` from `claude-auto-startup` with `supported_choices` `not-now` and `dont-show-again`; `--choice not-now` sends exactly byte `32` and `--choice dont-show-again` exactly byte `33`, each changing only its documented `autoModeEnvSetup` key. The `1. Yes` wizard is a separate `question` from `claude-auto-env-setup-wizard` with no answer capability.
-- [ ] No answer plan, `permission respond` or queued input selects `Yes, set auto mode as my default permission mode` or `1. Yes`, and no answer stage contains an Escape byte.
-- [ ] The notice `Claude has a question for you — it shows once you send or clear what you're typing.` yields a `question` from `claude-question-pending-notice`, which stops a profile submission before its submit key; the interaction closes when the user clears the draft (Dialog A then opens its own episode) or sends it.
-- [ ] In the Claude process that performs first-launch onboarding (primary screen), the idle composer and the auto-tip Bash form are detected by their existing rules, and previews go out through the profile.
-- [ ] In `default` mode, a read, edit or file creation outside the working directories yields a `permission_request` from `claude-read-file-permission`, `claude-edit-file-permission` or `claude-create-file-permission`; with `permissions.disableAutoMode` `disable`, a Bash command yields one from `claude-bash-permission-no-tip`. Each is answered by `--decision allow` (byte `31`) and `--decision deny` (byte `33`) when its digit checks passed, and is detection-only otherwise.
-- [ ] With the diff sidebar open, the auto-tip Bash form drawn left of the sidebar separator yields the same `permission_request`, evidence and answers as without the sidebar.
-- [ ] `mise //:test`, `mise //:lint`, `mise //:typecheck` and `mise //docs:build` pass, and live acceptance passes on both tmux and herdr with the release build and a private Claude configuration per member.
+- [x] On Claude Code 2.1.312 under the runner, "Make auto mode your default permission mode?" yields a `question` observation from rule `claude-auto-default-nudge`, an `interaction_opened` event with `director_action.kind=review_question`, and a non-null `runtime.current_interaction_id`; a preview, a `member prompt` and a `member exec` sent while it is open each queue with zero bytes and drain once after it closes.
+- [x] `permission inspect` on that interaction returns `answer_capability=tested`, a token and `supported_choices=[{"choice_id":"decline",…,"scope":"persistent"}]`; `permission respond --choice decline` sends exactly `0e` while `Yes` is focused, then `0d` while `No, keep …` is focused, closes the dialog and changes only `hasSeenAutoDefaultNudge` in the native configuration.
+- [x] "Teach auto mode about your environment?" yields a `question` from `claude-auto-startup` with `supported_choices` `not-now` and `dont-show-again`; `--choice not-now` sends exactly byte `32` and `--choice dont-show-again` exactly byte `33`, each changing only its documented `autoModeEnvSetup` key. The `1. Yes` wizard is a separate `question` from `claude-auto-env-setup-wizard` with no answer capability.
+- [x] No answer plan, `permission respond` or queued input selects `Yes, set auto mode as my default permission mode` or `1. Yes`, and no answer stage contains an Escape byte.
+- [x] The notice `Claude has a question for you — it shows once you send or clear what you're typing.` yields a `question` from `claude-question-pending-notice`, which stops a profile submission before its submit key; the interaction closes when the user clears the draft (Dialog A then opens its own episode) or sends it.
+- [x] In the Claude process that performs first-launch onboarding (primary screen), the idle composer and the four-choice Bash form are detected by their existing rules, and previews go out through the profile.
+- [x] In `default` mode, a read, edit or file creation outside the working directories yields a `permission_request` from `claude-read-file-permission`, `claude-edit-file-permission` or `claude-create-file-permission`; with `permissions.disableAutoMode` `disable`, a Bash command yields one from `claude-bash-permission-no-tip`. Each is answered by `--decision allow` (byte `31`) and `--decision deny` (byte `33`) when its digit checks passed, and is detection-only otherwise.
+- [x] With the diff sidebar open, the four-choice Bash form drawn left of the sidebar separator, including its rows wrapped at the narrowed width, yields the same `permission_request`, evidence and answers as without the sidebar.
+- [x] `mise //:test`, `mise //:lint`, `mise //:typecheck` and `mise //docs:build` pass, and live acceptance passes on both tmux and herdr with the release build and a private Claude configuration per member.
 
 ---
 
@@ -31,9 +31,9 @@ The Director answers Claude Code's two auto-mode nudge dialogs — "Make auto mo
 | The process that ran first-launch onboarding is undetected for its lifetime; every input waits for the `idle_timeout` fallback | That process stays on the primary screen (`alternate_on=0`) with rows identical to the alternate-screen rendering; every Claude rule declares `region.screen` `alternate` |
 | In `default` mode, ` Read file`, ` Edit file` and ` Create file` forms for paths outside the working directories produce no event | No rule matches their headings, questions and choices |
 | A three-choice Bash form (description row, no Tip row, `3. No`) is reported as `interaction_obscured` / `unmatched-screen` | Claude omits the Tip and `switch to auto mode` choice whenever auto mode cannot be offered (`disableAutoMode`, unavailable plan/model, fast mode, an ask rule or hook, `plan` mode); no rule matches that form |
-| With the diff sidebar open, auto-tip Bash forms produce no event | The sidebar draws a dim `│` at column 92 (166-column pane) and panel text on every form row, so the `\s*$`-anchored matchers fail. It auto-opens at ≥ 144 columns (≥ 110 with `.claude.json` `diffSidebarOpen` `true`) in a git repository after the working-tree change set changes; `diffSidebarOpen` `false` disables auto-open |
+| With the diff sidebar open, Bash forms produce no event | The sidebar draws a dim `│` at column 92 (166-column pane) and panel text on every form row, so the `\s*$`-anchored matchers fail. It auto-opens at ≥ 144 columns (≥ 110 with `.claude.json` `diffSidebarOpen` `true`) in a git repository after the working-tree change set changes; `diffSidebarOpen` `false` disables auto-open |
 
-Dialog A is pending when onboarding is complete, `hasSeenAutoDefaultNudge` is unset, the server-side gate `tengu_maple_pier` is on, the user settings pin a non-`auto` `permissions.defaultMode` and no project, local, flag or policy settings set `defaultMode`. A `--permission-mode` launch flag does not suppress it. At startup it renders below the banner; after a turn it renders at the bottom; in the onboarding process it renders on the primary screen right after the folder-trust step. In each placement it replaces the composer, its borders and the footer badge, and the hidden terminal cursor sits at column 3 of the `No` row:
+Dialog A is pending when onboarding is complete, `hasSeenAutoDefaultNudge` is unset, the server-side gate `tengu_maple_pier` is on, the user settings pin a non-`auto` `permissions.defaultMode` and no project, local, flag or policy settings set `defaultMode`. A `--permission-mode` launch flag does not suppress it. At startup it renders below the banner; after a turn it renders at the bottom; in the onboarding process it renders on the primary screen after the first turn. In each placement it replaces the composer, its borders and the footer badge, and the hidden terminal cursor sits at column 3 of the focused choice row (on `Yes` at mount, on `No` after Ctrl+N):
 
 ```
 ──────────────────────────────────────── (full-width rule)
@@ -48,7 +48,7 @@ Dialog A is pending when onboarding is complete, `hasSeenAutoDefaultNudge` is un
 
 The second label names the user-settings default mode (`No, keep manual mode` for `default`, `No, keep accept edits` for `acceptEdits`). Focus starts on `Yes` and is marked by the `❯` glyph and a foreground colour only. Down/Up and Ctrl+N/Ctrl+P (also `j`/`k`) move and wrap the focus, Enter confirms the focused choice, typed text (digits, Tab, Space, Ctrl+J and other printable keys) is discarded, and Escape resolves as decline. `Yes` writes `permissions.defaultMode: "auto"` into the user settings and switches the session; `No` and Escape set `hasSeenAutoDefaultNudge: true`. When a draft reaches the composer before the dialog mounts, the dialog stays hidden behind a notice row (§ Pending-question notice).
 
-Dialog B appears in `auto` when `numStartups >= 5`, `autoModeEnvSetup.denials >= 5`, no auto-mode environment is configured, `autoModeEnvSetup.dismissed` is not set and `dismissedAt` is older than 7 days. `2. Not now` sets `autoModeEnvSetup.dismissedAt` (7-day snooze), `3. Don't show again` sets `autoModeEnvSetup.dismissed: true`, and `1. Yes` opens a multi-step wizard that scans repositories and shell history and writes settings. A single digit selects its choice without Enter.
+Dialog B appears in `auto` when `numStartups >= 5`, `autoModeEnvSetup.denials >= 5`, no auto-mode environment is configured, `autoModeEnvSetup.dismissed` is not set, `dismissedAt` is older than 7 days and the auto-mode entry warning has been seen (`.claude.json` `hasSeenAutoModeEntryWarning: true`, or a settings source sets `skipAutoPermissionPrompt`). It ignores every choice key within 500 ms of mounting, and Escape resolves as `Not now`. `2. Not now` sets `autoModeEnvSetup.dismissedAt` (7-day snooze), `3. Don't show again` sets `autoModeEnvSetup.dismissed: true`, and `1. Yes` opens a multi-step wizard that scans repositories and shell history and writes settings. A single digit selects its choice without Enter.
 
 ---
 
@@ -176,7 +176,7 @@ An interaction rule may declare `frame` (today annotation-only). For an interact
 | `region.start_pattern` | `^ Make auto mode your default permission mode\?\s*$` |
 | `region.end_pattern` | `^   (?:❯ |  )No, keep \S.*$` |
 | `region.max_rows` | `10`, raised to the 36x120 heading-to-last-choice span when larger |
-| `region.cursor` | `inside`: the hidden cursor sits at column 3 of the `No` row both at startup and after a turn (measured with an argv-prompt launch, as CAFleet spawns members) |
+| `region.cursor` | `inside`: the hidden cursor sits at column 3 of the focused choice row both at startup and after a turn (measured with an argv-prompt launch, as CAFleet spawns members) |
 | `region.panel_separator` | `│` |
 | `frame` | `require_patterns` `[]`, `reject_patterns` `["^❯\\u{a0}"]` — the dialog replaces the live composer, so a quoted dialog above a live composer never matches |
 
@@ -203,7 +203,7 @@ Answer rule id `claude-auto-default-decline`, `choice_id` `decline`, `focus_matc
 | Field | Value |
 |---|---|
 | `priority` / `observation` | `100` / `question` |
-| `region` | `either`; start and end the notice row `^ *Claude has a question for you — it shows once you send or clear what you're typing\.\s*$`; `max_rows` `1`; cursor `any`; `panel_separator` `│` |
+| `region` | `either`; start and end the notice row `^Claude has a question for you — it shows once you send or clear what you're typing\.\s*$` (column 0, pinned in Step 1); `max_rows` `1`; cursor `any`; `panel_separator` `│` |
 | `frame` | `require_patterns` `["^❯\\u{a0}"]`, `reject_patterns` `["^  Showing detailed transcript · ctrl\\+o to toggle"]` |
 | matchers, choices, operation | the notice line; no choices; operation null; no answer plan |
 
@@ -214,9 +214,9 @@ The notice appears only when a draft reaches the composer before Dialog A mounts
 | User action on the native surface | Native outcome (2.1.312) |
 |---|---|
 | Clear the draft | The notice row disappears and Dialog A is drawn in its place at once; it opens its own `question` episode and is answered as § Dialog A specifies |
-| Send the draft | The first Enter does not submit; the second Enter submits the draft and the notice row disappears. Dialog A does not reappear in that process, and `hasSeenAutoDefaultNudge` stays unset, so it returns at the next launch |
+| Send the draft | For a draft typed during a turn (the CAFleet member case), the first Enter submits the draft, the notice row disappears within 0.2 s and the draft runs as a turn; a draft typed at startup before any turn needed a second Enter. Dialog A does not reappear in that process, and `hasSeenAutoDefaultNudge` stays unset, so it returns at the next launch |
 
-The Director receives `review_question` with no listed choice and asks the user to clear the draft on the native surface, so Dialog A appears and can be dismissed through `--choice decline`, or to send it with two Enters when the draft must run first; in the second case Dialog A returns at the member's next launch.
+The Director receives `review_question` with no listed choice and asks the user to clear the draft on the native surface, so Dialog A appears and can be dismissed through `--choice decline`, or to send it with Enter (again while the notice stays) when the draft must run first; in the second case Dialog A returns at the member's next launch.
 
 ### Dialog B rules
 
@@ -241,7 +241,7 @@ The two-space and three-space margins come from the 2.1.302 fixtures (`claude-2.
 
 ### Primary-screen rendering
 
-The Claude process that performs first-launch onboarding stays on the primary screen for its lifetime, with the composer and forms in rows identical to the alternate-screen rendering (idle composer `❯` + U+00A0 with the cursor right after it; auto-tip form with the cursor on the focused choice row). That process also shows Dialog A right after the folder-trust step when the user settings pin a non-`auto` default. Every Claude rule changes `region.screen` from `alternate` to `either`. On the primary screen, earlier transcript rows stay visible above the live region; the cursor rules, the annotation frame guards and the transcript prompt prefix `❯` + U+0020 (not U+00A0) keep them from matching. Step 1 captures the primary idle composer, the auto-tip form, the screen after the form closes and the screen after a resize, and a detector test asserts that no remnant row yields a request. A primary-screen form whose rows differ from its alternate-screen literals is reported to the Director before any rule change.
+The Claude process that performs first-launch onboarding stays on the primary screen for its lifetime, with the composer and forms in rows identical to the alternate-screen rendering (idle composer `❯` + U+00A0 with the cursor right after it; four-choice Bash form with the cursor on the focused choice row). That process also shows Dialog A after the first turn when the user settings pin a non-`auto` default. Every Claude rule changes `region.screen` from `alternate` to `either`. On the primary screen, earlier transcript rows stay visible above the live region; the cursor rules, the annotation frame guards and the transcript prompt prefix `❯` + U+0020 (not U+00A0) keep them from matching. Step 1 captures the primary idle composer, the four-choice Bash form, the screen after the form closes and the screen after a resize, and a detector test asserts that no remnant row yields a request. A primary-screen form whose rows differ from its alternate-screen literals is reported to the Director before any rule change.
 
 ### Diff sidebar clipping
 
@@ -256,6 +256,10 @@ A rule that declares `panel_separator` matches against the clipped set; region r
 Measured on 2.1.312 (tmux, exact widths): the left-area cells use the default background, and the separator (a dim U+2502) and the first panel cell use indexed background 235. The separator sits at one column on every row from row 0 down to the row above the composer border; the composer border, composer row and footer stay full width with no separator. Its column depends on the pane width and is neither fixed nor proportional (110→70, 120→70, 144→80, 166→92, 200→110, 240→150), so the detector finds it per frame. The sidebar opens mid-turn after an allowed Edit of an untracked file in the repository at ≥ 144 columns and, once open, stays down to 110 columns.
 
 Every Claude rule declares `│` except `claude-idle-composer` and `claude-auto-mode-indicator`, whose rows are the full-width composer and footer. The annotation rules whose regions end at the composer border keep that unclipped border row as their end row.
+
+The sidebar and primary-screen cases render the four-choice approval form that `claude-bash-permission` matches (Tip row, approval line, choice 2 `Yes, and don’t ask again for: <command> *`, `4. No`). Beside the sidebar the left area is 80 or 92 columns wide, so its Tip row wraps (at 144 columns) and choice 2 wraps onto a six-space continuation row (at 80 and 92 columns). `claude-bash-permission` matches these renderings unchanged: it has no Tip or choice-2 matcher, so the wrapped rows stay unmatched inside its region. Existing classifications stay unchanged.
+
+**Fixture backgrounds.** The three sidebar fixtures carry the existing optional `cell_backgrounds` runs of native screens (indexed 235 for the separator and panel cells), which fixture replay already paints, so they reproduce the separator’s background change.
 
 ### Manual-mode file permission forms
 
@@ -318,23 +322,25 @@ Captured at 120x36 with `permissions.disableAutoMode` `disable` in `default` mod
  Esc to cancel · Tab to amend
 ```
 
+A command inside the working directories renders the approval variant instead (`claude-bash-no-tip-cells-001`, 120x36, cursor (24,1)): the line ` This command requires approval` and a blank row precede the question, and choice 2 is ` Yes, and don’t ask again for: <command prefix> *` (U+2019 apostrophe). The access variant above needs a command touching a path outside the working directories; case `claude-bash-no-tip-access-cells-001` captures it.
+
 | Field | Value |
 |---|---|
 | `priority` / `observation` | `100` / `permission_request` |
 | `region` | `either`, start `^ Bash command\s*$`, end `^ Esc to cancel · Tab to amend\s*$`, `max_rows` `24`, cursor `inside`, `panel_separator` `│` |
-| matchers | `heading`; shared operation matcher with `row_margin` `" "`; `question` `^ Do you want to proceed\?\s*$`; `focus` `^ ❯ [1-9]\. `; `allow` `^ [❯ ] 1\. (?P<label>Yes)\s*$`; `access` `^ [❯ ] 2\. Yes, and always allow access to \S.* from this project\s*$`; `deny` `^ [❯ ] 3\. (?P<label>No)\s*$` |
-| choices | `allow-once`, `deny-once`; `access` has no entry |
+| matchers | `heading`; shared operation matcher with `row_margin` `" "`; `question` `^ Do you want to proceed\?\s*$`; `focus` `^ ❯ [1-9]\. `; `allow` `^ [❯ ] 1\. (?P<label>Yes)\s*$`; `remember` `^ [❯ ] 2\. Yes, and (?:always allow access to \S.* from this project|don’t ask again for: \S.*)\s*$`; `deny` `^ [❯ ] 3\. (?P<label>No)\s*$`; the approval line has no matcher, so both variants match |
+| choices | `allow-once`, `deny-once`; `remember` has no entry |
 | answers | allow `31` (`claude-bash-no-tip-allow-digit`), deny `33` (`claude-bash-no-tip-deny-digit`), one ungated stage each |
 
-`claude-bash-permission` requires the approval line and `4. No`, `claude-bash-permission-auto-tip` requires `3. Yes, and switch to auto mode …` and `4. No`, and `claude-auto-ask-permission` requires the `│ Ask rule` row and `2. No`, so the four Bash rules match disjoint forms. The description row is model-authored text without a matcher. Measured natively: `1` ran the command; `3` refused it with `Interrupted · What should Claude do instead?`.
+`claude-bash-permission` requires the approval line and `4. No`, `claude-bash-permission-auto-tip` requires `3. Yes, and switch to auto mode …` and `4. No`, and `claude-auto-ask-permission` requires the `│ Ask rule` row and `2. No`, so the four Bash rules match disjoint forms (only the no-tip rule ends its choices at `3. No`). The access variant draws its operation inside the boxed gutter (` │ ` before the command, as `claude-bash-permission` does) with no blank row before the question, while the approval variant uses the one-space margin; the rule takes both margins and keeps the boxed `│ ` gutter in the extracted operation, as `claude-bash-permission` does (`operation_rows` counted). The description row is model-authored text without a matcher. Measured natively on the access variant: `1` ran the command; `3` refused it with `Interrupted · What should Claude do instead?`; on the approval variant `31` ran the probe helper and `33` refused it, with no persistent change.
 
 ### File and Bash answer plans
 
 | Rule | Allow | Deny | Measured on 2.1.312 |
 |---|---|---|---|
 | `claude-read-file-permission` | `31`, `claude-read-file-allow-digit` | `33`, `claude-read-file-deny-digit` | `1` read; `3` refused with `Interrupted · What should Claude do instead?` |
-| `claude-edit-file-permission` | `31`, `claude-edit-file-allow-digit` | `33`, `claude-edit-file-deny-digit` | `1` applied the edit; `3` not measured |
-| `claude-create-file-permission` | `31`, `claude-create-file-allow-digit` | `33`, `claude-create-file-deny-digit` | `3` refused with `User rejected write to <path>`; `1` not measured |
+| `claude-edit-file-permission` | `31`, `claude-edit-file-allow-digit` | `33`, `claude-edit-file-deny-digit` | `1` applied the edit; `3` refused with `User rejected update to <path>` |
+| `claude-create-file-permission` | `31`, `claude-create-file-allow-digit` | `33`, `claude-create-file-deny-digit` | `1` created the file; `3` refused with no file written |
 | `claude-bash-permission-no-tip` | `31` | `33` | `1` ran; `3` refused |
 
 Each plan is one ungated stage and ships only when its Step 1 digit check passes: the digit alone closes a fresh form and the operation runs (allow) or does not run (deny), with no Enter and no persistent change. A failed check leaves that decision unsupported.
@@ -378,17 +384,18 @@ The driver accepts the seed only when it holds `.credentials.json`, `.claude.jso
 | `claude-auto-default-decline-001` | `auto` | same | `answer_stage` | `0e`, then `0d` (gated) | `claude-auto-default-cells-001` | Pre-stage and post-stage-1 fixtures, continuation |
 | `claude-auto-default-accept-edits-cells-001` | `auto` | `Seeded`, settings `{"permissions":{"defaultMode":"acceptEdits"}}` | `no_answer` | — | — | Second-label variant |
 | `claude-question-pending-cells-001` | `auto` | as `claude-auto-default-cells-001` | `no_answer` | — | — | Notice fixture, then the after-clear fixture (Dialog A drawn, notice gone); the implementer types a draft on the pane before the turn ends and clears it with Backspace |
-| `claude-question-pending-cells-002` | `auto` | same | `no_answer` | — | — | Notice fixture, then the after-send fixtures: the screen after the first Enter (notice still shown) and after the second (notice gone, composer idle); the implementer sends the draft with two Enters |
-| `claude-auto-env-setup-cells-001` | `auto` | `Seeded`, global `{"numStartups":5,"autoModeEnvSetup":{"denials":5}}` | `no_answer` | — | — | Offer fixture |
+| `claude-question-pending-cells-002` | `auto` | same | `no_answer` | — | — | Notice fixture, then the after-send fixtures: the screens after the Enter (notice gone, draft running) and the idle composer after that turn; the implementer types the draft during the first turn and sends it with one Enter |
+| `claude-auto-env-setup-cells-001` | `auto` | `Seeded`, global `{"numStartups":5,"autoModeEnvSetup":{"denials":5},"hasSeenAutoModeEntryWarning":true}` | `no_answer` | — | — | Offer fixture |
 | `claude-auto-env-setup-not-now-001` | `auto` | same | `answer_stage` | `32` | `claude-auto-env-setup-cells-001` | Pre-stage fixture, continuation |
 | `claude-auto-env-setup-dont-show-again-001` | `auto` | same | `answer_stage` | `33` | `claude-auto-env-setup-cells-001` | Pre-stage fixture, continuation |
-| `claude-primary-auto-tip-cells-001` | `default` | `Fresh {}` | `no_answer` | — | — | Primary idle composer, auto-tip form, closed-form and resize screens (Bash probe helper) |
+| `claude-primary-auto-tip-cells-001` | `default` | `Fresh {}` | `no_answer` | — | — | Primary idle composer, four-choice Bash form, closed-form and resize screens (Bash probe helper) |
 | `claude-primary-auto-default-cells-001` | `auto` | `Fresh`, settings `{"permissions":{"defaultMode":"default"}}` | `no_answer` | — | — | Primary-screen Dialog A right after folder trust, with its cursor |
 | `claude-read-file-cells-001`, `-allow-001`, `-deny-001` | `default` | `Seeded` | per row | — / `31` / `33` | the cells case | Fixtures and digit checks |
 | `claude-edit-file-cells-001`, `-allow-001`, `-deny-001` | `default` | `Seeded`, settings `{"permissions":{"allow":["Read(/{outside}/**)"]}}` | per row | — / `31` / `33` | the cells case | Fixtures and digit checks; only the Edit form appears |
 | `claude-create-file-cells-001`, `-allow-001`, `-deny-001` | `default` | `Seeded` | per row | — / `31` / `33` | the cells case | Fixtures and digit checks |
 | `claude-bash-no-tip-cells-001`, `-allow-001`, `-deny-001` | `default` | `Seeded`, settings `{"permissions":{"defaultMode":"default","disableAutoMode":"disable"}}` | per row | — / `31` / `33` | the cells case | Fixtures and digit checks (Bash probe helper) |
-| `claude-panel-auto-tip-cells-001` | `default` | `Seeded`, settings `{"permissions":{"allow":["Edit(/{cwd}/panel-probe.txt)"]}}` | `no_answer` | — | — | Auto-tip form beside the sidebar at 36x166 (separator column 92) |
+| `claude-bash-no-tip-access-cells-001` | `default` | as `claude-bash-no-tip-cells-001` | `no_answer` | — | — | Access-variant fixture: the prompt asks the member to run `touch {outside}/no-tip-access.txt` with the Bash tool |
+| `claude-panel-auto-tip-cells-001` | `default` | `Seeded`, settings `{"permissions":{"allow":["Edit(/{cwd}/panel-probe.txt)"]}}` | `no_answer` | — | — | Four-choice Bash form beside the sidebar at 36x166 (separator column 92) |
 | `claude-panel-auto-tip-cells-002` | `default` | same | `no_answer` | — | — | The same at 36x144 (separator column 80) |
 | `claude-panel-auto-tip-allow-001` | `default` | same | `answer_stage` | `31` | `claude-panel-auto-tip-cells-001` | Allow pre-stage fixture beside the sidebar; the command runs |
 
@@ -400,9 +407,23 @@ Allow evidence is the existing file-tool evidence (the member reports `cafleet-1
 |---|---|---|
 | Dialog A | `--choice decline` | Relay; the user picks `decline` or answers natively |
 | Dialog B offer | `--choice not-now`; ask the user before `dont-show-again` | Relay with both choices |
-| Pending notice | Ask the user to clear the draft natively (Dialog A then follows), or to send it with two Enters | Same |
+| Pending notice | Ask the user to clear the draft natively (Dialog A then follows), or to send it with Enter (again while the notice stays) | Same |
 | Wizard, question without choices | Ask the user to answer natively | Same |
 | File and Bash permission forms | The existing permission-request procedure; the path or command is the risk evidence | Same |
+
+### Batched request forms
+
+When Claude Code 2.1.312 issues several tool calls in one turn, each permission form's heading row carries a right-aligned request counter (` Read file` … `1 of 2` at the row end; measured at 249 columns in Step 6). Every heading-anchored Claude form rule (the Read, Edit and Create file rules and every `^ Bash command\s*$` rule) accepts that counter on its `region.start_pattern`, its `heading` matcher and, for the Edit and Create rules, the heading line of the region operation matcher: `(?:\s+\d+ of \d+)?` before the trailing `\s*$`. The counter is not evidence and not part of the operation.
+
+A capture case fixes the batched forms and their digit outcomes; the answer plans stay the single-stage digits, and a batched form keeps its decision only when its digit check passes on the batched capture:
+
+| Case | Mode | Prompt | Supplies |
+|---|---|---|---|
+| `claude-read-file-batched-cells-001` | `default` | two Read calls in one turn on two outside files | `1 of 2` fixture, then the screen after `31` (expected: the allow answers only the current form and `2 of 2` opens as a new request) |
+| `claude-read-file-batched-deny-001` | `default` | same | `1 of 2` pre-stage fixture; `33` refuses the batch (measured in Step 6: one `3` interrupted both reads) |
+| `claude-bash-batched-cells-001` | `default` | two Bash probe-helper calls in one turn | `1 of 2` Bash fixture, when Claude batches them |
+
+A Bash batch that Claude does not render with a counter is recorded under § Limits as unobserved.
 
 ### Limits
 
@@ -439,54 +460,81 @@ Allow evidence is the existing file-tool evidence (the member reports `cafleet-1
 
 ### Step 1: Capture native evidence
 
-- [ ] Verify Claude 2.1.312's `--permission-mode` choices from `claude --help` and the parser, and add the 2.1.312 adapter entry in `src/coding_agent/mod.rs` with a `policy_choices` test. <!-- completed: -->
-- [ ] Extend the driver per § Native capture procedure: `ClaudeConfigCase`, the `{outside}` token, launch policy, stage guard, persistent-setting comparison, sidebar size and repository setup, the new `APPROVED_CASES` entries, with driver unit tests for the guard, the token and the comparison. <!-- completed: -->
-- [ ] Build the seed per § Native capture procedure and confirm its checks. <!-- completed: -->
-- [ ] Run the Dialog A cells cases and both pending-notice cases; pin literals, `max_rows`, cursor and the notice margin; confirm the notice row is gone after clear and after the second Enter; report `blocked` if the dialog does not appear. <!-- completed: -->
-- [ ] Run the Dialog A decline case and the Dialog B cells, `not-now` and `dont-show-again` cases. <!-- completed: -->
-- [ ] Run both primary-screen cases; confirm identical rows (including Dialog A and its cursor) and no matching remnant after closure and resize. <!-- completed: -->
-- [ ] Run the Read, Edit, Create and no-tip Bash cases; pin literals and cursor and record each digit check. <!-- completed: -->
-- [ ] Run the sidebar cases at 166 and 144 columns; confirm the separator column and backgrounds of § Diff sidebar clipping and the allow digit beside the sidebar. <!-- completed: -->
-- [ ] Review masking, convert captures into fixtures and report every outcome (failed digit check, unproduced dialog, differing primary row) to the Director before Step 2. <!-- completed: -->
+- [x] Verify Claude 2.1.312's `--permission-mode` choices from `claude --help` and the parser, and add the 2.1.312 adapter entry in `src/coding_agent/mod.rs` with a `policy_choices` test. <!-- completed: 2026-11-04T15:02 -->
+- [x] Extend the driver per § Native capture procedure: `ClaudeConfigCase`, the `{outside}` token, launch policy, stage guard, persistent-setting comparison, sidebar size and repository setup, the new `APPROVED_CASES` entries, with driver unit tests for the guard, the token and the comparison. <!-- completed: 2026-11-04T15:19 -->
+- [x] Build the seed per § Native capture procedure and confirm its checks. <!-- completed: 2026-11-04T15:31 -->
+- [x] Run the Dialog A cells cases and both pending-notice cases; pin literals, `max_rows`, cursor and the notice margin; confirm the notice row is gone after clear and after the second Enter; report `blocked` if the dialog does not appear. <!-- completed: 2026-11-04T15:45 -->
+- [x] Run the Dialog A decline case and the Dialog B cells, `not-now` and `dont-show-again` cases. <!-- completed: 2026-11-04T15:53 -->
+- [x] Run both primary-screen cases; confirm identical rows (including Dialog A and its cursor) and no matching remnant after closure and resize. <!-- completed: 2026-11-04T16:00 -->
+- [x] Run the Read, Edit, Create and no-tip Bash cases; pin literals and cursor and record each digit check. <!-- completed: 2026-11-04T16:10 -->
+- [x] Run the sidebar cases at 166 and 144 columns; confirm the separator column and backgrounds of § Diff sidebar clipping and the allow digit beside the sidebar. <!-- completed: 2026-11-04T16:05 -->
+- [x] Review masking, convert captures into fixtures and report every outcome (failed digit check, unproduced dialog, differing primary row) to the Director before Step 2. <!-- completed: 2026-11-04T16:16 -->
 
 ### Step 2: Update documentation
 
-- [ ] Update `SPEC.md` per § Documentation targets with the Step 1 literals. <!-- completed: -->
-- [ ] Update `docs/docs/concepts/members.md` and `docs/docs/quickstart.md`. <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/cli.md`, `skills/cafleet/reference/coding-agents.md` and `skills/cafleet/roles/director.md`. <!-- completed: -->
+- [x] Update `SPEC.md` per § Documentation targets with the Step 1 literals. <!-- completed: 2026-11-04T16:20 -->
+- [x] Update `docs/docs/concepts/members.md` and `docs/docs/quickstart.md`. <!-- completed: 2026-11-04T16:20 -->
+- [x] Update `skills/cafleet/reference/cli.md`, `skills/cafleet/reference/coding-agents.md` and `skills/cafleet/roles/director.md`. <!-- completed: 2026-11-04T16:27 -->
 
 ### Step 3: Choice answers (tests first)
 
-- [ ] Catalog tests in `src/coding_agent/catalog.rs`: a choice entry on a question rule loads with any scope; it is refused on a permission rule, with a `decision` key on a question rule, with an unknown choice and with a duplicate `request_rule_id`+`choice_id`; `focus_style` `marker` loads and gates; an interaction frame needs a reject pattern. <!-- completed: -->
-- [ ] Implement `AnswerKey`, the two entry forms, the keyed `answer_plan` lookups, `marker` focus and interaction frames in `catalog.rs`. <!-- completed: -->
-- [ ] Detector tests in `src/coding_agent/detector.rs`: `match_answer` matches a question for a choice key and refuses a decision key on a question and the reverse; `marker` focus resolves one focused choice and none for zero or several marker rows. <!-- completed: -->
-- [ ] Implement the `match_answer` and `marker` changes in `detector.rs`. <!-- completed: -->
-- [ ] Control tests in `src/runtime/control.rs`: inspection key order with `supported_choices`; question capability, token and reasons; respond rejection reasons; choice capability binding. <!-- completed: -->
-- [ ] Implement `--choice` in `src/cli/runtime.rs` (argument group, shape check) and the runner path in `src/runtime/control.rs` and `src/runtime/input.rs`. <!-- completed: -->
-- [ ] Storage tests and DDL in `migrations/V1__baseline.sql` and `src/broker/runtime/inputs.rs`: exactly-one CHECK, digest with `choice_id`, question-opening requirement, audit output. <!-- completed: -->
-- [ ] `review_question` Director action and instruction in `src/broker/runtime/events.rs`, with tests. <!-- completed: -->
+- [x] Catalog tests in `src/coding_agent/catalog.rs`: a choice entry on a question rule loads with any scope; it is refused on a permission rule, with a `decision` key on a question rule, with an unknown choice and with a duplicate `request_rule_id`+`choice_id`; `focus_style` `marker` loads and gates; an interaction frame needs a reject pattern. <!-- completed: 2026-11-04T16:15 -->
+- [x] Implement `AnswerKey`, the two entry forms, the keyed `answer_plan` lookups, `marker` focus and interaction frames in `catalog.rs`. <!-- completed: 2026-11-04T16:15 -->
+- [x] Detector tests in `src/coding_agent/detector.rs`: `match_answer` matches a question for a choice key and refuses a decision key on a question and the reverse; `marker` focus resolves one focused choice and none for zero or several marker rows. <!-- completed: 2026-11-04T16:15 -->
+- [x] Implement the `match_answer` and `marker` changes in `detector.rs`. <!-- completed: 2026-11-04T16:15 -->
+- [x] Control tests in `src/runtime/control.rs`: inspection key order with `supported_choices`; question capability, token and reasons; respond rejection reasons; choice capability binding. <!-- completed: 2026-11-04T16:15 -->
+- [x] Implement `--choice` in `src/cli/runtime.rs` (argument group, shape check) and the runner path in `src/runtime/control.rs` and `src/runtime/input.rs`. <!-- completed: 2026-11-04T16:15 -->
+- [x] Storage tests and DDL in `migrations/V1__baseline.sql` and `src/broker/runtime/inputs.rs`: exactly-one CHECK, digest with `choice_id`, question-opening requirement, audit output. <!-- completed: 2026-11-04T16:15 -->
+- [x] `review_question` Director action and instruction in `src/broker/runtime/events.rs`, with tests. <!-- completed: 2026-11-04T16:15 -->
 
 ### Step 4: Sidebar clipping (tests first)
 
-- [ ] Detector tests in `detector.rs` with generated screens: one shared separator column clips panel rows; differing columns or a same-background `│` (boxed gutter) clip nothing; a clipped row is never soft-joined; rules without `panel_separator` see unclipped rows. <!-- completed: -->
-- [ ] Implement `panel_separator` loading in `catalog.rs` and the clipped line set in `detector.rs`. <!-- completed: -->
+- [x] Detector tests in `detector.rs` with generated screens: one shared separator column clips panel rows; differing columns or a same-background `│` (boxed gutter) clip nothing; a clipped row is never soft-joined; rules without `panel_separator` see unclipped rows. <!-- completed: 2026-11-04T16:15 -->
+- [x] Implement `panel_separator` loading in `catalog.rs` and the clipped line set in `detector.rs`. <!-- completed: 2026-11-04T16:15 -->
 
 ### Step 5: Profile rules
 
-- [ ] Add the Step 1 fixtures to `src/coding_agent/native/claude.json`, `bundled.json` and the embedded fixture table in `catalog.rs`. <!-- completed: -->
-- [ ] Catalog tests: each fixture classifies with its expected rule and evidence (operation, choice labels, `operation_rows`); offer and wizard are separate episodes; primary and sidebar fixtures yield the same rule and evidence as their alternate, full-width counterparts; existing classifications unchanged. <!-- completed: -->
-- [ ] Answer-plan tests: Dialog A `decline` resolves to the two gated stages and Dialog B `not-now`/`dont-show-again` to theirs; no plan targets `accept` or `1. Yes`; each file and no-tip decision resolves to `31`/`33` when its digit check passed and is absent otherwise. <!-- completed: -->
-- [ ] Detector tests: a quoted Dialog A above an idle composer, a model-quoted pending notice and primary-screen remnants produce no interaction; trailing padding keeps each new rule's identity. Tracker tests: replaying the notice fixture then the after-clear fixture closes the notice episode and opens a Dialog A episode; replaying the notice, after-first-Enter and after-second-Enter fixtures keeps the notice episode open, then closes it with the composer idle. <!-- completed: -->
-- [ ] Add the rules, `either` screens, `panel_separator` declarations and answers to `bundled.json`. <!-- completed: -->
-- [ ] Runner input tests in `src/runtime/input.rs`: replaying the Dialog A fixture queues a preview, a `member prompt` and a `member exec` with zero bytes and the idle composer drains each once; the pending-notice fixture during a submission's settle stops it before the submit key. <!-- completed: -->
+- [x] Add the Step 1 fixtures to `src/coding_agent/native/claude.json`, `bundled.json` and the embedded fixture table in `catalog.rs`. <!-- completed: 2026-11-04T16:30 -->
+- [x] Catalog tests: each fixture classifies with its expected rule and evidence (operation, choice labels, `operation_rows`); offer and wizard are separate episodes; primary and sidebar fixtures yield the same rule and evidence as their alternate, full-width counterparts; existing classifications unchanged. <!-- completed: 2026-11-04T16:58 -->
+- [x] Answer-plan tests: Dialog A `decline` resolves to the two gated stages and Dialog B `not-now`/`dont-show-again` to theirs; no plan targets `accept` or `1. Yes`; each file and no-tip decision resolves to `31`/`33` when its digit check passed and is absent otherwise. <!-- completed: 2026-11-04T16:58 -->
+- [x] Detector tests: a quoted Dialog A above an idle composer, a model-quoted pending notice and primary-screen remnants produce no interaction; trailing padding keeps each new rule's identity. Tracker tests: replaying the notice fixture then the after-clear fixture closes the notice episode and opens a Dialog A episode; replaying the notice fixture then the after-Enter and idle fixtures closes the notice episode and opens no Dialog A episode. <!-- completed: 2026-11-04T16:58 -->
+- [x] Add the rules, `either` screens, `panel_separator` declarations and answers to `bundled.json`. <!-- completed: 2026-11-04T16:58 -->
+- [x] Runner input tests in `src/runtime/input.rs`: replaying the Dialog A fixture queues a preview, a `member prompt` and a `member exec` with zero bytes and the idle composer drains each once; the pending-notice fixture during a submission's settle stops it before the submit key. <!-- completed: 2026-11-04T16:58 -->
+
+### Step 5b: Batched request forms
+
+- [x] Add the batched-form capture cases to the driver and run them with the seed; report the fixtures and digit outcomes before rule changes. <!-- completed: 2026-11-04T22:35 -->
+- [x] Catalog and detector tests: each batched fixture classifies with its rule and the same operation evidence as its single form; the counter changes no identity; the existing single-form classifications stay unchanged. <!-- completed: 2026-11-04T23:02 -->
+- [x] Add the counter to every heading-anchored Claude form rule in `bundled.json`, import the batched fixtures, and update `SPEC.md` and `skills/cafleet/reference/coding-agents.md` with the batched-form behaviour. <!-- completed: 2026-11-04T23:02 -->
 
 ### Step 6: Validate and accept
 
-- [ ] Run `mise //:test`, `mise //:lint`, `mise //:typecheck` and `mise //docs:build`. <!-- completed: -->
-- [ ] On tmux and herdr with the release build and a private onboarded Claude configuration per member: Dialog A event; a preview, `member prompt` and `member exec` queued and delivered once; Director-auto `--choice decline`; closure and `hasSeenAutoDefaultNudge`. <!-- completed: -->
-- [ ] On both multiplexers: Dialog B `--choice not-now` and, on a fresh configuration, `--choice dont-show-again`; `--decision` on a question and `--choice` on a permission request are rejected with zero bytes. <!-- completed: -->
-- [ ] On both multiplexers: an onboarding-session member's idle composer and Bash form are detected and answered; each file form and the no-tip Bash form are detected and answered as the digit checks recorded. <!-- completed: -->
-- [ ] On herdr (≥ 144 columns) and tmux at the same width: after an allowed Edit of an untracked repository file opens the sidebar, a Bash form is detected and answered. Record versions, geometry, outcomes and every unobserved case in an Execution record section and as limits in `SPEC.md`. <!-- completed: -->
+- [x] Run `mise //:test`, `mise //:lint`, `mise //:typecheck` and `mise //docs:build`. <!-- completed: 2026-11-04T16:58 -->
+- [x] On tmux and herdr with the release build and a private onboarded Claude configuration per member: Dialog A event; a preview, `member prompt` and `member exec` queued and delivered once; Director-auto `--choice decline`; closure and `hasSeenAutoDefaultNudge`. <!-- completed: 2026-11-05T00:22 -->
+- [x] On both multiplexers: Dialog B `--choice not-now` and, on a fresh configuration, `--choice dont-show-again`; `--decision` on a question and `--choice` on a permission request are rejected with zero bytes. <!-- completed: 2026-11-05T00:22 -->
+- [x] On both multiplexers: an onboarding-session member's idle composer and Bash form are detected and answered; each file form and the no-tip Bash form are detected and answered as the digit checks recorded. <!-- completed: 2026-11-05T00:22 -->
+- [x] On herdr (≥ 144 columns) and tmux at the same width: after an allowed Edit of an untracked repository file opens the sidebar, a Bash form is detected and answered. Record versions, geometry, outcomes and every unobserved case in an Execution record section and as limits in `SPEC.md`. <!-- completed: 2026-11-05T00:27 -->
+
+---
+
+## Execution record
+
+Step 6 live acceptance ran 2026-11-04 21:56 to 2026-11-05 00:22 UTC with the release build at `f32dc7ce` (Tasks 2–5) and `7da4b99f` (Step 5b batched forms), Claude Code 2.1.312 with `--model haiku`, tmux 3.6a on a private server and herdr 0.9.5 in a fresh tab, each on its own private database, with one private `CLAUDE_CONFIG_DIR` per member copied from the seed. Every answer used `--decision-source director-auto --director-mode auto`.
+
+| Check | tmux | herdr |
+|---|---|---|
+| Dialog A: `question` from `claude-auto-default-nudge` with `review_question`; preview, `member prompt` and `member exec` queued with zero bytes and delivered once after closure; `--choice decline` accepted; only `hasSeenAutoDefaultNudge` changed | pass | pass |
+| Dialog A wrong answers: `--choice accept` and `--decision allow` rejected with zero bytes | pass | pass |
+| Dialog B: `question` from `claude-auto-startup` with `not-now` and `dont-show-again`; each changed only its documented `autoModeEnvSetup` key; no wizard | pass | pass |
+| Cross-class: `--decision` on a question and `--choice` on a permission request rejected with zero bytes; usage errors exit 2 | pass | pass |
+| Onboarding process (primary screen): idle composer delivered by profile; Bash form detected and allowed; no remnant after closure or resize | pass | pass |
+| Read, Edit and Create file forms and the no-tip Bash form: detected; allow and deny produced the documented native outcomes | pass | pass |
+| Diff sidebar: Bash form beside the sidebar matched the full-width control's rule and was allowed | pass at 166 and 180 columns (separator index 92, 99) | pass at 180 columns (separator about 98–99, not measured exactly) |
+| Batched Read forms: `1 of 2` and `2 of 2` both detected; allow on `1 of 2` superseded it and opened `2 of 2`; deny on `2 of 2` interrupted the turn | pass | pass |
+
+Acceptance found one detection gap, the batched-form heading counter, which Step 5b fixed and the batched check above verified. An expired seed login mid-run was an environment issue, resolved by an operator re-login.
+
+Not observed live: batched Bash forms with a counter, the sidebar at 144 columns, the pending-question notice and the `1. Yes` wizard, Dialog A on an onboarding process's primary screen and its `No, keep accept edits` label, and byte-level answer stages (live evidence is the accepted response plus the native outcome). Delivered prompt and exec receipts stay `accepted`, as the Step 5 tests expect.
 
 ---
 
@@ -498,3 +546,7 @@ Allow evidence is the existing file-tool evidence (the member reports `cafleet-1
 | 2026-11-04 | Review round 1 and user decision: findings 1, 3 and 5 fixed instead of limits (primary screen `either`, `claude-bash-permission-no-tip`, `panel_separator` clipping); `marker` focus; keyed answer types and `match_answer`; interaction frame guard for Dialog A; pending-question notice rule; 2.1.312 explicit-mode adapter; driver launch policy, stage guard, `{outside}` token, baselines and inline seed; SPEC contradiction sentences named; capture-before-docs rationale; prompt/exec coverage |
 | 2026-11-04 | Review round 2: Dialog A after-turn cursor measured inside the region; pending-notice outcomes (clear, two-Enter send) with closure fixtures and tracker tests; typed-input harm in Background; primary-screen Dialog A case |
 | 2026-11-04 | Approved by the Reviewer and the user |
+| 2026-11-04 | Execution Step 1 evidence: Dialog B also requires `hasSeenAutoModeEntryWarning` (added to the Dialog B case overlay), ignores choices for 500 ms after mounting and resolves Escape as `Not now`; a draft typed during a turn is sent by one Enter (pending-notice send row, Director guidance, `claude-question-pending-cells-002` fixtures and tracker test revised); the no-tip Bash form has an approval variant for in-cwd commands, so its choice-2 matcher (`remember`) accepts both labels and case `claude-bash-no-tip-access-cells-001` captures the access variant |
+| 2026-11-04 | Execution Step 1 report: Dialog A cursor on the focused choice row and primary-screen Dialog A after the first turn; primary and sidebar cases render the four-choice `claude-bash-permission` form, whose wrapped Tip and choice-2 rows beside the sidebar stay unmatched inside its region; sidebar fixtures carry `cell_backgrounds` runs; the no-tip access variant's boxed gutter, kept in the operation as `claude-bash-permission` keeps it |
+| 2026-11-04 | Step 6 acceptance found that batched permission forms carry a `N of M` heading counter: § Batched request forms, Step 5b |
+| 2026-11-05 | Execution review round 1: the pending-notice row pattern pinned at column 0 (`^Claude has a question …`) as shipped; the Edit-deny and Create-allow outcomes recorded from the Step 1 digit checks |

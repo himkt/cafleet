@@ -99,10 +99,15 @@ work, such as `Bash(npm test *)`, so those commands run without routing.
 | The classifier blocks a Director `cafleet` command | Auto mode judged the action outside the request | Add an allow pattern for that subcommand |
 | `defaultMode: "auto"` has no effect | It is set in a project or local settings file, or auto mode is unavailable for the organization or model | Move it to `~/.claude/settings.json`; when auto mode is unavailable, use the other-modes profile |
 
-Claude Code 2.1.302 in auto mode can show a `Teach auto mode about your
-environment?` dialog after a member's turn. Answer it with `Don't show again`
-in an interactive session of that version that uses the members'
-configuration directory; after that answer it does not return.
+Claude Code can show two auto-mode dialogs in a member pane after a turn:
+`Make auto mode your default permission mode?` when your
+`~/.claude/settings.json` pins a non-`auto` `defaultMode`, and `Teach auto mode
+about your environment?` in auto mode. The runner holds input behind each one
+and sends the Director a question event. The Director dismisses the first with
+`No, keep …` and the second with `Not now`, and asks you before choosing `Don't
+show again`; each answer changes only that dialog's own flag in the member's
+Claude configuration. The `Yes` choices are never sent for you; answer them in
+the member pane if you want them.
 
 #### Auto mode {#auto-mode-profile}
 

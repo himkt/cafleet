@@ -39,6 +39,7 @@ pub(crate) use crate::broker::runtime::inputs::settle_preview;
 pub(crate) use crate::broker::runtime::inputs::settle_zero_byte_deferred;
 pub(crate) use crate::broker::runtime::inputs::unpublished_delivery_results;
 use crate::broker::stored_enum;
+use crate::coding_agent::catalog::AnswerKey;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::time::Deadline;
@@ -810,7 +811,7 @@ pub(crate) struct PermissionResponseMetadata {
     pub(crate) interaction_id: i64,
     pub(crate) expected_owner_epoch: i64,
     pub(crate) request_token: String,
-    pub(crate) decision: PermissionDecision,
+    pub(crate) key: AnswerKey,
     pub(crate) director_member_id: i64,
     pub(crate) director_mode: DirectorMode,
     pub(crate) decision_source: DecisionSource,
@@ -987,8 +988,19 @@ pub(crate) mod test_support {
         }
 
         pub(crate) fn open(&mut self, owner: &RunOwner) -> RuntimeEventRecord {
+            self.open_as(owner, InteractionClass::PermissionRequest)
+        }
+
+        pub(crate) fn open_as(
+            &mut self,
+            owner: &RunOwner,
+            classification: InteractionClass,
+        ) -> RuntimeEventRecord {
             self.reserve(owner);
-            let transition = opening(self.run.run_id, 1, 1, metadata());
+            let transition = ObservedTransition {
+                classification: Some(classification),
+                ..opening(self.run.run_id, 1, 1, metadata())
+            };
             storage::persist_event(&mut self.conn, owner, &transition, PersistenceMode::Live)
                 .unwrap()
         }
@@ -1152,6 +1164,7 @@ pub(crate) mod test_support {
 
     use crate::coding_agent::AnswerCapability;
     use crate::coding_agent::CodingAgent;
+    use crate::coding_agent::catalog::AnswerKey;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -1168,12 +1181,16 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn capability(decision: PermissionDecision) -> AnswerCapability {
-        AnswerCapability::fixture(
+        keyed_capability(AnswerKey::Decision(decision))
+    }
+
+    pub(crate) fn keyed_capability(key: AnswerKey) -> AnswerCapability {
+        AnswerCapability::fixture_key(
             CodingAgent::Codex,
             "0.163.0",
             "native-tool-permission",
             "single-request-choice",
-            decision,
+            key,
             &["synthetic-storage-fixture".into()],
         )
         .unwrap()
@@ -1181,6 +1198,18 @@ pub(crate) mod test_support {
 
     impl ResponseFixture {
         pub(crate) fn new() -> Self {
+            Self::opened(
+                InteractionClass::PermissionRequest,
+                AnswerKey::Decision(PermissionDecision::Allow),
+            )
+        }
+
+        /// A response fixture whose open interaction is a question, answered by `choice`.
+        pub(crate) fn question(choice: &str) -> Self {
+            Self::opened(InteractionClass::Question, AnswerKey::Choice(choice.into()))
+        }
+
+        pub(crate) fn opened(classification: InteractionClass, key: AnswerKey) -> Self {
             let mut base = Fixture::new();
             base.conn
                 .execute(
@@ -1189,7 +1218,7 @@ pub(crate) mod test_support {
                 )
                 .unwrap();
             let owner = base.activate();
-            let event = base.open(&owner);
+            let event = base.open_as(&owner, classification);
             let request = NewPermissionResponse {
                 operation_key: "permission:fixture-1".into(),
                 metadata: PermissionResponseMetadata {
@@ -1197,7 +1226,7 @@ pub(crate) mod test_support {
                     interaction_id: event.interaction_id.unwrap(),
                     expected_owner_epoch: owner.owner_epoch,
                     request_token: "a".repeat(64),
-                    decision: PermissionDecision::Allow,
+                    key: key.clone(),
                     director_member_id: base.director,
                     director_mode: DirectorMode::Auto,
                     decision_source: DecisionSource::DirectorAuto,
@@ -1211,7 +1240,7 @@ pub(crate) mod test_support {
                 owner,
                 event,
                 request,
-                capability: capability(PermissionDecision::Allow),
+                capability: keyed_capability(key),
             }
         }
 

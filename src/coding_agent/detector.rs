@@ -1,8 +1,10 @@
 use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::coding_agent::CodingAgent;
+use crate::coding_agent::catalog::AnswerKey;
 use crate::coding_agent::catalog::Capture;
 use crate::coding_agent::catalog::CursorRule;
+use crate::coding_agent::catalog::FocusStyle;
 use crate::coding_agent::catalog::MarginRows;
 use crate::coding_agent::catalog::MatcherScope;
 use crate::coding_agent::catalog::Profile;
@@ -141,6 +143,7 @@ pub(crate) struct AnswerMatch {
     plan: AnswerPlan,
     semantic: SemanticFingerprint,
     choices: Vec<String>,
+    choice_label: String,
     focus: String,
     focus_capture: String,
     focused_choice: Option<String>,
@@ -164,6 +167,10 @@ impl AnswerMatch {
     pub(crate) fn choices(&self) -> &[String] {
         &self.choices
     }
+    /// The extracted label of the choice the plan selects.
+    pub(crate) fn choice_label(&self) -> &str {
+        &self.choice_label
+    }
     pub(crate) fn focus(&self) -> &str {
         &self.focus
     }
@@ -184,9 +191,18 @@ struct LogicalLine {
     boundaries: Vec<(u16, u16)>,
 }
 fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
+    clipped_logical_lines(screen, &BTreeMap::new())
+}
+/// `clips` maps a panel row to its separator column; such a row keeps only the cells left of
+/// the separator and always ends its logical line.
+fn clipped_logical_lines(
+    screen: &ScreenSnapshot,
+    clips: &BTreeMap<u16, u16>,
+) -> Result<Vec<LogicalLine>> {
     let mut lines = Vec::new();
     let mut current: Option<LogicalLine> = None;
     for row in 0..screen.rows {
+        let width = clips.get(&row).copied().unwrap_or(screen.cols);
         let line = current.get_or_insert_with(|| LogicalLine {
             text: String::new(),
             start: row,
@@ -194,7 +210,7 @@ fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
             boundaries: vec![(row, 0)],
         });
         line.end = row;
-        let end = (0..screen.cols)
+        let end = (0..width)
             .rev()
             .find(|&col| {
                 screen
@@ -227,11 +243,70 @@ fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
             }
             *line.boundaries.last_mut().expect("cell end boundary") = (row, col + width);
         }
-        if !screen.screen.row_wrapped(row) || row + 1 == screen.rows {
+        if clips.contains_key(&row) || !screen.screen.row_wrapped(row) || row + 1 == screen.rows {
             lines.push(current.take().expect("current logical line"));
         }
     }
     Ok(lines)
+}
+/// The separator column of every panel row, when every panel row shares one column.
+fn panel_clips(screen: &ScreenSnapshot, separator: char) -> BTreeMap<u16, u16> {
+    let mut glyph = [0; 4];
+    let glyph = &*separator.encode_utf8(&mut glyph);
+    let mut clips = BTreeMap::new();
+    for row in 0..screen.rows {
+        let column = (40..screen.cols.saturating_sub(1)).find(|&col| {
+            let cell = |col| screen.screen.cell(row, col);
+            match (cell(col - 1), cell(col), cell(col + 1)) {
+                (Some(before), Some(at), Some(after)) => {
+                    at.contents() == glyph
+                        && at.bgcolor() != before.bgcolor()
+                        && at.bgcolor() == after.bgcolor()
+                }
+                _ => false,
+            }
+        });
+        if let Some(column) = column {
+            clips.insert(row, column);
+        }
+    }
+    let mut columns = clips.values();
+    match columns.next() {
+        Some(first) if columns.all(|column| column == first) => clips,
+        _ => BTreeMap::new(),
+    }
+}
+/// The unclipped logical lines and, per declared separator glyph, the clipped ones.
+struct ScreenLines {
+    full: Vec<LogicalLine>,
+    clipped: BTreeMap<char, Vec<LogicalLine>>,
+}
+impl ScreenLines {
+    fn new(screen: &ScreenSnapshot, profile: &Profile) -> Result<Self> {
+        let mut clipped = BTreeMap::new();
+        for separator in profile
+            .rules
+            .iter()
+            .filter_map(|rule| rule.region.panel_separator)
+        {
+            if let std::collections::btree_map::Entry::Vacant(entry) = clipped.entry(separator) {
+                entry.insert(clipped_logical_lines(
+                    screen,
+                    &panel_clips(screen, separator),
+                )?);
+            }
+        }
+        Ok(Self {
+            full: logical_lines(screen)?,
+            clipped,
+        })
+    }
+    fn of(&self, rule: &Rule) -> &[LogicalLine] {
+        match rule.region.panel_separator {
+            Some(separator) => &self.clipped[&separator],
+            None => &self.full,
+        }
+    }
 }
 struct Matched {
     rule: Rule,
@@ -242,6 +317,7 @@ struct Matched {
     mode: Option<String>,
     excerpt: String,
     focuses: BTreeMap<String, String>,
+    matcher_lines: BTreeMap<String, usize>,
     label_cells: Vec<(String, Vec<(u16, u16)>)>,
 }
 fn captured(
@@ -256,16 +332,16 @@ fn captured(
 }
 type Candidate = (usize, usize, ScreenRegion);
 fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Option<Matched> {
+    if rule.frame.is_some() && !frame_guard_holds(rule, lines) {
+        return None;
+    }
     match qualifying_regions(rule, screen, lines).as_slice() {
         [candidate] => extract(rule, lines, *candidate),
         _ => None,
     }
 }
 fn frame_guard_holds(rule: &Rule, lines: &[LogicalLine]) -> bool {
-    let frame = rule
-        .frame
-        .as_ref()
-        .expect("annotation rules declare a frame");
+    let frame = rule.frame.as_ref().expect("guarded rules declare a frame");
     frame
         .require
         .iter()
@@ -382,6 +458,7 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
         .join("\n");
     let mut values = BTreeMap::new();
     let mut focuses = BTreeMap::new();
+    let mut matcher_lines = BTreeMap::new();
     let mut spans = BTreeMap::new();
     for matcher in &rule.matchers {
         let texts = if matcher.scope == MatcherScope::Region {
@@ -408,19 +485,21 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
                     .get(0)
                     .expect("regex match has full capture")
                     .as_str();
-                captured_values.push((named, full.to_owned(), located));
+                captured_values.push((named, full.to_owned(), located, line_index));
             }
         }
         if captured_values.len() != 1 {
             return None;
         }
-        let (named, full, located) = captured_values.pop().expect("single matcher capture");
+        let (named, full, located, line_index) =
+            captured_values.pop().expect("single matcher capture");
         focuses.insert(
             matcher.id.clone(),
             serde_json::to_string(&(&matcher.id, &full, &named)).expect("focus strings serialize"),
         );
         if matcher.scope == MatcherScope::Line {
             spans.insert(matcher.id.clone(), located);
+            matcher_lines.insert(matcher.id.clone(), line_index);
         }
         values.insert(matcher.id.clone(), named);
     }
@@ -470,6 +549,7 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
         mode,
         excerpt: region_text,
         focuses,
+        matcher_lines,
         label_cells,
     })
 }
@@ -513,6 +593,29 @@ fn background_focus(screen: &ScreenSnapshot, matched: &Matched) -> Option<String
         _ => None,
     }
 }
+/// The line of each choice label: the marker moves between these lines, so they stay equal while
+/// only the focus moves and change when the choice rows' layout does.
+fn marker_layout(rule: &Rule, matched: &Matched) -> String {
+    let lines = rule
+        .choices
+        .iter()
+        .map(|choice| (&choice.id, matched.matcher_lines.get(&choice.label.matcher)))
+        .collect::<Vec<_>>();
+    serde_json::to_string(&lines).expect("focus strings serialize")
+}
+/// The focused choice is the one choice whose label matcher matched the focus matcher's row.
+fn marker_focus(rule: &Rule, matched: &Matched, focus_matcher: &str) -> Option<String> {
+    let focus_line = matched.matcher_lines.get(focus_matcher)?;
+    let focused = rule
+        .choices
+        .iter()
+        .filter(|choice| matched.matcher_lines.get(&choice.label.matcher) == Some(focus_line))
+        .collect::<Vec<_>>();
+    match focused.as_slice() {
+        [choice] => Some(choice.id.clone()),
+        _ => None,
+    }
+}
 impl Detector {
     pub(crate) fn match_answer(
         &self,
@@ -529,15 +632,19 @@ impl Detector {
                 .answer_plan(
                     capability.native_version(),
                     capability.request_rule_id(),
-                    capability.decision(),
+                    capability.key(),
                 )
                 .as_ref()
                 != Some(plan)
         {
             return Ok(None);
         }
+        let answered = match capability.key() {
+            AnswerKey::Decision(_) => InteractionClass::PermissionRequest,
+            AnswerKey::Choice(_) => InteractionClass::Question,
+        };
         let observed = self.observe(screen)?;
-        if observed.kind != ObservationKind::Interaction(InteractionClass::PermissionRequest)
+        if observed.kind != ObservationKind::Interaction(answered)
             || observed.match_evidence != MatchEvidence::Complete
             || observed.rule_id != capability.request_rule_id()
         {
@@ -548,33 +655,45 @@ impl Detector {
             .iter()
             .find(|r| r.id == observed.rule_id)
             .expect("selected compiled request rule");
-        let Some(matched) = match_rule(rule, screen, &logical_lines(screen)?) else {
+        let lines = ScreenLines::new(screen, profile)?;
+        let Some(matched) = match_rule(rule, screen, lines.of(rule)) else {
             return Ok(None);
         };
-        let capture = matched
-            .focuses
-            .get(plan.focus_matcher_id())
-            .expect("validated focus matcher")
-            .clone();
-        let background = rule
+        let style = rule
             .matchers
             .iter()
             .find(|matcher| matcher.id == plan.focus_matcher_id())
             .expect("validated focus matcher")
-            .background_focus;
-        let focused_choice = background
-            .then(|| background_focus(screen, &matched))
-            .flatten();
-        let focus = if background {
+            .focus_style;
+        let capture = match style {
+            Some(FocusStyle::Marker) => marker_layout(rule, &matched),
+            _ => matched
+                .focuses
+                .get(plan.focus_matcher_id())
+                .expect("validated focus matcher")
+                .clone(),
+        };
+        let focused_choice = match style {
+            Some(FocusStyle::Background) => background_focus(screen, &matched),
+            Some(FocusStyle::Marker) => marker_focus(rule, &matched, plan.focus_matcher_id()),
+            None => None,
+        };
+        let focus = if style.is_some() {
             serde_json::to_string(&(&capture, &focused_choice)).expect("focus strings serialize")
         } else {
             capture.clone()
         };
+        let choice_index = rule
+            .choices
+            .iter()
+            .position(|choice| choice.id == plan.choice_id())
+            .expect("validated answer choice");
         Ok(Some(AnswerMatch {
+            choice_label: matched.choices[choice_index].clone(),
             plan: plan.clone(),
             semantic: observed
                 .fingerprint
-                .expect("complete permission fingerprint"),
+                .expect("complete interaction fingerprint"),
             choices: matched.choices,
             focus,
             focus_capture: capture,
@@ -597,7 +716,7 @@ impl Detector {
         &self,
         profile: &Profile,
         screen: &ScreenSnapshot,
-        lines: &[LogicalLine],
+        lines: &ScreenLines,
         unmatched_evidence: &Value,
     ) -> Vec<AnnotationBlock> {
         let Some(group) = &profile.annotations else {
@@ -607,7 +726,7 @@ impl Detector {
             .rules
             .iter()
             .filter(|rule| group.rules.contains(&rule.id))
-            .flat_map(|rule| match_annotation_blocks(rule, screen, lines))
+            .flat_map(|rule| match_annotation_blocks(rule, screen, lines.of(rule)))
             .map(|matched| {
                 let mut raw_evidence = unmatched_evidence.clone();
                 raw_evidence["rule_id"] = json!(matched.rule.id);
@@ -662,7 +781,7 @@ impl Detector {
         let Some(profile) = &self.profile else {
             return Ok(observation);
         };
-        let lines = logical_lines(screen)?;
+        let lines = ScreenLines::new(screen, profile)?;
         observation.annotations =
             self.annotation_blocks(profile, screen, &lines, &observation.raw_evidence);
         observation.guarded_annotation_rules = profile
@@ -673,7 +792,7 @@ impl Detector {
                     .annotations
                     .as_ref()
                     .is_some_and(|group| group.rules.contains(&rule.id))
-                    && frame_guard_holds(rule, &lines)
+                    && frame_guard_holds(rule, lines.of(rule))
             })
             .map(|rule| rule.id.clone())
             .collect();
@@ -687,7 +806,7 @@ impl Detector {
                         .flatten()
                         .any(|cap| cap.rules.contains(&rule.id))
             })
-            .filter_map(|rule| match_rule(rule, screen, &lines))
+            .filter_map(|rule| match_rule(rule, screen, lines.of(rule)))
             .collect::<Vec<_>>();
         let Some(priority) = matched.iter().map(|m| m.rule.priority).max() else {
             return Ok(observation);
@@ -951,6 +1070,28 @@ mod tests {
     use serde_json::Value;
     use serde_json::json;
 
+    /// Claude rules read either screen, so a primary-screen replay is the same live screen.
+    fn assert_primary_matches_alternate(
+        case: &str,
+        primary: &ScreenObservation,
+        alternate: &ScreenObservation,
+    ) {
+        assert_eq!(primary.kind, alternate.kind, "{case}");
+        assert_eq!(primary.rule_id, alternate.rule_id, "{case}");
+        assert_eq!(primary.match_evidence, alternate.match_evidence, "{case}");
+        assert_eq!(
+            primary.verified_noninteraction, alternate.verified_noninteraction,
+            "{case}"
+        );
+        for field in ["operation", "operation_rows", "choices"] {
+            assert_eq!(
+                primary.raw_evidence[field], alternate.raw_evidence[field],
+                "{case}: {field}"
+            );
+        }
+        assert!(primary.fingerprint == alternate.fingerprint, "{case}");
+    }
+
     /// The Claude auto-tip permission form; `padding` written spaces follow the question and
     /// operation rows, as Claude leaves them when it repaints only the changed cells of a row
     /// that was earlier wider.
@@ -1096,9 +1237,11 @@ mod tests {
         assert_eq!(quoted.kind, ObservationKind::ComposerEmpty);
         assert!(quoted.fingerprint.is_none());
 
-        let primary = read_outside_observation(&read_outside_screen(|_| {}, false));
-        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
-        assert_ne!(primary.rule_id, READ_OUTSIDE_RULE);
+        assert_primary_matches_alternate(
+            "read-outside dialog",
+            &read_outside_observation(&read_outside_screen(|_| {}, false)),
+            &read_outside_observation(&read_outside_screen(|_| {}, true)),
+        );
 
         let cursor_outside = read_outside_observation(&replay_native_fixture(
             &bundled_screen(READ_OUTSIDE),
@@ -1131,7 +1274,7 @@ mod tests {
                 CodingAgent::Codex,
                 "0.0.1-synthetic",
                 "synthetic-permission",
-                PermissionDecision::Allow,
+                &AnswerKey::Decision(PermissionDecision::Allow),
             )
             .unwrap();
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
@@ -1270,8 +1413,11 @@ mod tests {
     #[test]
     fn bundled_claude_detector_rejects_copies_that_are_not_the_live_permission_form() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
-        let primary = claude_observation(&native_screen(|_| {}, false));
-        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
+        assert_primary_matches_alternate(
+            "permission form",
+            &claude_observation(&native_screen(|_| {}, false)),
+            &claude_observation(&native_screen(|_| {}, true)),
+        );
         let unfocused = claude_observation(&native_screen(
             |lines| lines[23] = lines[23].replace('❯', " "),
             true,
@@ -1736,8 +1882,11 @@ mod tests {
     #[test]
     fn bundled_claude_wrapped_form_keeps_the_false_positive_guards() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
-        let primary = claude_observation(&wrapped_screen(|_| {}, false));
-        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
+        assert_primary_matches_alternate(
+            "wrapped form",
+            &claude_observation(&wrapped_screen(|_| {}, false)),
+            &claude_observation(&wrapped_screen(|_| {}, true)),
+        );
         let quoted = claude_observation(&wrapped_screen(
             |lines| lines[15] = " Bash command".into(),
             true,
@@ -2113,7 +2262,12 @@ mod tests {
             for (decision, id, choice, byte) in forms.answers {
                 let plan = ProfileCatalog::bundled()
                     .unwrap()
-                    .answer_plan(forms.backend, forms.version, forms.rule, decision)
+                    .answer_plan(
+                        forms.backend,
+                        forms.version,
+                        forms.rule,
+                        &AnswerKey::Decision(decision),
+                    )
                     .expect("measured bundled answer plan");
                 assert_eq!(plan.stages().len(), 1, "{id}");
                 assert_eq!(plan.stages()[0].bytes(), &[byte], "{id}");
@@ -2169,7 +2323,17 @@ mod tests {
                     "{id} without its focus glyph"
                 );
                 let primary = replay_native_fixture(&fixture, |_| {}, false, None);
-                assert!(answer(&primary, &plan).is_none(), "{id} primary screen");
+                if forms.backend == CodingAgent::Claude {
+                    let replayed = answer(&primary, &plan)
+                        .expect("a Claude primary-screen replay is the live form");
+                    assert!(
+                        replayed.semantic() == matched.semantic(),
+                        "{id} primary screen"
+                    );
+                    assert_eq!(replayed.choices(), matched.choices(), "{id} primary screen");
+                } else {
+                    assert!(answer(&primary, &plan).is_none(), "{id} primary screen");
+                }
             }
         }
     }
@@ -2307,11 +2471,20 @@ mod tests {
             );
             assert!(!draft.verified_noninteraction, "{}", composer.idle);
             let primary = observe(&|_: &mut Vec<String>| {}, false, None);
-            assert!(
-                !primary.verified_noninteraction,
-                "{} primary-screen copy",
-                composer.idle
-            );
+            if composer.backend == CodingAgent::Claude {
+                assert_primary_matches_alternate(
+                    composer.idle,
+                    &primary,
+                    &observe(&|_: &mut Vec<String>| {}, true, None),
+                );
+                assert!(primary.verified_noninteraction, "{}", composer.idle);
+            } else {
+                assert!(
+                    !primary.verified_noninteraction,
+                    "{} primary-screen copy",
+                    composer.idle
+                );
+            }
             let away = observe(&|_: &mut Vec<String>| {}, true, Some((row, 0)));
             assert!(
                 !away.verified_noninteraction,
@@ -2331,6 +2504,787 @@ mod tests {
     fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
         assert_no_debug_or_serialize!(AnswerMatch);
     }
+    mod claude_2_1_312_guards {
+        use crate::coding_agent::detector::tests::*;
+
+        const DIALOG_A: &str = "claude-auto-default-nudge";
+        const NOTICE: &str = "claude-question-pending-notice";
+        const NUDGE: &str = "claude-2.1.312-auto-default-nudge-1";
+        const PENDING: &str = "claude-2.1.312-question-pending-notice-1";
+        const NOTICE_TEXT: &str =
+            "Claude has a question for you — it shows once you send or clear what you're typing.";
+        type LineChange = Box<dyn FnOnce(&mut Vec<String>)>;
+
+        fn replay(
+            id: &str,
+            change: impl FnOnce(&mut Vec<String>),
+            cursor: Option<(u16, u16)>,
+        ) -> ScreenObservation {
+            let fixture = bundled_screen(id);
+            let document: Value = serde_json::from_str(&fixture).unwrap();
+            let screen = replay_native_fixture(
+                &fixture,
+                change,
+                document["alternate_screen"].as_bool().unwrap(),
+                cursor,
+            );
+            Detector::new(
+                &ProfileCatalog::bundled().unwrap(),
+                CodingAgent::Claude,
+                Some("2.1.312"),
+            )
+            .observe(&screen)
+            .unwrap()
+        }
+        fn unchanged(id: &str) -> ScreenObservation {
+            replay(id, |_| {}, None)
+        }
+
+        #[test]
+        fn a_dialog_a_quoted_above_a_live_composer_is_no_interaction() {
+            assert_eq!(unchanged(NUDGE).rule_id, DIALOG_A);
+            for cursor in [None, Some((33, 2))] {
+                let quoted = replay(NUDGE, |lines| lines[33] = "❯\u{a0}".into(), cursor);
+                assert_ne!(quoted.rule_id, DIALOG_A, "{cursor:?}");
+                assert!(
+                    !matches!(quoted.kind, ObservationKind::Interaction(_)),
+                    "{cursor:?}: {:?}",
+                    quoted.kind
+                );
+            }
+        }
+
+        #[test]
+        fn a_pending_notice_outside_its_live_frame_or_margin_is_no_interaction() {
+            assert_eq!(unchanged(PENDING).rule_id, NOTICE);
+            let cases: [(&str, LineChange); 5] = [
+                (
+                    "assistant quote",
+                    Box::new(|lines| lines[19] = format!("● {NOTICE_TEXT}")),
+                ),
+                (
+                    "continuation quote",
+                    Box::new(|lines| lines[19] = format!("  {NOTICE_TEXT}")),
+                ),
+                (
+                    "quoted sentence",
+                    Box::new(|lines| lines[19] = format!("The notice said: {NOTICE_TEXT}")),
+                ),
+                (
+                    "transcript viewer",
+                    Box::new(|lines| {
+                        lines[30] = "  Showing detailed transcript · ctrl+o to toggle".into()
+                    }),
+                ),
+                (
+                    "no live composer",
+                    Box::new(|lines| lines[33] = "❯ Reply with the single word done.".into()),
+                ),
+            ];
+            for (case, change) in cases {
+                let observed = replay(PENDING, change, None);
+                assert_ne!(observed.rule_id, NOTICE, "{case}");
+                assert!(
+                    !matches!(observed.kind, ObservationKind::Interaction(_)),
+                    "{case}: {:?}",
+                    observed.kind
+                );
+            }
+        }
+
+        #[test]
+        fn a_batched_heading_outside_its_live_form_is_no_interaction() {
+            const BATCHED: &str = "claude-2.1.312-read-file-batched-permission-1";
+            const READ: &str = "claude-read-file-permission";
+            assert_eq!(unchanged(BATCHED).rule_id, READ);
+            let cases: [(&str, LineChange); 4] = [
+                (
+                    "assistant quote",
+                    Box::new(|lines| lines[18] = format!("●{}", &lines[18][1..])),
+                ),
+                (
+                    "counter without a heading",
+                    Box::new(|lines| lines[18] = format!("{:>120}", "1 of 2")),
+                ),
+                (
+                    "counter on another heading",
+                    Box::new(|lines| lines[18] = format!(" Read files{:>109}", "1 of 2")),
+                ),
+                ("no live footer", Box::new(|lines| lines[27].clear())),
+            ];
+            for (case, change) in cases {
+                let observed = replay(BATCHED, change, None);
+                assert_ne!(observed.rule_id, READ, "{case}");
+                assert!(
+                    !matches!(observed.kind, ObservationKind::Interaction(_)),
+                    "{case}: {:?}",
+                    observed.kind
+                );
+            }
+        }
+
+        #[test]
+        fn primary_screen_remnants_after_the_form_closes_produce_no_interaction() {
+            for id in [
+                "claude-2.1.312-primary-closed-form-1",
+                "claude-2.1.312-primary-idle-composer-1",
+                "claude-2.1.312-primary-resized-narrow-1",
+                "claude-2.1.312-primary-resized-idle-composer-1",
+            ] {
+                let observed = unchanged(id);
+                assert_eq!(observed.kind, ObservationKind::ComposerEmpty, "{id}");
+                assert_eq!(observed.rule_id, "claude-idle-composer", "{id}");
+                for cursor in [(6, 2), (10, 2), (11, 5)] {
+                    let elsewhere = replay(id, |_| {}, Some(cursor));
+                    assert!(
+                        !matches!(elsewhere.kind, ObservationKind::Interaction(_)),
+                        "{id} {cursor:?}: {:?}",
+                        elsewhere.kind
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn trailing_padding_keeps_each_new_rule_identity() {
+            for (id, rule) in [
+                (NUDGE, DIALOG_A),
+                ("claude-2.1.312-auto-default-accept-edits-nudge-1", DIALOG_A),
+                ("claude-2.1.312-primary-auto-default-nudge-1", DIALOG_A),
+                (PENDING, NOTICE),
+                (
+                    "claude-2.1.312-auto-env-setup-offer-1",
+                    "claude-auto-startup",
+                ),
+                (
+                    "claude-2.1.302-auto-env-setup-wizard-1",
+                    "claude-auto-env-setup-wizard",
+                ),
+                (
+                    "claude-2.1.312-read-file-permission-1",
+                    "claude-read-file-permission",
+                ),
+                (
+                    "claude-2.1.312-edit-file-permission-1",
+                    "claude-edit-file-permission",
+                ),
+                (
+                    "claude-2.1.312-create-file-permission-1",
+                    "claude-create-file-permission",
+                ),
+                (
+                    "claude-2.1.312-bash-no-tip-permission-1",
+                    "claude-bash-permission-no-tip",
+                ),
+                (
+                    "claude-2.1.312-bash-no-tip-access-permission-1",
+                    "claude-bash-permission-no-tip",
+                ),
+            ] {
+                let plain = unchanged(id);
+                assert_eq!(plain.rule_id, rule, "{id}");
+                for padding in [1, 4] {
+                    let padded = replay(
+                        id,
+                        |lines| {
+                            for line in lines.iter_mut() {
+                                if !line.trim().is_empty() && line.chars().count() + padding < 120 {
+                                    line.push_str(&" ".repeat(padding));
+                                }
+                            }
+                        },
+                        None,
+                    );
+                    assert_eq!(padded.rule_id, rule, "{id} +{padding}");
+                    assert_eq!(padded.kind, plain.kind, "{id} +{padding}");
+                    for field in ["operation", "operation_rows", "choices"] {
+                        assert_eq!(
+                            padded.raw_evidence[field], plain.raw_evidence[field],
+                            "{id} +{padding}: {field}"
+                        );
+                    }
+                    assert!(padded.fingerprint == plain.fingerprint, "{id} +{padding}");
+                }
+            }
+        }
+    }
+
+    mod panel_clipping {
+        use crate::coding_agent::detector::tests::*;
+
+        const COLS: u16 = 120;
+        const SEPARATOR: u16 = 80;
+        const PANEL: &str = "\x1b[2;48;5;235m";
+        const FORM: [&str; 6] = [
+            "Synthetic permission request",
+            "Operation: write disposable.txt",
+            "> Allow once",
+            "  Deny once",
+            "Request form: synthetic-only",
+            "Selection: ",
+        ];
+
+        struct Row {
+            left: String,
+            separator: Option<(u16, &'static str)>,
+            panel: String,
+        }
+        fn row(left: &str, separator: Option<u16>) -> Row {
+            Row {
+                left: left.into(),
+                separator: separator.map(|col| (col, PANEL)),
+                panel: " src/lib.rs +after".into(),
+            }
+        }
+        /// Writes each row at its 1-based screen row; a separator row draws the glyph at its
+        /// 0-based column in its style, then one panel cell run in the same background.
+        fn screen(rows: &[(u16, Row)], cursor: (u16, u16)) -> ScreenSnapshot {
+            let mut bytes = String::from("\x1b[0m\x1b[2J");
+            for (line, row) in rows {
+                bytes.push_str(&format!("\x1b[{line};1H{}", row.left));
+                if let Some((col, style)) = row.separator {
+                    bytes.push_str(&format!(
+                        "\x1b[{line};{}H{style}│\x1b[22m{}\x1b[0m",
+                        col + 1,
+                        row.panel
+                    ));
+                }
+            }
+            bytes.push_str(&format!("\x1b[{};{}H", cursor.0 + 1, cursor.1 + 1));
+            let mut state = TerminalState::new(TerminalSize {
+                rows: 24,
+                cols: COLS,
+            })
+            .unwrap();
+            state.feed(bytes.as_bytes()).unwrap();
+            state.snapshot()
+        }
+        /// The synthetic permission form at rows 19-24 with a separator at `columns[i]` on form
+        /// row `i` (none past the slice) and, when `above`, on every row above the form.
+        fn form(columns: &[Option<u16>], above: Option<u16>) -> ScreenSnapshot {
+            let mut rows = Vec::new();
+            if let Some(col) = above {
+                for line in 1..19 {
+                    rows.push((line, row("", Some(col))));
+                }
+            }
+            for (index, left) in FORM.iter().enumerate() {
+                rows.push((
+                    19 + index as u16,
+                    row(left, columns.get(index).copied().flatten()),
+                ));
+            }
+            screen(&rows, (23, 11))
+        }
+        fn declaring() -> Value {
+            let mut value = definitions();
+            value["profiles"][0]["rules"][0]["region"]["panel_separator"] = json!("│");
+            value
+        }
+        fn observe(definition: &Value, screen: &ScreenSnapshot) -> ScreenObservation {
+            let catalog = ProfileCatalog::from_definitions(definition).unwrap();
+            Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
+                .observe(screen)
+                .unwrap()
+        }
+        fn full_width() -> ScreenSnapshot {
+            form(&[], None)
+        }
+        fn assert_same_request(case: &str, clipped: &ScreenObservation, full: &ScreenObservation) {
+            assert_eq!(
+                clipped.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "{case}"
+            );
+            assert_eq!(clipped.rule_id, RULE, "{case}");
+            assert_eq!(clipped.match_evidence, MatchEvidence::Complete, "{case}");
+            for field in ["operation", "operation_rows", "choices", "excerpt"] {
+                assert_eq!(
+                    clipped.raw_evidence[field], full.raw_evidence[field],
+                    "{case}: {field}"
+                );
+            }
+            assert!(clipped.fingerprint == full.fingerprint, "{case}");
+        }
+
+        #[test]
+        fn a_shared_separator_column_clips_every_panel_row_for_a_declaring_rule() {
+            let full = observe(&declaring(), &full_width());
+            assert_eq!(full.rule_id, RULE);
+            let every = [Some(SEPARATOR); 6];
+            for (case, screen) in [
+                ("every form row", form(&every, None)),
+                (
+                    "every row above and on the form",
+                    form(&every, Some(SEPARATOR)),
+                ),
+                ("a full-width last row", form(&every[..5], Some(SEPARATOR))),
+                ("one panel row", form(&[None, Some(SEPARATOR)], None)),
+            ] {
+                assert_same_request(case, &observe(&declaring(), &screen), &full);
+            }
+        }
+
+        #[test]
+        fn a_clipped_request_answers_through_the_same_plan() {
+            let mut value = inspection_fixture_definition();
+            value["profiles"][0]["rules"][0]["region"]["panel_separator"] = json!("│");
+            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
+            let plan = catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    RULE,
+                    &AnswerKey::Decision(PermissionDecision::Allow),
+                )
+                .unwrap();
+            let clipped = detector
+                .match_answer(&form(&[Some(SEPARATOR); 6], Some(SEPARATOR)), &plan)
+                .unwrap()
+                .expect("the clipped form answers");
+            let full = detector
+                .match_answer(&full_width(), &plan)
+                .unwrap()
+                .expect("the full-width form answers");
+            assert_eq!(clipped.choices(), full.choices());
+            assert!(clipped.semantic() == full.semantic());
+            assert_eq!(clipped.focus(), full.focus());
+        }
+
+        #[test]
+        fn differing_separator_columns_clip_no_row() {
+            for columns in [
+                [Some(80), Some(81), Some(80), Some(80), Some(80), Some(80)],
+                [Some(80), Some(80), Some(80), Some(80), Some(80), Some(60)],
+            ] {
+                let observation = observe(&declaring(), &form(&columns, None));
+                assert_ne!(observation.rule_id, RULE, "{columns:?}");
+            }
+            let observation = observe(&declaring(), &form(&[Some(80); 6], Some(81)));
+            assert_ne!(observation.rule_id, RULE, "rows above use another column");
+        }
+
+        #[test]
+        fn a_separator_glyph_on_its_rows_background_is_never_a_separator() {
+            for (style, row_background) in [
+                ("", ""),
+                ("\x1b[2m", ""),
+                ("\x1b[2;48;5;235m", "\x1b[48;5;235m\x1b[2K"),
+            ] {
+                let rows = FORM
+                    .iter()
+                    .enumerate()
+                    .map(|(index, left)| {
+                        let mut value = row(left, Some(SEPARATOR));
+                        value.separator = Some((SEPARATOR, style));
+                        value.left = format!("{row_background}{left}");
+                        (19 + index as u16, value)
+                    })
+                    .collect::<Vec<_>>();
+                let observation = observe(&declaring(), &screen(&rows, (23, 11)));
+                assert_ne!(observation.rule_id, RULE, "{style:?}");
+            }
+            let boxed = [
+                (19, row("Synthetic permission request", None)),
+                (20, row("Operation: write disposable.txt", None)),
+                (21, row("> Allow once", None)),
+                (22, row("  Deny once", None)),
+                (23, row("Request form: synthetic-only", None)),
+                (24, row("Selection: ", None)),
+                (
+                    10,
+                    Row {
+                        left: format!("{:<50}│ touch /tmp/cafleet-f-out/p4.txt", ""),
+                        separator: None,
+                        panel: String::new(),
+                    },
+                ),
+            ];
+            let full = observe(&declaring(), &full_width());
+            assert_same_request(
+                "a boxed gutter",
+                &observe(&declaring(), &screen(&boxed, (23, 11))),
+                &full,
+            );
+        }
+
+        fn single_cell_panel(col: u16, panel: &str) -> ScreenSnapshot {
+            let rows = FORM
+                .iter()
+                .enumerate()
+                .map(|(index, left)| {
+                    let mut value = row(left, Some(col));
+                    value.panel = panel.into();
+                    (19 + index as u16, value)
+                })
+                .collect::<Vec<_>>();
+            screen(&rows, (23, 11))
+        }
+
+        #[test]
+        fn the_separator_column_lies_from_column_40_before_the_last_column() {
+            for (col, panel) in [(39, " "), (COLS - 1, "")] {
+                let observation = observe(&declaring(), &single_cell_panel(col, panel));
+                assert_ne!(observation.rule_id, RULE, "{col}");
+            }
+            let full = observe(&declaring(), &full_width());
+            for col in [40, COLS - 2] {
+                assert_same_request(
+                    &format!("column {col}"),
+                    &observe(&declaring(), &single_cell_panel(col, " ")),
+                    &full,
+                );
+            }
+        }
+
+        fn wrapped_form() -> ScreenSnapshot {
+            let mut rows = Vec::new();
+            for (index, left) in FORM.iter().enumerate() {
+                let mut value = row(left, Some(SEPARATOR));
+                if index == 1 {
+                    value.panel = format!(" {}", "x".repeat(45));
+                }
+                rows.push((19 + index as u16, value));
+            }
+            screen(&rows, (23, 11))
+        }
+
+        #[test]
+        fn a_clipped_row_is_never_soft_joined_to_the_next_row() {
+            let screen = wrapped_form();
+            assert!(
+                screen.screen.row_wrapped(19),
+                "the overflowing panel text wraps the operation row"
+            );
+            assert_ne!(
+                observe(&definitions(), &screen).rule_id,
+                RULE,
+                "unclipped, the wrapped operation row joins the next row"
+            );
+            assert_same_request(
+                "a wrapped panel row",
+                &observe(&declaring(), &screen),
+                &observe(&declaring(), &full_width()),
+            );
+        }
+
+        fn state_rule(id: &str, separator: bool) -> Value {
+            let mut rule = json!({
+                "id":id,"priority":100,"observation":"question",
+                "region":{"screen":"either","start_pattern":"^Status idle +│ ready$","end_pattern":"^Status idle +│ ready$","max_rows":1,"cursor":"any"},
+                "matchers":[{"id":"status","scope":"line","pattern":"^Status idle +│ ready$"}],
+                "extract":{"operation":null,"choices":[],"native_request_id":null},
+                "verified_noninteraction":false,"sensitive":false
+            });
+            if separator {
+                rule["region"]["panel_separator"] = json!("│");
+            }
+            rule
+        }
+        fn with_state_rule(separator: bool) -> Value {
+            let mut value = declaring();
+            value["profiles"][0]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .push(state_rule("synthetic-panel-state", separator));
+            value["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+                json!([RULE, "synthetic-panel-state"]);
+            value
+        }
+
+        #[test]
+        fn rules_without_a_panel_separator_see_unclipped_rows() {
+            let mut status = row("Status idle", Some(SEPARATOR));
+            status.panel = " ready".into();
+            let screen = screen(&[(5, status)], (0, 0));
+            let unclipped = observe(&with_state_rule(false), &screen);
+            assert_eq!(unclipped.rule_id, "synthetic-panel-state");
+            assert_eq!(
+                unclipped.kind,
+                ObservationKind::Interaction(InteractionClass::Question)
+            );
+            let clipped = observe(&with_state_rule(true), &screen);
+            assert_ne!(clipped.rule_id, "synthetic-panel-state");
+        }
+
+        #[test]
+        fn a_profile_without_any_panel_separator_never_clips() {
+            let observation = observe(&definitions(), &form(&[Some(SEPARATOR); 6], None));
+            assert_ne!(observation.rule_id, RULE);
+            assert_eq!(observe(&definitions(), &full_width()).rule_id, RULE);
+        }
+    }
+
+    mod question_answers {
+        use crate::coding_agent::detector::tests::*;
+
+        fn catalog() -> ProfileCatalog {
+            ProfileCatalog::from_definitions(&question_fixture_definition()).unwrap()
+        }
+        fn screen(bytes: &[u8]) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+            state.feed(bytes).unwrap();
+            state.snapshot()
+        }
+        fn detector() -> Detector {
+            Detector::new(&catalog(), CodingAgent::Codex, Some(VERSION))
+        }
+        fn plan(request: &str, key: AnswerKey) -> AnswerPlan {
+            catalog()
+                .answer_plan(CodingAgent::Codex, VERSION, request, &key)
+                .expect("synthetic question profile plan")
+        }
+        fn choice_plan(id: &str) -> AnswerPlan {
+            plan(QUESTION_RULE, AnswerKey::Choice(id.into()))
+        }
+        fn allow_plan() -> AnswerPlan {
+            plan(RULE, AnswerKey::Decision(PermissionDecision::Allow))
+        }
+        fn matched(focused: &[&str], id: &str) -> Option<AnswerMatch> {
+            detector()
+                .match_answer(&screen(&question_fixture_form(focused)), &choice_plan(id))
+                .unwrap()
+        }
+
+        #[test]
+        fn a_question_form_is_a_complete_question_with_its_choice_labels() {
+            let observation = detector()
+                .observe(&screen(&question_fixture_form(&["accept"])))
+                .unwrap();
+            assert_eq!(
+                observation.kind,
+                ObservationKind::Interaction(InteractionClass::Question)
+            );
+            assert_eq!(observation.rule_id, QUESTION_RULE);
+            assert_eq!(observation.match_evidence, MatchEvidence::Complete);
+            assert_eq!(
+                observation.raw_evidence["choices"],
+                json!(["Accept the change", "Keep current", "Ask later"])
+            );
+            assert!(observation.fingerprint.is_some());
+        }
+
+        #[test]
+        fn match_answer_matches_a_question_for_each_of_its_choice_plans() {
+            for id in ["decline", "later"] {
+                let matched = matched(&["accept"], id).expect("a choice plan matches its question");
+                assert!(matched.plan() == &choice_plan(id), "{id}");
+                assert_eq!(
+                    matched.choices(),
+                    ["Accept the change", "Keep current", "Ask later"],
+                    "{id}"
+                );
+            }
+        }
+
+        #[test]
+        fn match_answer_refuses_a_choice_plan_on_a_permission_form_and_a_decision_plan_on_a_question()
+         {
+            let permission = screen(&inspection_fixture_form(
+                "write disposable.txt",
+                "synthetic-only",
+            ));
+            let observed = detector().observe(&permission).unwrap();
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert!(
+                detector()
+                    .match_answer(&permission, &allow_plan())
+                    .unwrap()
+                    .is_some(),
+                "the decision plan answers its permission form"
+            );
+            for id in ["decline", "later"] {
+                assert!(
+                    detector()
+                        .match_answer(&permission, &choice_plan(id))
+                        .unwrap()
+                        .is_none(),
+                    "{id} on a permission form"
+                );
+            }
+            let question = screen(&question_fixture_form(&["accept"]));
+            assert!(
+                detector()
+                    .match_answer(&question, &allow_plan())
+                    .unwrap()
+                    .is_none(),
+                "a decision plan on a question"
+            );
+            assert!(
+                detector()
+                    .match_answer(&screen(&question_notice_form()), &choice_plan("decline"))
+                    .unwrap()
+                    .is_none(),
+                "a choice plan on another question rule"
+            );
+        }
+
+        #[test]
+        fn match_answer_refuses_a_choice_plan_from_another_profile_version() {
+            let other = Detector::new(&catalog(), CodingAgent::Codex, Some("0.0.2-synthetic"));
+            assert!(
+                other
+                    .match_answer(
+                        &screen(&question_fixture_form(&["accept"])),
+                        &choice_plan("decline")
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn marker_focus_resolves_the_one_choice_on_the_marker_row() {
+            for (focused, expected) in [
+                ("accept", "accept"),
+                ("decline", "decline"),
+                ("later", "later"),
+            ] {
+                for id in ["decline", "later"] {
+                    let matched = matched(&[focused], id).expect("the question matches");
+                    assert_eq!(
+                        matched.focused_choice_id(),
+                        Some(expected),
+                        "{focused} {id}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn marker_focus_resolves_no_choice_when_the_marker_row_holds_no_choice_label() {
+            let unlisted = b"\x1b[0m\x1b[2J\x1b[18;1HSynthetic question?\r\n  Accept the change\r\n  Keep current\r\n> Other option\r\n  Ask later\r\nQuestion end";
+            let matched = detector()
+                .match_answer(&screen(unlisted), &choice_plan("decline"))
+                .unwrap()
+                .expect("the question with an unlisted focused option matches");
+            assert_eq!(matched.focused_choice_id(), None);
+        }
+
+        #[test]
+        fn marker_focus_resolves_no_choice_when_the_marker_row_holds_several_choice_labels() {
+            let mut value = question_fixture_definition();
+            value["profiles"][0]["rules"][1]["matchers"][4]["pattern"] =
+                json!(" / (?P<label>Ask later)$");
+            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let plan = catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    QUESTION_RULE,
+                    &AnswerKey::Choice("decline".into()),
+                )
+                .unwrap();
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
+            let shared = b"\x1b[0m\x1b[2J\x1b[19;1HSynthetic question?\r\n  Accept the change\r\n> Keep current / Ask later\r\nQuestion end";
+            let matched = detector
+                .match_answer(&screen(shared), &plan)
+                .unwrap()
+                .expect("the question with two labels on the marker row matches");
+            assert_eq!(matched.focused_choice_id(), None);
+            let separate = b"\x1b[0m\x1b[2J\x1b[19;1HSynthetic question?\r\n> Accept the change\r\n  Keep current / Ask later\r\nQuestion end";
+            let matched = detector
+                .match_answer(&screen(separate), &plan)
+                .unwrap()
+                .expect("the question with one label on the marker row matches");
+            assert_eq!(matched.focused_choice_id(), Some("accept"));
+        }
+
+        #[test]
+        fn marker_focus_identity_is_the_capture_and_focused_choice_like_background_focus() {
+            let accept = matched(&["accept"], "decline").unwrap();
+            let decline = matched(&["decline"], "decline").unwrap();
+            for value in [&accept, &decline] {
+                assert_eq!(
+                    value.focus(),
+                    serde_json::to_string(&(value.focus_capture(), value.focused_choice_id()))
+                        .unwrap()
+                );
+            }
+            assert_ne!(accept.focus(), decline.focus());
+            assert!(accept.semantic() == decline.semantic());
+            assert!(!accept.same_request(&decline));
+            assert!(accept.same_request(&matched(&["accept"], "decline").unwrap()));
+            let a = detector()
+                .observe(&screen(&question_fixture_form(&["accept"])))
+                .unwrap();
+            let b = detector()
+                .observe(&screen(&question_fixture_form(&["decline"])))
+                .unwrap();
+            assert!(
+                a.fingerprint == b.fingerprint,
+                "a focus move keeps the episode identity"
+            );
+        }
+
+        fn framed_catalog() -> ProfileCatalog {
+            let mut value = question_fixture_definition();
+            value["profiles"][0]["rules"][1]["frame"] =
+                json!({"require_patterns":[],"reject_patterns":["^Live composer$"]});
+            ProfileCatalog::from_definitions(&value).unwrap()
+        }
+
+        #[test]
+        fn an_interaction_frame_reject_pattern_suppresses_the_rule_anywhere_on_the_screen() {
+            let catalog = framed_catalog();
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
+            let alone = detector
+                .observe(&screen(&question_fixture_form(&["accept"])))
+                .unwrap();
+            assert_eq!(
+                alone.kind,
+                ObservationKind::Interaction(InteractionClass::Question)
+            );
+            assert_eq!(alone.rule_id, QUESTION_RULE);
+            let mut quoted = question_fixture_form(&["accept"]);
+            quoted.extend_from_slice(b"\x1b[2;1HLive composer");
+            let quoted = detector.observe(&screen(&quoted)).unwrap();
+            assert_ne!(quoted.rule_id, QUESTION_RULE);
+            assert_ne!(
+                quoted.kind,
+                ObservationKind::Interaction(InteractionClass::Question)
+            );
+            let plan = catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    QUESTION_RULE,
+                    &AnswerKey::Choice("decline".into()),
+                )
+                .unwrap();
+            let mut quoted = question_fixture_form(&["accept"]);
+            quoted.extend_from_slice(b"\x1b[24;1HLive composer");
+            assert!(
+                detector
+                    .match_answer(&screen(&quoted), &plan)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn an_interaction_frame_require_pattern_must_appear_on_the_screen() {
+            let mut value = question_fixture_definition();
+            value["profiles"][0]["rules"][1]["frame"] = json!({
+                "require_patterns":["^Footer: question$"],"reject_patterns":["^Live composer$"]
+            });
+            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
+            let without = detector
+                .observe(&screen(&question_fixture_form(&["accept"])))
+                .unwrap();
+            assert_ne!(without.rule_id, QUESTION_RULE);
+            let mut with = question_fixture_form(&["accept"]);
+            with.extend_from_slice(b"\x1b[2;1HFooter: question");
+            let with = detector.observe(&screen(&with)).unwrap();
+            assert_eq!(with.rule_id, QUESTION_RULE);
+        }
+    }
+
     mod focus_resolution {
         use crate::coding_agent::detector::tests::*;
 
@@ -2350,7 +3304,12 @@ mod tests {
 
         fn gated_plan(decision: PermissionDecision) -> AnswerPlan {
             gated_catalog()
-                .answer_plan(CodingAgent::Codex, VERSION, GATED_RULE, decision)
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    GATED_RULE,
+                    &AnswerKey::Decision(decision),
+                )
                 .unwrap()
         }
 
@@ -3545,7 +4504,7 @@ mod tests {
                     CodingAgent::Opencode,
                     VERSION,
                     PERMISSION_RULE,
-                    PermissionDecision::Allow,
+                    &AnswerKey::Decision(PermissionDecision::Allow),
                 )
                 .unwrap();
             bundled_detector(CodingAgent::Opencode, VERSION)
@@ -4018,7 +4977,12 @@ mod tests {
         fn plan(rule: &str, decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
                 .unwrap()
-                .answer_plan(CodingAgent::Hermes, VERSION, rule, decision)
+                .answer_plan(
+                    CodingAgent::Hermes,
+                    VERSION,
+                    rule,
+                    &AnswerKey::Decision(decision),
+                )
                 .expect("measured bundled Hermes answer plan")
         }
 
@@ -4153,7 +5117,7 @@ mod tests {
                 assert_eq!(plan.capability().backend(), CodingAgent::Hermes);
                 assert_eq!(plan.capability().native_version(), VERSION);
                 assert_eq!(plan.capability().request_rule_id(), rule);
-                assert_eq!(plan.capability().decision(), decision);
+                assert_eq!(plan.capability().key(), &AnswerKey::Decision(decision));
                 assert_eq!(plan.stages().len(), 1, "{rule} {decision:?}");
                 let stage = &plan.stages()[0];
                 assert_eq!(stage.bytes(), &[byte], "{rule} {decision:?}");
@@ -4179,7 +5143,12 @@ mod tests {
                 assert!(
                     ProfileCatalog::bundled()
                         .unwrap()
-                        .answer_plan(CodingAgent::Hermes, VERSION, IDLE, decision)
+                        .answer_plan(
+                            CodingAgent::Hermes,
+                            VERSION,
+                            IDLE,
+                            &AnswerKey::Decision(decision)
+                        )
                         .is_none()
                 );
             }

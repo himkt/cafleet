@@ -929,10 +929,12 @@ fn association(
             && view.event.kind == RuntimeEventKind::InteractionOpened
             && view.event.notification_state == NotificationState::Inbox
             && director == run.director_member_id
-            && view
-                .interaction
-                .as_ref()
-                .is_some_and(|value| value.classification == InteractionClass::PermissionRequest),
+            && view.interaction.as_ref().is_some_and(|value| {
+                matches!(
+                    value.classification,
+                    InteractionClass::PermissionRequest | InteractionClass::Question
+                )
+            }),
         "permission run/event/interaction/Director association mismatch",
     )
 }
@@ -945,7 +947,7 @@ fn metadata(
         interaction_id: input.interaction_id,
         expected_owner_epoch: input.expected_owner_epoch,
         request_token: input.request_token.clone(),
-        decision: input.decision,
+        key: input.key.clone(),
         director_member_id: input.director_member_id,
         director_mode: input.director_mode,
         decision_source: input.decision_source,
@@ -1003,7 +1005,7 @@ pub(super) fn projection(
         owner_epoch: metadata.expected_owner_epoch,
         interaction_id: metadata.interaction_id,
         event_id: metadata.event_id,
-        decision: metadata.decision,
+        key: metadata.key,
         decision_source: metadata.decision_source,
     })
 }
@@ -1309,7 +1311,10 @@ fn inspect_permission_with_host(
                 && reply.evidence["screen_seq"].as_u64() == Some(reply.output_seq),
             "permission inspection evidence identity mismatch",
         )?;
-        let missing = crate::runtime::input::inspection_missing_evidence(&reply.evidence)?;
+        let missing = crate::runtime::input::interaction_missing_evidence(
+            interaction.classification,
+            &reply.evidence,
+        )?;
         ensure(
             reply
                 .missing_evidence
@@ -1322,8 +1327,17 @@ fn inspect_permission_with_host(
             Coverage::Tested => ensure(
                 run.native_version.is_some()
                     && reply.request_token.is_some()
-                    && !reply.supported_decisions.is_empty()
-                    && reply.classification == Some(InteractionClass::PermissionRequest)
+                    && match interaction.classification {
+                        InteractionClass::Question => {
+                            reply.supported_decisions.is_empty()
+                                && !reply.supported_choices.is_empty()
+                        }
+                        _ => {
+                            !reply.supported_decisions.is_empty()
+                                && reply.supported_choices.is_empty()
+                        }
+                    }
+                    && reply.classification == Some(interaction.classification)
                     && reply.visibility == Visibility::Visible
                     && reply.capability_reason.is_none(),
                 "permission inspection capability fields disagree",
@@ -1331,6 +1345,7 @@ fn inspect_permission_with_host(
             Coverage::Unknown => ensure(
                 reply.request_token.is_none()
                     && reply.supported_decisions.is_empty()
+                    && reply.supported_choices.is_empty()
                     && reply
                         .capability_reason
                         .as_ref()
@@ -1751,6 +1766,7 @@ pub(crate) fn reconcile_input_with_host(
 pub(crate) mod test_support {
     use crate::broker::runtime as storage;
     use crate::broker::runtime::*;
+    use crate::coding_agent::catalog::AnswerKey;
     use crate::config::Settings;
     use crate::runtime::test_support::Fixture;
     use crate::runtime::*;
@@ -1791,7 +1807,7 @@ pub(crate) mod test_support {
                 expected_run_id: self.owner.run_id,
                 expected_owner_epoch: metadata.expected_owner_epoch,
                 request_token: metadata.request_token.clone(),
-                decision: metadata.decision,
+                key: metadata.key.clone(),
                 decision_source: metadata.decision_source,
                 director_mode: metadata.director_mode,
                 mode_evidence_ref: metadata.mode_evidence_ref.clone(),
@@ -1886,7 +1902,7 @@ pub(crate) mod test_support {
                     interaction_id: event.interaction_id.unwrap(),
                     expected_owner_epoch: owner.owner_epoch,
                     request_token: "a".repeat(64),
-                    decision,
+                    key: AnswerKey::Decision(decision),
                     director_member_id: fixture.run.director_member_id,
                     director_mode: mode,
                     decision_source: source,
@@ -2136,6 +2152,7 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
+    use crate::coding_agent::catalog::AnswerKey;
     use crate::runtime::input_client::*;
     use crate::runtime::service::test_support::ServiceFixture;
     use crate::runtime::service::test_support::input_service::input_service_barrier;
@@ -2764,7 +2781,7 @@ mod tests {
             expected_run_id: run.run_id,
             expected_owner_epoch: run.owner_epoch,
             request_token: current.request_token.expect("actual current service token"),
-            decision: PermissionDecision::Allow,
+            key: AnswerKey::Decision(PermissionDecision::Allow),
             decision_source: DecisionSource::DirectorAuto,
             director_mode: DirectorMode::Auto,
             mode_evidence_ref: "fixture:service-mode".into(),
@@ -2804,15 +2821,10 @@ mod tests {
             )
         );
         assert_eq!(
-            (
-                &m.request_token,
-                m.decision,
-                m.director_mode,
-                m.decision_source
-            ),
+            (&m.request_token, &m.key, m.director_mode, m.decision_source),
             (
                 &input.request_token,
-                input.decision,
+                &input.key,
                 input.director_mode,
                 input.decision_source
             )
@@ -2965,7 +2977,7 @@ mod tests {
                 result.owner_epoch,
                 result.interaction_id,
                 result.event_id,
-                result.decision,
+                &result.key,
                 result.decision_source
             ),
             (
@@ -2974,7 +2986,7 @@ mod tests {
                 run.owner_epoch,
                 input.interaction_id,
                 input.event_id,
-                input.decision,
+                &input.key,
                 input.decision_source
             )
         );
@@ -5695,6 +5707,7 @@ mod tests {
         }
 
         mod entry {
+            use crate::coding_agent::catalog::AnswerKey;
             use crate::runtime::InputCommandHost;
             use crate::runtime::InputControlReply;
             use crate::runtime::InputControlRequest;
@@ -5801,7 +5814,7 @@ mod tests {
                 );
                 assert_eq!(result.interaction_id, case.request.metadata.interaction_id);
                 assert_eq!(result.event_id, case.event.event_id);
-                assert_eq!(result.decision, case.request.metadata.decision);
+                assert_eq!(result.key, case.request.metadata.key);
                 assert_eq!(
                     result.decision_source,
                     case.request.metadata.decision_source
@@ -6076,7 +6089,7 @@ mod tests {
                         "run" => request.expected_run_id += 1,
                         "epoch" => request.expected_owner_epoch += 1,
                         "token" => request.request_token = "b".repeat(64),
-                        "decision" => request.decision = PermissionDecision::Deny,
+                        "decision" => request.key = AnswerKey::Decision(PermissionDecision::Deny),
                         "source" => request.decision_source = DecisionSource::DirectorAuto,
                         "mode" => request.director_mode = DirectorMode::Manual,
                         "mode_ref" => request.mode_evidence_ref = "fixture:other-mode".into(),
@@ -6783,7 +6796,9 @@ mod tests {
                         match field {
                             "epoch" => request.expected_owner_epoch += 1,
                             "token" => request.request_token = "b".repeat(64),
-                            "decision" => request.decision = PermissionDecision::Deny,
+                            "decision" => {
+                                request.key = AnswerKey::Decision(PermissionDecision::Deny)
+                            }
                             "mode_ref" => request.mode_evidence_ref = "fixture:other-mode".into(),
                             "decision_ref" => {
                                 request.decision_evidence_ref = "fixture:other-decision".into()

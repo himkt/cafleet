@@ -1,5 +1,6 @@
 use crate::broker::runtime::*;
 use crate::coding_agent::AnswerCapability;
+use crate::coding_agent::catalog::valid_choice_id;
 use crate::runtime::with_database_deadline;
 use crate::time::now_stamp;
 use rusqlite::Connection;
@@ -818,6 +819,13 @@ fn validate_metadata(metadata: &PermissionResponseMetadata) -> Result<(), Caflee
             "nonblank reference of 1-2048 UTF-8 bytes without controls required",
         )?;
     }
+    if let AnswerKey::Choice(choice) = &metadata.key {
+        require(
+            valid_choice_id(choice),
+            "choice_id",
+            "lowercase hyphenated choice id of 1-64 bytes required",
+        )?;
+    }
     nonblank(&metadata.answer_rule_id, "answer_rule_id")
 }
 
@@ -829,12 +837,26 @@ pub(crate) fn permission_response_digest(
     validate_metadata(metadata)?;
     let object = json!({"run_id":run_id,"owner_epoch":metadata.expected_owner_epoch,
         "interaction_id":metadata.interaction_id,"event_id":metadata.event_id,"director_member_id":metadata.director_member_id,
-        "request_token":metadata.request_token,"decision":metadata.decision,"director_mode":metadata.director_mode,
+        "request_token":metadata.request_token,"decision":metadata.key.decision(),"choice_id":metadata.key.choice(),
+        "director_mode":metadata.director_mode,
         "decision_source":metadata.decision_source,"mode_evidence_ref":metadata.mode_evidence_ref,
         "decision_evidence_ref":metadata.decision_evidence_ref,"answer_rule_id":metadata.answer_rule_id});
     Ok(crate::digest::sha256_hex(
         crate::digest::canonical_json(&object).as_bytes(),
     ))
+}
+
+fn stored_key(
+    decision: Option<PermissionDecision>,
+    choice_id: Option<String>,
+) -> rusqlite::Result<AnswerKey> {
+    match (decision, choice_id) {
+        (Some(decision), None) => Ok(AnswerKey::Decision(decision)),
+        (None, Some(choice)) => Ok(AnswerKey::Choice(choice)),
+        _ => Err(rusqlite::Error::InvalidColumnName(
+            "member_permission_responses requires exactly one of decision and choice_id".into(),
+        )),
+    }
 }
 
 fn map_response(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionResponseRecord> {
@@ -845,7 +867,7 @@ fn map_response(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionResponseR
             interaction_id: row.get("interaction_id")?,
             expected_owner_epoch: row.get("expected_owner_epoch")?,
             request_token: row.get("request_token")?,
-            decision: row.get("decision")?,
+            key: stored_key(row.get("decision")?, row.get("choice_id")?)?,
             director_member_id: row.get("director_member_id")?,
             director_mode: row.get("director_mode")?,
             decision_source: row.get("decision_source")?,
@@ -951,6 +973,13 @@ pub(super) fn validate_input_response(
     Ok(Some(response))
 }
 
+fn answered_class(key: &AnswerKey) -> InteractionClass {
+    match key {
+        AnswerKey::Decision(_) => InteractionClass::PermissionRequest,
+        AnswerKey::Choice(_) => InteractionClass::Question,
+    }
+}
+
 fn permission_event_matches(
     event: &RuntimeEventView,
     run_id: i64,
@@ -962,7 +991,7 @@ fn permission_event_matches(
         && event.event.kind == RuntimeEventKind::InteractionOpened
         && event.event.notification_state == NotificationState::Inbox
         && event.interaction.as_ref().is_some_and(|interaction| {
-            interaction.classification == InteractionClass::PermissionRequest
+            interaction.classification == answered_class(&metadata.key)
                 && (!require_open || interaction.closed_at.is_none())
         })
 }
@@ -1062,7 +1091,7 @@ pub(crate) fn reserve_permission_response(
         let now = now_stamp();
         tx.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,?2,'permission_response',?3,'in_progress',?4,?4)",params![run.run_id,request.operation_key,digest,now])?;
         let input_id = tx.last_insert_rowid();
-        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.decision.as_str(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_rule_id,now])?;
+        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,choice_id,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.key.decision().map(PermissionDecision::as_str),metadata.key.choice(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_rule_id,now])?;
         tx.execute(
             "INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)",
             params![metadata.interaction_id, input_id],
@@ -1143,7 +1172,7 @@ fn validate_current_capability(
                 == event.event.payload_json["evidence"]["rule_id"]
                     .as_str()
                     .ok_or_else(|| invalid("rule_id", "event request rule required"))?
-            && cap.decision() == metadata.decision
+            && cap.key() == &metadata.key
             && !cap.fixture_ids().is_empty(),
         "answer_capability",
         "answer capability does not match this request",
@@ -2200,6 +2229,185 @@ mod tests {
     use sha2::Digest;
     use sha2::Sha256;
 
+    use crate::coding_agent::catalog::AnswerKey;
+
+    fn raw_answer(conn: &Connection, input_id: i64) -> (Option<String>, Option<String>) {
+        conn.query_row(
+            "SELECT decision,choice_id FROM member_permission_responses WHERE input_id=?1",
+            [input_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn runtime_choice_response_reserves_against_an_open_question_and_stores_only_its_choice() {
+        for choice in ["decline", "not-now", "dont-show-again"] {
+            let mut fixture = ResponseFixture::question(choice);
+            let receipt = fixture.reserve();
+            assert_eq!(
+                receipt.response.metadata.key,
+                AnswerKey::Choice(choice.into())
+            );
+            assert_eq!(receipt.response.metadata, fixture.request.metadata);
+            assert_eq!(
+                receipt.input.payload_digest,
+                expected_digest(fixture.owner.run_id, &fixture.request.metadata)
+            );
+            assert_eq!(
+                raw_answer(&fixture.base.conn, receipt.input.input_id),
+                (None, Some(choice.to_owned()))
+            );
+            assert_eq!(
+                storage::get_permission_response(&fixture.base.reopen(), receipt.input.input_id)
+                    .unwrap(),
+                receipt
+            );
+        }
+        let mut decision = ResponseFixture::new();
+        let receipt = decision.reserve();
+        assert_eq!(
+            raw_answer(&decision.base.conn, receipt.input.input_id),
+            (Some("allow".into()), None)
+        );
+    }
+
+    #[test]
+    fn runtime_permission_digest_covers_the_choice_id_with_null_for_the_absent_answer() {
+        let decision = ResponseFixture::new();
+        let question = ResponseFixture::question("decline");
+        let mut chosen = decision.request.metadata.clone();
+        chosen.key = AnswerKey::Choice("decline".into());
+        let decided =
+            storage::permission_response_digest(decision.owner.run_id, &decision.request.metadata)
+                .unwrap();
+        let chose = storage::permission_response_digest(decision.owner.run_id, &chosen).unwrap();
+        assert_eq!(
+            decided,
+            expected_digest(decision.owner.run_id, &decision.request.metadata)
+        );
+        assert_eq!(chose, expected_digest(decision.owner.run_id, &chosen));
+        assert_ne!(decided, chose);
+        let mut other = chosen.clone();
+        other.key = AnswerKey::Choice("not-now".into());
+        assert_ne!(
+            storage::permission_response_digest(decision.owner.run_id, &other).unwrap(),
+            chose
+        );
+        assert_eq!(
+            storage::permission_response_digest(question.owner.run_id, &question.request.metadata)
+                .unwrap(),
+            expected_digest(question.owner.run_id, &question.request.metadata)
+        );
+    }
+
+    #[test]
+    fn runtime_permission_metadata_refuses_a_choice_outside_the_choice_id_shape() {
+        for choice in [
+            "",
+            "Decline",
+            "ask_later",
+            "-decline",
+            "decline-",
+            "a--b",
+            &"a".repeat(65),
+        ] {
+            let mut fixture = ResponseFixture::question("decline");
+            let mut request = fixture.request.clone();
+            request.metadata.key = AnswerKey::Choice(choice.into());
+            fixture.capability = keyed_capability(AnswerKey::Choice(choice.into()));
+            assert_rejected_unchanged(&mut fixture, &request);
+            assert!(
+                storage::permission_response_digest(fixture.owner.run_id, &request.metadata)
+                    .is_err(),
+                "{choice}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_permission_answer_kind_must_match_the_opened_interaction_class() {
+        let mut decision_on_question = ResponseFixture::opened(
+            InteractionClass::Question,
+            AnswerKey::Decision(PermissionDecision::Allow),
+        );
+        let request = decision_on_question.request.clone();
+        assert_rejected_unchanged(&mut decision_on_question, &request);
+        let mut choice_on_permission = ResponseFixture::opened(
+            InteractionClass::PermissionRequest,
+            AnswerKey::Choice("decline".into()),
+        );
+        let request = choice_on_permission.request.clone();
+        assert_rejected_unchanged(&mut choice_on_permission, &request);
+        for class in [
+            InteractionClass::Trust,
+            InteractionClass::Update,
+            InteractionClass::UnknownInteraction,
+        ] {
+            for key in [
+                AnswerKey::Decision(PermissionDecision::Allow),
+                AnswerKey::Choice("decline".into()),
+            ] {
+                let mut fixture = ResponseFixture::opened(class, key);
+                let request = fixture.request.clone();
+                assert_rejected_unchanged(&mut fixture, &request);
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_choice_capability_binding_requires_the_requested_choice() {
+        for capability in [
+            AnswerKey::Choice("later".into()),
+            AnswerKey::Decision(PermissionDecision::Allow),
+        ] {
+            let mut fixture = ResponseFixture::question("decline");
+            fixture.capability = keyed_capability(capability);
+            let request = fixture.request.clone();
+            assert_rejected_unchanged(&mut fixture, &request);
+        }
+        let mut decided = ResponseFixture::new();
+        decided.capability = keyed_capability(AnswerKey::Choice("allow".into()));
+        let request = decided.request.clone();
+        assert_rejected_unchanged(&mut decided, &request);
+    }
+
+    #[test]
+    fn the_response_audit_checks_exactly_one_of_a_decision_and_a_shaped_choice_id() {
+        let mut fixture = ResponseFixture::new();
+        let input_id = fixture.reserve().input.input_id;
+        let set = |conn: &Connection, decision: Option<&str>, choice: Option<&str>| {
+            conn.execute(
+                "UPDATE member_permission_responses SET decision=?1,choice_id=?2 WHERE input_id=?3",
+                params![decision, choice, input_id],
+            )
+        };
+        for (decision, choice) in [
+            (Some("deny"), None),
+            (None, Some("decline")),
+            (None, Some("dont-show-again")),
+            (None, Some("a".repeat(64).as_str())),
+        ] {
+            set(&fixture.base.conn, decision, choice)
+                .unwrap_or_else(|cause| panic!("{decision:?} {choice:?}: {cause}"));
+        }
+        for (decision, choice) in [
+            (None, None),
+            (Some("allow"), Some("decline")),
+            (Some("approve"), None),
+            (None, Some("")),
+            (None, Some("Decline")),
+            (None, Some("ask_later")),
+            (None, Some("ask later")),
+            (None, Some("a".repeat(65).as_str())),
+        ] {
+            assert!(
+                set(&fixture.base.conn, decision, choice).is_err(),
+                "{decision:?} {choice:?}"
+            );
+        }
+    }
+
     use crate::coding_agent::AnswerCapability;
     use crate::coding_agent::CodingAgent;
 
@@ -2212,10 +2420,14 @@ mod tests {
     }
 
     fn expected_digest(run: i64, metadata: &PermissionResponseMetadata) -> String {
+        let (decision, choice_id) = match &metadata.key {
+            AnswerKey::Decision(decision) => (json!(decision.as_str()), Value::Null),
+            AnswerKey::Choice(choice) => (Value::Null, json!(choice)),
+        };
         let value = json!({
             "run_id":run,"owner_epoch":metadata.expected_owner_epoch,"interaction_id":metadata.interaction_id,
             "event_id":metadata.event_id,"director_member_id":metadata.director_member_id,
-            "request_token":metadata.request_token,"decision":metadata.decision,
+            "request_token":metadata.request_token,"decision":decision,"choice_id":choice_id,
             "director_mode":metadata.director_mode,"decision_source":metadata.decision_source,
             "mode_evidence_ref":metadata.mode_evidence_ref,"decision_evidence_ref":metadata.decision_evidence_ref,
             "answer_rule_id":metadata.answer_rule_id,
@@ -2700,11 +2912,11 @@ mod tests {
                 let mut fixture = ResponseFixture::new();
                 fixture.request.metadata.director_mode = mode;
                 fixture.request.metadata.decision_source = DecisionSource::User;
-                fixture.request.metadata.decision = decision;
+                fixture.request.metadata.key = AnswerKey::Decision(decision);
                 fixture.capability = capability(decision);
                 let receipt = fixture.reserve();
                 assert_eq!(receipt.response.metadata.director_mode, mode);
-                assert_eq!(receipt.response.metadata.decision, decision);
+                assert_eq!(receipt.response.metadata.key, AnswerKey::Decision(decision));
                 assert_eq!(
                     receipt.response.metadata.decision_source,
                     DecisionSource::User
@@ -2745,7 +2957,7 @@ mod tests {
                 "event" => changed.event_id += 1,
                 "director" => changed.director_member_id += 1,
                 "token" => changed.request_token = "b".repeat(64),
-                "decision" => changed.decision = PermissionDecision::Deny,
+                "decision" => changed.key = AnswerKey::Decision(PermissionDecision::Deny),
                 "mode" => changed.director_mode = DirectorMode::Manual,
                 "source" => changed.decision_source = DecisionSource::DirectorAuto,
                 "mode-ref" => changed.mode_evidence_ref = "fixture:other-mode".into(),
@@ -3149,7 +3361,7 @@ mod tests {
             let mut request = fixture.request.clone();
             let mut identity = fixture.identity();
             match changed {
-                "decision" => request.metadata.decision = PermissionDecision::Deny,
+                "decision" => request.metadata.key = AnswerKey::Decision(PermissionDecision::Deny),
                 "token" => request.metadata.request_token = "b".repeat(64),
                 "epoch" => request.metadata.expected_owner_epoch += 1,
                 "event" => request.metadata.event_id += 1,
@@ -3320,7 +3532,7 @@ mod tests {
             }
             let mut second = fixture.request.clone();
             second.operation_key = "permission:different-key".into();
-            second.metadata.decision = PermissionDecision::Deny;
+            second.metadata.key = AnswerKey::Decision(PermissionDecision::Deny);
             let before = state(&fixture.base.conn);
             let denied_capability = capability(PermissionDecision::Deny);
             assert!(

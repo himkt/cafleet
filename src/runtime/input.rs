@@ -10,6 +10,7 @@ use crate::coding_agent::AnswerStage;
 use crate::coding_agent::ComposerOperation;
 use crate::coding_agent::ProfileCatalog;
 use crate::coding_agent::StageGate;
+use crate::coding_agent::catalog::AnswerKey;
 use crate::coding_agent::coding_agent;
 use crate::db::bounded_by_inherited;
 use crate::db::with_database_budget;
@@ -213,7 +214,11 @@ pub(super) fn inspection_association(
             && view.event.message_id.is_some_and(|id| id > 0)
             && view.interaction.as_ref().is_some_and(|i| {
                 i.run_id == run.run_id
-                    && i.classification == storage::InteractionClass::PermissionRequest
+                    && matches!(
+                        i.classification,
+                        storage::InteractionClass::PermissionRequest
+                            | storage::InteractionClass::Question
+                    )
                     && i.closed_at.is_none()
             }),
         "permission inspection current event/interaction/message mismatch",
@@ -229,6 +234,19 @@ pub(super) fn inspection_association(
     let live: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM fleets WHERE fleet_id=?1 AND director_member_id=?2 AND deleted_at IS NULL)", rusqlite::params![run.fleet_id, run.director_member_id], |r| r.get(0))?;
     ensure(live, "permission fleet/Director changed")?;
     Ok(view)
+}
+
+/// The operation-centred facts an inspected interaction lacks; a question lacks none of them.
+pub(super) fn interaction_missing_evidence(
+    classification: storage::InteractionClass,
+    evidence: &serde_json::Value,
+) -> Result<Vec<MissingEvidence>> {
+    if classification == storage::InteractionClass::Question {
+        storage::evidence::validate(evidence)?;
+        Ok(Vec::new())
+    } else {
+        inspection_missing_evidence(evidence)
+    }
 }
 
 pub(super) fn inspection_missing_evidence(
@@ -252,6 +270,29 @@ pub(super) fn inspection_missing_evidence(
         MissingEvidence::ChoiceScope,
     ]);
     Ok(missing)
+}
+
+fn answered_classification(key: &AnswerKey) -> storage::InteractionClass {
+    match key {
+        AnswerKey::Decision(_) => storage::InteractionClass::PermissionRequest,
+        AnswerKey::Choice(_) => storage::InteractionClass::Question,
+    }
+}
+
+fn answer_kind_mismatch(
+    classification: storage::InteractionClass,
+    key: &AnswerKey,
+) -> Option<&'static str> {
+    let question = classification == storage::InteractionClass::Question;
+    match key {
+        AnswerKey::Decision(_) if question => {
+            Some("decision answers apply only to permission requests")
+        }
+        AnswerKey::Choice(_) if !question => {
+            Some("choice answers apply only to question interactions")
+        }
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -743,7 +784,8 @@ impl InputCoordinator {
                     .current_evidence()
                     .ok_or_else(|| error("current inspection observation unavailable"))?
                     .clone();
-                let missing_evidence = inspection_missing_evidence(&evidence)?;
+                let missing_evidence =
+                    interaction_missing_evidence(interaction.classification, &evidence)?;
                 let fresh = match transport.take_input_drain() {
                     Some(proof) => {
                         transport.validate_observation_drain(&proof, deadline)?;
@@ -760,6 +802,7 @@ impl InputCoordinator {
                     self.current_request = None;
                 }
                 let mut supported_decisions = Vec::new();
+                let mut supported_choices = Vec::new();
                 let mut answer_rule_id = None;
                 let mut request_token = None;
                 let blocker = self.permission_blocker(observation);
@@ -806,15 +849,28 @@ impl InputCoordinator {
                         }) {
                             answer_rule_id = Some(first.answer_rule_id().to_owned());
                         }
-                        supported_decisions = current
-                            .observed
-                            .answer_matches
-                            .iter()
-                            .map(|m| m.plan().capability().decision())
-                            .collect();
+                        for matched in &current.observed.answer_matches {
+                            match matched.plan().capability().key() {
+                                AnswerKey::Decision(decision) => {
+                                    supported_decisions.push(*decision)
+                                }
+                                AnswerKey::Choice(choice) => supported_choices.push(
+                                    crate::runtime::control::SupportedChoice {
+                                        choice_id: choice.clone(),
+                                        label: matched.choice_label().to_owned(),
+                                        scope: matched.plan().choice_scope(),
+                                    },
+                                ),
+                            }
+                        }
                         request_token = Some(token.clone());
                         reason = None;
                     }
+                } else if fresh
+                    && blocker.is_none()
+                    && observation.unplanned_question_episode() == Some(interaction.episode_seq)
+                {
+                    reason = Some("question has no tested answer".into());
                 }
                 check_deadline(Instant::now(), deadline)?;
                 Ok(InputControlReply::Inspection(Box::new(
@@ -840,6 +896,7 @@ impl InputCoordinator {
                         },
                         capability_reason: reason,
                         supported_decisions,
+                        supported_choices,
                         request_token,
                         output_seq: transport.snapshot().screen_seq,
                         evidence,
@@ -979,7 +1036,8 @@ impl InputCoordinator {
                 && self.manual_generation == bound.manual_generation
                 && observation.request_generation() == bound.observed.request_generation
                 && observed.request_generation == bound.observed.request_generation
-                && observed.classification == storage::InteractionClass::PermissionRequest
+                && observed.classification
+                    == answered_classification(&selection.request.metadata.key)
                 && observed.same_request(&bound.observed),
             "permission request token or current plan binding changed",
         )?;
@@ -1287,14 +1345,31 @@ impl InputCoordinator {
                     && binding.identity == request.identity,
                 "permission response token identity changed",
             )?;
-            let plan = binding
+            if let Some(reason) = answer_kind_mismatch(binding.observed.classification, &input.key)
+            {
+                return Ok(Some(InputControlReply::PermissionResponse(
+                    self.rejected_response(input, reason),
+                )));
+            }
+            let Some(matched) = binding
                 .observed
                 .answer_matches
                 .iter()
-                .find(|matched| matched.plan().capability().decision() == input.decision)
-                .ok_or_else(|| error("selected permission decision is unsupported"))?
-                .plan()
-                .clone();
+                .find(|matched| matched.plan().capability().key() == &input.key)
+            else {
+                return match &input.key {
+                    AnswerKey::Decision(_) => {
+                        Err(error("selected permission decision is unsupported"))
+                    }
+                    AnswerKey::Choice(choice) => Ok(Some(InputControlReply::PermissionResponse(
+                        self.rejected_response(
+                            input,
+                            format!("choice {choice} has no tested answer for this question"),
+                        ),
+                    ))),
+                };
+            };
+            let plan = matched.plan().clone();
             let cap = plan.capability();
             let selection = Arc::new(PermissionSelection {
                 request: storage::NewPermissionResponse {
@@ -1304,7 +1379,7 @@ impl InputCoordinator {
                         interaction_id: input.interaction_id,
                         expected_owner_epoch: input.expected_owner_epoch,
                         request_token: input.request_token.clone(),
-                        decision: input.decision,
+                        key: input.key.clone(),
                         director_member_id: input.director_member_id,
                         director_mode: input.director_mode,
                         decision_source: input.decision_source,
@@ -1387,8 +1462,32 @@ impl InputCoordinator {
             owner_epoch: metadata.expected_owner_epoch,
             interaction_id: metadata.interaction_id,
             event_id: metadata.event_id,
-            decision: metadata.decision,
+            key: metadata.key.clone(),
             decision_source: metadata.decision_source,
+        }
+    }
+
+    fn rejected_response(
+        &self,
+        input: &crate::runtime::PermissionRespondInput,
+        reason: impl Into<String>,
+    ) -> PermissionResponseResult {
+        PermissionResponseResult {
+            submission: SubmissionResult {
+                status: SubmissionStatus::Rejected,
+                input_id: None,
+                stage: SubmissionStage::ZeroBytes,
+                output_seq: None,
+                reason: Some(reason.into()),
+                delivery: None,
+            },
+            member_id: self.run.member_id,
+            run_id: self.run.run_id,
+            owner_epoch: input.expected_owner_epoch,
+            interaction_id: input.interaction_id,
+            event_id: input.event_id,
+            key: input.key.clone(),
+            decision_source: input.decision_source,
         }
     }
 
@@ -5289,6 +5388,48 @@ mod tests {
                     );
                 }
 
+                #[test]
+                fn staged_claude_pending_question_notice_during_the_settle_stops_before_the_submit_key()
+                 {
+                    use crate::coding_agent::detector::test_support::bundled_screen;
+                    use crate::coding_agent::detector::test_support::native_fixture_bytes;
+                    use crate::runtime::input::tests::permission_inspection_contracts::with_claude_host;
+                    with_claude_host(
+                        "2.1.312",
+                        "claude-2.1.312-auto-default-decline-continuation-1",
+                        |host, _, _| {
+                            let mut program = LITERAL.as_bytes().to_vec();
+                            program.push(b'\r');
+                            host.pty.expect_program(program);
+                            until_literal_written(
+                                host,
+                                prompt_request(host, "prompt:pending-question-notice"),
+                            );
+                            host.show(native_fixture_bytes(&bundled_screen(
+                                "claude-2.1.312-question-pending-notice-1",
+                            )));
+                            let reply = finish_after_interruption(host);
+                            let cause = stored(host, &reply)
+                                .uncertain_cause
+                                .expect("a stopped stage records its cause");
+                            assert!(
+                                matches!(
+                                    cause,
+                                    storage::UncertainCause::InteractionCandidate
+                                        | storage::UncertainCause::InteractionOpen
+                                ),
+                                "{cause:?}"
+                            );
+                            assert_stopped_with(host, &reply, cause);
+                            assert!(
+                                host.pty.program.is_empty(),
+                                "the submit key is never written"
+                            );
+                            assert!(!host.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
+                        },
+                    );
+                }
+
                 fn quiesce_once(host: &mut Host) -> InputDrain {
                     host.coordinator
                         .progress_with_manual(&mut host.transport, |transport| {
@@ -9111,6 +9252,7 @@ mod tests {
         use crate::broker::runtime::DirectorMode;
         use crate::broker::runtime::PermissionDecision;
         use crate::coding_agent::CodingAgent;
+        use crate::coding_agent::catalog::AnswerKey;
         use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
         use crate::runtime::ByteInput;
         use crate::runtime::PermissionInspection;
@@ -9146,6 +9288,14 @@ mod tests {
             key: &str,
             decision: PermissionDecision,
         ) -> PermissionRespondInput {
+            keyed_command(h, inspection, key, AnswerKey::Decision(decision))
+        }
+        fn keyed_command(
+            h: &Host,
+            inspection: &PermissionInspection,
+            key: &str,
+            answer: AnswerKey,
+        ) -> PermissionRespondInput {
             PermissionRespondInput {
                 event_id: inspection.event_id,
                 interaction_id: inspection.interaction_id,
@@ -9157,7 +9307,7 @@ mod tests {
                     .as_ref()
                     .expect("actual inspected token")
                     .clone(),
-                decision,
+                key: answer,
                 decision_source: DecisionSource::DirectorAuto,
                 director_mode: DirectorMode::Auto,
                 mode_evidence_ref: "fixture:response-mode".into(),
@@ -9216,15 +9366,10 @@ mod tests {
                 )
             );
             assert_eq!(
-                (
-                    &m.request_token,
-                    m.decision,
-                    m.decision_source,
-                    m.director_mode
-                ),
+                (&m.request_token, &m.key, m.decision_source, m.director_mode),
                 (
                     &input.request_token,
-                    input.decision,
+                    &input.key,
                     input.decision_source,
                     input.director_mode
                 )
@@ -9647,6 +9792,135 @@ mod tests {
                     Some(crate::broker::runtime::DeliveryMethod::Profile)
                 );
                 assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+            });
+        }
+
+        #[test]
+        fn a_preview_prompt_and_exec_during_dialog_a_queue_with_zero_bytes_and_each_drains_once() {
+            use crate::runtime::input::tests::ordinary_prompt::support::canonical_preview;
+            use crate::runtime::input::tests::ordinary_prompt::support::preview_request;
+            const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
+            const LITERAL: &str = "queued behind the auto-mode nudge";
+            let fixture = |id: &str| {
+                native_fixture_bytes(
+                    &crate::coding_agent::detector::test_support::bundled_screen(id),
+                )
+            };
+            with_claude_host("2.1.312", IDLE, |h, _, _| {
+                h.pty
+                    .child
+                    .bytes
+                    .extend(fixture("claude-2.1.312-auto-default-nudge-1"));
+                settled_ids(h);
+                assert!(matches!(
+                    h.controller.health(&h.writer).eligibility,
+                    InputEligibility::Hold(_)
+                ));
+                let run = h.fixture.run.clone();
+                let message = crate::broker::send_message(
+                    &mut h.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    "preview during Dialog A",
+                )
+                .unwrap();
+                let preview = canonical_preview(&message);
+                let mut program = preview.as_bytes().to_vec();
+                program.push(b'\r');
+                program.extend_from_slice(LITERAL.as_bytes());
+                program.push(b'\r');
+                program.extend_from_slice(b"! ");
+                program.extend_from_slice(LITERAL.as_bytes());
+                program.push(b'\r');
+                h.pty.expect_program(program.clone());
+                let mut prompt = h.request("prompt:dialog-a");
+                prompt.operation = InputControlOperation::SubmitPrompt(SubmitInput {
+                    operation_key: "prompt:dialog-a".into(),
+                    input_kind: storage::InputKind::Prompt,
+                    message_id: None,
+                    literal: LITERAL.into(),
+                });
+                let mut exec = h.request("exec:dialog-a");
+                exec.operation = InputControlOperation::SubmitExec(SubmitInput {
+                    operation_key: "exec:dialog-a".into(),
+                    input_kind: storage::InputKind::Exec,
+                    message_id: None,
+                    literal: LITERAL.into(),
+                });
+                let mut queued_ids = Vec::new();
+                for (case, request) in [
+                    ("preview", preview_request(h, &message, &preview)),
+                    ("prompt", prompt),
+                    ("exec", exec),
+                ] {
+                    let Some(InputControlReply::Submission(queued)) = h.handle(request).unwrap()
+                    else {
+                        panic!("a {case} during Dialog A returns a Submission reply")
+                    };
+                    assert_eq!(
+                        (queued.status, queued.stage),
+                        (SubmissionStatus::Queued, SubmissionStage::ZeroBytes),
+                        "{case}"
+                    );
+                    assert_eq!(
+                        queued
+                            .delivery
+                            .as_ref()
+                            .and_then(|delivery| delivery.reason.as_deref()),
+                        Some("interaction_open"),
+                        "{case}"
+                    );
+                    queued_ids.push(queued.input_id.expect("queued work has a durable input ID"));
+                }
+                for _ in 0..20 {
+                    h.drain();
+                    h.advance();
+                }
+                assert!(
+                    h.pty.offers.is_empty(),
+                    "no byte, Enter included, reaches Dialog A: {:?}",
+                    h.pty.offers
+                );
+                h.show(fixture(IDLE));
+                while !queued_ids.iter().all(|id| {
+                    matches!(
+                        storage::get_input(&h.fixture.conn, *id).unwrap().state,
+                        storage::InputState::Accepted | storage::InputState::Settled
+                    )
+                }) {
+                    assert!(Instant::now() < h.until, "the queued inputs drain in time");
+                    h.drain();
+                    h.advance();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                for _ in 0..20 {
+                    h.drain();
+                    h.advance();
+                }
+                assert_eq!(
+                    h.pty.program,
+                    vec![program],
+                    "each input is delivered once, in order"
+                );
+                assert!(h.pty.manual.is_empty(), "{:?}", h.pty.manual);
+                for (index, id) in queued_ids.into_iter().enumerate() {
+                    let input = storage::get_input(&h.fixture.conn, id).unwrap();
+                    if index == 0 {
+                        assert_eq!(input.state, storage::InputState::Settled, "preview {id}");
+                        assert_eq!(
+                            input.disposition,
+                            Some(storage::InputDisposition::Submitted),
+                            "preview {id}"
+                        );
+                    } else {
+                        assert_eq!(input.state, storage::InputState::Accepted, "{id}");
+                    }
+                    assert_eq!(
+                        input.delivery_method,
+                        Some(crate::broker::runtime::DeliveryMethod::Profile)
+                    );
+                    assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+                }
             });
         }
 
@@ -10125,13 +10399,13 @@ mod tests {
                     (
                         result.interaction_id,
                         result.event_id,
-                        result.decision,
+                        &result.key,
                         result.decision_source
                     ),
                     (
                         input.interaction_id,
                         input.event_id,
-                        input.decision,
+                        &input.key,
                         input.decision_source
                     )
                 );
@@ -10550,7 +10824,8 @@ mod tests {
                     .answer_matches
                     .iter()
                     .find(|matched| {
-                        matched.plan().capability().decision() == PermissionDecision::Allow
+                        matched.plan().capability().key()
+                            == &AnswerKey::Decision(PermissionDecision::Allow)
                     })
                     .unwrap()
                     .plan()
@@ -11121,7 +11396,7 @@ mod tests {
                         CodingAgent::Codex,
                         "0.0.1-synthetic",
                         "synthetic-permission",
-                        input.decision,
+                        &input.key,
                     )
                     .unwrap();
                 let cap = plan.capability();
@@ -11132,7 +11407,7 @@ mod tests {
                         interaction_id: input.interaction_id,
                         expected_owner_epoch: input.expected_owner_epoch,
                         request_token: input.request_token.clone(),
-                        decision: input.decision,
+                        key: input.key.clone(),
                         director_member_id: input.director_member_id,
                         director_mode: input.director_mode,
                         decision_source: input.decision_source,
@@ -11593,6 +11868,346 @@ mod tests {
                 assert_eq!(repeated.submission.status, SubmissionStatus::Uncertain);
                 assert_eq!(h.pty.offers.len(), 2);
             });
+        }
+
+        mod question {
+            use crate::coding_agent::catalog::test_support::QUESTION_DECLINE_PLAN;
+            use crate::coding_agent::catalog::test_support::QUESTION_LATER_PLAN;
+            use crate::coding_agent::catalog::test_support::inspection_fixture_form;
+            use crate::coding_agent::catalog::test_support::question_fixture_definition;
+            use crate::coding_agent::catalog::test_support::question_fixture_form;
+            use crate::coding_agent::catalog::test_support::question_notice_form;
+            use crate::runtime::input::tests::permission_response_contracts::*;
+            use rusqlite::OptionalExtension;
+
+            fn with_question(program: &[u8], body: impl FnOnce(&mut Host)) {
+                with_definition(
+                    question_fixture_definition(),
+                    program.to_vec(),
+                    |h, _, _| body(h),
+                );
+            }
+
+            fn opened_ids(h: &mut Host) -> (i64, i64, i64, i64) {
+                loop {
+                    h.drain();
+                    let ids = h
+                        .fixture
+                        .conn
+                        .query_row(
+                            "SELECT e.event_id,e.interaction_id,e.message_id,i.episode_seq FROM member_runtime_events e JOIN member_interactions i ON i.interaction_id=e.interaction_id WHERE e.run_id=?1 AND e.kind='interaction_opened' AND i.closed_at IS NULL ORDER BY e.event_id DESC LIMIT 1",
+                            [h.fixture.run.run_id],
+                            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                        )
+                        .optional()
+                        .unwrap();
+                    if let Some(ids) = ids {
+                        return ids;
+                    }
+                    assert!(
+                        Instant::now() < h.until,
+                        "the question opens within the fixture deadline"
+                    );
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            }
+
+            fn question(h: &mut Host, focused: &[&str]) -> (i64, i64, i64, i64) {
+                h.show(question_fixture_form(focused));
+                settled_ids(h)
+            }
+
+            fn choice(id: &str) -> AnswerKey {
+                AnswerKey::Choice(id.into())
+            }
+
+            fn offers(values: &[&[u8]]) -> Vec<Vec<u8>> {
+                values.iter().map(|value| value.to_vec()).collect()
+            }
+
+            #[test]
+            fn question_inspection_lists_its_tested_choices_in_rule_order_with_a_token() {
+                with_question(b"3", |h| {
+                    let ids = question(h, &["accept"]);
+                    let value = inspect(h, ids);
+                    assert_eq!(
+                        value.classification,
+                        Some(storage::InteractionClass::Question)
+                    );
+                    assert_eq!(value.visibility, Visibility::Visible);
+                    assert_eq!(value.answer_capability, storage::Coverage::Tested);
+                    assert!(value.supported_decisions.is_empty());
+                    assert_eq!(
+                        serde_json::to_value(&value.supported_choices).unwrap(),
+                        serde_json::json!([
+                            {"choice_id":"decline","label":"Keep current","scope":"persistent"},
+                            {"choice_id":"later","label":"Ask later","scope":"session"}
+                        ])
+                    );
+                    assert!(
+                        value.answer_rule_id.is_none(),
+                        "distinct choice plans have no unique common rule"
+                    );
+                    assert!(value.capability_reason.is_none());
+                    assert!(value.missing_evidence.is_empty());
+                    let token = value.request_token.expect("a tested question token");
+                    assert_eq!(token.len(), 64);
+                    assert_eq!(counts(h), [0, 0, 0]);
+                    assert!(h.pty.offers.is_empty());
+                });
+            }
+
+            #[test]
+            fn question_with_one_tested_plan_names_its_answer_rule() {
+                let mut definition = question_fixture_definition();
+                definition["profiles"][0]["capabilities"]["answers"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|answer| answer["answer_rule_id"] != QUESTION_LATER_PLAN);
+                with_definition(definition, b"\x0e\r".to_vec(), |h, _, _| {
+                    let ids = question(h, &["accept"]);
+                    let value = inspect(h, ids);
+                    assert_eq!(value.answer_rule_id.as_deref(), Some(QUESTION_DECLINE_PLAN));
+                    assert_eq!(
+                        serde_json::to_value(&value.supported_choices).unwrap(),
+                        serde_json::json!([
+                            {"choice_id":"decline","label":"Keep current","scope":"persistent"}
+                        ])
+                    );
+                });
+            }
+
+            #[test]
+            fn question_without_a_tested_plan_reports_unknown_capability_and_no_token() {
+                with_question(b"3", |h| {
+                    h.show(question_notice_form());
+                    let ids = opened_ids(h);
+                    let value = inspect(h, ids);
+                    assert_eq!(
+                        value.classification,
+                        Some(storage::InteractionClass::Question)
+                    );
+                    assert_eq!(value.answer_capability, storage::Coverage::Unknown);
+                    assert_eq!(
+                        value.capability_reason.as_deref(),
+                        Some("question has no tested answer")
+                    );
+                    assert!(value.request_token.is_none());
+                    assert!(value.answer_rule_id.is_none());
+                    assert!(value.supported_decisions.is_empty());
+                    assert!(value.supported_choices.is_empty());
+                    assert!(value.missing_evidence.is_empty());
+                });
+            }
+
+            #[test]
+            fn a_non_fresh_question_with_tested_plans_keeps_the_generic_reason() {
+                with_question(b"3", |h| {
+                    let ids = question(h, &["accept"]);
+                    let first = inspect(h, ids)
+                        .request_token
+                        .expect("a fresh tested question token");
+                    let stale = inspect_request(h, inspection_target(h, ids), h.until).unwrap();
+                    assert_eq!(
+                        stale.classification,
+                        Some(storage::InteractionClass::Question)
+                    );
+                    assert_eq!(stale.visibility, Visibility::Visible);
+                    assert_eq!(
+                        stale.capability_reason.as_deref(),
+                        Some("current executable permission request unavailable"),
+                        "a question with tested plans is reinspected, not unanswerable"
+                    );
+                    assert_eq!(stale.answer_capability, storage::Coverage::Unknown);
+                    assert!(stale.request_token.is_none());
+                    assert!(stale.answer_rule_id.is_none());
+                    assert!(stale.supported_choices.is_empty());
+                    let reinspected = inspect(h, ids);
+                    assert_eq!(reinspected.request_token.as_deref(), Some(first.as_str()));
+                    assert!(reinspected.capability_reason.is_none());
+                    assert!(h.pty.offers.is_empty());
+                });
+            }
+
+            #[test]
+            fn an_ungated_choice_writes_its_stage_and_records_the_choice_audit() {
+                with_question(b"3", |h| {
+                    let ids = question(h, &["accept"]);
+                    let inspected = inspect(h, ids);
+                    let input =
+                        keyed_command(h, &inspected, "response:question-later", choice("later"));
+                    assert!(h.respond(&input).unwrap().is_none());
+                    let id = arm_stage(h, 1);
+                    h.drain();
+                    let result = response(h.advance().expect("the single choice stage completes"));
+                    assert_eq!(
+                        (
+                            result.submission.status,
+                            result.submission.stage,
+                            result.submission.input_id
+                        ),
+                        (
+                            SubmissionStatus::Accepted,
+                            SubmissionStage::Submitted,
+                            Some(id)
+                        )
+                    );
+                    assert_eq!(result.key, choice("later"));
+                    assert_eq!(h.pty.offers, offers(&[b"3"]));
+                    let receipt = audit(h, id, &input, QUESTION_LATER_PLAN);
+                    assert_eq!(receipt.input.state, storage::InputState::Accepted);
+                    assert_eq!(receipt.response.metadata.key, choice("later"));
+                });
+            }
+
+            #[test]
+            fn a_gated_choice_writes_each_stage_on_its_marker_focus() {
+                with_question(b"\x0e\r", |h| {
+                    let ids = question(h, &["accept"]);
+                    let inspected = inspect(h, ids);
+                    let input = keyed_command(
+                        h,
+                        &inspected,
+                        "response:question-decline",
+                        choice("decline"),
+                    );
+                    assert!(h.respond(&input).unwrap().is_none());
+                    let id = arm_stage(h, 1);
+                    h.drain();
+                    assert!(
+                        h.advance().is_none(),
+                        "the first choice stage keeps the response open"
+                    );
+                    assert_eq!(h.pty.offers, offers(&[b"\x0e"]));
+                    h.show(question_fixture_form(&["decline"]));
+                    arm_stage(h, 2);
+                    h.drain();
+                    let result = response(h.advance().expect("the second choice stage completes"));
+                    assert_eq!(
+                        (result.submission.status, result.submission.stage),
+                        (SubmissionStatus::Accepted, SubmissionStage::Submitted)
+                    );
+                    assert_eq!(h.pty.offers, offers(&[b"\x0e", b"\r"]));
+                    assert_eq!(
+                        audit(h, id, &input, QUESTION_DECLINE_PLAN).input.state,
+                        storage::InputState::Accepted
+                    );
+                });
+            }
+
+            #[test]
+            fn a_gated_choice_writes_nothing_while_its_first_focus_gate_is_unmet() {
+                with_question(b"\x0e\r", |h| {
+                    let ids = question(h, &["decline"]);
+                    let deadline = Instant::now() + Duration::from_millis(600);
+                    let inspected = inspect(h, ids);
+                    let input =
+                        keyed_command(h, &inspected, "response:question-unmet", choice("decline"));
+                    let outcome = match h.respond_until(&input, deadline) {
+                        Ok(None) => loop {
+                            h.drain();
+                            match h.try_advance() {
+                                Ok(None)
+                                    if Instant::now() >= deadline + Duration::from_millis(400) =>
+                                {
+                                    break Ok(None);
+                                }
+                                Ok(None) => std::thread::sleep(Duration::from_millis(2)),
+                                Ok(Some(reply)) => break Ok(Some(response(reply))),
+                                Err(failure) => break Err(failure),
+                            }
+                        },
+                        Ok(Some(reply)) => Ok(Some(response(reply))),
+                        Err(refused) => Err(refused),
+                    };
+                    assert!(
+                        h.pty.offers.is_empty(),
+                        "an unmet focus gate writes no byte"
+                    );
+                    if let Ok(Some(result)) = &outcome {
+                        assert_ne!(result.submission.status, SubmissionStatus::Accepted);
+                    }
+                });
+            }
+
+            fn rejected(h: &mut Host, input: &PermissionRespondInput, reason: &str) {
+                let before = counts(h);
+                let result = response(
+                    h.respond(input)
+                        .unwrap()
+                        .expect("an answer-kind mismatch replies at once"),
+                );
+                assert_eq!(
+                    (
+                        result.submission.status,
+                        result.submission.stage,
+                        result.submission.input_id
+                    ),
+                    (SubmissionStatus::Rejected, SubmissionStage::ZeroBytes, None)
+                );
+                assert_eq!(result.submission.reason.as_deref(), Some(reason));
+                assert_eq!(result.key, input.key);
+                assert_eq!(counts(h), before, "a rejection reserves nothing");
+                assert!(h.pty.offers.is_empty(), "a rejection writes no byte");
+            }
+
+            #[test]
+            fn a_choice_on_a_permission_request_is_rejected_with_zero_bytes() {
+                with_question(b"y\r", |h| {
+                    h.show(inspection_fixture_form(
+                        "PRIVATE_QUESTION_PROFILE",
+                        "synthetic-only",
+                    ));
+                    let ids = settled_ids(h);
+                    let inspected = inspect(h, ids);
+                    assert!(inspected.supported_choices.is_empty());
+                    let input = keyed_command(
+                        h,
+                        &inspected,
+                        "response:choice-on-permission",
+                        choice("decline"),
+                    );
+                    rejected(
+                        h,
+                        &input,
+                        "choice answers apply only to question interactions",
+                    );
+                });
+            }
+
+            #[test]
+            fn a_decision_on_a_question_is_rejected_with_zero_bytes() {
+                with_question(b"3", |h| {
+                    let ids = question(h, &["accept"]);
+                    let inspected = inspect(h, ids);
+                    for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                        let input =
+                            command(h, &inspected, "response:decision-on-question", decision);
+                        rejected(
+                            h,
+                            &input,
+                            "decision answers apply only to permission requests",
+                        );
+                    }
+                });
+            }
+
+            #[test]
+            fn a_choice_without_a_tested_plan_is_rejected_with_zero_bytes() {
+                with_question(b"3", |h| {
+                    let ids = question(h, &["accept"]);
+                    let inspected = inspect(h, ids);
+                    for id in ["accept", "missing"] {
+                        let input =
+                            keyed_command(h, &inspected, "response:untested-choice", choice(id));
+                        rejected(
+                            h,
+                            &input,
+                            &format!("choice {id} has no tested answer for this question"),
+                        );
+                    }
+                });
+            }
         }
 
         mod gated {

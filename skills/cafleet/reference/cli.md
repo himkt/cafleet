@@ -20,7 +20,7 @@ Exact command facts for running CAFleet and interpreting its results.
 | `member recover` | Reconcile the recorded run without restarting an agent | `MEMBER_ID` | yes |
 | `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
 | `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
-| `permission inspect` / `permission respond` | Inspect / answer the current native permission request | `INTERACTION_ID` | yes |
+| `permission inspect` / `permission respond` | Inspect / answer the current native permission request or question | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
 | `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
 | `message listen` | Stream pending inbox records through stdout | `MEMBER_ID` | JSONL only |
@@ -328,7 +328,7 @@ Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_
 
 Notifications contain full versioned JSON, observed member as sender and Director as recipient. Verify association through event show. Kinds: `coverage_unknown,interaction_opened,interaction_obscured,interaction_closed,permission_denied_observed,automatic_refusal_observed,automatic_review_unavailable,input_delivery_result,runner_degraded,runner_lost,runner_exited`.
 
-Runtime events use `schema_version=2`; readers require it. Identity fields: `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Required nullable `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_automatic_refusal,review_automatic_review_unavailable`.
+Runtime events use `schema_version=2`; readers require it. Identity fields: `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id`; context includes `kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, closure `close_reason` or lifecycle `cause`. Required nullable `director_action` contains `kind,instruction,inspect_argv`: review kinds are `review_permission_request,review_question,review_automatic_refusal,review_automatic_review_unavailable`; `review_question` accompanies every question `interaction_opened`, with the same `permission inspect` argv.
 
 Evidence contains `backend,native_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. Positive `operation_rows` is null exactly with null operation; above one requires confirmation against excerpt. Metadata nulls screen-derived operation/choices/excerpt/native identifier. Excerpts/payloads are bounded at 8/16 KiB.
 
@@ -372,33 +372,35 @@ Projection: deferred ready → queued with original reason; other ready → held
 
 At settle checks the first matching cause among the first five wins. Director reconciliation requires nonempty evidence, synchronization with current owner and proof no active writer remains; unreachable owners require exclusive receipt-only ownership, otherwise uncertainty remains. Repeating a settled ordinary disposition returns original evidence; conflicting disposition fails unchanged. Settlement writes no input and establishes no native result.
 
-Nullable `permission_response` audit contains `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at`. Settlement grants no answer and releases no possibly transmitted claim. IDs are positive; malformed input exits 2, absent/corrupt rows fail explicitly.
+Nullable `permission_response` audit contains `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,choice_id,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_rule_id,decided_at`; exactly one of `decision` and `choice_id` is null, and the text line `Permission decision: … decision=DECISION choice=CHOICE …` renders it as `-`. Settlement grants no answer and releases no possibly transmitted claim. IDs are positive; malformed input exits 2, absent/corrupt rows fail explicitly.
 
 ### `permission inspect`
 
 `cafleet permission inspect INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID [--json]` reads pinned-runner state without child bytes, receipt, audit or claim. Missing interaction fails before event/run/database checks; stale/unavailable owner fails operationally.
 
-Result `request` contains identity `event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq`; context `classification,visibility,backend,native_version`; capability `answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq`; `evidence,missing_evidence`.
+Result `request` contains identity `event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq`; context `classification,visibility,backend,native_version`; capability `answer_rule_id,answer_capability,capability_reason,supported_decisions,supported_choices,request_token,output_seq`; `evidence,missing_evidence`.
 
-Visibility: `visible,obscured,not_visible,unknown`; capability: `tested,unknown`. Answerable requests have null `capability_reason`; others return a bounded explanation. Supported decisions are tested `allow,deny`; blocked/unsupported returns empty decisions/null token. Otherwise token is lowercase 64-hex, request-bound. Missing facts are `operation,arguments,cwd,environment,targets,effects,choice_scope`; operation requires nonblank/unredacted/untruncated evidence. Obtain necessary missing facts before deciding.
+Visibility: `visible,obscured,not_visible,unknown`; capability: `tested,unknown`. Answerable requests have null `capability_reason`; others return a bounded explanation. For a permission request, supported decisions are the tested subset of `allow,deny` and `supported_choices` is `[]`. For a question, `supported_decisions` is `[]` and `supported_choices` lists one `{choice_id,label,scope}` per tested choice; a question without one returns capability `unknown` with reason `question has no tested answer`. Blocked/unsupported returns empty arrays/null token. Otherwise token is lowercase 64-hex, request-bound. For a permission request, missing facts are `operation,arguments,cwd,environment,targets,effects,choice_scope`; operation requires nonblank/unredacted/untruncated evidence; obtain necessary missing facts before deciding. A question returns `missing_evidence` `[]`. Text `answers=` lists the supported decisions or choice ids.
 
 ### `permission respond`
 
 ```text
-cafleet permission respond INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID --expected-run-id RUN_ID --expected-owner-epoch EPOCH --request-token TOKEN --decision allow|deny --decision-source director-auto|user --director-mode auto|manual|unknown --mode-evidence-ref REFERENCE --decision-evidence-ref REFERENCE --operation-key KEY [--json]
+cafleet permission respond INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID --expected-run-id RUN_ID --expected-owner-epoch EPOCH --request-token TOKEN (--decision allow|deny | --choice CHOICE_ID) --decision-source director-auto|user --director-mode auto|manual|unknown --mode-evidence-ref REFERENCE --decision-evidence-ref REFERENCE --operation-key KEY [--json]
 ```
 
-Require positive IDs/epoch, exact token, nonblank key and evidence references of 1–2048 UTF-8 bytes with non-whitespace and no C0/DEL. References identify host evidence without embedded commands/screens/secrets. `director-auto` requires current host mode `auto`; `user` records a user decision in any mode. Resolve mode independently of member policy; other/unknown modes require user permission. Native/managed rules remain authoritative. Shape/source-mode errors exit 2 before effects. Record operation key before dispatch.
+Pass exactly one of `--decision` (permission request) and `--choice` (question, one of the inspected `supported_choices` ids); both, neither or a choice id outside 1–64 bytes of lowercase hyphen-separated words exit 2. Require positive IDs/epoch, exact token, nonblank key and evidence references of 1–2048 UTF-8 bytes with non-whitespace and no C0/DEL. References identify host evidence without embedded commands/screens/secrets. `director-auto` requires current host mode `auto`; `user` records a user decision in any mode. Resolve mode independently of member policy; other/unknown modes require user permission. Native/managed rules remain authoritative. Shape/source-mode errors exit 2 before effects. Record operation key before dispatch.
 
 Validate retained keys first: matching metadata returns stored result with zero new bytes; conflicting reuse fails. New keys cannot bypass active/submitted/uncertain/abandoned claims.
 
-Result `response` contains `status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,decision_source,stage,output_seq,reason`. Status `accepted` means submitted, `held/rejected` zero bytes, `uncertain` partial/submitted/unknown. Input/sequence/reason may be null. Acceptance establishes key submission independently of native approval/execution.
+Result `response` contains `status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,choice,decision_source,stage,output_seq,reason`, exactly one of `decision` and `choice` non-null; text adds `choice=CHOICE` after `decision=DECISION`. Status `accepted` means submitted, `held/rejected` zero bytes, `uncertain` partial/submitted/unknown. Input/sequence/reason may be null. Acceptance establishes key submission independently of native approval/execution.
 
 Retained accepted/submitted returns accepted/submitted; in-progress/uncertain returns uncertain/unknown; settled not-submitted/abandoned returns rejected/zero_bytes for this retry, preserving original claim; ready takes exact-metadata live validation. Uncertainty reports recorded cause or `prior transmission remains uncertain`.
 
 Accepted/prior submitted exits 0; structured held/rejected/uncertain prints selected response and exits 1: `Error: permission response STATUS for interaction INTERACTION_ID: REASON`, appending ` (input_id=INPUT_ID)` when known. Pre-reply failures retain ordinary categories/context; usage exits 2.
 
 Blocked current requests create no receipt/audit/claim/byte: `Error: runner control: permission request is blocked: REASON`, followed by known run/interaction/key context; capability reasons are `permission input is fenced`, `manual input accounting failed`, `observation degraded: CODE`, `observation transitions pending`, `observation evidence pending`, `observation update pending`, `observation incomplete`, `observation health unavailable`, `terminal input interrupted`, `outer terminal closed`, `native output closed`, `terminal output still arriving`, `terminal reply pending`, `permission request is not visible`, or `permission request is not the current interaction`, matching inspection.
+
+A wrong-kind answer is a structured zero-byte `rejected` response (exit 1): `choice answers apply only to question interactions` (`--choice` on a non-question), `decision answers apply only to permission requests` (`--decision` on a question), or `choice CHOICE_ID has no tested answer for this question`.
 
 ### `member recover`
 
