@@ -75,7 +75,7 @@ cafleet message ack 10
 
 Keep deferred questions and approvals in host-owned task state after ACK, and reconcile replayed IDs before acting; broker events leave pending user decisions pending. The [message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) and [Director consumption](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-consumption-and-continuation) contracts own the full procedure.
 
-The Director renews a listener whose lease expired while authorized work remains. After an unexpected exit it reconciles the inbox and replaces the listener only once the old process has ended; unACKed messages survive damaged output. A fully idle Codex Director reconciles its inbox on the next user or native activation ([host evidence](https://github.com/himkt/cafleet/blob/main/SPEC.md#host-evidence-and-native-input-authorization)).
+The Director keeps its listener for the fleet's lifetime and renews one whose lease expired while the fleet exists. After an unexpected exit it reconciles the inbox and replaces the listener only once the old process has ended; unACKed messages survive damaged output. A fully idle Codex Director reconciles its inbox on the next user or native activation ([host evidence](https://github.com/himkt/cafleet/blob/main/SPEC.md#host-evidence-and-native-input-authorization)).
 
 On a backend whose [Director verdict](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) is `yes` but whose listener tool is unavailable, the Director states that reception limit and uses manual `message poll` or a finite receive within host permissions. A finite receive also retries ordinary-member previews:
 
@@ -121,9 +121,9 @@ cafleet fleet delete 1
 cafleet fleet list
 ```
 
-Fleet deletion closes the listener with reason `fleet_deleted` ([message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen)). To stop reception while the fleet stays live, the Director cancels the listener and confirms it ended, or lets its finite lease expire without renewal; pending messages stay available for later reads.
+Fleet deletion closes the listener with reason `fleet_deleted` ([message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen)), the listener's only normal end; the Director confirms that the listener exited and starts no replacement. Pending messages stay available for later reads.
 
-Fleet deletion retains history. When it reports a member it could not end, resolve that member's cause and rerun `cafleet fleet delete`. Limit cleanup to the team you own.
+Fleet deletion retains history. When `cafleet fleet delete` exits 1, the fleet stays registered and the Director keeps its listener; resolve the reported cause and rerun `cafleet fleet delete`. Limit cleanup to the team you own.
 
 ## Backend variations
 

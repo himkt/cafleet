@@ -421,13 +421,13 @@ The host owns continuation, native tools and user gates; CAFleet persists messag
 4. Arm one native `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md). Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. An unavailable or denied native adapter follows [receiver recovery](#receiver-recovery).
 5. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
 6. Receive each member's ready and ACK it. Dispatch that member's assignment as soon as its inputs exist; other members' readiness does not delay it.
-7. Keep native reception active and follow [Director wake](#director-wake) until work resolves or an explicit user handoff occurs.
+7. Keep native reception active and follow [Director wake](#director-wake) for the fleet's lifetime; [Shutdown](#shutdown) ends it through fleet deletion.
 
 ### Director wake
 
 Receive Director messages through broker reads and stdout only. Automatic reception sends no Escape, text, Enter or queued composer input to the Director, including on startup failure, receiver loss or missing native tools. A tool rejection or dismissed decision in the Director's own pane therefore comes from the operator or host, never from CAFleet input; follow it as reported. Backend recipes own concrete tool calls; preserve the supplied host continuation state, user decision gates and the host's goal activation, pause, completion and budget authority: reception never calls a goal lifecycle tool, starts a goal, resumes a paused goal or changes its budget.
 
-1. Retain one owned native handle while assignments or an authorized user-feedback phase remain outstanding. Store its pinned member/fleet IDs, receive status, incomplete JSONL and unfinished actions across context compaction.
+1. Retain one owned native handle for the fleet's lifetime. Member creation, `ready`, a final reply, completed work, an empty assignment queue, idle periods and user handoffs keep it; only [fleet deletion](#shutdown) ends it normally. Store its pinned member/fleet IDs, receive status, incomplete JSONL and unfinished actions across context compaction.
 2. Consume complete `ready`, `message` and `closed` records from that handle. Preserve incomplete chunks for the next read. A healthy live read with no output keeps the same process; receiving a message supplies no reason to replace it.
 3. On every received batch/wake and before reporting completion, run `cafleet message poll <director-member-id> --json`. Read full bodies, reconcile known/replayed IDs, record deferred actions, ACK consumed deliveries and dispatch work whose inputs are ready.
 4. On every wake, run `cafleet member list <fleet-id> --json` and check assignments past their expected reply point, using `cafleet member capture` and artifacts as evidence. Consume the Director's own pending IDs through broker reads. Explicit finite `wait` remains available when ordinary-member retry rotation is needed; the listener performs no preview retries.
@@ -444,7 +444,7 @@ Run one persistent receiver through the backend recipe; [message listen](../refe
 | Observed state | Director response |
 |---|---|
 | Live handle, empty read | Retain the handle and read it again when appropriate |
-| Clean `closed` with `timeout` | Establish task exit, then renew only while authorized delegated work remains |
+| Clean `closed` with `timeout` | Establish task exit, then renew while the fleet exists |
 | `member_inactive` / `fleet_deleted` | Retire the handle; resume only with an explicitly established new task/identity |
 | Unexpected EOF, failed native call or receiver exit | Inspect output/exit and complete a fresh successful broker health/inbox check before replacing the receiver |
 | Fatal database/schema error | Surface the cause, and restart only after the repair it names is authorized and complete |
@@ -497,6 +497,6 @@ For unreadable owner identity, `--owner-terminated` requires the inspected run/e
 Use CAFleet primitives within the task's authorized scope.
 
 1. Consume the final inbox and complete the workflow's approval gates, then run `cafleet fleet delete <fleet-id>`. It ends each remaining ordinary member as `cafleet member delete` does, killing its pane and deregistering it while serializing input ownership, and reports each pane outcome. It then deregisters the Director and registry while leaving the Director's own pane open.
-2. When it reports a member it could not end, the fleet stays registered. Run `cafleet member list <fleet-id>`, resolve that member's cause, then rerun `cafleet fleet delete <fleet-id>`; it resumes with the remaining members.
-3. Collect the listener's `fleet_deleted` closure and native task exit, then retire its handle. If retiring reception while the fleet stays live, use verified native cancellation with observed termination, or stop renewal and drain its finite lease. Discard an incomplete final line and preserve pending messages for later reads.
+2. When `cafleet fleet delete` exits 1, the fleet stays registered and native reception stays active. Run `cafleet member list <fleet-id>`, resolve the reported cause, then rerun `cafleet fleet delete <fleet-id>`; it resumes with the remaining members.
+3. Collect the listener's `fleet_deleted` closure and native task exit, then retire its handle without replacement. When no receiver was running at deletion, run a final `cafleet message poll <director-member-id> --json` instead. Discard an incomplete final line and preserve pending messages for later reads.
 4. Run `cafleet fleet list` and confirm the fleet is absent. Limit cleanup to fleets covered by this task's authorization.

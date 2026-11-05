@@ -71,7 +71,7 @@ implementing the approved work.
 
 ### Watch the team work
 
-Read durable coordination with message poll/show and inspect the team’s visible panes with `member capture`. The Director receives replies and checks evidence until delegated work resolves.
+Read durable coordination with message poll/show and inspect the team’s visible panes with `member capture`. The Director receives replies and checks evidence for as long as the fleet exists.
 
 ### Invocation syntax
 
