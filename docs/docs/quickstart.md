@@ -16,7 +16,7 @@ cafleet setup
 
 Alternatively, extract the binary for your platform from
 [GitHub Releases](https://github.com/himkt/cafleet/releases) onto PATH, then
-run setup. Setup installs embedded skills and presets offline; use
+run setup. Setup installs embedded skills, presets and plugins offline; use
 `--coding-agent` to select a backend.
 
 Rerun `cafleet setup` after every upgrade, patch releases included, because
@@ -33,12 +33,12 @@ system:
 |---|---|---|---|
 | [`claude` (Claude Code)](#claude-code) | `~/.claude/settings.json` | The permission profile below that matches the Director's mode | The skills |
 | [`codex` (OpenAI Codex CLI)](#codex) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` |
-| [`opencode`](#opencode) | — | — | The skills, plus the `cafleet` and `cafleet-ask` agent presets in `~/.config/opencode/agents/` |
-| [`hermes` (Hermes Agent)](#hermes) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills, plus CAFleet's member variables merged into `terminal.client_env_passthrough` |
+| [`opencode`](#opencode) | — | — | The skills, the `cafleet` and `cafleet-ask` agent presets in `~/.config/opencode/agents/`, and the CAFleet plugin in `~/.config/opencode/plugins/` |
+| [`hermes` (Hermes Agent)](#hermes) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills, the CAFleet plugin in `~/.hermes/plugins/cafleet/` and its enablement, plus CAFleet's member variables merged into `terminal.client_env_passthrough` |
 
 The paths above are defaults. `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
 `HERMES_HOME` relocate their backend's installed assets. `OPENCODE_CONFIG_DIR` relocates only the OpenCode
-presets; its skills remain under `~/.config/opencode/skills`. The
+presets and plugin; its skills remain under `~/.config/opencode/skills`. The
 [config-dir resolution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#config-dir-resolution)
 specifies validation and every install target.
 Set the variable in the environment you run `cafleet setup` and
@@ -211,6 +211,35 @@ Neither preset is an OS-level sandbox: keep every loaded OpenCode configuration
 free of MCP servers, submit one shell command per invocation, and use the
 `codex` backend when you need kernel-enforced isolation.
 
+Setup also installs the CAFleet plugin as `plugins/cafleet.ts` next to the
+presets, with a `cafleet.executable` file naming the `cafleet` it runs; rerun
+setup after moving or upgrading the CLI. The plugin gives an OpenCode Director
+its reception and goal controls:
+
+1. Launch the Director with `opencode mini --standalone` from the project
+   directory, with the default agent. Plugins in the shared background service
+   do not receive your shell's environment, so that service cannot host a
+   Director.
+2. After registering the fleet, the Director starts reception with the
+   plugin's `cafleet_listen` tool. Each broker record then arrives as its own
+   turn.
+3. Set, inspect, pause, resume and clear a goal with `/cafleet-goal <objective>`,
+   `/cafleet-goal status`, `/cafleet-goal pause`, `/cafleet-goal resume` and
+   `/cafleet-goal clear`. While a goal is active the plugin continues the
+   session turn by turn, and it pauses the goal after three continuation turns
+   without reported progress; `/cafleet-goal resume` restarts it.
+
+OpenCode allows every action by default, so the plugin tools run on a default
+Director without a prompt. If your configuration adds a broad `ask` or `deny`
+rule, add this rule after it so the Director keeps the plugin tools:
+
+```json
+{ "action": "cafleet", "resource": "*", "effect": "allow" }
+```
+
+Both member presets deny the plugin tools, and the plugin itself refuses to
+run inside a member.
+
 ### Hermes
 
 Hermes members use your existing Hermes configuration: your configured default
@@ -225,13 +254,29 @@ gateway, and this list lets each member's tools see that member's own values,
 including the `CAFLEET_MEMBER_ID` marker of the
 [Director-only command guard](concepts/members.md#command-routing). Rerunning
 setup adds only missing names, after your existing entries.
+Setup also installs the CAFleet plugin into the `plugins/cafleet/` directory
+of the Hermes home that `hermes config path` reports, including an active
+profile's home, with an `executable` file naming the `cafleet` it runs. It then
+enables the plugin by adding `cafleet` to `plugins.enabled` and setting
+`plugins.entries.cafleet.allow_gateway_injection` to `true`. Setup fails
+instead when `plugins.disabled` lists `cafleet`; remove it from that list and
+rerun setup. Once `plugins.enabled` exists, Hermes loads only the user plugins
+it lists, so another installed plugin that was not enabled stays disabled until
+you add it.
 A plain `cafleet setup` on a host without `hermes` installs the skills and
-skips this merge; run `cafleet setup --coding-agent hermes` after installing
-Hermes.
+skips the plugin and both merges; run `cafleet setup --coding-agent hermes`
+after installing Hermes.
+
+Run a Hermes Director in the TUI client, `hermes chat --tui` (or set
+`display.interface: tui`). After registering the fleet, the Director starts
+reception with the plugin's `cafleet_listen` tool, and each broker record
+arrives as its own turn. The classic CLI runs those turns without showing them
+in its pane, so members keep the classic CLI and the Director uses the TUI.
 
 `cafleet member create` reads your effective Hermes configuration and refuses
 to start a member when a member variable is missing from the list.
-`cafleet doctor` reports the list on its `hermes` summary line, for example
+`cafleet doctor` reports the list, the installed plugin and its enablement on
+its `hermes` summary line, for example
 `error hermes: terminal.client_env_passthrough lacks CAFleet's member names: CAFLEET_MEMBER_ID — run 'cafleet setup --coding-agent hermes'`.
 
 CAFleet needs no `approvals.deny` entries; keep every `cafleet …` glob out of

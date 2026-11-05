@@ -4,7 +4,7 @@ Run project operations through full mise monorepo task paths. Use `mise tasks --
 
 Required Rust validation is `mise //:test` and `mise //:lint`; `//:typecheck` remains a registry task. Use `mise //docs:build` for documentation/link checks. Find installation, formatting and release-build operations through `mise tasks --all`.
 
-Rust tasks embed skills/presets and use the pinned toolchain. The documentation site owns its Node/pnpm tooling. Reinstall the CLI after Rust edits when the installed binary should change; preserve an active executing fleet's installed runtime/assets during implementation.
+Rust tasks embed skills, presets and extensions and use the pinned toolchain. The documentation site owns its Node/pnpm tooling. Reinstall the CLI after Rust edits when the installed binary should change; preserve an active executing fleet's installed runtime/assets during implementation.
 
 ## mise Tasks
 

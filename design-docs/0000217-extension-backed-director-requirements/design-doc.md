@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 0/50 tasks complete
+**Progress**: 23/50 tasks complete
 **Last Updated**: 2026-11-05
 
 ## Overview
@@ -543,41 +543,41 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 
 ### Step 1: SPEC.md
 
-- [ ] Rewrite §6.7 Role requirements: the two independent Director requirements, listen tiers with the 2 >> 3 gap, the tier-3 negative-evidence definition, the subscribe probe with the busy rule, goal tiers and the extension-goal minimum bar (§1.1–1.2) <!-- completed: -->
-- [ ] Replace §6.7 Role eligibility with the per-requirement table (§1.3), with pending rows for new mechanisms, and update the verdict-change paragraph <!-- completed: -->
-- [ ] Update §6.3 Asset installation: extension table, executable record, install order, output line, failure string, `<hermes home>` resolution and the combined skip line, plus the `cafleet setup` output examples <!-- completed: -->
-- [ ] Add the Hermes enablement merge (§2.3) and rewrite § Hermes environment passthrough to list exactly what setup touches <!-- completed: -->
-- [ ] Add the doctor rows, their order, states and details, and the summary phrases (§2.4) <!-- completed: -->
-- [ ] Add `--codex-thread` to §6.3 `message listen`: stdout scope, forwarded events, message reference, deadline, startup errors, `session_exited` and ancestor pinning (§3.1–3.2) <!-- completed: -->
-- [ ] Rewrite the codex and hermes host-evidence paragraphs in §6.7, add an opencode one, and remove the heartbeat recipe text <!-- completed: -->
+- [x] Rewrite §6.7 Role requirements: the two independent Director requirements, listen tiers with the 2 >> 3 gap, the tier-3 negative-evidence definition, the subscribe probe with the busy rule, goal tiers and the extension-goal minimum bar (§1.1–1.2) <!-- completed: 2026-11-05T22:22 -->
+- [x] Replace §6.7 Role eligibility with the per-requirement table (§1.3), with pending rows for new mechanisms, and update the verdict-change paragraph <!-- completed: 2026-11-05T22:22 -->
+- [x] Update §6.3 Asset installation: extension table, executable record, install order, output line, failure string, `<hermes home>` resolution and the combined skip line, plus the `cafleet setup` output examples <!-- completed: 2026-11-05T22:22 -->
+- [x] Add the Hermes enablement merge (§2.3) and rewrite § Hermes environment passthrough to list exactly what setup touches <!-- completed: 2026-11-05T22:22 -->
+- [x] Add the doctor rows, their order, states and details, and the summary phrases (§2.4) <!-- completed: 2026-11-05T22:22 -->
+- [x] Add `--codex-thread` to §6.3 `message listen`: stdout scope, forwarded events, message reference, deadline, startup errors, `session_exited` and ancestor pinning (§3.1–3.2) <!-- completed: 2026-11-05T22:22 -->
+- [x] Rewrite the codex and hermes host-evidence paragraphs in §6.7, add an opencode one, and remove the heartbeat recipe text <!-- completed: 2026-11-05T22:22 -->
 
 ### Step 2: Documentation site
 
-- [ ] `docs/docs/concepts/coding-agents.md`: Director requirements in tier terms, extension support, the Hermes Director on the TUI client and the OpenCode Director launch <!-- completed: -->
-- [ ] `docs/docs/contributing.md`: add the subscribe probe and the tier recording next to the stream probe, and describe the stream probe as the tier-3 probe <!-- completed: -->
-- [ ] `docs/docs/quickstart.md`: § Hermes (TUI Director launch, plugin install and enablement by setup, other user plugins stay as enabled) and § OpenCode (plugin install, `opencode mini --standalone` Director launch, `/cafleet-goal`, and the `cafleet` allow rule for configurations whose broad rules override the base allow) <!-- completed: -->
-- [ ] `docs/docs/mixed-backend-team.md:78`: replace the idle-Codex sentence with queued-turn reception <!-- completed: -->
-- [ ] Update the setup and doctor descriptions on the remaining docs pages that list what `cafleet setup` installs <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
+- [x] `docs/docs/concepts/coding-agents.md`: Director requirements in tier terms, extension support, the Hermes Director on the TUI client and the OpenCode Director launch <!-- completed: 2026-11-05T22:25 -->
+- [x] `docs/docs/contributing.md`: add the subscribe probe and the tier recording next to the stream probe, and describe the stream probe as the tier-3 probe <!-- completed: 2026-11-05T22:25 -->
+- [x] `docs/docs/quickstart.md`: § Hermes (TUI Director launch, plugin install and enablement by setup, other user plugins stay as enabled) and § OpenCode (plugin install, `opencode mini --standalone` Director launch, `/cafleet-goal`, and the `cafleet` allow rule for configurations whose broad rules override the base allow) <!-- completed: 2026-11-05T22:25 -->
+- [x] `docs/docs/mixed-backend-team.md:78`: replace the idle-Codex sentence with queued-turn reception <!-- completed: 2026-11-05T22:25 -->
+- [x] Update the setup and doctor descriptions on the remaining docs pages that list what `cafleet setup` installs <!-- completed: 2026-11-05T22:25 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-05T22:25 -->
 
 ### Step 3: README.md
 
-- [ ] Check the README pitch and install commands against the docs index; edit only if they drift <!-- completed: -->
+- [x] Check the README pitch and install commands against the docs index; edit only if they drift <!-- completed: 2026-11-05T22:26 -->
 
 ### Step 4: Skills
 
-- [ ] `skills/cafleet/reference/coding-agents.md` § Role requirements: restate the criterion (§1) <!-- completed: -->
-- [ ] claude section: per-requirement Role eligibility rows <!-- completed: -->
-- [ ] codex section: forwarder reception recipe (§3.3), Note rows and per-requirement rows <!-- completed: -->
-- [ ] opencode section: Director launch, reception and goal recipe (§5.3), Note rows and per-requirement rows <!-- completed: -->
-- [ ] hermes section: TUI requirement, plugin recipe (§4.3), client-specific Note rows, removal of the heartbeat recipe and rows, and per-requirement rows <!-- completed: -->
-- [ ] `skills/cafleet/reference/cli.md`: `message listen --codex-thread`, `session_exited`, `message_ref`, setup extension lines and doctor rows <!-- completed: -->
-- [ ] `skills/cafleet/roles/director.md` § Director wake: wording that holds for handle-read (tier 3) and turn-delivered (tiers 1–2) reception, and the reception goal-authority sentence (§5.3) <!-- completed: -->
-- [ ] `skills/cafleet/roles/director.md` § Receiver recovery and Spawn Protocol step 4: rows for an unavailable or refused extension tool, `[cafleet listen closed]`, forwarded `closed` and `session_exited` <!-- completed: -->
+- [x] `skills/cafleet/reference/coding-agents.md` § Role requirements: restate the criterion (§1) <!-- completed: 2026-11-05T22:29 -->
+- [x] claude section: per-requirement Role eligibility rows <!-- completed: 2026-11-05T22:29 -->
+- [x] codex section: forwarder reception recipe (§3.3), Note rows and per-requirement rows <!-- completed: 2026-11-05T22:29 -->
+- [x] opencode section: Director launch, reception and goal recipe (§5.3), Note rows and per-requirement rows <!-- completed: 2026-11-05T22:29 -->
+- [x] hermes section: TUI requirement, plugin recipe (§4.3), client-specific Note rows, removal of the heartbeat recipe and rows, and per-requirement rows <!-- completed: 2026-11-05T22:29 -->
+- [x] `skills/cafleet/reference/cli.md`: `message listen --codex-thread`, `session_exited`, `message_ref`, setup extension lines and doctor rows <!-- completed: 2026-11-05T22:29 -->
+- [x] `skills/cafleet/roles/director.md` § Director wake: wording that holds for handle-read (tier 3) and turn-delivered (tiers 1–2) reception, and the reception goal-authority sentence (§5.3) <!-- completed: 2026-11-05T22:29 -->
+- [x] `skills/cafleet/roles/director.md` § Receiver recovery and Spawn Protocol step 4: rows for an unavailable or refused extension tool, `[cafleet listen closed]`, forwarded `closed` and `session_exited` <!-- completed: 2026-11-05T22:29 -->
 
 ### Step 5: Project rules
 
-- [ ] `.claude/rules/documentation-maintenance.md`: Template § Role eligibility uses the per-requirement shape, and § Director verdict changes names the subscribe probe, tier recording and negative evidence <!-- completed: -->
+- [x] `.claude/rules/documentation-maintenance.md`: Template § Role eligibility uses the per-requirement shape, and § Director verdict changes names the subscribe probe, tier recording and negative evidence <!-- completed: 2026-11-05T22:30 -->
 
 ### Step 6: Embedded extensions and presets
 

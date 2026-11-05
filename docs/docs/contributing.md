@@ -6,10 +6,11 @@ Develop changes through reviewed designs and the bundled CAFleet workflows. Run 
 
 | Entry | Responsibility |
 |---|---|
-| `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters; built by the root `Cargo.toml` and `build.rs`, which embeds `skills/` and `presets/` |
+| `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters; built by the root `Cargo.toml` and `build.rs`, which embeds `skills/`, `presets/` and `extensions/` |
 | `migrations/` | Embedded SQL schema baseline |
 | `skills/` | Installed agent-facing skills, roles and references |
 | `presets/` | Backend permission/configuration assets |
+| `extensions/` | Backend plugins that `cafleet setup` installs for Director reception and goals |
 | `docs/` | Independent operator documentation and its Node/pnpm site tooling |
 | `design-docs/` | Numbered design documents and local evidence |
 
@@ -72,11 +73,11 @@ Use safe PTY/terminal APIs behind deterministic transport traits; the crate sets
 
 Evaluate a candidate backend against the role bar before it ships:
 
-1. Open a design doc for the candidate. It carries a `## Role evaluation` section with a `Role | Eligible | Evidence` table: one Director row and one Member row.
-2. For each role, check every Eligible-tier requirement in [SPEC §6.7 Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) against an installed native version, recording the version per requirement group: official documentation and installed `--help` / `--version` for host capabilities, and CAFleet PTY probes on each registered multiplexer for runtime behavior. A Director needs native goal lifecycle controls and a passing [CAFleet stream probe](#run-a-cafleet-stream-probe). A Member needs a runner-compatible PTY lifecycle, a detection-coverage declaration, and a classified default launch mode (`auto` whenever the backend offers one) whose every approval form the bundled profile detects and answers allow/deny outside its recorded layout limits.
-3. Derive each verdict: `yes` only when every requirement is established; otherwise `no` with "not established" or the observed failure.
+1. Open a design doc for the candidate. It carries a `## Role evaluation` section with a `Role | Requirement | Source | Delivery | Eligible | Evidence` table: Director `goal`, `listen` and `verdict` rows and one Member row, in the shape of the [SPEC Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) table.
+2. For each role, check every Eligible-tier requirement in [SPEC §6.7 Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) against an installed native version, recording the version per requirement group: official documentation and installed `--help` / `--version` for host capabilities, and CAFleet PTY probes on each registered multiplexer for runtime behavior. A Director needs a goal and a listen requirement, each recorded with its source (`native` or `extension`). The goal is native lifecycle controls, or a CAFleet extension verified live against the extension-goal minimum bar. The listen is recorded at the highest tier its evidence establishes: a passing [subscribe probe](#run-a-cafleet-subscribe-probe) records a `subscribe` delivery (tier 1 native, tier 2 extension), and a passing [stream probe](#run-a-cafleet-stream-probe) records a `compromise` delivery (tier 3) only together with the tier-1 and tier-2 negative evidence that Role requirements defines, each source named with its version and check date. A Member needs a runner-compatible PTY lifecycle, a detection-coverage declaration, and a classified default launch mode (`auto` whenever the backend offers one) whose every approval form the bundled profile detects and answers allow/deny outside its recorded layout limits.
+3. Derive each verdict: `yes` only when every requirement is established; otherwise `no` with "not established" or the observed failure. The Director `verdict` row is `yes` only when its `goal` and `listen` rows are both `yes`, and otherwise names the unmet requirements.
 4. For a Member-eligible candidate, claim detection and request-bound allow and deny answers for every approval form the default mode renders, and record the profile's layout limits (`W_min`, wrapped or clipped operations, uncaptured geometries); a default mode that renders no approval form needs no request rules. Choose the other bundled-support capabilities to claim and collect the evidence in the table below; an unclaimed optional capability ships as `unknown` coverage.
-5. When the backend ships, copy the verdicts into its Role eligibility subsection in `skills/cafleet/reference/coding-agents.md` and the [SPEC Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) table, and ship only the roles marked `yes`.
+5. When the backend ships, copy the rows into its Role eligibility subsection in `skills/cafleet/reference/coding-agents.md` and the [SPEC Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) table, and ship only the roles marked `yes`.
 
 | Capability | Required native evidence |
 |---|---|
@@ -87,9 +88,22 @@ Evaluate a candidate backend against the role bar before it ships:
 
 Every claimed detector/composer/answer capability requires CAFleet-owned positive and adversarial replay fixtures, including redraw, wrapping, fragmented ANSI/UTF-8, alternate screens, competing forms and quoted transcript false positives. Every capture is real native PTY evidence on a native version within the profile's interval on each registered multiplexer, including concurrent output/input and the observed-state race boundary. A submission plan is measured, never an assumed Enter mapping. [SPEC §6.9 Native acceptance and coverage](https://github.com/himkt/cafleet/blob/main/SPEC.md#native-acceptance-and-coverage) owns the minimum policies, evidence fields and fault cases. A launch-help probe supplies no detector/composer/answer claim; missing minimum native evidence fails feature acceptance.
 
+### Run a CAFleet subscribe probe
+
+The subscribe probe establishes a tier-1 (native) or tier-2 (extension) subscribe listen: the host pushes each record the running `cafleet message listen` emits into the session as model-visible input, and the model neither polls nor reads the process. The candidate Director starts its receiver through the mechanism under test, such as a native tool or a CAFleet plugin tool, and a probe member sends the records.
+
+1. Prepare the isolated database, Director session and probe member as in steps 1–3 of the stream probe below, and start the receiver after the Director consumes the ready.
+2. **Idle.** With the Director idle, send one record. A new turn must start without user input and consume it.
+3. **Busy.** Ask the Director to run a foreground command of at least 60 s, such as `sleep 90`, and send two records while it runs. The command must not be interrupted, and each record must reach the session no later than the end of that turn, without input.
+4. **Burst.** Send three records back to back. All three must arrive, in order.
+5. **Owner exit.** End the Director session the receiver belongs to, and confirm with `ps` that no `cafleet message listen` survives it.
+6. Record the backend, native version, mechanism, message IDs, send timestamps, each record's delivery turn and timestamp, ACK timestamps and the receiver's exit in the design doc's evidence record.
+
+A record discovered through a foreground `poll`, `wait` or `show` invalidates the run. Probe each mechanism separately; the backend's Director reception recipe owns the concrete tool calls.
+
 ### Run a CAFleet stream probe
 
-The stream probe establishes a candidate Director's streamed background output while supervision continues. The candidate starts `cafleet message listen` through its native background-execution facility and keeps working on something unrelated in the same session. The probe passes when broker records another member sends at separate times during that work are each first observed in the listener's output delivered through that facility, then consumed without user input, while the same listener is still running, during the work or at the session's next turn boundary. The host may push the records or the Director may read the running process's output on demand. A record discovered through a foreground `poll`, `wait` or `show` invalidates the run. Output that reaches the session only when the process exits, such as a completion notification for a finite receive, fails the probe. Probe each native mechanism that can read a running background process separately. Passing establishes streamed background output; the backend's native reception recipe owns the concrete tool calls.
+The stream probe is the tier-3 probe: it establishes a built-in compromise listen, where the Director reads its background listener's output while supervision continues. The candidate starts `cafleet message listen` through its native background-execution facility and keeps working on something unrelated in the same session. The probe passes when broker records another member sends at separate times during that work are each first observed in the listener's output delivered through that facility, then consumed without user input, while the same listener is still running, during the work or at the session's next turn boundary. The host may push the records or the Director may read the running process's output on demand. A record discovered through a foreground `poll`, `wait` or `show` invalidates the run. Output that reaches the session only when the process exits, such as a completion notification for a finite receive, fails the probe. Probe each native mechanism that can read a running background process separately. Passing establishes a tier-3 listen, recorded only together with tier-1 and tier-2 negative evidence; the backend's Director reception recipe owns the concrete tool calls.
 
 1. Create an isolated database in a fresh short absolute directory, such as one from `mktemp -d` (`CAFLEET_DATABASE_URL=sqlite:///<probe dir>/director.db`), so the member runtime socket path stays within the platform limit; record its location and run `cafleet setup` against it.
 2. In a tmux pane, start the candidate Director session and register it with `cafleet fleet create --coding-agent <backend>`.

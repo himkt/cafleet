@@ -8,7 +8,7 @@ numbering/format rules live in the shared [design-document guidelines](../../ski
 
 | Audience | Home | Content |
 |---|---|---|
-| Everything (contract) | `SPEC.md` | Every contract: CLI, output, errors, environment, schema, runtime, multiplexer, backends, presets, wire. §6.7 Coding-agent backends covers role requirements, per-backend role eligibility, backend argv, model/effort validation, permission posture, presets and host evidence. |
+| Everything (contract) | `SPEC.md` | Every contract: CLI, output, errors, environment, schema, runtime, multiplexer, backends, presets, wire. §6.7 Coding-agent backends covers role requirements, per-backend role eligibility, Director extensions, backend argv, model/effort validation, permission posture, presets and host evidence. |
 | Users | `docs/` site | Concepts, usage, setup and configuration steps a user performs; exact contract detail is a link to `SPEC.md`. `docs/docs/concepts/coding-agents.md` explains backend differences, selection and configuration. |
 | Agents | `skills/` | Necessary-and-sufficient instructions to drive cafleet, with command facts in `skills/cafleet/reference/cli.md`. `skills/cafleet/reference/coding-agents.md` owns the runtime overlay. |
 
@@ -151,7 +151,7 @@ Write CAFleet base instructions so they read the same on every backend: family `
 2. **Role defaults**: the concrete model and effort assignments for reviewers and other members; models come from the backend catalog (or are `—` when the backend has no maintained catalog) and effort matches its runtime capability.
 3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
-5. **Role eligibility**: per-role `yes`/`no` verdicts for Director and Member, each with checked native version, source and date.
+5. **Role eligibility**: per-requirement `yes`/`no` rows — Director `goal`, `listen` and `verdict`, plus Member — each requirement row with its source, delivery, checked native version and date.
 
 Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying the Template in this rule and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill exclusively maintains model catalogs, provenance/context notes, canonical Role defaults and shared freshness metadata from official sources, refreshing model data at least every 30 days. Runtime documentation maintenance owns Runtime bindings, bound runtime notes, Role eligibility and worked resolutions, and re-checks eligibility whenever a bundled profile boundary or `Evidence:` line changes; structural reorganization preserves the model freshness date.
 
@@ -163,7 +163,7 @@ State shared operational facts in each home for its audience.
 
 ### Director verdict changes
 
-To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version: native goal lifecycle controls from official documentation or installed help, and streamed background output while supervision continues from the CAFleet stream probe defined there. Record the version, source and date in `SPEC.md` § Role eligibility and the backend's Role eligibility table, then add a native reception recipe or state the manual `poll` / finite `wait` reception limit.
+To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version. The goal requirement needs native goal lifecycle controls from official documentation or installed help, or a CAFleet extension verified live against the extension-goal minimum bar. The listen requirement records its highest established tier: the subscribe probe for a native or extension subscribe listen, or the stream probe for a built-in compromise listen together with tier-1 and tier-2 negative evidence, each source named with its version and check date. Record each requirement row's source, delivery, version and date in `SPEC.md` § Role eligibility and the backend's Role eligibility table, derive the `verdict` row, then add a Director reception recipe or state the manual `poll` / finite `wait` reception limit.
 
 ### Template
 
@@ -187,4 +187,4 @@ Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names
 
 #### Role eligibility
 
-Use a `Role | Eligible | Evidence` table with one Director row and one Member row. Mark `yes` only when every Eligible-tier requirement in [Role requirements](../../skills/cafleet/reference/coding-agents.md#role-requirements) is established; otherwise `no` with "not established" or the observed failure. Each Evidence cell names the source, native version and `checked YYYY-MM-DD` for each requirement group in at most two sentences, and a Member row names its bundled profile instead of listing its capabilities.
+Use a `Role | Requirement | Source | Delivery | Eligible | Evidence` table with Director `goal`, `listen` and `verdict` rows and one Member row. Source is `native` or `extension` on `goal` and `listen` rows; Delivery is `subscribe` or `compromise` on the `listen` row; every other Requirement, Source and Delivery cell is `—`. Mark a requirement row `yes` only when [Role requirements](../../skills/cafleet/reference/coding-agents.md#role-requirements) establishes it; otherwise `no` with "not established" or the observed failure. The `verdict` row is `yes` only when the `goal` and `listen` rows are both `yes`, with Evidence `goal and listen rows`, and otherwise names the unmet requirements. Each requirement row's Evidence names the mechanism, native version and `checked YYYY-MM-DD` in at most two sentences, and the Member row names its bundled profile instead of listing its capabilities.
