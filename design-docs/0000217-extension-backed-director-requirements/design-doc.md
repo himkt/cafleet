@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 23/50 tasks complete
+**Progress**: 27/50 tasks complete
 **Last Updated**: 2026-11-05
 
 ## Overview
@@ -581,10 +581,10 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 
 ### Step 6: Embedded extensions and presets
 
-- [ ] Add `extensions/hermes/cafleet/plugin.yaml` and `__init__.py` (§4.1–4.2), and validate them with `hermes plugins validate` <!-- completed: -->
-- [ ] Add `extensions/opencode/cafleet.ts` (§5) <!-- completed: -->
-- [ ] Add `"cafleet": "deny"` to `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` <!-- completed: -->
-- [ ] Add the `EXTENSIONS` table to `build.rs` <!-- completed: -->
+- [x] Add `extensions/hermes/cafleet/plugin.yaml` and `__init__.py` (§4.1–4.2), and validate them with `hermes plugins validate` <!-- completed: 2026-11-05T22:42 -->
+- [x] Add `extensions/opencode/cafleet.ts` (§5) <!-- completed: 2026-11-05T22:42 -->
+- [x] Add `"cafleet": "deny"` to `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` <!-- completed: 2026-11-05T22:42 -->
+- [x] Add the `EXTENSIONS` table to `build.rs` <!-- completed: 2026-11-05T22:42 -->
 
 ### Step 7: Setup and doctor
 

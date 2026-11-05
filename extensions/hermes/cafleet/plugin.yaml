@@ -1,0 +1,9 @@
+name: cafleet
+version: "1"
+description: "CAFleet Director reception: push each broker record into the owning session."
+author: CAFleet
+kind: standalone
+provides_tools:
+  - cafleet_listen
+provides_hooks:
+  - on_session_finalize
