@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 37/50 tasks complete
+**Progress**: 39/50 tasks complete
 **Last Updated**: 2026-11-05
 
 ## Overview
@@ -615,8 +615,8 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 ### Step 9: Validation
 
 - [ ] `mise //:test` <!-- completed: -->
-- [ ] `mise //:lint` <!-- completed: -->
-- [ ] Run A-S with the built binary against temporary homes and database (§6 Isolation) <!-- completed: -->
+- [x] `mise //:lint` <!-- completed: 2026-11-05T23:19 -->
+- [x] Run A-S with the built binary against temporary homes and database (§6 Isolation) <!-- completed: 2026-11-05T23:19 -->
 
 ### Step 10: Live acceptance and evidence
 
