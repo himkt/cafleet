@@ -228,7 +228,8 @@ its reception and goal controls:
    `/cafleet-goal status`, `/cafleet-goal pause`, `/cafleet-goal resume` and
    `/cafleet-goal clear`. While a goal is active the plugin continues the
    session turn by turn, and it pauses the goal after three continuation turns
-   without reported progress; `/cafleet-goal resume` restarts it.
+   without reported progress or after 50 continuations; `/cafleet-goal resume`
+   restarts it with a fresh continuation budget.
 
 OpenCode allows every action by default, so the plugin tools run on a default
 Director without a prompt. If your configuration adds a broad `ask` or `deny`

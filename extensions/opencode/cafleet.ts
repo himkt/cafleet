@@ -67,6 +67,7 @@ export default Plugin.define({
     const touched = new Set<string>()
 
     const storageKey = (sessionID: string) => `goal/${sessionID}`
+    const generationKey = (sessionID: string) => `goal-generation/${sessionID}`
     const readGoal = async (sessionID: string) =>
       (await ctx.storage.get(storageKey(sessionID))) as unknown as Goal | undefined
 
@@ -82,7 +83,14 @@ export default Plugin.define({
       })
     }
 
+    async function nextGeneration(sessionID: string) {
+      const issued = ((await ctx.storage.get(generationKey(sessionID))) as unknown as number | undefined) ?? 0
+      await ctx.storage.set(generationKey(sessionID), (issued + 1) as never)
+      return issued + 1
+    }
+
     async function clearGoal(sessionID: string) {
+      await nextGeneration(sessionID)
       await ctx.storage.remove(storageKey(sessionID))
       await ctx.session.instructions.entry.remove({ sessionID, key: ENTRY_KEY })
     }
@@ -113,7 +121,7 @@ export default Plugin.define({
     }
 
     async function pause(sessionID: string, goal: Goal) {
-      await writeGoal(sessionID, { ...goal, status: "paused", generation: goal.generation + 1 })
+      await writeGoal(sessionID, { ...goal, status: "paused", generation: await nextGeneration(sessionID) })
     }
 
     function requireDirector() {
@@ -245,7 +253,11 @@ export default Plugin.define({
           await touch(context.sessionID)
           const goal = await readGoal(context.sessionID)
           if (!goal) return result({ ok: false, error: "no CAFleet goal is set for this session" })
-          await writeGoal(context.sessionID, { ...goal, status: "complete", generation: goal.generation + 1 })
+          await writeGoal(context.sessionID, {
+            ...goal,
+            status: "complete",
+            generation: await nextGeneration(context.sessionID),
+          })
           turns.set(context.sessionID, { ...(turns.get(context.sessionID) ?? { continuationTurn: false }), progressed: true })
           return result({ ok: true })
         },
@@ -271,13 +283,19 @@ export default Plugin.define({
           if (argument === "pause") return pause(sessionID, goal!)
           if (argument === "clear") return clearGoal(sessionID)
           if (argument === "resume") {
-            const resumed: Goal = { ...goal!, status: "active", generation: goal!.generation + 1, idle_streak: 0 }
+            const resumed: Goal = {
+              ...goal!,
+              status: "active",
+              generation: await nextGeneration(sessionID),
+              continuations: 0,
+              idle_streak: 0,
+            }
             return queueContinuation(sessionID, resumed)
           }
           const created: Goal = {
             objective: argument,
             status: "active",
-            generation: (goal?.generation ?? 0) + 1,
+            generation: await nextGeneration(sessionID),
             continuations: 0,
             idle_streak: 0,
           }
@@ -341,6 +359,11 @@ export default Plugin.define({
         }
         if (goal.continuations >= CONTINUATION_LIMIT) {
           await pause(data.sessionID, { ...goal, idle_streak: idle })
+          await notice(
+            data.sessionID,
+            `paused: reached ${CONTINUATION_LIMIT} continuations; the operator resumes it with /cafleet-goal resume`,
+            false,
+          )
           continue
         }
         await queueContinuation(data.sessionID, { ...goal, idle_streak: idle })

@@ -8,6 +8,7 @@
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 /target/
+__pycache__/
 /docs/doc_build/
 /docs/node_modules/
 /researches/

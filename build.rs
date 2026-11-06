@@ -24,8 +24,8 @@ fn main() {
     fs::write(&out, generated).expect("the generated embed tables are writable");
 }
 
-/// Collect every non-hidden file under `dir` as a `/`-separated path relative
-/// to `root`.
+/// Collect every file under `dir` as a `/`-separated path relative to `root`,
+/// skipping hidden entries and interpreter caches.
 fn walk(root: &Path, dir: &Path, paths: &mut Vec<String>) {
     let entries =
         fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
@@ -33,7 +33,7 @@ fn walk(root: &Path, dir: &Path, paths: &mut Vec<String>) {
         let entry = entry.unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
         let name = entry.file_name();
         let name = name.to_str().expect("embedded file names are UTF-8");
-        if name.starts_with('.') {
+        if is_excluded(name) {
             continue;
         }
         let path = entry.path();
@@ -50,6 +50,12 @@ fn walk(root: &Path, dir: &Path, paths: &mut Vec<String>) {
             );
         }
     }
+}
+
+/// Hermes rewrites a plugin's `__pycache__` on load, so an embedded cache
+/// would never match its installed copy.
+fn is_excluded(name: &str) -> bool {
+    name.starts_with('.') || name == "__pycache__" || name.ends_with(".pyc")
 }
 
 /// Emit `pub static <name>: &[(&str, &[u8])]` mapping each relative path to

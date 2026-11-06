@@ -2424,17 +2424,18 @@ A refused injection or a rejected `synthetic` call kills the child. A Hermes inj
 
 | Operation | Surface | Effect |
 |---|---|---|
-| set | `/cafleet-goal <objective>` | Store status `active`, `continuations: 0` and `idle_streak: 0`, put the instruction entry, queue the first continuation |
+| set | `/cafleet-goal <objective>` | Store status `active`, the next `generation`, `continuations: 0` and `idle_streak: 0`, put the instruction entry, queue the first continuation |
 | status | `/cafleet-goal status`; tool `cafleet_goal_status` | The command queues a synthetic `[cafleet goal] status: <json>` turn; the tool returns the stored JSON |
 | pause | `/cafleet-goal pause` | Status `paused`, bump `generation`, update the entry |
-| resume | `/cafleet-goal resume` | Status `active`, bump `generation`, reset `idle_streak`, queue a continuation |
-| clear | `/cafleet-goal clear` | Bump `generation`, remove the storage key and the entry |
+| resume | `/cafleet-goal resume` | Status `active`, bump `generation`, reset `idle_streak` and `continuations`, queue a continuation |
+| clear | `/cafleet-goal clear` | Bump `generation`, remove the `goal/<sessionID>` key and the entry |
 | complete | tool `cafleet_goal_complete(summary)` | Status `complete`, bump `generation`, update the entry |
 | progress | tool `cafleet_goal_progress(note)` | Reset `idle_streak` |
 
+- **Generations.** Generations increase monotonically per session. Every bump, and the generation set assigns, stores the new value under storage key `goal-generation/<sessionID>`, which clear keeps; the next generation is that value plus one, so a continuation queued before a clear never matches a later goal.
 - **Continuation.** On `session.execution.succeeded` for a session with an `active` goal, the plugin queues a synthetic item with `delivery: "queue"`, metadata `{ cafleetGoalGeneration: <generation> }` and text `[cafleet goal] Continue working toward the active goal: <objective>. Call cafleet_goal_progress after each step and cafleet_goal_complete when it is achieved.` A `session.execution.interrupted` with `reason: "user"` pauses the goal.
 - **Stale continuations.** The `context` session hook removes every `[cafleet goal]` continuation whose generation differs from the stored one or whose goal is not `active`, so a continuation queued just before `pause`, `clear` or `complete` never reaches the model.
-- **No-progress stop.** A continuation turn that ends without a `cafleet_goal_progress` or `cafleet_goal_complete` call increments `idle_streak`. At 3 the goal pauses and the plugin queues `[cafleet goal] paused: no progress in 3 consecutive continuation turns; the operator resumes it with /cafleet-goal resume` with `resume: false`. The 50-continuation cap also pauses the goal.
+- **No-progress stop.** A continuation turn that ends without a `cafleet_goal_progress` or `cafleet_goal_complete` call increments `idle_streak`. At 3 the goal pauses and the plugin queues `[cafleet goal] paused: no progress in 3 consecutive continuation turns; the operator resumes it with /cafleet-goal resume` with `resume: false`. The 50-continuation cap also pauses the goal and queues `[cafleet goal] paused: reached 50 continuations; the operator resumes it with /cafleet-goal resume` with `resume: false`; resume starts a fresh budget of 50.
 - **Persistence.** The instruction entry carries the goal across compaction. A stored `active` goal for a `sessionID` is restored on the server's first event, tool call or command for that `sessionID`, so after a restart the Director's re-arming `cafleet_listen` turn restores it and the next `session.execution.succeeded` queues the continuation. Storage is shared by every server on the same OpenCode data directory, while restoration stays scoped to the sessions a server serves; setup scans no storage, so a member server or any other server sharing the config directory never restores the Director's goal.
 
 ### 6.8 Configuration

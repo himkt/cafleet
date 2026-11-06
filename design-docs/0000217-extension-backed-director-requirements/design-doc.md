@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 58/60 tasks complete
+**Progress**: 59/60 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -599,7 +599,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 - [x] `extensions/hermes/cafleet/__init__.py` and SPEC.md: read `CAFLEET_MEMBER_ID` and `CAFLEET_DATABASE_URL` through `agent.session_client_env` (`bound_client_env()`, `tool_env()`), refusing an unbound session (§4.1) <!-- completed: 2026-11-06T04:34 -->
 - [x] Add `extensions/opencode/cafleet.ts` (§5) <!-- completed: 2026-11-05T22:42 -->
 - [x] `extensions/opencode/cafleet.ts` and SPEC.md: queue no `[cafleet listen closed]` notice for a receiver the plugin stops or that exits by `SIGTERM` (plugin cleanup or host shutdown), which A-O saw delivered on the next launch (§5.1) <!-- completed: 2026-11-06T05:16 -->
-- [ ] Review round 1: exclude `__pycache__` from the `build.rs` embed walk and `.gitignore` it; implement the 50-continuation cap notice and the resume reset, and monotonic goal generations through `goal-generation/<sessionID>` (§5.2) in `extensions/opencode/cafleet.ts`, SPEC.md and the opencode Note rows; restate the stale-continuation Note as the mechanism with its A-O limit <!-- completed: -->
+- [x] Review round 1: exclude `__pycache__` from the `build.rs` embed walk and `.gitignore` it; implement the 50-continuation cap notice and the resume reset, and monotonic goal generations through `goal-generation/<sessionID>` (§5.2) in `extensions/opencode/cafleet.ts`, SPEC.md and the opencode Note rows; restate the stale-continuation Note as the mechanism with its A-O limit <!-- completed: 2026-11-06T05:45 -->
 - [x] Add `"cafleet": "deny"` to `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` <!-- completed: 2026-11-05T22:42 -->
 - [x] Add the `EXTENSIONS` table to `build.rs` <!-- completed: 2026-11-05T22:42 -->
 
