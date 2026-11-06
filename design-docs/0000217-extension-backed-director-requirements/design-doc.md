@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 49/58 tasks complete
+**Progress**: 50/58 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -650,7 +650,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 - [ ] Run A-H (Hermes TUI) <!-- completed: -->
 - [ ] Run A-O (OpenCode) <!-- completed: -->
 - [ ] Run A-M (Member re-check for OpenCode and Hermes) <!-- completed: -->
-- [ ] Rewrite the SPEC § Role eligibility rows and the coding-agents.md rows from the observed results, recording `no` with the observed failure for any failed run. Update the dependent prose: host-evidence paragraphs, Note rows and docs verdict mentions. <!-- completed: -->
+- [x] Rewrite the SPEC § Role eligibility rows and the coding-agents.md rows from the observed results, recording `no` with the observed failure for any failed run. Update the dependent prose: host-evidence paragraphs, Note rows and docs verdict mentions. <!-- completed: 2026-11-06T05:19 -->
 
 ### Step 11: Final consistency
 

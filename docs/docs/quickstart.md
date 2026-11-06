@@ -216,8 +216,9 @@ presets, with a `cafleet.executable` file naming the `cafleet` it runs; rerun
 setup after moving or upgrading the CLI. The plugin gives an OpenCode Director
 its reception and goal controls:
 
-1. Launch the Director with `opencode mini --standalone` from the project
-   directory, with the default agent. Plugins in the shared background service
+1. Launch the Director on OpenCode 2.2.0 or later with
+   `opencode mini --standalone` from the project directory, with the default
+   agent. Plugins in the shared background service
    do not receive your shell's environment, so that service cannot host a
    Director.
 2. After registering the fleet, the Director starts reception with the

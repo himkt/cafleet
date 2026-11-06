@@ -102,8 +102,8 @@ Reception ends with the fleet: after `closed` `fleet_deleted`, verify task/sourc
 | Role | Requirement | Source | Delivery | Eligible | Evidence |
 |---|---|---|---|---|---|
 | Director | `goal` | `native` | — | `yes` | [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. |
-| Director | `listen` | `native` | `subscribe` | `no` | not established (acceptance run A-Cl pending) |
-| Director | `verdict` | — | — | `no` | `listen` |
+| Director | `listen` | `native` | `subscribe` | `yes` | One Monitor task running `cafleet message listen`: subscribe probe (idle wake, records during a 70 s foreground command delivered after it, burst of 3 in order), 2.1.312, checked 2026-11-06. |
+| Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the Claude profile from `2.1.302`. |
 
 ## codex
@@ -166,9 +166,9 @@ The forwarder pins its Codex session process at startup and exits with `closed` 
 
 | Role | Requirement | Source | Delivery | Eligible | Evidence |
 |---|---|---|---|---|---|
-| Director | `goal` | `native` | — | `yes` | [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. |
-| Director | `listen` | `native` | `subscribe` | `no` | not established (acceptance run A-C pending) |
-| Director | `verdict` | — | — | `no` | `listen` |
+| Director | `goal` | `native` | — | `yes` | [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Native `/goal` stayed active through the listen acceptance run, 0.165.0, checked 2026-11-06. |
+| Director | `listen` | `native` | `subscribe` | `yes` | `cafleet message listen --codex-thread` forwarding through `codex queue` on the escalated path: subscribe probe, a `message_ref` for a 70,000-byte body, 200 burst records in order past the 100-submission cap, 10 idle minutes and a forced-failure closed notice, 0.165.0, checked 2026-11-06. The sandboxed path is unverified, and `member delete` left no listener. |
+| Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the Codex profile from `0.163.0`. |
 
 ## opencode
@@ -332,10 +332,10 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 |---|---|
 | A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
 | Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. | Member startup |
-| An OpenCode Director runs `opencode mini --standalone` from the project directory with the default agent, so plugins load in its private server with the launcher's environment. The shared background service passes plugins no client environment and cannot host a Director. | Director launch; [native reception](#opencode-native-director-reception) |
+| An OpenCode Director runs OpenCode 2.2.0 or later as `opencode mini --standalone` from the project directory with the default agent, so plugins load in its private server with the launcher's environment. The shared background service passes plugins no client environment and cannot host a Director. | Director launch; [native reception](#opencode-native-director-reception) |
 | `cafleet setup` installs the CAFleet plugin as `<preset base>/plugins/cafleet.ts` with a `cafleet.executable` record naming the `cafleet` it runs. It provides `cafleet_listen`, `/cafleet-goal`, `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`. | setup; [native reception](#opencode-native-director-reception) |
 | Each plugin tool asserts the `cafleet` permission action, which OpenCode's base allow-all rule resolves to allow on a default Director; an operator configuration whose broad `ask` or `deny` rule overrides it needs `{ "action": "cafleet", "resource": "*", "effect": "allow" }`. Both member presets deny `cafleet`, and inside a member the plugin refuses with `cafleet tools run only in a Director session`. | [Director wake](../roles/director.md#director-wake); [member routing](../roles/member.md#reconsider-then-route) |
-| An active goal continues through queued `[cafleet goal]` continuation turns. Continuations made stale by pause, clear or complete never reach the model; the goal pauses after 3 continuation turns without `cafleet_goal_progress` or `cafleet_goal_complete`, or after 50 continuations, and a user interrupt pauses it. After a restart, the session's first event, tool call or command restores an active goal. | [Director wake](../roles/director.md#director-wake); [native reception](#opencode-native-director-reception) |
+| An active goal continues through queued `[cafleet goal]` continuation turns. Continuations made stale by pause, clear or complete never reach the model; the goal pauses after 3 continuation turns without `cafleet_goal_progress` or `cafleet_goal_complete`, or after 50 continuations, and a user interrupt pauses it. After a restart, the session's first event, tool call or command restores an active goal. Goal storage is shared by every OpenCode server on the same data directory, while restoration stays scoped to the sessions a server serves, so spawning a member queues nothing into the Director session. | [Director wake](../roles/director.md#director-wake); [native reception](#opencode-native-director-reception) |
 | OpenCode loads presets from `~/.config/opencode`, the default preset base, and from `OPENCODE_CONFIG_DIR`. `member create` forwards a set `OPENCODE_CONFIG_DIR` into the member's environment, so the member loads the preset setup installed and spawn checked. Same-name agent definitions can merge across sources; inspect the effective configuration when customizing a preset. | `{permission_flags}`; preset discovery; member spawn |
 | The broad `cafleet *` allow lets members run broker commands; Director-only commands refuse inside the member through the runner guard, whose error tells the member to send the request to its Director. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
 | MCP tools' participation in preset permission evaluation and compound-shell permission matching are unverified. Keep loaded configurations free of MCP servers and submit one command per invocation. | `{permission_flags}`; [command isolation](../SKILL.md#one-shot-command-isolation) |
@@ -362,9 +362,9 @@ After a restart on the same session, re-arm with `cafleet_listen` on the first t
 
 | Role | Requirement | Source | Delivery | Eligible | Evidence |
 |---|---|---|---|---|---|
-| Director | `goal` | `extension` | — | `no` | not established (acceptance run A-O pending) |
-| Director | `listen` | `extension` | `subscribe` | `no` | not established (acceptance run A-O pending) |
-| Director | `verdict` | — | — | `no` | `goal`, `listen` |
+| Director | `goal` | `extension` | — | `yes` | `cafleet` plugin goal extension under `opencode mini --standalone`: set, status, pause, resume, clear, complete, compaction, restart on the same session and the no-progress stop, 2.2.0 (minimum), checked 2026-11-06. A continuation in flight at pause was not separately observed. |
+| Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with queued `session.synthetic` delivery under `opencode mini --standalone`: subscribe probe (idle wake, 70 s busy command, burst of 10 in order) and client exit ending the child, 2.2.0 (minimum), checked 2026-11-06. |
+| Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: the OpenCode profile from `2.1.4`. |
 
 ## hermes
@@ -396,8 +396,8 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 
 | Note | Applies at |
 |---|---|
-| `clarify` offers the listed choices plus a free-text Other and waits up to an hour; a result whose `status` is `answered` records the decision. Its evidence comes from the classic CLI. A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
-| A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), because turns injected into a classic CLI session run without rendering in its pane; members use the classic CLI. Director records arrive through the CAFleet plugin's `cafleet_listen` tool (§ Hermes native Director reception). | Director launch; [Director wake](../roles/director.md#director-wake) |
+| `clarify` offers the listed choices plus a free-text Other and waits up to an hour; a result whose `status` is `answered` records the decision. It was verified in the classic CLI and the TUI client. A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
+| A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), because turns injected into a classic CLI session run without rendering in its pane; members use the classic CLI. Director records arrive through the CAFleet plugin's `cafleet_listen` tool (§ Hermes native Director reception). Native `/goal` set, status, pause, resume and clear work in the TUI client, and continuation turns already queued before `/goal clear` still run after it. | Director launch; [Director wake](../roles/director.md#director-wake) |
 | `cafleet setup --coding-agent hermes` installs the CAFleet plugin into `<hermes home>/plugins/cafleet/` with an `executable` record naming the `cafleet` it runs, adds `cafleet` to `plugins.enabled` and sets `plugins.entries.cafleet.allow_gateway_injection` to `true`; it fails when `plugins.disabled` lists `cafleet`. Inside a member session `cafleet_listen` returns `cafleet_listen runs only in a Director session`. | setup; [member routing](../roles/member.md#reconsider-then-route) |
 | Default mode `smart` (class `auto`): commands outside Hermes's dangerous-command patterns run unreviewed; the guardian model reviews the rest and may open an ESCALATE prompt or, after a guardian DENY, an owner-override prompt offering once/deny. The member waits while the Director answers allow-once or deny through the runtime procedure; an unanswered prompt fails closed at `approvals.timeout` (default 300 s) with a BLOCKED result, which the member routes like any refusal. Hardline floors, the sudo guard and `approvals.deny` block before review and route like any refusal. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [runtime procedure](../roles/director.md#consume-observed-interactions) |
 | CAFleet needs no `approvals.deny` entries. Hermes applies `approvals.deny` to every session, so a `cafleet …` glob there also blocks a Hermes Director's own command with `BLOCKED: … user-defined deny rule '<glob>'`; the Director then asks the operator, through its decision surface, to remove that CAFleet glob from `approvals.deny`. | `{decision_surface}`; `{permission_flags}`; [Director dispatch](../roles/director.md#director-side-dispatch) |
@@ -405,7 +405,7 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 | One Hermes gateway per Hermes home runs every session's terminal tools. Setup merges CAFleet's member variables into `terminal.client_env_passthrough`, so each member's tools see its own `CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID` and pane variables; `member create` refuses a configuration whose list lacks one of them, naming `cafleet setup --coding-agent hermes`. | setup; member spawn |
 | Hermes can rewrite an installed skill during a session. Rerun `cafleet setup --coding-agent hermes` to restore the embedded copies. | setup |
 | A Hermes session can keep work running after its pane's client exits; [member delete](cli.md#member-delete) owns settlement, its exit and its warning. When deletion warns that the client had already exited, that session's in-flight turn runs to completion; to stop its background processes, find the session with `hermes sessions list --source tool`, resume it with `hermes chat --cli --resume <session id> --in <cwd>` and run `/stop`. CAFleet never stops a Hermes gateway or touches sessions it does not own. | [Member Delete](../roles/director.md#member-delete); [Shutdown](../roles/director.md#shutdown) |
-| Leading-`!` input runs a native shell command in the classic CLI REPL, where it was verified. The Director authorizes routed native input under its host rules. | [Native dispatch](../roles/director.md#director-side-dispatch) |
+| Leading-`!` input runs a native shell command in the classic CLI REPL and the TUI client, where it was verified. The Director authorizes routed native input under its host rules. | [Native dispatch](../roles/director.md#director-side-dispatch) |
 
 #### Hermes native Director reception
 
@@ -420,7 +420,7 @@ The plugin runs the receiver inside the Hermes gateway without `--timeout` and e
 
 | Role | Requirement | Source | Delivery | Eligible | Evidence |
 |---|---|---|---|---|---|
-| Director | `goal` | `native` | — | `no` | not established on the TUI client (acceptance run A-H pending) |
-| Director | `listen` | `extension` | `subscribe` | `no` | not established (acceptance run A-H pending) |
-| Director | `verdict` | — | — | `no` | `goal`, `listen` |
+| Director | `goal` | `native` | — | `yes` | Native `/goal` set, status, pause, resume and clear on the TUI client, 2026.9.24, checked 2026-11-06. |
+| Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with ordered gateway injection on the TUI client: subscribe probe (idle wake, 70 s busy command, bursts of 3 and 10 in order) and `/exit` ending the child, 2026.9.24, checked 2026-11-06. |
+| Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |

@@ -34,13 +34,13 @@ A Director backend needs two capabilities, checked independently: goal lifecycle
 | Extension subscribe | A CAFleet plugin that `cafleet setup` installs pushes each record the same way | Accepted, below native |
 | Built-in compromise | The model reads the running listener's output or receives periodic batches | Far below both; recorded only when neither subscribe tier exists |
 
-[Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the tiers and the probes that establish them.
+[Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the tiers and the probes that establish them. Each bundled backend meets both Director requirements as follows:
 
 | Backend | Director launch | Reception | Goal |
 |---|---|---|---|
 | `claude` | Your usual Claude Code session | The native Monitor tool | Native `/goal` |
 | `codex` | Your usual Codex session | `cafleet message listen --codex-thread` hands each record to the session as a queued turn | Native `/goal` |
-| `opencode` | `opencode mini --standalone` from the project directory, with the default agent | The CAFleet plugin's `cafleet_listen` tool | The CAFleet plugin's `/cafleet-goal` command |
+| `opencode` | OpenCode 2.2.0 or later as `opencode mini --standalone` from the project directory, with the default agent | The CAFleet plugin's `cafleet_listen` tool | The CAFleet plugin's `/cafleet-goal` command |
 | `hermes` | The TUI client, `hermes chat --tui` | The CAFleet plugin's `cafleet_listen` tool | Native `/goal` |
 
 A Hermes Director runs the TUI because records the plugin delivers to a classic CLI session run without appearing in that pane; Hermes members keep the classic CLI. The shared OpenCode background service passes no client environment to plugins, so it is not a supported Director launch.
