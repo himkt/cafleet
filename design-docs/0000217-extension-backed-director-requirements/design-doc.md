@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 48/57 tasks complete
+**Progress**: 48/58 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -58,6 +58,7 @@ The probes produced findings the design must handle:
 |---|---|---|
 | Hermes premise correction | `plugins_injection.py` routes to `_pending_input`/`_interrupt_queue` only when `PluginManager._cli_ref` is set, and 2026.9.24 never sets it. Plugins run in the per-home gateway, where a keyed injection is admitted into the session's durable FIFO (`gateway/run_plugin_injection.py:233-245`, `:363-392`). | No plugin-side busy buffer and no `pre_llm_call` flush (§4.1) |
 | Hermes injection order (A-H, 2026-11-06) | `inject_message` returns before its dispatch coroutine commits, so back-to-back records reordered (994→995→993, 996→998→997). | Ordered injection: await each dispatch before the next record (§4.1) |
+| Hermes member refusal (A-H, 2026-11-06) | In a member session `get_session_env("CAFLEET_MEMBER_ID")` returned empty and `cafleet_listen` returned `ok: true`: it maps only `HERMES_SESSION_*` names and otherwise reads the gateway's `os.environ`. | Read the client environment through `agent.session_client_env` (§4.1) |
 | Hermes key-less injection | `gateway/plugin_keyless_inject.py:92-98` refuses when several classic CLI sessions share a home, and the Director and Hermes members do. | The tool captures the calling session key and injects with `session_key=` (§4.1) |
 | Hermes enablement | `hermes plugins enable` fails on the Homebrew install (its PM venv sync needs `site-packages/uv.lock`). Only `plugins.enabled`/`plugins.disabled` gate loading (`plugins_discovery.py:112-131`, `:257-302`). | Setup merges the keys through `hermes config set` (§2.3) |
 | Hermes classic CLI visibility | Gateway turns injected into a classic CLI session run without rendering in that pane. | A Hermes Director runs the TUI client; members keep `--cli` (§4.3) |
@@ -382,7 +383,7 @@ provides_hooks:
 | Seam | Use |
 |---|---|
 | `hermes_cli.plugin_session.session_key()` | calling session key |
-| `gateway.session_context.get_session_env(name, default)` | session environment (`CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID`) |
+| `agent.session_client_env.bound_client_env()` and `tool_env()` | the calling session's client environment, as its tool subprocesses receive it (`CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID`) |
 | `gateway.session_authorities.authority_for_home(...)` → `authority.sessions[...].subscribers` | client attachment (§4.2) |
 | the published gateway runner (`ctx._manager._gateway_message_injector[0]`), its `_gateway_loop` and `_dispatch_plugin_message_injection(session_key=, content=, plugin_id=, plugin_home=)` | ordered injection (below) |
 
@@ -392,11 +393,11 @@ The tool resolves all four on every call. If an import or lookup fails, or the a
 
 **Tool `cafleet_listen(director_id: integer)`**, in toolset `cafleet`:
 
-1. When `get_session_env("CAFLEET_MEMBER_ID")` is non-empty, return `{"ok": false, "error": "cafleet_listen runs only in a Director session"}`. Member sessions export `CAFLEET_MEMBER_ID` through `terminal.client_env_passthrough`.
+1. When `bound_client_env()` is `None`, return `{"ok": false, "error": "cafleet_listen cannot read the calling session's client environment"}`; an unbound session (messaging, cron) has no client environment that could prove it is not a member. When `tool_env()` holds a non-empty `CAFLEET_MEMBER_ID`, return `{"ok": false, "error": "cafleet_listen runs only in a Director session"}`. Member sessions export `CAFLEET_MEMBER_ID` through `terminal.client_env_passthrough`, which is exactly what `tool_env()` carries. (`gateway.session_context.get_session_env` maps only `HERMES_SESSION_*` names and otherwise reads the gateway's own `os.environ`, so A-H saw it return empty in a member session.)
 2. Read the session key. An empty key returns `{"ok": false, "error": "cafleet_listen must be called from a session turn"}`.
 3. When this key already owns a live receiver, return `{"ok": true, "pid": <pid>, "session_key": <key>, "existing": true}`.
 4. Read the executable record (`Path(__file__).with_name("executable")`). If it is missing or is not an executable file, return `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent hermes'"}`.
-5. Spawn `<recorded cafleet> message listen <director_id>` inside the gateway. The child gets the gateway's environment, plus `CAFLEET_DATABASE_URL` from the session environment when that value is non-empty. Return `{"ok": true, "pid": <pid>, "session_key": <key>}`.
+5. Spawn `<recorded cafleet> message listen <director_id>` inside the gateway. The child gets the gateway's environment, plus `CAFLEET_DATABASE_URL` from `tool_env()` when that value is non-empty. Return `{"ok": true, "pid": <pid>, "session_key": <key>}`.
 6. A reader thread injects each stdout line as `[cafleet listen record] <line>` into the session `<key>` through ordered injection, one record at a time.
 
 The listener runs without `--timeout`; the plugin performs no automatic replacement.
@@ -593,6 +594,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 - [x] Add `extensions/hermes/cafleet/plugin.yaml` and `__init__.py` (§4.1–4.2), and validate them with `hermes plugins validate` <!-- completed: 2026-11-05T22:42 -->
 - [x] Update SPEC.md (the Hermes plugin delivery row and private-seam list) and any skill or docs text that names `inject_message` as the delivery to the §4.1 ordered injection <!-- completed: 2026-11-06T04:11 -->
 - [x] `extensions/hermes/cafleet/__init__.py`: ordered injection through the gateway runner's dispatch coroutine with a 10 s deadline, the consent check before spawning, the fourth seam and its failure rows (§4.1–4.2); validate with `hermes plugins validate` on a temporary `HERMES_HOME` <!-- completed: 2026-11-06T04:15 -->
+- [ ] `extensions/hermes/cafleet/__init__.py` and SPEC.md: read `CAFLEET_MEMBER_ID` and `CAFLEET_DATABASE_URL` through `agent.session_client_env` (`bound_client_env()`, `tool_env()`), refusing an unbound session (§4.1) <!-- completed: -->
 - [x] Add `extensions/opencode/cafleet.ts` (§5) <!-- completed: 2026-11-05T22:42 -->
 - [x] Add `"cafleet": "deny"` to `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` <!-- completed: 2026-11-05T22:42 -->
 - [x] Add the `EXTENSIONS` table to `build.rs` <!-- completed: 2026-11-05T22:42 -->
@@ -667,3 +669,4 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 | 2026-11-05 | Approved by the user after Reviewer approval; Status set to Approved |
 | 2026-11-06 | A-C found Codex 0.165.0's 100-submission thread-queue cap: a 200-record burst ended the forwarder at record 97. Approved by the user: a full-queue refusal is now a 1 s wait-and-retry of the same record with a 600 s limit (§3.1), the busy rule states that waiting behind earlier records passes (§1.1), and the forwarder stays tier 1 because Codex still starts every turn. |
 | 2026-11-06 | A-H found that Hermes `inject_message` returns before its dispatch commits, so three back-to-back records reordered twice. Approved by the user: the plugin awaits each record's gateway dispatch before the next (ordered injection, §4.1), adding a fourth private seam and a consent check; Hermes stays tier 2. |
+| 2026-11-06 | A-H found that `get_session_env` cannot see a member's client environment, so a member session's `cafleet_listen` succeeded. The plugin now reads `CAFLEET_MEMBER_ID` and `CAFLEET_DATABASE_URL` through `agent.session_client_env` and refuses an unbound session (§4.1); the member-refusal intent is unchanged. |
