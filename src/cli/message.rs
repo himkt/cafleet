@@ -823,6 +823,7 @@ impl CodexQueue<'_> {
                         return Ok(Forwarding::SessionExited);
                     }
                 }
+                // COMMENT(reviewer): [COMPLIANCE] Design §3.1/SPEC § Codex forwarding: "The pinned Codex process exits → stdout `closed` `session_exited`, exit 0; nothing is forwarded". Only the full-queue arm checks the pinned session. When the session ends while a record is in flight (for example `member delete` during a burst), `codex queue` fails or hangs against the gone thread, and this arm and the `Exit` arm below exit 1 and forward a `[cafleet listen closed]` notice to the dead session, without writing a stdout `closed` record. On a `Deadline` or `Exit` failure, call `pinned_session_exited(self.session)?` first and return `Ok(Forwarding::SessionExited)` when it is true. Add a test where the fake `codex` fails once the session has been killed.
                 Err(QueueFailure::Deadline) => {
                     return Err(CafleetError::App(self.deadline_diagnostic()));
                 }
@@ -2149,6 +2150,31 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             )
         }
 
+        /// Accepts only the closed notice and holds every record until the test creates
+        /// [`RELEASE`], then answers it with `record_reply`.
+        fn codex_failing_released_records(record_reply: &str) -> String {
+            codex_refusing_records(&format!(
+                "while [ ! -e \"$CAFLEET_TEST_CODEX_LOG.release\" ]; do sleep 0.05; done\n{record_reply}"
+            ))
+        }
+
+        const RELEASE: &str = "codex.log.release";
+
+        fn assert_closed_with_session_exited(forwarder: &Forwarder, broker: &Broker, member: i64) {
+            assert_eq!(
+                forwarder.stdout_records(),
+                [
+                    crate::output::json::listen_ready(member, broker.fleet),
+                    crate::output::json::listen_closed(member, "session_exited"),
+                ]
+            );
+            assert!(
+                !forwarder.stderr().contains("failed to forward"),
+                "{}",
+                forwarder.stderr()
+            );
+        }
+
         /// Stamps every invocation, answers the first `refusals` (every one when `None`) with
         /// Codex's full-queue refusal, and runs `then` for the rest.
         fn full_queue_codex(refusals: Option<u32>, then: &str) -> String {
@@ -2301,8 +2327,11 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             assert_eq!(reference["event"], "message_ref");
             assert_eq!(reference["message_id"], exceeds);
             assert_eq!(reference["from_member_id"], worker);
-            let bytes = reference["bytes"].as_u64().unwrap();
-            assert!(bytes > RECORD_LIMIT as u64 - overhead as u64, "{bytes}");
+            assert_eq!(
+                reference["bytes"].as_u64(),
+                Some(broker.record_text(exceeds).len() as u64),
+                "bytes is the length of the text the reference replaces"
+            );
         }
 
         #[test]
@@ -2501,6 +2530,105 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             assert!(
                 forwarded.iter().all(|invocation| *invocation == record),
                 "only the waiting record is attempted, with no closed notice: {forwarded:?}"
+            );
+        }
+
+        #[test]
+        fn a_codex_queue_failing_after_the_pinned_session_ended_closes_the_listener_with_session_exited()
+         {
+            let mut broker = broker();
+            let (director, worker) = (broker.director, broker.worker);
+            let message = broker.send(worker, director, "in flight");
+            let mut forwarder = start(
+                &broker,
+                &listen_args(director, None),
+                Some(&codex_failing_released_records(&format!(
+                    "printf '%s\\n' 'thread {THREAD} not found' >&2\nexit 2"
+                ))),
+                Launch::Session,
+            );
+            forwarder.wait_forwarded(1);
+            forwarder.end_session();
+            std::fs::write(forwarder.file(RELEASE), "").unwrap();
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(5)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            assert_closed_with_session_exited(&forwarder, &broker, director);
+            assert_eq!(
+                forwarder.forwarded(),
+                [queued(&broker.record_text(message))],
+                "no closed notice goes to the exited session"
+            );
+        }
+
+        #[test]
+        fn a_codex_queue_past_its_deadline_after_the_pinned_session_ended_closes_the_listener_with_session_exited()
+         {
+            let mut broker = broker();
+            let (director, worker) = (broker.director, broker.worker);
+            let message = broker.send(worker, director, "in flight");
+            let mut forwarder = start(
+                &broker,
+                &listen_args(director, None),
+                Some(&codex_refusing_records("exec sleep 30")),
+                Launch::Session,
+            );
+            forwarder.wait_forwarded(1);
+            forwarder.end_session();
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(20)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            assert_closed_with_session_exited(&forwarder, &broker, director);
+            assert!(
+                !forwarder.stderr().contains("did not finish within"),
+                "{}",
+                forwarder.stderr()
+            );
+            assert_eq!(
+                forwarder.forwarded(),
+                [queued(&broker.record_text(message))],
+                "no closed notice goes to the exited session"
+            );
+        }
+
+        #[test]
+        fn a_closing_record_failing_after_the_pinned_session_ended_closes_the_listener_with_session_exited()
+         {
+            let mut broker = broker();
+            let worker = broker.worker;
+            let mut forwarder = start(
+                &broker,
+                &listen_args(worker, None),
+                Some(&codex_failing_released_records(&format!(
+                    "printf '%s\\n' 'thread {THREAD} not found' >&2\nexit 2"
+                ))),
+                Launch::Session,
+            );
+            forwarder.wait_ready();
+            assert!(
+                crate::broker::members::test_support::deregister_member(&mut broker.conn, worker)
+                    .unwrap()
+            );
+            forwarder.wait_forwarded(1);
+            forwarder.end_session();
+            std::fs::write(forwarder.file(RELEASE), "").unwrap();
+            assert_eq!(
+                forwarder.wait_exit(Duration::from_secs(5)),
+                0,
+                "{}",
+                forwarder.stderr()
+            );
+            assert_closed_with_session_exited(&forwarder, &broker, worker);
+            assert_eq!(
+                forwarder.forwarded(),
+                [queued(&closed_text(worker, "member_inactive"))],
+                "no closed notice goes to the exited session"
             );
         }
 

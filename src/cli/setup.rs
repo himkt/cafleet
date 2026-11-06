@@ -3113,6 +3113,24 @@ mod tests {
             );
         }
 
+        #[test]
+        fn doctor_reports_a_relative_hermes_config_path_with_the_member_create_cause() {
+            let (mut scenario, _conn) = healthy_scenario();
+            let answers = scenario.ready_hermes_answers(&HERMES_CLIENT_ENV_PASSTHROUGH);
+            scenario.hermes(Answer::Print("config.yaml".into()), &answers);
+            let (summary, rows) = scenario.summary_and_rows(1);
+            let detail = "cannot read hermes configuration through 'hermes config path': printed no absolute file path: config.yaml";
+            assert_eq!(
+                named_row(&rows, "hermes.extension"),
+                format!("error hermes.extension: {detail}")
+            );
+            assert_eq!(
+                named_row(&summary, "hermes"),
+                format!("error hermes: {detail}"),
+                "an unreadable config path has no setup fix"
+            );
+        }
+
         enum Enablement {
             Row(&'static str),
             Unreadable,

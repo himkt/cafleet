@@ -82,6 +82,7 @@ pub(crate) fn opencode_plugins_dir(preset_base: &Path) -> PathBuf {
     preset_base.join("plugins")
 }
 
+// COMMENT(reviewer): [IMPROVEMENT] This duplicates `crate::coding_agent::hermes_settlement::effective_home` (the `hermes config path` → absolute parent rule) under a different cause string. SPEC § Contract error strings fixes that condition as `cannot read hermes configuration through 'hermes config path': printed no absolute file path: {stdout}`, but `doctor`'s `hermes.extension` row (setup.rs `hermes_extension_check`) reports `…'hermes config path': 'hermes config path' printed '<path>', not an absolute file path` for the same input. Change the cause to `printed no absolute file path: <stdout>` (or share one helper with `effective_home`), so doctor matches member create, and add a test for a relative `config path` output. The setup and doctor tests do not cover this branch today.
 /// The plugin directory under the Hermes home that owns `config_path`.
 pub(crate) fn hermes_plugin_dir(config_path: &str) -> Result<PathBuf, String> {
     Path::new(config_path)
@@ -2018,6 +2019,30 @@ mod tests {
                 assert_eq!(installed.lines, [skills_line(&installed)]);
                 assert_eq!(fake.calls, [FakeHermes::path_call()]);
                 assert!(!fake.plugin_dir().exists());
+                assert!(!installed.base.join("plugins").exists());
+            }
+        }
+
+        #[test]
+        fn hermes_setup_fails_into_the_resolved_base_when_the_config_path_is_not_absolute() {
+            for printed in ["config.yaml", "profiles/work/config.yaml"] {
+                let mut fake = FakeHermes::holding(&[]);
+                fake.reply(
+                    FakeHermes::path_call(),
+                    Reply::Exit {
+                        code: 0,
+                        stdout: format!("{printed}\n"),
+                        stderr: format!("{OUT_OF_SYNC}\n"),
+                    },
+                );
+                let installed = install(&mut fake);
+                assert_failure(
+                    &installed,
+                    &passthrough_prefix(&installed.base),
+                    Cause::Exact(&format!("printed no absolute file path: {printed}")),
+                );
+                assert_eq!(installed.lines, [skills_line(&installed)]);
+                assert_eq!(fake.calls, [FakeHermes::path_call()]);
                 assert!(!installed.base.join("plugins").exists());
             }
         }
