@@ -453,7 +453,9 @@ Run one persistent receiver through the backend recipe; [message listen](../refe
 | Forwarded `closed` record (Codex `--codex-thread`) | Read the retained exec session once for its final output, then follow the row for the record's reason |
 | `closed` `session_exited` | The owning Codex session ended and its forwarder with it; a resumed or new session starts one fresh receiver after a fresh successful health/inbox check |
 | `[cafleet listen closed]` turn | The receiver exited without a normal closure; inspect the diagnostic, establish that it exited and complete a fresh successful health/inbox check before starting one replacement |
-| Extension tool missing, `ok: false` or permission refused | Run `cafleet doctor`; route the `cafleet setup --coding-agent <agent>` or permission fix it names through the operator, and meanwhile use manual `poll`/finite `wait` within host permissions |
+| Extension tool missing, or an `ok: false` naming `cafleet setup` | Run `cafleet doctor`, which checks missing or differing extensions and the Hermes enablement; route the `cafleet setup --coding-agent <agent>` fix it names through the operator, and meanwhile use manual `poll`/finite `wait` within host permissions |
+| Extension tool permission refused | Route the permission rule in the backend's Note → applies at row through the operator, and meanwhile use manual `poll`/finite `wait` within host permissions |
+| Any other extension `ok: false` | Surface its error text to the operator, and meanwhile use manual `poll`/finite `wait` within host permissions |
 | Native or extension receiver tool unavailable or denied at runtime | On a host satisfying the [Director requirements](../reference/coding-agents.md#role-requirements), state the reception limit and use manual `poll`/finite `wait` within host permissions |
 
 Retain pending messages across recovery. Repeated receiver failures require diagnosis; each replacement requires observed termination and a fresh successful health/inbox check. Follow the backend's native receive lifecycle independently of whether a host goal was supplied.

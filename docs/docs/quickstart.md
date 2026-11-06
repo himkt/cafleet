@@ -239,8 +239,9 @@ rule, add this rule after it so the Director keeps the plugin tools:
 { "action": "cafleet", "resource": "*", "effect": "allow" }
 ```
 
-Both member presets deny the plugin tools, and the plugin itself refuses to
-run inside a member.
+The plugin refuses to run inside a member, which it recognizes by the member
+environment. Both member presets also deny the plugin tools, which covers a
+member whose environment lacks that marker.
 
 ### Hermes
 

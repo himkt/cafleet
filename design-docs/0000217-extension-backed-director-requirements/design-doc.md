@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
-**Status**: Complete
-**Progress**: 60/60 tasks complete
+**Status**: In Progress
+**Progress**: 61/67 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -393,12 +393,12 @@ The tool resolves all four on every call. If an import or lookup fails, or the a
 
 **Tool `cafleet_listen(director_id: integer)`**, in toolset `cafleet`:
 
-1. When `bound_client_env()` is `None`, return `{"ok": false, "error": "cafleet_listen cannot read the calling session's client environment"}`; an unbound session (messaging, cron) has no client environment that could prove it is not a member. When `tool_env()` holds a non-empty `CAFLEET_MEMBER_ID`, return `{"ok": false, "error": "cafleet_listen runs only in a Director session"}`. Member sessions export `CAFLEET_MEMBER_ID` through `terminal.client_env_passthrough`, which is exactly what `tool_env()` carries. (`gateway.session_context.get_session_env` maps only `HERMES_SESSION_*` names and otherwise reads the gateway's own `os.environ`, so A-H saw it return empty in a member session.)
+1. When `bound_client_env()` is `None`, return `{"ok": false, "error": "cafleet_listen cannot read the calling session's client environment"}`; an unbound session (messaging, cron) has no client environment that could prove it is not a member. When `bound_client_env()` is not `None` but the client is not local (its `tool_env()` is empty, because Hermes drops every passthrough name for a non-local client), return `{"ok": false, "error": "cafleet_listen cannot verify a client that is not attached locally"}` for the same reason. When `tool_env()` holds a non-empty `CAFLEET_MEMBER_ID`, return `{"ok": false, "error": "cafleet_listen runs only in a Director session"}`. Member sessions export `CAFLEET_MEMBER_ID` through `terminal.client_env_passthrough`, which is exactly what `tool_env()` carries. (`gateway.session_context.get_session_env` maps only `HERMES_SESSION_*` names and otherwise reads the gateway's own `os.environ`, so A-H saw it return empty in a member session.)
 2. Read the session key. An empty key returns `{"ok": false, "error": "cafleet_listen must be called from a session turn"}`.
 3. When this key already owns a live receiver, return `{"ok": true, "pid": <pid>, "session_key": <key>, "existing": true}`.
 4. Read the executable record (`Path(__file__).with_name("executable")`). If it is missing or is not an executable file, return `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent hermes'"}`.
-5. Spawn `<recorded cafleet> message listen <director_id>` inside the gateway. The child gets the gateway's environment, plus `CAFLEET_DATABASE_URL` from `tool_env()` when that value is non-empty. Return `{"ok": true, "pid": <pid>, "session_key": <key>}`.
-6. A reader thread injects each stdout line as `[cafleet listen record] <line>` into the session `<key>` through ordered injection, one record at a time.
+5. Spawn `<recorded cafleet> message listen <director_id>` inside the gateway with `Popen(..., encoding="utf-8", errors="replace")`. The child starts from the gateway's environment with every `CAFLEET_*` name removed, then gets `CAFLEET_DATABASE_URL` only from `tool_env()` when that value is non-empty, so an unset value selects the default database exactly as in the Director's shell. The gateway's own environment belongs to whichever client first started it and can carry another fleet's database or a member's `CAFLEET_MEMBER_ID`. Return `{"ok": true, "pid": <pid>, "session_key": <key>}`.
+6. A reader thread injects each stdout line as `[cafleet listen record] <line>` into the session `<key>` through ordered injection, one record at a time. The stdout reader puts its end-of-output sentinel in a `finally:` block, so a read failure ends delivery as an end of output instead of blocking it.
 
 The listener runs without `--timeout`; the plugin performs no automatic replacement.
 
@@ -406,7 +406,9 @@ The listener runs without `--timeout`; the plugin performs no automatic replacem
 
 | Event | Plugin action |
 |---|---|
-| An ordered injection returns `False` | Kill the child, because the session is gone |
+| An ordered injection returns `False` while the session is still attached (`_session_attached`) | A transient refusal, for example the session authority's 32-row admission queue cap (`queue_full`) or a draining gateway: keep the record, wait 1 s and retry it; later records wait behind it |
+| One record meets refusals for 600 s while the session stays attached | Kill the child and log the cause; the closed notice below is attempted once through the same path |
+| An ordered injection returns `False` for a session no longer attached | Kill the child silently, because the session is gone |
 | An ordered injection raises or exceeds its 10 s deadline | Kill the child and log the cause; the closed notice below is attempted once through the same path |
 | The child exits without a `closed` record | Inject `[cafleet listen closed] exit <code>: <last stderr line>` into the owning session |
 | A `closed` record | Already injected as a record; the receiver ends |
@@ -415,13 +417,14 @@ The Director owns every replacement through receiver recovery.
 
 #### 4.2 Receiver lifecycle (Hermes)
 
-The child runs inside the shared Hermes gateway, which outlives client sessions. In H1/H2 the listener survived `member delete` and TUI `/exit`. The plugin binds each receiver to its owning session with three signals. Any one of them kills the child and confirms that it exited:
+The child runs inside the shared Hermes gateway, which outlives client sessions. In H1/H2 the listener survived `member delete` and TUI `/exit`. The plugin binds each receiver to its owning session, and to its own loaded instance, with four signals. Any one of them kills the child and confirms that it exited:
 
 | Signal | Source |
 |---|---|
-| Session finalize | `on_session_finalize` for the owning session. CLI shutdown and the TUI session lifecycle fire it (`hermes_cli/lifecycle.py:81-97`). `on_session_end` is per-turn and unused. |
+| Session finalize | `on_session_finalize` for the owning session. CLI shutdown and the TUI session lifecycle fire it (`hermes_cli/lifecycle.py:81-97`). `on_session_end` is per-turn and unused. The hook resolves the finalized session's route through the session authority (`authority.sessions.get(session_id).route`) and stops the receiver whose `session_key` equals it, because compression rotates the session id and finalize runs on a thread where `HERMES_SESSION_KEY` is unbound; the existing session-id and session-key matches remain fallbacks. |
+| Plugin unload | `ctx.on_unload(...)` stops every receiver. A forced re-discovery (`hermes plugins install/enable`, the control-socket nudge, the reload verb) re-executes the module with an empty receiver map, so without it old receivers would keep running untracked and a repeat `cafleet_listen` would start a second listener. |
 | Client detach | A watchdog thread checks every 5 s that the gateway's live local session for the key has at least one subscriber. After 30 s with no subscriber the receiver ends; the grace covers client reconnects. A read error kills the child and logs the seam error. |
-| Injection refusal | An ordered injection returns `False` |
+| Injection refusal | An ordered injection returns `False` for a session no longer attached |
 
 `closed` `fleet_deleted` remains the normal end of reception.
 
@@ -448,7 +451,7 @@ One file, `extensions/opencode/cafleet.ts`, defines `Plugin.define({ id: "caflee
 
 **Supported Director launch:** `opencode mini --standalone` from the project directory, with the default agent. Plugins load in that private server, which inherits the launcher's environment (the O1/O2 surface). In the shared background service, plugins do not receive the client's environment, so the service is not a supported Director launch. A-O verifies the plugin under this launch with the default agent.
 
-**Member refusal.** When `process.env.CAFLEET_MEMBER_ID` is set in the server, every tool and the `/cafleet-goal` command refuse with `cafleet tools run only in a Director session`. Member servers inherit the member environment. Each tool also calls `ctx.permission.assert({ sessionID, agent, source, action: "cafleet", resources: [<tool name>] })` before doing any work. Both OpenCode member presets add `"cafleet": "deny"` to their permission map, so a member's call is denied even before the environment check.
+**Member refusal.** When `process.env.CAFLEET_MEMBER_ID` is set in the server, every tool and the `/cafleet-goal` command refuse with `cafleet tools run only in a Director session`. Member servers inherit the member environment. After that check, each tool calls `ctx.permission.assert({ sessionID, agent, source, action: "cafleet", resources: [<tool name>] })` before doing any work. Both OpenCode member presets add `"cafleet": "deny"` to their permission map as defense in depth: the plugin refuses a member first on `CAFLEET_MEMBER_ID`, and the preset deny covers a member server whose environment lacks it.
 
 **Director-side resolution.** In OpenCode 2.2.0 every agent, the default `build` agent included, starts with an ordered base policy whose first rule is `{ "action": "*", "resource": "*", "effect": "allow" }`. Later global and agent rules override it. The `cafleet` action therefore resolves to `allow` on a default Director, without prompting. Source: v2.2.0 `services/www/src/docs/content/permissions.mdx` § Defaults; the "no rule matches → `ask`" fallback in § Rules applies only when no rule at all matches.
 
@@ -459,7 +462,7 @@ An operator configuration that adds a broad `ask` or `deny` rule overrides the b
 - **Tool:** `cafleet_listen(director_id: integer)` returns `{ ok, pid, sessionID }` for the calling `context.sessionID`. It keeps one receiver per session; a repeat call returns the existing pid with `existing: true`.
 - **Executable:** the tool reads the executable record at `new URL("./cafleet.executable", import.meta.url)`. A missing or unusable record returns `ok: false` with the record path and the setup fix.
 - **Delivery:** the plugin spawns `<recorded cafleet> message listen <director_id>` with `node:child_process`. It calls `ctx.session.synthetic({ sessionID, text: "[cafleet listen record] <line>", delivery: "queue" })` for each stdout line.
-- **Failure:** a rejected `synthetic` kills the child. An exit without a `closed` record queues `[cafleet listen closed] exit <code>: <last stderr line>`. No automatic replacement happens.
+- **Failure:** a rejected `synthetic` kills the child. An exit without a `closed` record queues `[cafleet listen closed] exit <code>: <last stderr line>`. The plugin decides this on the child's `close` event, which fires after its stdio drains, not on `exit`, which can fire while the final `closed` record is still unread. A child `error` event, such as an asynchronous spawn failure, deletes the receiver's map entry and queues the closed notice; `cafleet_listen` returns `ok: false` when `child.pid` is undefined. No automatic replacement happens.
 - **Lifecycle:** the plugin's cleanup kills every child. O2-e showed that deleting the member ends the receiver: the standalone server's stdin lease ends, and plugin cleanup runs. A-O repeats the check for the Director launch, by exiting the client.
 
 #### 5.2 Goal extension
@@ -480,9 +483,13 @@ An operator configuration that adds a broad `ask` or `deny` rule overrides the b
 - On `session.execution.succeeded` for a session with an `active` goal, the plugin queues a synthetic item with `delivery: "queue"` and metadata `{ cafleetGoalGeneration: <generation> }`. Its text is `[cafleet goal] Continue working toward the active goal: <objective>. Call cafleet_goal_progress after each step and cafleet_goal_complete when it is achieved.`
 - A `session.execution.interrupted` with `reason: "user"` pauses the goal.
 
-**Stale continuations.** The `context` session hook removes every `[cafleet goal]` continuation message whose generation differs from the stored one, or whose goal is not `active`. A continuation queued just before `pause`, `clear` or `complete` therefore never reaches the model.
+**Serialization.** Every goal operation for a session runs through one per-session promise chain shared by the event handler, the `/cafleet-goal` command and the tools. Each operation re-reads the stored goal inside that critical section before it writes, so a concurrent pause or clear is never overwritten by a stale read-modify-write.
+
+**Stale continuations.** The `context` session hook removes each `[cafleet goal]` continuation message after the last assistant message, the undelivered tail, whose generation differs from the stored one, or whose goal is not `active`. Earlier history stays intact, so past turns keep their prompts and the provider's cached history prefix is stable. A continuation queued just before `pause`, `clear` or `complete` therefore never reaches the model. What OpenCode 2.2.0 does with a step whose only new prompt was removed is not established.
 
 The reason: in O2-c, one queued continuation ran after `pause`. OpenCode 2.2.0 exposes `session.inbox.cancel` only on the HTTP API, not in the plugin `SessionDomain`.
+
+**Event failures.** Each event's handling is wrapped in `try/catch`: the plugin logs the cause and keeps the event loop alive, because one rejected await would otherwise end continuation, interrupt pausing and the no-progress stop for every session on the server. When a goal can no longer continue, the plugin pauses it with a `[cafleet goal]` notice.
 
 **No-progress stop.**
 - A continuation turn that ends without a `cafleet_goal_progress` or `cafleet_goal_complete` call increments `idle_streak`.
@@ -539,7 +546,7 @@ Run each backend step through Director-spawned probe members. Record the observe
 | A-S | `cafleet setup --coding-agent hermes` and `--coding-agent opencode` on temporary homes: clean home, rerun idempotence, a home with an active profile (extension lands in the profile's plugins directory), and `plugins.disabled` listing `cafleet` (setup fails with the stated cause). Then `cafleet doctor` rows: `ok`, a tampered extension file, a missing executable record and a missing enablement key, each `error`. |
 | A-Cl | Claude: subscribe probe through the Monitor recipe (idle, busy ≥ 60 s, burst of 3) |
 | A-C | Codex, under an active `/goal`, on the escalated path (the sandboxed path is unverified on this host):<br>• subscribe probe with `--codex-thread`<br>• a record over 65,536 bytes arrives as `message_ref`<br>• 200 records sent in one burst all arrive, in order, with the listener alive<br>• the listener stays alive across 10 idle minutes<br>• a forced `codex queue` failure, from a `codex` wrapper earlier on the forwarder's `PATH`, arrives as a `[cafleet listen closed]` turn<br>• `member delete` makes the listener exit within 1 s with `session_exited`, and `ps` shows no surviving `cafleet message listen` |
-| A-H | Hermes TUI:<br>• subscribe probe through `cafleet_listen`<br>• `/goal` set/status/pause/resume/clear, `clarify` and leading-`!` input in the TUI<br>• TUI `/exit` and pane kill each end the child within the 30 s grace<br>• a second `cafleet_listen` returns `existing: true`<br>• `cafleet_listen` in a member session returns the refusal |
+| A-H | Hermes TUI:<br>• subscribe probe through `cafleet_listen`<br>• a burst of more than 32 records sent during a busy turn all arrive, in order, with the receiver alive<br>• `/goal` set/status/pause/resume/clear, `clarify` and leading-`!` input in the TUI<br>• TUI `/exit` and pane kill each end the child within the 30 s grace<br>• a second `cafleet_listen` returns `existing: true`<br>• `cafleet_listen` in a member session returns the refusal |
 | A-O | OpenCode, as Director with `opencode mini --standalone` and the default agent:<br>• subscribe probe<br>• no permission prompt opens for the CAFleet tools or continuation turns<br>• goal bar: set, status, pause with an in-flight continuation dropped, resume, compaction, restart on the same session with the goal restored by the re-arm turn, clear, complete<br>• no-progress stop after 3 idle continuations<br>• spawning a member while the goal is active queues nothing into the Director session<br>• the `ctx.storage` sharing scope is recorded<br>• client exit leaves no child<br>• a member's `cafleet_listen` and `/cafleet-goal` are denied |
 | A-M | Member re-check for OpenCode and Hermes with the plugins installed: the bundled profiles' approval-prompt coverage and default launch behave as recorded, and the new tools are unavailable or denied |
 
@@ -661,6 +668,16 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 - [x] Search SPEC, docs, skills and rules for the remaining `heartbeat`, `process_manage` and `write_stdin` reception mentions and for the old Director wording ("streamed background output"). Each surviving mention must describe the current state. <!-- completed: 2026-11-06T05:23 -->
 - [x] Commit `design-docs/0000217-extension-backed-director-requirements/design-doc.md` with the implementation <!-- completed: 2026-11-06T05:37 -->
 
+### Step 12: Review round 2
+
+- [x] SPEC.md, docs, skills and this design doc: the Claude owner-exit observation in the claude `listen` Evidence, the codex `goal` Evidence narrowed to the observed steps, the OpenCode preset deny restated as defense in depth, the queued-turn sentence scoped to the Codex forwarder and the plugins, the stale-continuation limit stated without a run ID, the receiver-recovery rows split by fix owner, and the plugin decisions below in §4.1–4.2, §5.1–5.2 and SPEC § Director extensions <!-- completed: 2026-11-06T07:01 -->
+- [ ] `src/cli/message.rs`: on an `Exit` or `Deadline` queue failure, check the pinned session first and end with `session_exited` when it has exited; unit test with a fake `codex` that fails after the pinned session is killed <!-- completed: -->
+- [ ] `src/assets.rs`: the cause `printed no absolute file path: <stdout>` for a non-absolute `hermes config path` in setup and doctor; unit tests with a relative config path <!-- completed: -->
+- [ ] `extensions/hermes/cafleet/__init__.py`: the non-local client refusal, UTF-8 decoding with the end-of-output sentinel in `finally:`, the transient-refusal retry with its 600 s limit, the `CAFLEET_*`-stripped child environment, finalize route resolution and the unload cleanup (§4.1–4.2); validate with `hermes plugins validate` <!-- completed: -->
+- [ ] `extensions/opencode/cafleet.ts`: the child `error` handler, the closed-notice decision on `close`, the tail-only stale-continuation drop, per-event failure handling and per-session serialization of goal operations (§5.1–5.2) <!-- completed: -->
+- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: -->
+- [ ] After the plugin fixes, delete their implementation members, reinstall the CLI, rerun `cafleet setup --coding-agent hermes` and run the A-H burst of more than 32 records during a busy turn <!-- completed: -->
+
 ---
 
 ## Changelog
@@ -675,3 +692,4 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 | 2026-11-06 | A-H found that Hermes `inject_message` returns before its dispatch commits, so three back-to-back records reordered twice. Approved by the user: the plugin awaits each record's gateway dispatch before the next (ordered injection, §4.1), adding a fourth private seam and a consent check; Hermes stays tier 2. |
 | 2026-11-06 | A-H found that `get_session_env` cannot see a member's client environment, so a member session's `cafleet_listen` succeeded. The plugin now reads `CAFLEET_MEMBER_ID` and `CAFLEET_DATABASE_URL` through `agent.session_client_env` and refuses an unbound session (§4.1); the member-refusal intent is unchanged. |
 | 2026-11-06 | A-O found a spurious `[cafleet listen closed]` after a restart: receivers the plugin stops, or that exit by `SIGTERM` at host shutdown, now queue no notice (§5.1). Review round 1: the 50-continuation cap queues a paused notice and resume resets `continuations`; goal generations stay monotonic across clear (§5.2); the recorded Claude version is 2.1.312 and the acceptance limits are stated in the Success Criteria. |
+| 2026-11-06 | Review round 2. Hermes plugin (§4.1–4.2): a bound non-local client is refused; an injection refused while the session stays attached (the 32-row admission cap, a draining gateway) is retried every 1 s with a 600 s limit; the child starts with every `CAFLEET_*` name removed and takes `CAFLEET_DATABASE_URL` only from `tool_env()`; output decodes as UTF-8; finalize resolves the session's route through the authority; plugin unload stops every receiver. A-H adds a burst of more than 32 records during a busy turn. OpenCode plugin (§5, §5.1–5.2): the preset deny is defense in depth behind the environment refusal; the closed notice is decided on `close`, and a child `error` queues it; the stale-continuation drop covers only the undelivered tail; event failures are logged without ending the loop; goal operations are serialized per session. The Claude owner-exit check is recorded in the claude `listen` Evidence. |
