@@ -414,7 +414,7 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 3. Each record arrives as its own turn beginning `[cafleet listen record]`; a record that arrives during a busy turn runs after that turn ends, without interrupting it. Consume it, reconcile with `cafleet message poll <director-id> --json`, record deferred actions, ACK and act within authorization.
 4. A `[cafleet listen closed]` turn, an `ok: false` result or a missing `cafleet_listen` tool follows [receiver recovery](../roles/director.md#receiver-recovery). A missing tool or an executable-record error is fixed by `cafleet setup --coding-agent hermes`, which `cafleet doctor` names.
 
-The plugin runs the receiver inside the Hermes gateway without `--timeout` and ends it when the session finalizes, when no client has been attached for 30 s, or when injection is refused. `closed` `fleet_deleted` ends reception normally; start no replacement. Reception makes no pane input and leaves `/goal` authority with the host.
+The plugin runs the receiver inside the Hermes gateway without `--timeout` and ends it when the session finalizes, when no client has been attached for 30 s, or when an injection is refused, raises or exceeds its 10 s deadline. It commits each record before injecting the next, so records arrive in emission order. Before it starts a receiver, `cafleet_listen` requires `plugins.entries.cafleet.allow_gateway_injection` to be `true` and otherwise returns `ok: false` naming `cafleet setup --coding-agent hermes`. `closed` `fleet_deleted` ends reception normally; start no replacement. Reception makes no pane input and leaves `/goal` authority with the host.
 
 ### Role eligibility
 

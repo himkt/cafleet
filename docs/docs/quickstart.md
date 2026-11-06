@@ -270,7 +270,7 @@ after installing Hermes.
 Run a Hermes Director in the TUI client, `hermes chat --tui` (or set
 `display.interface: tui`). After registering the fleet, the Director starts
 reception with the plugin's `cafleet_listen` tool, and each broker record
-arrives as its own turn. The classic CLI runs those turns without showing them
+arrives as its own turn, in the order the broker delivered it. The classic CLI runs those turns without showing them
 in its pane, so members keep the classic CLI and the Director uses the TUI.
 
 `cafleet member create` reads your effective Hermes configuration and refuses
