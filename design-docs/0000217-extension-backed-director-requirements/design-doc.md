@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 47/57 tasks complete
+**Progress**: 48/57 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -592,7 +592,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 
 - [x] Add `extensions/hermes/cafleet/plugin.yaml` and `__init__.py` (§4.1–4.2), and validate them with `hermes plugins validate` <!-- completed: 2026-11-05T22:42 -->
 - [x] Update SPEC.md (the Hermes plugin delivery row and private-seam list) and any skill or docs text that names `inject_message` as the delivery to the §4.1 ordered injection <!-- completed: 2026-11-06T04:11 -->
-- [ ] `extensions/hermes/cafleet/__init__.py`: ordered injection through the gateway runner's dispatch coroutine with a 10 s deadline, the consent check before spawning, the fourth seam and its failure rows (§4.1–4.2); validate with `hermes plugins validate` on a temporary `HERMES_HOME` <!-- completed: -->
+- [x] `extensions/hermes/cafleet/__init__.py`: ordered injection through the gateway runner's dispatch coroutine with a 10 s deadline, the consent check before spawning, the fourth seam and its failure rows (§4.1–4.2); validate with `hermes plugins validate` on a temporary `HERMES_HOME` <!-- completed: 2026-11-06T04:15 -->
 - [x] Add `extensions/opencode/cafleet.ts` (§5) <!-- completed: 2026-11-05T22:42 -->
 - [x] Add `"cafleet": "deny"` to `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` <!-- completed: 2026-11-05T22:42 -->
 - [x] Add the `EXTENSIONS` table to `build.rs` <!-- completed: 2026-11-05T22:42 -->

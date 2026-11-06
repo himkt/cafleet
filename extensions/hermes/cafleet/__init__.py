@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -18,6 +20,9 @@ SETUP_FIX = "run 'cafleet setup --coding-agent hermes'"
 WATCHDOG_INTERVAL_S = 5.0
 DETACH_GRACE_S = 30.0
 EXIT_CONFIRM_S = 5.0
+INJECT_DEADLINE_S = 10.0
+INJECTION_SEAM = "gateway runner._dispatch_plugin_message_injection"
+CONSENT_ERROR = f"plugins.entries.cafleet.allow_gateway_injection is not true; {SETUP_FIX}"
 
 _ctx = None
 _receivers: dict[str, "Receiver"] = {}
@@ -38,15 +43,27 @@ def _session_env(name: str) -> str:
     return get_session_env(name, "") or ""
 
 
-def _session_attached(session_key: str) -> bool:
-    from gateway.session_authorities import authority_for_home
-    manager = _ctx._manager
-    injector = manager._gateway_message_injector
+def _gateway_runner():
+    injector = _ctx._manager._gateway_message_injector
     if injector is None:
         raise RuntimeError("no live gateway serves this plugin")
-    authority = authority_for_home(injector[0], manager.home_path)
+    return injector[0]
+
+
+def _injection_target():
+    runner = _gateway_runner()
+    loop = runner._gateway_loop
+    if loop is None or loop.is_closed():
+        raise RuntimeError("the gateway loop is not running")
+    return runner._dispatch_plugin_message_injection, loop
+
+
+def _session_attached(session_key: str) -> bool:
+    from gateway.session_authorities import authority_for_home
+    home = _ctx._manager.home_path
+    authority = authority_for_home(_gateway_runner(), home)
     if authority is None:
-        raise RuntimeError(f"no session authority serves {manager.home_path}")
+        raise RuntimeError(f"no session authority serves {home}")
     return any(live.route == session_key and live.subscribers for live in list(authority.sessions.values()))
 
 
@@ -69,13 +86,21 @@ class Receiver:
         self.stopping = threading.Event()
         self.saw_closed = False
         self.last_stderr = ""
+        self.lines: queue.Queue[str | None] = queue.Queue()
+        self.stderr_thread: threading.Thread | None = None
 
     def alive(self) -> bool:
         return self.proc.poll() is None
 
     def start(self) -> None:
-        for target, name in ((self._pump_stdout, "stdout"), (self._pump_stderr, "stderr"), (self._watch, "watchdog")):
-            threading.Thread(target=target, daemon=True, name=f"cafleet-listen-{name}-{self.proc.pid}").start()
+        self.stderr_thread = self._spawn_thread(self._pump_stderr, "stderr")
+        for target, name in ((self._read_stdout, "stdout"), (self._deliver, "deliver"), (self._watch, "watchdog")):
+            self._spawn_thread(target, name)
+
+    def _spawn_thread(self, target, name: str) -> threading.Thread:
+        thread = threading.Thread(target=target, daemon=True, name=f"cafleet-listen-{name}-{self.proc.pid}")
+        thread.start()
+        return thread
 
     def stop(self, reason: str) -> None:
         if self.stopping.is_set():
@@ -90,24 +115,59 @@ class Receiver:
             logger.error("cafleet_listen: receiver pid=%s did not exit within %ss", self.proc.pid, EXIT_CONFIRM_S)
 
     def _inject(self, text: str) -> bool:
-        return bool(_ctx.inject_message(text, session_key=self.session_key))
+        """Commit one turn into the session's durable FIFO and wait for the commit.
 
-    def _pump_stdout(self) -> None:
+        `ctx.inject_message` returns once its dispatch coroutine is scheduled, so consecutive calls race
+        through their awaited session lookups and can commit out of order."""
+        dispatch, loop = _injection_target()
+        coro = dispatch(session_key=self.session_key, content=text, plugin_id=_ctx.plugin_id,
+                        plugin_home=_ctx._manager.home_path)
+        try:
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+        except BaseException:
+            coro.close()
+            raise
+        try:
+            return bool(future.result(timeout=INJECT_DEADLINE_S))
+        except TimeoutError:
+            future.cancel()
+            raise TimeoutError(f"the injection did not finish within {INJECT_DEADLINE_S:.0f} s") from None
+
+    def _read_stdout(self) -> None:
         for raw in self.proc.stdout:
             line = raw.rstrip("\n")
-            if not line:
-                continue
+            if line:
+                self.lines.put(line)
+        self.lines.put(None)
+
+    def _deliver(self) -> None:
+        while (line := self.lines.get()) is not None:
             self.saw_closed = self.saw_closed or line.startswith('{"event":"closed"')
-            if not self._inject(RECORD_PREFIX + line):
+            try:
+                committed = self._inject(RECORD_PREFIX + line)
+            except Exception as exc:
+                logger.error("cafleet_listen: %s for session=%s: %r", INJECTION_SEAM, self.session_key, exc)
+                self.stop(f"the injection failed: {exc!r}")
+                self._inject_closed_notice()
+                break
+            if not committed:
                 self.stop("the session refused the injection")
                 break
-        code = self.proc.wait()
-        if not self.saw_closed and not self.stopping.is_set():
-            self._inject(f"{CLOSED_PREFIX}exit {code}: {self.last_stderr}")
+        else:
+            self.proc.wait()
+            if not self.saw_closed and not self.stopping.is_set():
+                self._inject_closed_notice()
         self.stopping.set()
         with _receivers_lock:
             if _receivers.get(self.session_key) is self:
                 del _receivers[self.session_key]
+
+    def _inject_closed_notice(self) -> None:
+        self.stderr_thread.join(timeout=EXIT_CONFIRM_S)
+        try:
+            self._inject(f"{CLOSED_PREFIX}exit {self.proc.poll()}: {self.last_stderr}")
+        except Exception as exc:
+            logger.error("cafleet_listen: closed notice for session=%s failed: %r", self.session_key, exc)
 
     def _pump_stderr(self) -> None:
         for raw in self.proc.stderr:
@@ -150,6 +210,10 @@ def _listen(args: dict, **kwargs) -> str:
         _session_attached(session_key)
     except Exception as exc:
         return _result(ok=False, error=f"gateway.session_authorities.authority_for_home: {exc}")
+    try:
+        _injection_target()
+    except Exception as exc:
+        return _result(ok=False, error=f"{INJECTION_SEAM}: {exc}")
     with _receivers_lock:
         existing = _receivers.get(session_key)
         if existing is not None and existing.alive():
@@ -158,6 +222,8 @@ def _listen(args: dict, **kwargs) -> str:
             executable = _recorded_executable()
         except ValueError as exc:
             return _result(ok=False, error=str(exc))
+        if not _ctx._gateway_injection_allowed():
+            return _result(ok=False, error=CONSENT_ERROR)
         env = dict(os.environ)
         database_url = _session_env("CAFLEET_DATABASE_URL")
         if database_url:
