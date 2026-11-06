@@ -471,10 +471,10 @@ An operator configuration that adds a broad `ask` or `deny` rule overrides the b
 | pause | `/cafleet-goal pause` | Status `paused`, bump `generation`, update the entry |
 | resume | `/cafleet-goal resume` | Status `active`, bump `generation`, reset `idle_streak` and `continuations`, queue a continuation |
 | clear | `/cafleet-goal clear` | Bump `generation`, remove the storage key and the entry |
-
-**Monotonic generations.** Generations increase monotonically per session across clear. Every operation that bumps `generation` also stores the new value under storage key `goal-generation/<sessionID>`, which clear keeps; set starts at that value plus one. A continuation queued before a clear therefore never matches a later goal's generation.
 | complete | tool `cafleet_goal_complete(summary)` | Status `complete`, bump `generation`, update the entry |
 | progress | tool `cafleet_goal_progress(note)` | Reset `idle_streak` |
+
+**Monotonic generations.** Generations increase monotonically per session across clear. Every operation that bumps `generation` also stores the new value under storage key `goal-generation/<sessionID>`, which clear keeps; set starts at that value plus one. A continuation queued before a clear therefore never matches a later goal's generation.
 
 **Continuation.**
 - On `session.execution.succeeded` for a session with an `active` goal, the plugin queues a synthetic item with `delivery: "queue"` and metadata `{ cafleetGoalGeneration: <generation> }`. Its text is `[cafleet goal] Continue working toward the active goal: <objective>. Call cafleet_goal_progress after each step and cafleet_goal_complete when it is achieved.`
