@@ -784,7 +784,7 @@ impl ListenOutput for CodexForwarding<'_> {
 #[derive(PartialEq)]
 enum Forwarding {
     Accepted,
-    /// The pinned session ended while the thread's queue was full, so the record has no reader.
+    /// The pinned session ended before the thread accepted the record, so it has no reader.
     SessionExited,
 }
 
@@ -823,7 +823,11 @@ impl CodexQueue<'_> {
                         return Ok(Forwarding::SessionExited);
                     }
                 }
-                // COMMENT(reviewer): [COMPLIANCE] Design §3.1/SPEC § Codex forwarding: "The pinned Codex process exits → stdout `closed` `session_exited`, exit 0; nothing is forwarded". Only the full-queue arm checks the pinned session. When the session ends while a record is in flight (for example `member delete` during a burst), `codex queue` fails or hangs against the gone thread, and this arm and the `Exit` arm below exit 1 and forward a `[cafleet listen closed]` notice to the dead session, without writing a stdout `closed` record. On a `Deadline` or `Exit` failure, call `pinned_session_exited(self.session)?` first and return `Ok(Forwarding::SessionExited)` when it is true. Add a test where the fake `codex` fails once the session has been killed.
+                Err(QueueFailure::Deadline | QueueFailure::Exit(_))
+                    if pinned_session_exited(self.session)? =>
+                {
+                    return Ok(Forwarding::SessionExited);
+                }
                 Err(QueueFailure::Deadline) => {
                     return Err(CafleetError::App(self.deadline_diagnostic()));
                 }

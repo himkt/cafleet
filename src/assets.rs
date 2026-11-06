@@ -82,16 +82,10 @@ pub(crate) fn opencode_plugins_dir(preset_base: &Path) -> PathBuf {
     preset_base.join("plugins")
 }
 
-// COMMENT(reviewer): [IMPROVEMENT] This duplicates `crate::coding_agent::hermes_settlement::effective_home` (the `hermes config path` → absolute parent rule) under a different cause string. SPEC § Contract error strings fixes that condition as `cannot read hermes configuration through 'hermes config path': printed no absolute file path: {stdout}`, but `doctor`'s `hermes.extension` row (setup.rs `hermes_extension_check`) reports `…'hermes config path': 'hermes config path' printed '<path>', not an absolute file path` for the same input. Change the cause to `printed no absolute file path: <stdout>` (or share one helper with `effective_home`), so doctor matches member create, and add a test for a relative `config path` output. The setup and doctor tests do not cover this branch today.
 /// The plugin directory under the Hermes home that owns `config_path`.
 pub(crate) fn hermes_plugin_dir(config_path: &str) -> Result<PathBuf, String> {
-    Path::new(config_path)
-        .parent()
-        .filter(|home| home.is_absolute())
+    crate::coding_agent::hermes_settlement::home_of_config_path(config_path)
         .map(|home| home.join(HERMES_PLUGIN_DIR))
-        .ok_or_else(|| {
-            format!("'hermes config path' printed '{config_path}', not an absolute file path")
-        })
 }
 
 /// Every embedded extension file under `prefix`, with its path relative to the extension root.
