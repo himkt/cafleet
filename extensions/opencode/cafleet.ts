@@ -30,6 +30,12 @@ interface TurnState {
   progressed: boolean
 }
 
+interface EventData {
+  sessionID: string
+  inboxID?: string
+  reason?: string
+}
+
 interface ToolContext {
   readonly sessionID: string
   readonly agent: string
@@ -65,6 +71,13 @@ export default Plugin.define({
     const continuationGenerations = new Map<string, number>()
     const turns = new Map<string, TurnState>()
     const touched = new Set<string>()
+    const goalChains = new Map<string, Promise<unknown>>()
+
+    function serializeGoal<T>(sessionID: string, operation: () => Promise<T>): Promise<T> {
+      const run = (goalChains.get(sessionID) ?? Promise.resolve()).then(operation)
+      goalChains.set(sessionID, run.catch(() => undefined))
+      return run
+    }
 
     const storageKey = (sessionID: string) => `goal/${sessionID}`
     const generationKey = (sessionID: string) => `goal-generation/${sessionID}`
@@ -149,8 +162,20 @@ export default Plugin.define({
       })
       receivers.set(sessionID, child)
       let sawClosed = false
+      let ended = false
       let lastStderr = ""
       let delivery: Promise<unknown> = Promise.resolve()
+      const end = (cause: string, detail = lastStderr) => {
+        if (ended) return
+        ended = true
+        if (receivers.get(sessionID) === child) receivers.delete(sessionID)
+        if (sawClosed || stoppedReceivers.has(child)) return
+        delivery = delivery.then(() =>
+          ctx.session
+            .synthetic({ sessionID, text: `${CLOSED_PREFIX}${cause}: ${detail}`, delivery: "queue" })
+            .catch(() => undefined),
+        )
+      }
       createInterface({ input: child.stdout! }).on("line", (line) => {
         if (!line) return
         sawClosed ||= line.startsWith('{"event":"closed"')
@@ -163,18 +188,10 @@ export default Plugin.define({
       createInterface({ input: child.stderr! }).on("line", (line) => {
         if (line.trim()) lastStderr = line.trim()
       })
-      child.on("exit", (code, signal) => {
-        if (receivers.get(sessionID) === child) receivers.delete(sessionID)
-        if (sawClosed || stoppedReceivers.has(child) || signal === "SIGTERM") return
-        delivery = delivery.then(() =>
-          ctx.session
-            .synthetic({
-              sessionID,
-              text: `${CLOSED_PREFIX}exit ${code ?? signal}: ${lastStderr}`,
-              delivery: "queue",
-            })
-            .catch(() => undefined),
-        )
+      child.on("error", (error: NodeJS.ErrnoException) => end(`exit ${error.code ?? "error"}`, error.message))
+      child.on("close", (code, signal) => {
+        if (signal === "SIGTERM") stoppedReceivers.add(child)
+        end(`exit ${code ?? signal}`)
       })
       return child
     }
@@ -194,13 +211,18 @@ export default Plugin.define({
         execute: async (input, context) => {
           if (isMember) return result({ ok: false, error: MEMBER_REFUSAL })
           await authorize("cafleet_listen", context)
-          await touch(context.sessionID)
+          await serializeGoal(context.sessionID, () => touch(context.sessionID))
           const existing = receivers.get(context.sessionID)
           if (existing && existing.exitCode === null && existing.signalCode === null) {
             return result({ ok: true, pid: existing.pid, sessionID: context.sessionID, existing: true })
           }
           try {
             const child = startReceiver(context.sessionID, (input as { director_id: number }).director_id)
+            if (child.pid === undefined) {
+              stoppedReceivers.add(child)
+              receivers.delete(context.sessionID)
+              return result({ ok: false, error: "cafleet message listen did not start" })
+            }
             return result({ ok: true, pid: child.pid, sessionID: context.sessionID })
           } catch (error) {
             return result({ ok: false, error: (error as Error).message })
@@ -214,8 +236,10 @@ export default Plugin.define({
         execute: async (_input, context) => {
           if (isMember) return result({ ok: false, error: MEMBER_REFUSAL })
           await authorize("cafleet_goal_status", context)
-          await touch(context.sessionID)
-          return { content: JSON.stringify((await readGoal(context.sessionID)) ?? null) }
+          return serializeGoal(context.sessionID, async () => {
+            await touch(context.sessionID)
+            return { content: JSON.stringify((await readGoal(context.sessionID)) ?? null) }
+          })
         },
       })
       editor.add({
@@ -230,12 +254,14 @@ export default Plugin.define({
         execute: async (_input, context) => {
           if (isMember) return result({ ok: false, error: MEMBER_REFUSAL })
           await authorize("cafleet_goal_progress", context)
-          await touch(context.sessionID)
-          const goal = await readGoal(context.sessionID)
-          if (!goal) return result({ ok: false, error: "no CAFleet goal is set for this session" })
-          await writeGoal(context.sessionID, { ...goal, idle_streak: 0 })
-          turns.set(context.sessionID, { ...(turns.get(context.sessionID) ?? { continuationTurn: false }), progressed: true })
-          return result({ ok: true })
+          return serializeGoal(context.sessionID, async () => {
+            await touch(context.sessionID)
+            const goal = await readGoal(context.sessionID)
+            if (!goal) return result({ ok: false, error: "no CAFleet goal is set for this session" })
+            await writeGoal(context.sessionID, { ...goal, idle_streak: 0 })
+            turns.set(context.sessionID, { ...(turns.get(context.sessionID) ?? { continuationTurn: false }), progressed: true })
+            return result({ ok: true })
+          })
         },
       })
       editor.add({
@@ -250,16 +276,18 @@ export default Plugin.define({
         execute: async (_input, context) => {
           if (isMember) return result({ ok: false, error: MEMBER_REFUSAL })
           await authorize("cafleet_goal_complete", context)
-          await touch(context.sessionID)
-          const goal = await readGoal(context.sessionID)
-          if (!goal) return result({ ok: false, error: "no CAFleet goal is set for this session" })
-          await writeGoal(context.sessionID, {
-            ...goal,
-            status: "complete",
-            generation: await nextGeneration(context.sessionID),
+          return serializeGoal(context.sessionID, async () => {
+            await touch(context.sessionID)
+            const goal = await readGoal(context.sessionID)
+            if (!goal) return result({ ok: false, error: "no CAFleet goal is set for this session" })
+            await writeGoal(context.sessionID, {
+              ...goal,
+              status: "complete",
+              generation: await nextGeneration(context.sessionID),
+            })
+            turns.set(context.sessionID, { ...(turns.get(context.sessionID) ?? { continuationTurn: false }), progressed: true })
+            return result({ ok: true })
           })
-          turns.set(context.sessionID, { ...(turns.get(context.sessionID) ?? { continuationTurn: false }), progressed: true })
-          return result({ ok: true })
         },
       })
     })
@@ -270,36 +298,38 @@ export default Plugin.define({
         description: "Set a CAFleet goal (text), or report status / pause / resume / clear it.",
         execute: async ({ sessionID, prompt }) => {
           requireDirector()
-          await touch(sessionID)
-          const argument = (prompt.text ?? "").trim()
-          const goal = await readGoal(sessionID)
-          if (argument === "status" || argument === "") {
-            await notice(sessionID, `status: ${JSON.stringify(goal ?? null)}`, true)
-            return
-          }
-          if (["pause", "resume", "clear"].includes(argument) && !goal) {
-            throw new Error("no CAFleet goal is set for this session")
-          }
-          if (argument === "pause") return pause(sessionID, goal!)
-          if (argument === "clear") return clearGoal(sessionID)
-          if (argument === "resume") {
-            const resumed: Goal = {
-              ...goal!,
+          return serializeGoal(sessionID, async () => {
+            await touch(sessionID)
+            const argument = (prompt.text ?? "").trim()
+            const goal = await readGoal(sessionID)
+            if (argument === "status" || argument === "") {
+              await notice(sessionID, `status: ${JSON.stringify(goal ?? null)}`, true)
+              return
+            }
+            if (["pause", "resume", "clear"].includes(argument) && !goal) {
+              throw new Error("no CAFleet goal is set for this session")
+            }
+            if (argument === "pause") return pause(sessionID, goal!)
+            if (argument === "clear") return clearGoal(sessionID)
+            if (argument === "resume") {
+              const resumed: Goal = {
+                ...goal!,
+                status: "active",
+                generation: await nextGeneration(sessionID),
+                continuations: 0,
+                idle_streak: 0,
+              }
+              return queueContinuation(sessionID, resumed)
+            }
+            const created: Goal = {
+              objective: argument,
               status: "active",
               generation: await nextGeneration(sessionID),
               continuations: 0,
               idle_streak: 0,
             }
-            return queueContinuation(sessionID, resumed)
-          }
-          const created: Goal = {
-            objective: argument,
-            status: "active",
-            generation: await nextGeneration(sessionID),
-            continuations: 0,
-            idle_streak: 0,
-          }
-          return queueContinuation(sessionID, created)
+            return queueContinuation(sessionID, created)
+          })
         },
       })
     })
@@ -308,8 +338,9 @@ export default Plugin.define({
 
     await ctx.session.hook("context", async (input) => {
       const goal = await readGoal(input.sessionID)
-      input.messages = input.messages.filter((message) => {
-        if (message.role !== "user") return true
+      const lastAssistant = input.messages.findLastIndex((message) => message.role === "assistant")
+      input.messages = input.messages.filter((message, index) => {
+        if (index < lastAssistant || message.role !== "user") return true
         const continuation = message.content.some(
           (part) => part.type === "text" && part.text.startsWith(CONTINUE_PREFIX),
         )
@@ -325,48 +356,70 @@ export default Plugin.define({
     const events = ctx.event.subscribe({
       types: ["session.inbox.delivered", "session.execution.succeeded", "session.execution.interrupted"],
     })
+    async function handleEvent(type: string, data: EventData) {
+      await touch(data.sessionID)
+      if (type === "session.inbox.delivered") {
+        if (data.inboxID !== undefined && continuationGenerations.has(data.inboxID)) {
+          turns.set(data.sessionID, { continuationTurn: true, progressed: false })
+        }
+        return
+      }
+      const turn = turns.get(data.sessionID)
+      turns.delete(data.sessionID)
+      const goal = await readGoal(data.sessionID)
+      if (goal?.status !== "active") return
+      if (type === "session.execution.interrupted") {
+        if (data.reason === "user") await pause(data.sessionID, goal)
+        return
+      }
+      const idle = turn?.continuationTurn && !turn.progressed ? goal.idle_streak + 1 : goal.idle_streak
+      if (idle >= IDLE_LIMIT) {
+        await pause(data.sessionID, { ...goal, idle_streak: idle })
+        await notice(
+          data.sessionID,
+          `paused: no progress in ${IDLE_LIMIT} consecutive continuation turns; ` +
+            "the operator resumes it with /cafleet-goal resume",
+          false,
+        )
+        return
+      }
+      if (goal.continuations >= CONTINUATION_LIMIT) {
+        await pause(data.sessionID, { ...goal, idle_streak: idle })
+        await notice(
+          data.sessionID,
+          `paused: reached ${CONTINUATION_LIMIT} continuations; the operator resumes it with /cafleet-goal resume`,
+          false,
+        )
+        return
+      }
+      await queueContinuation(data.sessionID, { ...goal, idle_streak: idle })
+    }
+
+    async function pauseAfterFailure(sessionID: string, cause: unknown) {
+      const goal = await readGoal(sessionID)
+      if (goal?.status !== "active") return
+      await pause(sessionID, goal)
+      await notice(
+        sessionID,
+        `paused: the goal cannot continue (${(cause as Error).message}); ` +
+          "the operator resumes it with /cafleet-goal resume",
+        false,
+      )
+    }
+
     void (async () => {
       for await (const event of events) {
-        const { type, data } = event as unknown as {
-          type: string
-          data: { sessionID: string; inboxID?: string; reason?: string }
-        }
-        await touch(data.sessionID)
-        if (type === "session.inbox.delivered") {
-          if (data.inboxID !== undefined && continuationGenerations.has(data.inboxID)) {
-            turns.set(data.sessionID, { continuationTurn: true, progressed: false })
+        const { type, data } = event as unknown as { type: string; data: EventData }
+        await serializeGoal(data.sessionID, async () => {
+          try {
+            await handleEvent(type, data)
+          } catch (error) {
+            console.error(`[cafleet goal] ${type} for session ${data.sessionID} failed:`, error)
+            await pauseAfterFailure(data.sessionID, error).catch((pauseError) =>
+              console.error(`[cafleet goal] pausing session ${data.sessionID} failed:`, pauseError),
+            )
           }
-          continue
-        }
-        const turn = turns.get(data.sessionID)
-        turns.delete(data.sessionID)
-        const goal = await readGoal(data.sessionID)
-        if (goal?.status !== "active") continue
-        if (type === "session.execution.interrupted") {
-          if (data.reason === "user") await pause(data.sessionID, goal)
-          continue
-        }
-        const idle = turn?.continuationTurn && !turn.progressed ? goal.idle_streak + 1 : goal.idle_streak
-        if (idle >= IDLE_LIMIT) {
-          await pause(data.sessionID, { ...goal, idle_streak: idle })
-          await notice(
-            data.sessionID,
-            `paused: no progress in ${IDLE_LIMIT} consecutive continuation turns; ` +
-              "the operator resumes it with /cafleet-goal resume",
-            false,
-          )
-          continue
-        }
-        if (goal.continuations >= CONTINUATION_LIMIT) {
-          await pause(data.sessionID, { ...goal, idle_streak: idle })
-          await notice(
-            data.sessionID,
-            `paused: reached ${CONTINUATION_LIMIT} continuations; the operator resumes it with /cafleet-goal resume`,
-            false,
-          )
-          continue
-        }
-        await queueContinuation(data.sessionID, { ...goal, idle_streak: idle })
+        })
       }
     })()
 

@@ -21,6 +21,8 @@ WATCHDOG_INTERVAL_S = 5.0
 DETACH_GRACE_S = 30.0
 EXIT_CONFIRM_S = 5.0
 INJECT_DEADLINE_S = 10.0
+REFUSAL_RETRY_S = 1.0
+REFUSAL_LIMIT_S = 600.0
 INJECTION_SEAM = "gateway runner._dispatch_plugin_message_injection"
 CONSENT_ERROR = f"plugins.entries.cafleet.allow_gateway_injection is not true; {SETUP_FIX}"
 
@@ -61,13 +63,17 @@ def _injection_target():
     return runner._dispatch_plugin_message_injection, loop
 
 
-def _session_attached(session_key: str) -> bool:
+def _authority():
     from gateway.session_authorities import authority_for_home
     home = _ctx._manager.home_path
     authority = authority_for_home(_gateway_runner(), home)
     if authority is None:
         raise RuntimeError(f"no session authority serves {home}")
-    return any(live.route == session_key and live.subscribers for live in list(authority.sessions.values()))
+    return authority
+
+
+def _session_attached(session_key: str) -> bool:
+    return any(live.route == session_key and live.subscribers for live in list(_authority().sessions.values()))
 
 
 def _recorded_executable() -> Path:
@@ -137,24 +143,42 @@ class Receiver:
             raise TimeoutError(f"the injection did not finish within {INJECT_DEADLINE_S:.0f} s") from None
 
     def _read_stdout(self) -> None:
-        for raw in self.proc.stdout:
-            line = raw.rstrip("\n")
-            if line:
-                self.lines.put(line)
-        self.lines.put(None)
+        try:
+            for raw in self.proc.stdout:
+                line = raw.rstrip("\n")
+                if line:
+                    self.lines.put(line)
+        finally:
+            self.lines.put(None)
+
+    def _commit(self, text: str) -> bool:
+        """Inject one record, retrying while the still-attached session refuses it (a full admission
+        queue or a draining gateway); False once the receiver has ended."""
+        refused_since = None
+        while not self._inject(text):
+            if not _session_attached(self.session_key):
+                self.stop("the session is no longer attached")
+                return False
+            refused_since = refused_since or time.monotonic()
+            if time.monotonic() - refused_since >= REFUSAL_LIMIT_S:
+                self.stop(f"the attached session refused one record for {REFUSAL_LIMIT_S:.0f} s")
+                self._inject_closed_notice()
+                return False
+            if self.stopping.wait(REFUSAL_RETRY_S):
+                return False
+        return True
 
     def _deliver(self) -> None:
         while (line := self.lines.get()) is not None:
             self.saw_closed = self.saw_closed or line.startswith('{"event":"closed"')
             try:
-                committed = self._inject(RECORD_PREFIX + line)
+                committed = self._commit(RECORD_PREFIX + line)
             except Exception as exc:
-                logger.error("cafleet_listen: %s for session=%s: %r", INJECTION_SEAM, self.session_key, exc)
-                self.stop(f"the injection failed: {exc!r}")
+                logger.error("cafleet_listen: delivery to session=%s failed: %r", self.session_key, exc)
+                self.stop(f"the delivery failed: {exc!r}")
                 self._inject_closed_notice()
                 break
             if not committed:
-                self.stop("the session refused the injection")
                 break
         else:
             self.proc.wait()
@@ -203,6 +227,8 @@ def _listen(args: dict, **kwargs) -> str:
         return _result(ok=False, error=f"agent.session_client_env: {exc}")
     if client_env is None:
         return _result(ok=False, error="cafleet_listen cannot read the calling session's client environment")
+    if not client_env:
+        return _result(ok=False, error="cafleet_listen cannot verify a client that is not attached locally")
     if client_env.get("CAFLEET_MEMBER_ID"):
         return _result(ok=False, error="cafleet_listen runs only in a Director session")
     try:
@@ -229,19 +255,31 @@ def _listen(args: dict, **kwargs) -> str:
             return _result(ok=False, error=str(exc))
         if not _ctx._gateway_injection_allowed():
             return _result(ok=False, error=CONSENT_ERROR)
-        env = dict(os.environ)
+        env = {name: value for name, value in os.environ.items() if not name.startswith("CAFLEET_")}
         database_url = client_env.get("CAFLEET_DATABASE_URL")
         if database_url:
             env["CAFLEET_DATABASE_URL"] = database_url
         proc = subprocess.Popen(
             [str(executable), "message", "listen", str(int(args["director_id"]))],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1, env=env,
+            encoding="utf-8", errors="replace", bufsize=1, env=env,
         )
         receiver = Receiver(session_key, str(kwargs.get("session_id") or ""), proc)
         _receivers[session_key] = receiver
     receiver.start()
     return _result(ok=True, pid=proc.pid, session_key=session_key)
+
+
+def _finalized_route(session_id: str) -> str:
+    """The route of a finalized session, which survives the session-id rotation of a compression."""
+    if not session_id:
+        return ""
+    try:
+        live = _authority().sessions.get(session_id)
+    except Exception as exc:
+        logger.error("cafleet_listen: gateway.session_authorities.authority_for_home: %s", exc)
+        return ""
+    return "" if live is None else live.route
 
 
 def _on_session_finalize(**kwargs) -> None:
@@ -250,11 +288,20 @@ def _on_session_finalize(**kwargs) -> None:
         session_key = _session_key()
     except Exception:
         session_key = ""
+    keys = {key for key in (_finalized_route(session_id), session_key) if key}
     with _receivers_lock:
         owned = [r for r in _receivers.values()
-                 if (session_id and r.session_id == session_id) or (session_key and r.session_key == session_key)]
+                 if r.session_key in keys or (session_id and r.session_id == session_id)]
     for receiver in owned:
         receiver.stop("the session finalized")
+
+
+def _on_unload() -> None:
+    with _receivers_lock:
+        receivers = list(_receivers.values())
+        _receivers.clear()
+    for receiver in receivers:
+        receiver.stop("the plugin unloaded")
 
 
 _SCHEMA = {
@@ -277,3 +324,4 @@ def register(ctx) -> None:
     _ctx = ctx
     ctx.register_tool(name="cafleet_listen", toolset="cafleet", schema=_SCHEMA, handler=_listen)
     ctx.register_hook("on_session_finalize", _on_session_finalize)
+    ctx.on_unload(_on_unload)
