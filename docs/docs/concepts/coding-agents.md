@@ -22,7 +22,30 @@ lists what setup installs for each backend and the configuration you add.
   and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
 
-Run the root Director on a backend whose Director verdict is `yes`, and spawn members on backends whose Member verdict is `yes`; a backend whose Director verdict is `no` runs only as a member. [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records each backend's verdicts with their evidence. A Director backend needs native goal lifecycle controls and must deliver the output of the Director's background listener to the session while the listener runs, at the latest at the session's next turn boundary; [Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines both requirements and the probe.
+Run the root Director on a backend whose Director verdict is `yes`, and spawn members on backends whose Member verdict is `yes`; a backend whose Director verdict is `no` runs only as a member. [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records each backend's verdicts with their evidence.
+
+## Director requirements
+
+A Director backend needs two capabilities, checked independently: goal lifecycle controls and reception of the Director's broker records. Goal controls come from the backend itself or from a CAFleet extension that supports the full goal lifecycle across compaction and restarts. Reception falls into three tiers:
+
+| Tier | How records reach the Director | Standing |
+|---|---|---|
+| Native subscribe | The backend itself pushes each record into the session, starting a turn when the session is idle | Preferred |
+| Extension subscribe | A CAFleet plugin that `cafleet setup` installs pushes each record the same way | Accepted, below native |
+| Built-in compromise | The model reads the running listener's output or receives periodic batches | Far below both; recorded only when neither subscribe tier exists |
+
+[Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the tiers and the probes that establish them. Each bundled backend meets both Director requirements as follows:
+
+| Backend | Director launch | Reception | Goal |
+|---|---|---|---|
+| `claude` | Your usual Claude Code session | The native Monitor tool | Native `/goal` |
+| `codex` | Your usual Codex session | `cafleet message listen --codex-thread` hands each record to the session as a queued turn | Native `/goal` |
+| `opencode` | OpenCode 2.2.0 or later as `opencode mini --standalone` from the project directory, with the default agent | The CAFleet plugin's `cafleet_listen` tool | The CAFleet plugin's `/cafleet-goal` command |
+| `hermes` | The TUI client, `hermes chat --tui` | The CAFleet plugin's `cafleet_listen` tool | Native `/goal` |
+
+A Hermes Director runs the TUI because records the plugin delivers to a classic CLI session run without appearing in that pane; Hermes members keep the classic CLI. The shared OpenCode background service passes no client environment to plugins, so it is not a supported Director launch.
+
+`cafleet setup` installs the CAFleet plugin for OpenCode and Hermes next to the skills and presets, records which `cafleet` executable the plugin runs, and for Hermes enables the plugin in your Hermes configuration. `cafleet doctor` checks that each installed plugin matches the copy embedded in the CLI and that Hermes enables it. The plugin tools refuse to run in member sessions, and the OpenCode member presets deny them.
 
 ## Launch modes
 

@@ -7,22 +7,25 @@ fn main() {
     println!("cargo:rerun-if-changed=migrations");
     println!("cargo:rerun-if-changed=skills");
     println!("cargo:rerun-if-changed=presets");
+    println!("cargo:rerun-if-changed=extensions");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by cargo");
     let skills = Path::new(&manifest_dir).join("skills");
     let presets = Path::new(&manifest_dir).join("presets");
+    let extensions = Path::new(&manifest_dir).join("extensions");
 
     let mut generated = String::new();
     emit_table(&mut generated, "SKILLS", &skills);
     emit_table(&mut generated, "PRESETS", &presets);
+    emit_table(&mut generated, "EXTENSIONS", &extensions);
 
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set by cargo"))
         .join("embedded_data.rs");
     fs::write(&out, generated).expect("the generated embed tables are writable");
 }
 
-/// Collect every non-hidden file under `dir` as a `/`-separated path relative
-/// to `root`.
+/// Collect every file under `dir` as a `/`-separated path relative to `root`,
+/// skipping hidden entries and interpreter caches.
 fn walk(root: &Path, dir: &Path, paths: &mut Vec<String>) {
     let entries =
         fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
@@ -30,7 +33,7 @@ fn walk(root: &Path, dir: &Path, paths: &mut Vec<String>) {
         let entry = entry.unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
         let name = entry.file_name();
         let name = name.to_str().expect("embedded file names are UTF-8");
-        if name.starts_with('.') {
+        if is_excluded(name) {
             continue;
         }
         let path = entry.path();
@@ -47,6 +50,12 @@ fn walk(root: &Path, dir: &Path, paths: &mut Vec<String>) {
             );
         }
     }
+}
+
+/// Hermes rewrites a plugin's `__pycache__` on load, so an embedded cache
+/// would never match its installed copy.
+fn is_excluded(name: &str) -> bool {
+    name.starts_with('.') || name == "__pycache__" || name.ends_with(".pyc")
 }
 
 /// Emit `pub static <name>: &[(&str, &[u8])]` mapping each relative path to

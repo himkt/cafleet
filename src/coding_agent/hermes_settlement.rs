@@ -337,27 +337,27 @@ pub(crate) fn effective_home(
     base: &Path,
     until: Instant,
 ) -> Result<PathBuf, CafleetError> {
-    let config = crate::coding_agent::run_bounded(
+    crate::coding_agent::run_bounded(
         executable,
         &["config", "path"],
         &[("HERMES_HOME", base)],
         until,
     )
+    .and_then(|config| home_of_config_path(config.trim()))
     .map_err(|cause| {
         CafleetError::App(format!(
             "cannot read hermes configuration through 'hermes config path': {cause}"
         ))
-    })?;
-    Path::new(config.trim())
+    })
+}
+
+/// The Hermes home that owns the file `hermes config path` printed as `config_path`.
+pub(crate) fn home_of_config_path(config_path: &str) -> Result<PathBuf, String> {
+    Path::new(config_path)
         .parent()
         .filter(|home| home.is_absolute())
         .map(Path::to_path_buf)
-        .ok_or_else(|| {
-            CafleetError::App(format!(
-                "cannot read hermes configuration through 'hermes config path': printed no absolute file path: {}",
-                config.trim()
-            ))
-        })
+        .ok_or_else(|| format!("printed no absolute file path: {config_path}"))
 }
 
 /// Stops and verifies a Hermes run's session work through its pane.

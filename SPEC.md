@@ -25,7 +25,7 @@ A Director arms native reception before relying on replies and retains one recei
 | Multiplexer | Discovery, pane creation/capture/input/kill and layout compensation |
 | Pane input | Stable OS locks, runner-state gating and durable receipt settlement |
 | Member runtime | Owned PTY transport, typed observations, durable event/inbox transactions and identity-pinned recovery |
-| Notification / receiving | Ordinary-member draining delivery, caller-owned finite retries and read-only persistent inbox streams |
+| Notification / receiving | Ordinary-member draining delivery, caller-owned finite retries and read-only persistent inbox streams, optionally forwarded to a Codex thread |
 | Coding-agent backends | Registry, availability, model/effort validation and spawn argv |
 | CLI | Parse/guard/compose these contracts and emit results |
 
@@ -256,7 +256,7 @@ environment variable, falling back to the default when the variable is unset:
 | codex | `CODEX_HOME` | `$CODEX_HOME` | `~/.codex` | `<base>/skills` | `<base>/rules/cafleet.rules` | `<base>` |
 | opencode (skills) | — (fixed discovery path) | — | `~/.config/opencode` | `<base>/skills` | — | — |
 | opencode (preset) | `OPENCODE_CONFIG_DIR` | `$OPENCODE_CONFIG_DIR` | `~/.config/opencode` | — | `<base>/agents/cafleet.md`, `<base>/agents/cafleet-ask.md` | `<base>` |
-| hermes | `HERMES_HOME` | `$HERMES_HOME` | `~/.hermes` | `<base>/skills` | — (setup merges `terminal.client_env_passthrough` instead; § Hermes environment passthrough) | `<base>` |
+| hermes | `HERMES_HOME` | `$HERMES_HOME` | `~/.hermes` | `<base>/skills` | — (setup installs the `cafleet` plugin under `<hermes home>` and merges the Hermes configuration instead; § Asset installation) | `<base>` |
 
 opencode discovers skills only at fixed paths but loads agent definitions from
 `OPENCODE_CONFIG_DIR` as well, so only the presets follow the variable.
@@ -284,8 +284,8 @@ validated value into the member environment (§6.3 Member environment).
 
 ##### Asset installation
 
-Each agent's presets, where they exist, are static files embedded in the
-binary next to the skills; install targets resolve per
+Each agent's presets and extensions, where they exist, are static files
+embedded in the binary next to the skills; preset install targets resolve per
 §6.3 Config-dir resolution. Setup installs every embedded
 preset of the agent, in this order, replacing any existing target:
 
@@ -295,26 +295,62 @@ preset of the agent, in this order, replacing any existing target:
 | codex | `presets/codex/cafleet.rules` | `<codex base>/rules/cafleet.rules` |
 | opencode | `presets/opencode/cafleet.md` | `<preset base>/agents/cafleet.md` |
 | opencode | `presets/opencode/cafleet-ask.md` | `<preset base>/agents/cafleet-ask.md` |
-| hermes | — (skills, then the `terminal.client_env_passthrough` merge below) | — |
+| hermes | — (skills, the extension, then the Hermes configuration merges below) | — |
 
-Each backend replaces every embedded skill sequentially, then replaces each of its presets in order. Existing targets
-are deleted before their replacements are written. Unrelated skills remain
-untouched. A symlink target is unlinked as an entry;
+Setup then installs every embedded extension of the agent and writes its
+executable record:
+
+| Agent | Bundled extension | Install target | Executable record |
+|---|---|---|---|
+| claude | — | — | — |
+| codex | — | — | — |
+| opencode | `extensions/opencode/cafleet.ts` | `<preset base>/plugins/cafleet.ts` | `<preset base>/plugins/cafleet.executable` |
+| hermes | `extensions/hermes/cafleet/` (every file) | `<hermes home>/plugins/cafleet/` | `<hermes home>/plugins/cafleet/executable` |
+
+`<preset base>` is the opencode preset base (`$OPENCODE_CONFIG_DIR`, else
+`~/.config/opencode`). `<hermes home>` is the parent directory of the
+`<config path>` that `hermes config path` prints (§ Hermes environment
+passthrough step 1); Hermes discovers user plugins under its home, and a sticky
+`<base>/active_profile` re-homes both that directory and `hermes config
+path` to the profile directory. Setup for `hermes` runs `hermes config path`
+once, before the extension install, so installing the Hermes extension requires
+`hermes` on `PATH`. Extension files are embedded verbatim, so the embedded
+bytes equal the installed bytes.
+
+The *executable record* is a one-line file holding the absolute, canonicalized
+path of the running `cafleet` executable (`std::env::current_exe()`). Setup
+writes it after the extension files. It is not an embedded asset and is not
+byte-compared. OpenCode plugin discovery loads only `.ts`/`.js` files and
+directories, so it ignores the record. The plugins execute only the recorded
+path.
+
+Each backend replaces every embedded skill sequentially, then replaces each of
+its presets in order, then each extension target followed by its executable
+record, then (for `hermes`) runs the configuration merges. Existing targets
+are deleted before their replacements are written. Unrelated skills and plugins
+remain untouched. A symlink target is unlinked as an entry;
 its referent is not deleted. Skills-operation errors retain `failed to install
-skills into <skills_dir>: <error>` and preset-operation errors retain `failed
-to install preset into <target>: <error>`. A successful install records one
-`asset_installs` row for the agent, covering all of its presets; a failure on
-any preset fails setup and records no installation.
+skills into <skills_dir>: <error>`, preset-operation errors retain `failed
+to install preset into <target>: <error>` and extension-operation errors,
+including the executable record, use `failed to install extension into
+<target>: <error>`. A successful install records one `asset_installs` row for
+the agent, covering its skills, presets and extensions; a failure on any
+preset, extension or configuration merge fails setup and records no
+installation.
 
 The command prints each success line after that operation completes, then
 records the installed version after all operations succeed: the skills line,
-then one preset line per installed preset target in install order. Claude
-prints only the skills line, and Hermes prints the skills line followed by a
-member-names line (§ Hermes environment passthrough):
+then one preset line per installed preset target in install order, then one
+extension line per extension target after the target and its executable
+record are written. A directory extension prints its directory once. Claude
+prints only the skills line, and Hermes prints the skills line, the extension
+line, a member-names line (§ Hermes environment passthrough) and a plugin
+enablement line (§ Hermes plugin enablement):
 
 ```
 <agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
 <agent>: installed preset (v<version>) -> <target>
+<agent>: installed extension (v<version>) -> <target>
 ```
 
 `cafleet setup --coding-agent opencode` prints:
@@ -323,6 +359,17 @@ member-names line (§ Hermes environment passthrough):
 opencode: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
 opencode: installed preset (v<version>) -> <preset base>/agents/cafleet.md
 opencode: installed preset (v<version>) -> <preset base>/agents/cafleet-ask.md
+opencode: installed extension (v<version>) -> <preset base>/plugins/cafleet.ts
+```
+
+`cafleet setup --coding-agent hermes` on a home whose list already holds the
+member names and whose plugin is already enabled prints:
+
+```
+hermes: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
+hermes: installed extension (v<version>) -> <hermes home>/plugins/cafleet
+hermes: terminal.client_env_passthrough already holds CAFleet's member names -> <config path>
+hermes: plugin cafleet already enabled -> <config path>
 ```
 
 ###### Hermes environment passthrough
@@ -336,9 +383,20 @@ HERDR_TAB_ID, HERDR_WORKSPACE_ID, HERDR_SOCKET_PATH, HERDR_BIN_PATH, HERDR_SESSI
 
 One Hermes gateway per Hermes home runs the terminal tools of every session with its own launch environment. A session's tools see that session's own value only for a name in this list, and a listed name the session does not export is unset; a Hermes Director's client exports no `CAFLEET_MEMBER_ID`, so the Director's tools never see it.
 
-After installing the skills and printing the skills line, setup for `hermes` merges the names into the resolved Hermes configuration through the local `hermes` binary, with `HERMES_HOME` set to the resolved base on every call. It touches nothing else under the Hermes home and parses no `config.yaml` itself:
+Setup for `hermes` runs every Hermes command through the local `hermes` binary, with `HERMES_HOME` set to the resolved base on every call, and parses no `config.yaml` itself. Under the Hermes home it touches exactly:
 
-1. Run `hermes config path`; its trimmed stdout is `<config path>`. Hermes applies a sticky `<base>/active_profile` to every command, so this path, the merge, the availability preflight (§6.7 Hermes availability preflight) and the member's own `hermes chat` name the same file.
+- the skills
+- `<hermes home>/plugins/cafleet/`
+- `terminal.client_env_passthrough`
+- `plugins.enabled`
+- `plugins.disabled` (read only)
+- `plugins.entries.cafleet.allow_gateway_injection`
+
+A key is *not set* when its `hermes config get` exits 1 and one stderr line, trimmed, equals exactly `Config key not set: <key>`. Hermes prints unrelated lines to stderr on every command, such as an install out-of-sync warning, so the rule matches a line, not the whole stream. Any other non-zero exit is a failed command whose cause is its stderr text.
+
+After installing the skills, setup merges the names into the resolved Hermes configuration:
+
+1. Run `hermes config path` before the extension install (§ Asset installation); its trimmed stdout is `<config path>`. Hermes applies a sticky `<base>/active_profile` to every command, so this path, the extension's `<hermes home>`, the merges, the availability preflight (§6.7 Hermes availability preflight) and the member's own `hermes chat` name the same file and home.
 2. Run `hermes config get --json terminal.client_env_passthrough`. Its stdout must be a JSON array of strings.
 3. Compute the merged list: every existing entry in its existing order, then each missing CAFleet name in canonical order. Comparison is exact string equality.
 4. When nothing is missing, print the unchanged line below and write nothing.
@@ -354,13 +412,34 @@ Rerunning setup on an installation whose list predates a canonical name appends 
 
 A failed command, output that is not a JSON array of strings, or a name missing after step 6 fails setup for `hermes` with `failed to install hermes terminal.client_env_passthrough names into <config path>: <cause>`, and no `asset_installs` row is recorded. When step 1 itself fails, `<config path>` in that error is the resolved Hermes base (`$HERMES_HOME`, else `~/.hermes`), for example `failed to install hermes terminal.client_env_passthrough names into /root/.hermes: binary hermes not found on PATH`. Hermes's writer refuses a key pinned by its managed scope, and that refusal is the cause.
 
-Hermes writes through its own ruamel round-trip writer and replaces the file atomically, writing through a symlinked `config.yaml` to its target. Comments, key order, quoting and untouched nodes are preserved; existing entries keep their comments and quoting, and appended entries are written unquoted. A rerun after a successful merge finds nothing missing and writes nothing. Setup reads and writes no other Hermes key.
+Hermes writes through its own ruamel round-trip writer and replaces the file atomically, writing through a symlinked `config.yaml` to its target. Comments, key order, quoting and untouched nodes are preserved; existing entries keep their comments and quoting, and appended entries are written unquoted. A rerun after a successful merge finds nothing missing and writes nothing.
 
-Setup runs only the local binary and stays offline. `cafleet setup --coding-agent hermes` requires `hermes` on `PATH`; its absence fails with the cause `binary hermes not found on PATH`. Plain `cafleet setup` (no `--coding-agent`) with `hermes` absent from `PATH` installs the Hermes skills, records the `asset_installs` row, skips the merge and prints:
+Setup runs only the local binary and stays offline. `cafleet setup --coding-agent hermes` requires `hermes` on `PATH`; its absence fails with the cause `binary hermes not found on PATH`. Plain `cafleet setup` (no `--coding-agent`) with `hermes` absent from `PATH` installs the Hermes skills, records the `asset_installs` row, skips the extension and both merges and prints:
 
 ```
-hermes: skipped terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes
+hermes: skipped the plugin and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes
 ```
+
+###### Hermes plugin enablement
+
+After the passthrough merge, setup for `hermes` enables the `cafleet` plugin with these steps:
+
+1. Run `hermes config get --json plugins.disabled`. When the key is set, its value must be a JSON array of strings. When it lists `cafleet`, setup fails with the cause `plugins.disabled lists cafleet; remove it from plugins.disabled, then rerun 'cafleet setup --coding-agent hermes'`. The deny-list wins over `plugins.enabled`, and the operator's explicit disable is preserved.
+2. Run `hermes config get --json plugins.enabled`. *Not set* means an empty list; otherwise the value must be a JSON array of strings.
+3. When `cafleet` is missing, run `hermes config set plugins.enabled '<existing entries in order, then "cafleet", as compact JSON>'`.
+4. Run `hermes config get --json plugins.entries.cafleet.allow_gateway_injection`. When the key is *not set* or its value is not `true`, run `hermes config set plugins.entries.cafleet.allow_gateway_injection true`.
+5. Re-read both keys and require `cafleet` in `plugins.enabled` and `true` for `allow_gateway_injection`.
+
+Setup prints exactly one of these lines, the first when steps 3 and 4 wrote nothing:
+
+```
+hermes: plugin cafleet already enabled -> <config path>
+hermes: enabled plugin cafleet -> <config path>
+```
+
+Any failed command, a timeout, an unexpected value or a listed `plugins.disabled` entry fails setup with `failed to enable hermes plugin cafleet in <config path>: <cause>`, and no `asset_installs` row is recorded.
+
+A missing `plugins.enabled` enables no user plugin, and Hermes grandfathers installed user plugins only while the key is missing. After setup writes the key, other user plugins that were installed but not enabled stay disabled; the operator enables them explicitly. Setup never runs `hermes plugins enable`: its dependency admission re-syncs the Hermes environment, which the plugin does not need and which fails on installs without `uv.lock`.
 
 #### Shared diagnosis and connection reuse
 
@@ -438,12 +517,17 @@ in this order:
 | `<agent>.executable` | `<binary> is on PATH` | `<binary> is optional and absent from PATH` | — | — |
 | `opencode.preset[.<mode>]` | § OpenCode preset checks | § OpenCode preset checks | — | § OpenCode preset checks |
 | `hermes.client_env_passthrough` | § Hermes passthrough check | § Hermes passthrough check | — | § Hermes passthrough check |
+| `opencode.extension`, `hermes.extension`, `hermes.plugin_enabled` | § Extension checks | § Extension checks | — | § Extension checks |
 | `<agent>.installation` | `recorded <version> at <installed_at>` when the version at the resolved path equals the CLI version | `unavailable: configuration failed: <cause>`; `unavailable: <database error>` for a database that is not current | `recorded <version> at <installed_at>; run 'cafleet setup --coding-agent <agent>'` for another version; `no installation recorded at <path>; run 'cafleet setup --coding-agent <agent>'` | `installation query failed: <cause>` |
 | `member_runtime.<run_id>`, `member_runtime` | § Member runtime checks | § Member runtime checks | § Member runtime checks | § Member runtime checks |
 
 The three per-agent rows repeat for each backend in registry order; the
 OpenCode preset checks follow `opencode.executable`, and the Hermes passthrough
-check follows `hermes.executable`.
+check follows `hermes.executable`. The extension checks follow them and
+precede `<agent>.installation`: `opencode.extension` follows
+`opencode.preset[.<mode>]`, `hermes.extension` follows
+`hermes.client_env_passthrough`, and `hermes.plugin_enabled` follows
+`hermes.extension`.
 A recorded version is compared by string equality. Installation records are
 read only at the resolved path of a current database; a row recorded at
 another path is not the resolved installation.
@@ -462,7 +546,7 @@ registry order, then the `members` lines (§ Member runtime checks).
 | `<agent>` | `ready` | The backend rules below |
 
 A backend line folds that backend's `configuration`, `executable`, OpenCode
-`preset`, `hermes.client_env_passthrough` and `installation` checks. The first
+`preset`, `hermes.client_env_passthrough`, extension and `installation` checks. The first
 matching rule applies:
 
 1. A `configuration` check with status `error` prints `error <agent>: <cause>`.
@@ -474,10 +558,17 @@ matching rule applies:
 | OpenCode preset missing or unreadable | `error` | `preset <path> is unreadable: <cause>` | yes |
 | Hermes passthrough lacks names | `error` | `terminal.client_env_passthrough lacks CAFleet's member names: <name>, …` | yes |
 | Hermes passthrough unreadable | `error` | `cannot read hermes configuration through 'hermes config get': <cause>` | no |
+| Extension missing, unreadable or differing | `error` | `extension <path> is missing or differs from the embedded copy` | yes |
+| Executable record unusable | `error` | `extension executable record <path> is unusable: <cause>` | yes |
+| Hermes config path unreadable | `error` | `cannot read hermes configuration through 'hermes config path': <cause>` | no |
+| Hermes plugin listed in `plugins.disabled` | `error` | `hermes plugins.disabled lists cafleet` | no |
+| Hermes plugin not enabled | `error` | `hermes plugin cafleet is not enabled: <key>, …` | yes |
 | Installation recorded at another version | `warn` | `assets from cafleet <version> (this is <cli version>)` | yes |
 | No installation recorded | `warn` | `assets not installed at <path>` | yes |
 | Installation unavailable because the database is not current | `info` | `assets unchecked (database unavailable)` | no |
 | Installation query failed | `error` | `installation query failed: <cause>` | no |
+
+An unreadable `hermes.plugin_enabled` read reuses the Hermes passthrough unreadable phrase.
 
 For example:
 
@@ -561,6 +652,42 @@ files at the other base in place.
 | The command fails, times out or prints something other than a JSON array of strings | `error` | `cannot read hermes configuration through 'hermes config get': <cause>` |
 | The list holds every CAFleet member name | `ok` | `holds CAFleet's member names` |
 | The list lacks a CAFleet member name | `error` | `hermes terminal.client_env_passthrough lacks CAFleet's member names: <name>, …; run 'cafleet setup --coding-agent hermes'` |
+
+###### Extension checks
+
+Each extension check is read-only. The executable record is usable when it names an existing executable file.
+
+**`opencode.extension`** checks `<preset base>/plugins/cafleet.ts` and `<preset base>/plugins/cafleet.executable`:
+
+| State | Status | Detail |
+|---|---|---|
+| The `opencode` executable is absent from `PATH` | `info` | `unavailable: executable is absent` |
+| The opencode configuration failed | `info` | `unavailable: configuration failed: <cause>` |
+| The plugin equals the embedded bytes and the executable record is usable | `ok` | The plugin path |
+| The plugin is missing, unreadable or differs from the embedded bytes | `error` | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent opencode'` |
+| The executable record is missing, unreadable or names no executable file | `error` | `<record path>: <cause>; run 'cafleet setup --coding-agent opencode'` |
+
+**`hermes.extension`** runs `hermes config path` with the passthrough check's bounds and checks `<hermes home>/plugins/cafleet/`:
+
+| State | Status | Detail |
+|---|---|---|
+| The `hermes` executable is absent from `PATH` | `info` | `unavailable: executable is absent` |
+| The hermes configuration failed | `info` | `unavailable: configuration failed: <cause>` |
+| `hermes config path` fails or times out | `error` | `cannot read hermes configuration through 'hermes config path': <cause>` |
+| Every embedded file equals its installed copy and the executable record is usable | `ok` | The plugin directory |
+| A file is missing, unreadable or differs | `error` | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent hermes'` |
+| The executable record is missing, unreadable or names no executable file | `error` | `<record path>: <cause>; run 'cafleet setup --coding-agent hermes'` |
+
+**`hermes.plugin_enabled`** runs three bounded `hermes config get --json` calls, for `plugins.disabled`, `plugins.enabled` and `plugins.entries.cafleet.allow_gateway_injection`, and applies the *not set* rule (§ Hermes environment passthrough):
+
+| State | Status | Detail |
+|---|---|---|
+| The `hermes` executable is absent from `PATH` | `info` | `unavailable: executable is absent` |
+| The hermes configuration failed | `info` | `unavailable: configuration failed: <cause>` |
+| A call fails other than *not set*, times out or prints a value of the wrong JSON type | `error` | `cannot read hermes configuration through 'hermes config get': <cause>` |
+| `plugins.disabled` lists `cafleet` | `error` | `hermes plugins.disabled lists cafleet; remove it, then run 'cafleet setup --coding-agent hermes'` |
+| `plugins.enabled` lacks `cafleet`, or `allow_gateway_injection` is not `true` | `error` | `hermes plugin cafleet is not enabled: <key>, …; run 'cafleet setup --coding-agent hermes'` |
+| Otherwise | `ok` | `cafleet enabled with gateway injection` |
 
 ##### Member runtime checks
 
@@ -702,7 +829,7 @@ A script or operator uses `message wait` for finite manual reception and ordinar
 
 ##### `message listen`
 
-`cafleet message listen MEMBER_ID [--timeout SECONDS]`
+`cafleet message listen MEMBER_ID [--timeout SECONDS] [--codex-thread THREAD]`
 
 Stream any active member's pending inbox through UTF-8 JSONL. Derive and pin its fleet at startup, using the configured database and the ordinary schema-version guard. Require a live root Director with a concrete registered placement, without resolving a multiplexer or checking its executable/physical pane. The subject's own placement may be absent. Unknown/inactive startup subjects use `Member ID not found`, exit 1.
 
@@ -724,7 +851,7 @@ The command always emits JSONL; text mode and `--json` are absent. Stdout contai
 {"event":"closed","member_id":1,"reason":"timeout"}
 ```
 
-The inner message is exactly the full message record (§6.4 Persisted shape), preserving original text beyond CLI/pane limits. `closed.reason` is `timeout`, `member_inactive` or `fleet_deleted`; fleet deletion takes precedence when both lifecycle closures are observed. Check normal closures before revalidating a continuing live fleet. Missing persisted rows, changed fleet identity, invalid stored enums/root relationships or missing root placement are fatal errors.
+The inner message is exactly the full message record (§6.4 Persisted shape), preserving original text beyond CLI/pane limits. `closed.reason` is `timeout`, `member_inactive`, `fleet_deleted` or, only in forwarding mode (§ Codex forwarding), `session_exited`; fleet deletion takes precedence when both lifecycle closures are observed. Check normal closures before revalidating a continuing live fleet. Missing persisted rows, changed fleet identity, invalid stored enums/root relationships or missing root placement are fatal errors.
 
 Each short read transaction validates identity and selects every `input_required` record for the pinned subject ordered by `(created_at ASC, message_id ASC)`. Commit before output or sleep. A later commit with an earlier timestamp emits when first observed. A process-local ID set suppresses already-emitted pending IDs; insert only after the complete record and LF flush successfully. Retain only IDs still pending in successful snapshots; a failed snapshot leaves the set unchanged. A snapshot containing only previously emitted pending IDs waits one second, while newly emitted records permit immediate recheck.
 
@@ -735,6 +862,43 @@ Each snapshot has a fresh database deadline at most five seconds away, shortened
 Output owns one serialized record at a time and applies backpressure before selecting more messages. Nonblocking filesystem/poll output preserves/restores descriptor flags on normal return, resumes partial writes from their byte offset and checks every write/flush. Its five-second deadline is shortened by the lease. Broken pipe, write-zero, flush failure or output deadline exhaustion terminates visibly with exit 1, even after partial records. Normal lease expiry between records uses a separate bounded final write for `closed`. Complete records survive a later error; an incomplete final line remains unconsumed and recovers through broker replay. Only the current snapshot, one record and pending emitted IDs occupy listener memory.
 
 Database contention retries stay inside the snapshot budget; exhaustion or another fatal error terminates the stream. The listener retains its connection/PID across healthy events and ordinary signal behavior outside pane termination deferral. Host cancellation may end it without `closed`. Native owners retain one handle, reconcile durable state after failure and establish old-process termination before replacement. Installed backend instructions own concrete native tool recipes and their evidence limits.
+
+###### Codex forwarding
+
+`--codex-thread THREAD` selects forwarding mode, which keeps the record, ordering, replay, lease and idle contracts and changes the output:
+
+- **Stdout** carries the `ready` record and the final `closed` record, and nothing between them, so an unread PTY never stalls the five-second output deadline. The final `closed` record is written right before exit and carries every reason, `session_exited` included. Writing it is the listener's last action, and a write failure leaves the exit status unchanged.
+- **Forwarded events.** Each `message` record, and each `closed` record whose reason is `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in emission order. `ready` and `closed` `session_exited` are never forwarded.
+- **Forwarding command:** `codex queue --thread THREAD --message <text>`, where the text is `[cafleet listen record] <compact record JSON>`.
+- **Large records.** When that text exceeds 65,536 bytes, the forwarded text is the reference below instead:
+
+  ```
+  [cafleet listen record] {"event":"message_ref","message_id":<id>,"from_member_id":<id>,"bytes":<n>} — read it with: cafleet message show <id> --json
+  ```
+
+  `bytes` is the byte length of the text the reference replaces.
+- **One at a time.** Each `codex queue` runs to exit, with a 10 s deadline, before the next record is forwarded.
+- **Full queue.** Codex refuses a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions`). A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a *full-queue refusal*, not a failure: the listener keeps the same record, waits 1 s, checks the pinned session (§ Liveness) and retries it. Later records wait behind it, so emission order holds and no record is dropped. The pinned session's exit during the wait ends the listener with `session_exited`.
+- **Full-queue limit.** When one record meets full-queue refusals for 600 s without being accepted, the listener fails.
+- **Binary resolution.** `codex` resolves through the listener's `PATH` with the absolute-entry search of §6.9 Native executable resolution.
+
+| Condition | Behavior |
+|---|---|
+| `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
+| No Codex session ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
+| `codex queue` exits non-zero, other than a full-queue refusal, while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
+| Full-queue refusals for one record reach 600 s | stderr `codex thread <THREAD> queue stayed full for 600 s`, closed notice, exit 1 |
+| `codex queue` exceeds 10 s while the pinned session is alive | kill it; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
+| Any other failure after `ready` (database, schema guard, deadline) | its existing stderr diagnostic, closed notice, exit 1 |
+| The pinned Codex process exits | stdout `closed` with reason `session_exited`, exit 0; nothing is forwarded |
+
+A `codex queue` that exits non-zero or exceeds 10 s makes the listener check the pinned session first. When that session has exited, the `session_exited` row applies: no diagnostic and no closed notice.
+
+**Closed notice.** Before every non-zero exit after `ready`, the listener makes one best-effort attempt, bounded by 10 s, to forward `[cafleet listen closed] exit 1: <stderr diagnostic>` with `codex queue`; the attempt can itself meet the full queue and is not retried. When that attempt also fails, stderr keeps the original diagnostic and adds `failed to forward the closed notice to codex thread <THREAD>: <cause>`, and the exit status stays 1.
+
+**Session pinning.** At startup the listener walks its ancestors, starting from its parent, reading `/proc/<pid>/stat` (ppid) and `/proc/<pid>/cmdline` on Linux and `ps -o ppid= -o args= -p <pid>` elsewhere. It pins the nearest ancestor whose argv[0] basename is exactly `codex`; shells, `bwrap`, node launchers and the sandbox helper (the same binary, run with argv[0] `codex-linux-sandbox`) are skipped. The executable path is not compared, because the helper shares it. A sandbox that unshares the PID namespace hides the ancestor, and startup fails with the missing-ancestor error.
+
+**Liveness.** Each idle tick (at most 1 s) checks the pinned pid with `kill(pid, 0)`. On Linux it also compares the pinned process's start time from `/proc/<pid>/stat`, so a reused pid counts as exited. The pinned process's exit ends the listener with `session_exited`. The listener sets no `PR_SET_PDEATHSIG`, which fires when the forking thread exits rather than the multi-threaded Codex process.
 
 ##### `message ack`
 
@@ -1152,6 +1316,9 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | `member create` | `--coding-agent hermes` with an unreadable configuration or a `terminal.client_env_passthrough` lacking a CAFleet member name | §6.7 Hermes availability preflight | 1 | Fires before registration or multiplexer effects |
 | `member delete` | A `hermes` run whose work settlement cannot be verified | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 | The member row and runner cleanup records are kept |
 | `setup` | The Hermes `terminal.client_env_passthrough` merge fails | `failed to install hermes terminal.client_env_passthrough names into <config path>: <cause>` | 1 | No `asset_installs` row for `hermes` (§6.3 Hermes environment passthrough) |
+| `setup` | An extension file or its executable record cannot be installed | `failed to install extension into <target>: <error>` | 1 | No `asset_installs` row for the agent (§6.3 Asset installation) |
+| `setup` | The Hermes plugin enablement merge fails | `failed to enable hermes plugin cafleet in <config path>: <cause>` | 1 | No `asset_installs` row for `hermes` (§6.3 Hermes plugin enablement) |
+| `message listen --codex-thread` | `codex` is not on `PATH`, or no Codex ancestor process exists | §6.3 Codex forwarding | 1 | Before `ready` |
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error; fires before registration or multiplexer effects |
 | (any subject-taking command) | Missing positional subject id | The parser's native missing-required-argument error naming the positional | 2 | — |
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
@@ -1651,34 +1818,96 @@ Every member pane runs a coding-agent binary selected from the backend registry 
 
 | Role | Tier | Required backend capability |
 |---|---|---|
-| Director | Eligible | Native goal lifecycle controls, such as a goal command, and streamed background output while supervision continues, established by a CAFleet stream probe. Both capabilities are required. |
+| Director | Eligible | A goal requirement (§ Goal requirement) and a listen requirement (§ Listen requirement), evaluated independently. Both are required. |
 | Member | Eligible | A runner-compatible PTY lifecycle and an explicit detection-coverage declaration. A classified default launch mode (`auto` whenever the backend offers one) with approval-prompt coverage: the bundled profile for the evaluated native version detects every approval form the default mode renders and declares request-bound allow and deny answers for it, at every pane geometry outside its recorded layout limits. A default mode that renders no approval form meets this without request rules. |
 | Member | Bundled support | A native version the version probe parses, selecting a bundled profile that declares detection, automatic review annotations, composer plans and request-bound answers independently from native evidence. Capabilities beyond approval-prompt coverage are optional, and an undeclared one is `unknown` coverage or unsupported. |
 
 An *approval form* is a native permission request that blocks the member until someone answers it. Question, trust, update and startup dialogs are separate interaction classes outside approval-prompt coverage, whether or not they have answer plans. A *recorded layout limit* is a profile-documented rendering in which no request rule matches, such as a pane narrower than the profile's `W_min`, a wrapped or clipped operation, or a geometry that was never captured. A form rendered inside a recorded limit produces no `interaction_opened` event and is answered manually on the native surface.
 
-Streamed background output while supervision continues is established by a CAFleet stream probe on an installed native version. The candidate Director starts `cafleet message listen` through its native background-execution facility, then continues unrelated work in the same session. The facility must deliver each record the running listener emits to the session without waiting for the process to exit, at the latest at the session's next turn boundary; the host may push records into the session, or the model may read the running process's accumulated output on demand. The probe passes when broker records that another member sends at separate times during that work are each first observed in the listener's output delivered through that facility, and consumed without user input, while the same listener process is still running. A record discovered through a foreground `poll`, `wait` or `show` invalidates the run. Output that reaches the session only when the process exits, including a completion notification for a finite receive, fails the probe. Mid-turn delivery and waking an idle session are not required. Record the native mechanism, version and check date.
+Evaluate each role independently; a backend ships for the roles it meets. A verdict is `yes` only when recorded evidence establishes every Eligible-tier requirement for that role, and otherwise `no` with "not established" or the observed failure as its evidence. The Director verdict is `yes` only when both its goal and listen requirements are met; a `no` names each unmet requirement. Approval-prompt coverage of the default mode counts toward the Member verdict; the other bundled-support capabilities never change a verdict. The verdict is evaluated against the profile selected for the recorded native version. Each requirement group's evidence holds for its own recorded native version, and a newer installed version carries the verdict forward until the next re-check, which follows any change to the backend's bundled profile boundary or recorded evidence. A run of a Member-eligible backend whose version probe fails, or whose version selects no profile, is still a supported launch: it records `coverage=unknown`, ordinary generated input uses delivery fallback, and any approval form it shows is answered manually on the native surface. § Role eligibility records each backend's verdicts.
 
-Evaluate each role independently; a backend ships for the roles it meets. A verdict is `yes` only when recorded evidence establishes every Eligible-tier requirement for that role, and otherwise `no` with "not established" or the observed failure as its evidence. Approval-prompt coverage of the default mode counts toward the Member verdict; the other bundled-support capabilities never change a verdict. The verdict is evaluated against the profile selected for the recorded native version. Each requirement group's evidence holds for its own recorded native version, and a newer installed version carries the verdict forward until the next re-check, which follows any change to the backend's bundled profile boundary or recorded evidence. A run of a Member-eligible backend whose version probe fails, or whose version selects no profile, is still a supported launch: it records `coverage=unknown`, ordinary generated input uses delivery fallback, and any approval form it shows is answered manually on the native surface. § Role eligibility records each backend's verdicts.
-
-Every launch mode other than the default is an explicit `--permission-mode` choice under §6.9 Launch policy and capability registry, which records each mode's `auto`/`manual` class. A backend whose default mode renders an approval form that its bundled profile neither covers nor records as a layout limit is not Member-eligible. Preserve native guards, managed policy, explicit denies, sandbox boundaries and the host's activation, pause, completion and budget authority. A backend with unknown detector/composer coverage permits manual terminal work and delivers ordinary generated input through delivery fallback. The decision surface and native receive support are evaluated independently of Director eligibility: a Director meeting both requirements may use manual `poll` or finite `wait` when its native adapter is unavailable, and streamed background output establishes no unsolicited wake of an idle session.
+Every launch mode other than the default is an explicit `--permission-mode` choice under §6.9 Launch policy and capability registry, which records each mode's `auto`/`manual` class. A backend whose default mode renders an approval form that its bundled profile neither covers nor records as a layout limit is not Member-eligible. Preserve native guards, managed policy, explicit denies, sandbox boundaries and the host's activation, pause, completion and budget authority. A backend with unknown detector/composer coverage permits manual terminal work and delivers ordinary generated input through delivery fallback. The decision surface and native receive support are evaluated independently of Director eligibility: a Director meeting both requirements may use manual `poll` or finite `wait` when its reception mechanism is unavailable, and a tier-3 listen establishes no unsolicited wake of an idle session.
 
 The bundled backend policy catalog owns launch-mode choices and defaults, exact argv mapping, version eligibility and detection/composer profiles. The omitted native argv is specified below; an explicit native mode changes only its permission argument and preserves the remaining argv and literal assignment.
 
+##### Listen requirement
+
+A *subscribe-style* listen delivers each record that the running `cafleet message listen` emits into the session as model-visible input. The host pushes the input; the model neither polls nor reads the process. Subscribe-style delivery has these semantics:
+
+- When the session is idle, delivery starts a new turn.
+- When the session is busy, the record is delivered no later than the end of the running turn and never interrupts it. Earlier delivery between tool calls inside the turn also passes.
+- No record waits for an unrelated future turn. A record queued behind earlier undelivered records is delivered after their turns; that wait passes, because each of those turns consumes an earlier record.
+- Records keep their emission order.
+
+| Tier | Name | Definition | Standing |
+|---|---|---|---|
+| 1 | Native subscribe | The push facility is part of the backend as installed. CAFleet contributes only CLI invocations: `cafleet message listen` and its forwarding options. | Preferred |
+| 2 | Extension subscribe | Subscribe-style delivery through a CAFleet-vendored extension or plugin that `cafleet setup` installs (§6.3 Asset installation). | Accepted; ranks below tier 1 |
+| 3 | Built-in compromise | Reception built from built-in tools, where the model reads the running process's output or receives periodic batches. It must pass the stream probe below. | Degraded fallback |
+
+Tiers rank 1 > 2 >> 3, and within one delivery style native outranks extension. Tier 3 sits far below both subscribe tiers: it spends model turns on reads, delays records to read or batch points, and needs heartbeat-style wake and log reconciliation.
+
+A backend's recorded tier is the highest one its evidence establishes. Tier 3 is recorded only together with negative evidence for tiers 1 and 2 on that version:
+
+- **Tier 1 negative evidence:** the installed version's built-in tools and CLI expose no facility that pushes externally produced text into a running session as model-visible input that starts a turn when the session is idle. The check covers built-in tool docs, `--help` of the binary and its subcommands, and the native source or official documentation for that version.
+- **Tier 2 negative evidence:** the version's extension surfaces expose no way for an extension to do the same. The surfaces are plugins, hooks, extensions, MCP notifications and any client/server protocol an extension can call. The check uses the native source at that version's tag, or the official extension documentation.
+- **Recording:** each source is named with its version, plus `checked YYYY-MM-DD`.
+
+**Subscribe probe.** This probe establishes tier 1 or 2 on an installed native version. The candidate Director starts the receiver through its tier's mechanism, and another member sends broker records:
+
+1. One record while the session is idle: a new turn starts without user input and consumes it.
+2. Two records while the session runs a foreground command of at least 60 s: the command is not interrupted, and each record is delivered no later than the end of that turn, without input.
+3. Three records back to back: all are delivered, in order.
+4. The receiver ends when its owning session ends.
+
+**Stream probe.** This probe establishes tier 3 on an installed native version. The candidate Director starts `cafleet message listen` through its native background-execution facility, then continues unrelated work in the same session. The facility must deliver each record the running listener emits to the session without waiting for the process to exit, at the latest at the session's next turn boundary; the host may push records into the session, or the model may read the running process's accumulated output on demand. The probe passes when broker records that another member sends at separate times during that work are each first observed in the listener's output delivered through that facility, and consumed without user input, while the same listener process is still running. Output that reaches the session only when the process exits, including a completion notification for a finite receive, fails the probe. Mid-turn delivery and waking an idle session are not required.
+
+A record discovered through a foreground `poll`, `wait` or `show` invalidates a subscribe or stream probe run. Each run records the mechanism, native version and check date.
+
+##### Goal requirement
+
+| Tier | Name | Definition |
+|---|---|---|
+| 1 | Native | Goal lifecycle controls built into the backend, such as a goal command |
+| 2 | Extension | A CAFleet-vendored extension that meets the minimum bar below |
+| — | No | Neither |
+
+Native outranks extension. **Extension-goal minimum bar.** Every item is verified live on the installed native version:
+
+- **Operations:** set, status, pause, resume, clear and complete.
+- **Persistence:** the goal survives context compaction and a process restart on the same session.
+- **Continuation:** turns continue automatically until the goal completes, is paused or is cleared.
+
 #### Role eligibility
 
-| Backend | Role | Eligible | Evidence |
-|---|---|---|---|
-| `claude` | Director | `yes` | Goal lifecycle: [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. Streamed background output: Monitor stream probes, 2.1.301, checked 2026-10-25; fleet-lifetime Monitor lease (`--timeout 1770` / `timeout_ms 1800000`, CLI `timeout` closure before Monitor expiry, single-receiver re-arm), 2.1.309, checked 2026-11-05. |
-| `claude` | Member | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the Claude profile from `2.1.302`. |
-| `codex` | Director | `yes` | Goal lifecycle: [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Streamed background output: retained `exec_command` session stream probes, 0.162.1, checked 2026-10-25. |
-| `codex` | Member | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the Codex profile from `0.163.0`. |
-| `opencode` | Director | `no` | Goal lifecycle controls: not established for 2.1.4, with no goal evidence recorded, checked 2026-10-31. Streamed background output: observed failure, CAFleet stream probes of `shell` `background=true` (records only at process exit), 2.1.4, checked 2026-11-03. |
-| `opencode` | Member | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: the OpenCode profile from `2.1.4`. |
-| `hermes` | Director | `yes` | Goal lifecycle: native `/goal` lifecycle controls in installed source and in-session `/help goal`, 2026.9.24, checked 2026-11-02. Streamed background output and idle wake: CAFleet stream probe with `terminal` `background=true` read through `process_manage` `action=log`, 2026.9.24, checked 2026-11-03; persistent `listen` receiver with `terminal` `heartbeat=60`, clean first-observation and extended live runs, 2026.9.24, checked 2026-11-04; fleet-lifetime runs (creation-only receiver kept through 60 idle minutes, rolling-log overflow reconciliation, unexpected-exit replacement, failed-deletion retention, finite-lease renewal), 2026.9.24, checked 2026-11-05. |
-| `hermes` | Member | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |
+| Backend | Role | Requirement | Source | Delivery | Eligible | Evidence |
+|---|---|---|---|---|---|---|
+| `claude` | Director | `goal` | `native` | — | `yes` | [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. |
+| `claude` | Director | `listen` | `native` | `subscribe` | `yes` | One Monitor task running `cafleet message listen`: subscribe probe (idle wake, records during a 70 s foreground command delivered after it, burst of 3 in order), 2.1.312, checked 2026-11-06. After `member delete` the listener had exited with its session; the exit latency was not measured. |
+| `claude` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
+| `claude` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the Claude profile from `2.1.302`. |
+| `codex` | Director | `goal` | `native` | — | `yes` | [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Native `/goal` stayed active through the 200-record burst, idle and forced-failure steps, 0.165.0, checked 2026-11-06. |
+| `codex` | Director | `listen` | `native` | `subscribe` | `yes` | `cafleet message listen --codex-thread` forwarding through `codex queue` on the escalated path: subscribe probe, a `message_ref` for a 70,000-byte body, 200 burst records in order past the 100-submission cap, 10 idle minutes and a forced-failure closed notice, 0.165.0, checked 2026-11-06. The sandboxed path is unverified, and `member delete` left no listener. |
+| `codex` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
+| `codex` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the Codex profile from `0.163.0`. |
+| `opencode` | Director | `goal` | `extension` | — | `yes` | `cafleet` plugin goal extension under `opencode mini --standalone`: set, status, pause, resume, clear, complete, compaction, restart on the same session and the no-progress stop, 2.2.0 (minimum), checked 2026-11-06. A continuation in flight at pause was not separately observed. |
+| `opencode` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with queued `session.synthetic` delivery under `opencode mini --standalone`: subscribe probe (idle wake, 70 s busy command, burst of 10 in order) and client exit ending the child, 2.2.0 (minimum), checked 2026-11-06. |
+| `opencode` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
+| `opencode` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet` preset, which resolves every shell check to allow or deny: live runner acceptance on herdr only (`coverage=tested`, no native form, native denial itself not exercised), 2.1.4, checked 2026-10-29. Bundled support: the OpenCode profile from `2.1.4`. |
+| `hermes` | Director | `goal` | `native` | — | `yes` | Native `/goal` set, status, pause, resume and clear on the TUI client, 2026.9.24, checked 2026-11-06. |
+| `hermes` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with ordered gateway injection on the TUI client: subscribe probe (idle wake, 70 s busy command, bursts of 3 and 10 in order) and `/exit` ending the child, 2026.9.24, checked 2026-11-06. |
+| `hermes` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
+| `hermes` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |
 
-To change a Director verdict, a maintainer re-runs the Director requirements in § Role requirements, including the CAFleet stream probe, for an installed native version; records the version, source and date in this table and in the installed CAFleet skill's backend section; then adds a native reception recipe or states the manual `poll` / finite `wait` reception limit.
+| Column | Values |
+|---|---|
+| Requirement | `goal`, `listen` or `verdict` for Director rows; — for the Member row |
+| Source | `native` or `extension` for `goal` and `listen` rows; — for `verdict` and Member rows |
+| Delivery | `subscribe` or `compromise` for `listen` rows; — otherwise |
+| Eligible | `yes` or `no`. The `verdict` row is `yes` only when the `goal` and `listen` rows are both `yes`. |
+| Evidence | Requirement rows: mechanism, native version and `checked YYYY-MM-DD`, in at most two sentences. A `verdict` row: `goal and listen rows` for `yes`, or the unmet requirement names for `no`. |
+
+To change a Director verdict, a maintainer re-runs the Director requirements in § Role requirements for an installed native version: the subscribe probe for a tier-1 or tier-2 listen, or the stream probe together with tier-1 and tier-2 negative evidence for a tier-3 listen, and native goal evidence or the extension-goal minimum bar. The maintainer records each requirement row's source, delivery, version and date in this table and in the installed CAFleet skill's backend section, then adds a Director reception recipe or states the manual `poll` / finite `wait` reception limit.
 
 #### Interface
 
@@ -2029,6 +2258,8 @@ resolved mode. The remedy names the selector as the targeted repair; plain
 
 Each preset's `shell` ruleset places its `"*"` base before an explicit allowlist translated from the operator's Claude Code `permissions.allow` set (`cafleet *`, its declared Git commands, file-inspection utilities and the project's cargo-backed mise tasks), with `"cafleet *": "allow"` as the map's last entry. Opencode selects the last matching rule, so the broad allow lets members run broker commands; the Director-only commands refuse inside the member through the runner guard (§6.3 Director-only command guard). Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
 
+Both presets set `"cafleet": "deny"` in their permission map as defense in depth for the CAFleet plugin tools (§ Director extensions): the plugin refuses a member first on `CAFLEET_MEMBER_ID`, and the deny covers a member server whose environment lacks it.
+
 The `cafleet-ask` preset differs from the `cafleet` preset only as § Preset file
 format states; the shell base sets their behavior:
 
@@ -2154,13 +2385,63 @@ Native shell probes displayed command/stdout/stderr followed by a model turn; th
 
 CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root Director's pane, which receives no automatic pane input, or a detected one in a runner-managed member's pane, where input queues while the interaction is open (§6.9 Delivery method and interaction priority). Escape-first input can cancel an open prompt the runner did not detect: a runner-managed member's delivery fallback for previews, `member prompt` and `member exec`. Claude Code then reports a user rejection before the input arrives; the member treats a rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause as delivery-caused and re-asks the question or re-issues the call. A profile-delivered preview ends with the resume clause only and sends no Escape, so a rejection before it stands. A rejection followed by Director prompt or native-command input follows that input, and the Director checks the pane for an open prompt before such dispatch.
 
-**codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting. Retain one native execution session handle for Director inbox reception and explicitly read it while the fleet exists, independently of whether a host goal exists. The installed CAFleet skill's [Codex native recipe](https://github.com/himkt/cafleet/blob/main/skills/cafleet/reference/coding-agents.md#codex-native-director-reception) owns tool calls, bounded reads, leases and recovery. Preserve supplied goal activation, pause, completion and budget authority. A background process alone supplies no unsolicited per-line wake after a model turn ends; fully idle Codex reconciles its inbox on the next user/native activation.
+**codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting. A Director starts `cafleet message listen <director-id> --codex-thread "$CODEX_THREAD_ID"` once through native `exec_command` (§6.3 Codex forwarding); Codex injects `CODEX_THREAD_ID` into every exec shell. Each forwarded record arrives as a queued user turn: it starts a turn on an idle session, waits for the end of a running turn otherwise, and interleaves with native goal continuation turns at turn boundaries. The Director retains the exec session handle without reading it again until recovery. Where the sandbox cannot start the forwarder, for example when bwrap cannot create namespaces, it runs on the escalated path under the host's approval rules. The installed CAFleet skill's [Codex native recipe](https://github.com/himkt/cafleet/blob/main/skills/cafleet/reference/coding-agents.md#codex-native-director-reception) owns the tool call, consumption and recovery. Preserve supplied goal activation, pause, completion and budget authority.
 
 A native shell probe displayed the actual command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the TUI's effective boundary and protocol path were not established. Treat native input as a Director-authorized action rather than assume a second member-tool permission check.
 
-**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and routed native shell commands, and owns explicit pane input dispatch. Leading-`!` input runs a native shell command in `mini`. The native path's effective permission boundary and any second member-tool permission check remain unestablished; preserve the preset's member-tool permissions and the Director's command authorization. The opencode Director verdict is `no` (§ Role eligibility).
+**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and routed native shell commands, and owns explicit pane input dispatch. Leading-`!` input runs a native shell command in `mini`. The native path's effective permission boundary and any second member-tool permission check remain unestablished; preserve the preset's member-tool permissions and the Director's command authorization. An OpenCode Director runs OpenCode 2.2.0 or later and launches with `opencode mini --standalone` from the project directory with the default agent, so plugins load in its private server with the launcher's environment; the shared background service passes no client environment to plugins and is not a supported Director launch. The `cafleet` plugin supplies reception and the goal extension (§ Director extensions). In OpenCode 2.2.0 every agent starts with a base policy whose first rule allows every action, so the plugin's `cafleet` permission action resolves to allow on a default Director; a configuration whose broad `ask` or `deny` rule overrides that base allow restores it with `{ "action": "cafleet", "resource": "*", "effect": "allow" }`. The plugin refuses a member first on `CAFLEET_MEMBER_ID`, and both member presets deny `cafleet` for a member server whose environment lacks it.
 
-**hermes**: Hermes 2026.9.24 ships a user-operated `/goal` command with `status`, `show`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate` subcommands, a `terminal` tool whose `background=true` with `notify=true` injects one completion notification into the conversation when the process exits and whose `heartbeat=N` (minimum 60) also injects, every N seconds while the process runs, a notification carrying its output since the previous one, skipping ticks with no new output, and `process_manage`, which polls, reads the log of, waits on or kills a background process by its `session_id`. In the classic REPL, leading-`!` input runs a native shell command locally; the Director authorizes each routed command under its host rules. The hermes Director verdict is `yes` for 2026.9.24 (§ Role eligibility). A Director keeps one persistent background `listen` receiver with `heartbeat=60`, whose heartbeat notifications wake an idle session, and reads it through `process_manage` between work steps; heartbeats are a wake signal, so broker reads remain the completeness check. The receiver follows the fleet's lifetime: creation-only requests, completed work, idle periods and user handoffs keep it, a finite lease is renewed while the fleet exists, and only fleet deletion ends it normally; `process_manage` kill serves receiver replacement during recovery and ends a receiver still running after `fleet_deleted`. CAFleet makes no goal lifecycle calls and preserves activation, pause, completion and gate/wait authority.
+**hermes**: Hermes 2026.9.24 ships a user-operated `/goal` command with `status`, `show`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate` subcommands. A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), because turns injected through the gateway run without rendering in the classic CLI; members keep `--cli`. The Director receives inbox records through the `cafleet` plugin's `cafleet_listen` tool (§ Director extensions), which runs `cafleet message listen` inside the per-home gateway and commits each record, in emission order, into the calling session's durable input queue: each record becomes its own turn, and a record injected during a busy turn runs after that turn ends without interrupting it. Native `/goal` set, status, pause, resume and clear work in the TUI client, and continuation turns already queued before `/goal clear` still run after it. In the classic REPL and the TUI client, leading-`!` input runs a native shell command locally; the Director authorizes each routed command under its host rules. CAFleet makes no goal lifecycle calls and preserves activation, pause, completion and gate/wait authority.
+
+#### Director extensions
+
+The extensions that §6.3 Asset installation installs supply Director reception for `hermes` and `opencode`, and the goal extension for `opencode`. Each runs only the `cafleet` executable named by its executable record, never a path a tool argument supplies, and runs `<recorded cafleet> message listen <director_id>` without `--timeout`. Every replacement belongs to the Director's receiver recovery; the plugins replace no receiver automatically.
+
+| Surface | Hermes plugin | OpenCode plugin |
+|---|---|---|
+| Receiver tool | `cafleet_listen(director_id: integer)` in toolset `cafleet` | `cafleet_listen(director_id: integer)` |
+| Session scope | One receiver per calling session key | One receiver per calling `sessionID` |
+| Success result | `{"ok": true, "pid": <pid>, "session_key": <key>}`, plus `"existing": true` for a live receiver | `{ ok, pid, sessionID }`, plus `existing: true` for a live receiver |
+| Delivery per stdout line | Ordered injection of `[cafleet listen record] <line>` into session `<key>`'s durable input queue, each committed before the next line | `session.synthetic({ sessionID, text: "[cafleet listen record] <line>", delivery: "queue" })` |
+| Member refusal | A non-empty `CAFLEET_MEMBER_ID` in the session's `tool_env()` returns `{"ok": false, "error": "cafleet_listen runs only in a Director session"}` | A set server `CAFLEET_MEMBER_ID` refuses every tool and `/cafleet-goal` with `cafleet tools run only in a Director session` |
+| Executable record error | `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent hermes'"}` | `ok: false` with the record path and `run 'cafleet setup --coding-agent opencode'` |
+| Child environment | The gateway's environment with every `CAFLEET_*` name removed, plus `CAFLEET_DATABASE_URL` only when the session's `tool_env()` holds a non-empty value | The server's environment |
+| Receiver end | Session finalize, plugin unload, 30 s with no client subscriber, a raising or overdue injection, or 600 s of refusals for one record kills the child | Plugin cleanup kills every child when the server ends |
+
+A rejected `synthetic` call kills the child. A Hermes injection that raises or exceeds its 10 s deadline, or one record refused for 600 s, kills the child, logs the cause and attempts the closed notice below once through ordered injection. A child that exits unexpectedly, without a `closed` record and without the plugin stopping it, queues `[cafleet listen closed] exit <code>: <last stderr line>` into the owning session. A Hermes plugin unload for a session that is still attached injects `[cafleet listen closed] the plugin unloaded: exit <code>: <last stderr line>` once through ordered injection after the child exits; a draining gateway refuses it and it is not retried. A child the plugin stops through session finalize, client detach, plugin cleanup or a Hermes unload for a detached session queues no closed notice, and each receiver attempts at most one. The OpenCode plugin decides the notice on the child's `close` event, after its stdio drains, so a final `closed` record is read first; a child `error` event, such as an asynchronous spawn failure, removes the receiver and queues the notice. An OpenCode child that exits by `SIGTERM` is an intentional stop by plugin cleanup or host shutdown, which can signal the child before cleanup runs, and queues no closed notice; a non-zero exit code or any other signal queues the notice. A `closed` record is delivered as a record and ends the receiver.
+
+**Hermes plugin.** The plugin declares tool `cafleet_listen` and hook `on_session_finalize`. It depends on four private Hermes core seams outside the plugin API, which the tool resolves on every call:
+
+| Seam | Use |
+|---|---|
+| `hermes_cli.plugin_session.session_key()` | Calling session key |
+| `agent.session_client_env.bound_client_env()` and `tool_env()` | Calling session's client environment as its tool subprocesses receive it (`CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID`) |
+| `gateway.session_authorities.authority_for_home(...)` → `authority.sessions[...].subscribers` | Client attachment |
+| The published gateway runner (`ctx._manager._gateway_message_injector[0]`), its `_gateway_loop` and `_dispatch_plugin_message_injection(session_key=, content=, plugin_id=, plugin_home=)` | Ordered injection |
+
+`hermes plugins validate` flags the imports of the first three seams as private core imports. A failed import, lookup or attachment read returns `{"ok": false, "error": "<seam>: <exception>"}` and starts no receiver. A session without a bound client environment (`bound_client_env()` is `None`, as for messaging and cron sessions) returns `{"ok": false, "error": "cafleet_listen cannot read the calling session's client environment"}`, because nothing proves it is not a member. A bound client that is not attached locally, whose `tool_env()` is empty because Hermes drops every passthrough name for it, returns `{"ok": false, "error": "cafleet_listen cannot verify a client that is not attached locally"}` for the same reason. Member sessions export `CAFLEET_MEMBER_ID` through `terminal.client_env_passthrough`, which `tool_env()` carries. An empty session key returns `{"ok": false, "error": "cafleet_listen must be called from a session turn"}`. Ordered injection bypasses the consent check of `ctx.inject_message`, so before spawning the child the tool requires `ctx._gateway_injection_allowed()`, which holds when `plugins.entries.cafleet.allow_gateway_injection` is `true` (§6.3 Hermes plugin enablement); otherwise it returns `{"ok": false, "error": "plugins.entries.cafleet.allow_gateway_injection is not true; run 'cafleet setup --coding-agent hermes'"}`. The child starts from the gateway's environment with every `CAFLEET_*` name removed, and receives `CAFLEET_DATABASE_URL` only from a non-empty value in the session's `tool_env()`, so an unset value selects the default database exactly as in the Director's shell. The plugin decodes the child's output as UTF-8, replacing invalid bytes, and treats a stdout read failure as the end of the child's output. A watchdog checks every 5 s that the session has at least one subscriber; a read error kills the child. `on_session_finalize` resolves the finalized session's route through the session authority and stops the receiver whose session key equals it, so a session id rotated by context compression still matches. The plugin's unload callback stops every receiver and confirms its exit, so a plugin re-discovery leaves no untracked receiver; a re-discovery leaves the gateway and its sessions running, so the unload closed notice outside the callback, after the receiver's delivery ends, tells a still-attached Director to re-arm reception.
+
+**Ordered injection.** `ctx.inject_message` returns `True` once it schedules its dispatch coroutine on the gateway loop, before the record is committed, so consecutive calls can commit out of order. The plugin instead submits each record's `_dispatch_plugin_message_injection(...)` coroutine to the runner's `_gateway_loop` with `asyncio.run_coroutine_threadsafe` and waits up to 10 s for its result before it reads the next line. A `False` result is a refused injection and is treated as transient, for example the session authority's 32-row admission queue cap, a draining gateway or a briefly detached client: the plugin keeps the record, waits 1 s and retries it, and later records wait behind it. The retry checks no attachment, so a detached session keeps the 30 s detach grace and the watchdog alone ends its receiver.
+
+**OpenCode plugin.** One V2 plugin file defines `Plugin.define({ id: "cafleet", setup })`. Each tool first refuses a member on `CAFLEET_MEMBER_ID`, then calls `ctx.permission.assert({ sessionID, agent, source, action: "cafleet", resources: [<tool name>] })` before any work; both member presets set `"cafleet": "deny"`, which covers a member server whose environment lacks `CAFLEET_MEMBER_ID`. `cafleet_listen` returns `ok: false` when the spawned child has no pid. Its goal extension stores `{objective, status, generation, continuations, idle_streak}` under storage key `goal/<sessionID>` and mirrors it in the session instruction entry `cafleet-goal`, which first appears in 2.2.0:
+
+| Operation | Surface | Effect |
+|---|---|---|
+| set | `/cafleet-goal <objective>` | Store status `active`, the next `generation`, `continuations: 0` and `idle_streak: 0`, put the instruction entry, queue the first continuation |
+| status | `/cafleet-goal status`; tool `cafleet_goal_status` | The command queues a synthetic `[cafleet goal] status: <json>` turn; the tool returns the stored JSON |
+| pause | `/cafleet-goal pause` | Status `paused`, bump `generation`, update the entry |
+| resume | `/cafleet-goal resume` | Status `active`, bump `generation`, reset `idle_streak` and `continuations`, queue a continuation |
+| clear | `/cafleet-goal clear` | Bump `generation`, remove the `goal/<sessionID>` key and the entry |
+| complete | tool `cafleet_goal_complete(summary)` | Status `complete`, bump `generation`, update the entry |
+| progress | tool `cafleet_goal_progress(note)` | Reset `idle_streak` |
+
+- **Generations.** Generations increase monotonically per session. Every bump, and the generation set assigns, stores the new value under storage key `goal-generation/<sessionID>`, which clear keeps; the next generation is that value plus one, so a continuation queued before a clear never matches a later goal.
+- **Continuation.** On `session.execution.succeeded` for a session with an `active` goal, the plugin queues a synthetic item with `delivery: "queue"`, metadata `{ cafleetGoalGeneration: <generation> }` and text `[cafleet goal] Continue working toward the active goal: <objective>. Call cafleet_goal_progress after each step and cafleet_goal_complete when it is achieved.` A `session.execution.interrupted` with `reason: "user"` pauses the goal.
+- **Serialization.** Every goal operation for a session, from the event handler, the command and the tools, runs through one per-session promise chain and re-reads the stored goal inside it before writing, so a concurrent pause or clear is never overwritten.
+- **Stale continuations.** The `context` session hook removes each `[cafleet goal]` continuation after the last assistant message, the undelivered tail, whose generation differs from the stored one or whose goal is not `active`, so a continuation queued just before `pause`, `clear` or `complete` never reaches the model; earlier history stays intact.
+- **Event failures.** A failure while handling one event is logged and leaves the event loop running. Any such failure while the session's goal is `active`, a transient storage or `synthetic` error included, pauses the goal and queues `[cafleet goal] paused: the goal cannot continue (<cause>); the operator resumes it with /cafleet-goal resume` with `resume: false`.
+- **No-progress stop.** A continuation turn that ends without a `cafleet_goal_progress` or `cafleet_goal_complete` call increments `idle_streak`. At 3 the goal pauses and the plugin queues `[cafleet goal] paused: no progress in 3 consecutive continuation turns; the operator resumes it with /cafleet-goal resume` with `resume: false`. The 50-continuation cap also pauses the goal and queues `[cafleet goal] paused: reached 50 continuations; the operator resumes it with /cafleet-goal resume` with `resume: false`; resume starts a fresh budget of 50.
+- **Persistence.** The instruction entry carries the goal across compaction. A stored `active` goal for a `sessionID` is restored on the server's first event, tool call or command for that `sessionID`, so after a restart the Director's re-arming `cafleet_listen` turn restores it and the next `session.execution.succeeded` queues the continuation. Storage is shared by every server on the same OpenCode data directory, while restoration stays scoped to the sessions a server serves; setup scans no storage, so a member server or any other server sharing the config directory never restores the Director's goal.
 
 ### 6.8 Configuration
 
