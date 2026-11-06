@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 45/54 tasks complete
+**Progress**: 46/57 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -56,7 +56,8 @@ The probes produced findings the design must handle:
 
 | Finding | Observed | Design response |
 |---|---|---|
-| Hermes premise correction | `plugins_injection.py` routes to `_pending_input`/`_interrupt_queue` only when `PluginManager._cli_ref` is set, and 2026.9.24 never sets it. Plugins run in the per-home gateway, where `inject_message(session_key=…)` commits into the session's durable FIFO (`gateway/run_plugin_injection.py:233-245`, `:363-392`). | No plugin-side busy buffer and no `pre_llm_call` flush (§4.1) |
+| Hermes premise correction | `plugins_injection.py` routes to `_pending_input`/`_interrupt_queue` only when `PluginManager._cli_ref` is set, and 2026.9.24 never sets it. Plugins run in the per-home gateway, where a keyed injection is admitted into the session's durable FIFO (`gateway/run_plugin_injection.py:233-245`, `:363-392`). | No plugin-side busy buffer and no `pre_llm_call` flush (§4.1) |
+| Hermes injection order (A-H, 2026-11-06) | `inject_message` returns before its dispatch coroutine commits, so back-to-back records reordered (994→995→993, 996→998→997). | Ordered injection: await each dispatch before the next record (§4.1) |
 | Hermes key-less injection | `gateway/plugin_keyless_inject.py:92-98` refuses when several classic CLI sessions share a home, and the Director and Hermes members do. | The tool captures the calling session key and injects with `session_key=` (§4.1) |
 | Hermes enablement | `hermes plugins enable` fails on the Homebrew install (its PM venv sync needs `site-packages/uv.lock`). Only `plugins.enabled`/`plugins.disabled` gate loading (`plugins_discovery.py:112-131`, `:257-302`). | Setup merges the keys through `hermes config set` (§2.3) |
 | Hermes classic CLI visibility | Gateway turns injected into a classic CLI session run without rendering in that pane. | A Hermes Director runs the TUI client; members keep `--cli` (§4.3) |
@@ -376,15 +377,18 @@ provides_hooks:
   - on_session_finalize
 ```
 
-**Private seams.** The plugin depends on three Hermes seams, each of which `hermes plugins validate` flags as a private core import. They are the only ways in 2026.9.24 to identify the calling session, read its environment and observe its attachment:
+**Private seams.** The plugin depends on four Hermes seams, each a private core interface outside the plugin API. They are the only ways in 2026.9.24 to identify the calling session, read its environment, observe its attachment and inject records in order:
 
 | Seam | Use |
 |---|---|
 | `hermes_cli.plugin_session.session_key()` | calling session key |
 | `gateway.session_context.get_session_env(name, default)` | session environment (`CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID`) |
 | `gateway.session_authorities.authority_for_home(...)` → `authority.sessions[...].subscribers` | client attachment (§4.2) |
+| the published gateway runner (`ctx._manager._gateway_message_injector[0]`), its `_gateway_loop` and `_dispatch_plugin_message_injection(session_key=, content=, plugin_id=, plugin_home=)` | ordered injection (below) |
 
-The tool imports all three on every call. If an import fails, or the attachment read raises, the tool returns `{"ok": false, "error": "<seam>: <exception>"}` and starts no receiver, so no receiver ever runs without its lifecycle signals.
+The tool resolves all four on every call. If an import or lookup fails, or the attachment read raises, the tool returns `{"ok": false, "error": "<seam>: <exception>"}` and starts no receiver, so no receiver ever runs without its lifecycle signals.
+
+**Ordered injection.** `ctx.inject_message` only schedules its dispatch coroutine on the gateway loop and returns `True` before the record is committed (`gateway/run_plugin_injection.py:76-110`). Consecutive calls therefore run concurrent coroutines whose awaited session lookups can reorder them before the session authority's ordered write (`gateway/session_automation.py:465-487`); A-H observed 994→995→993 and 996→998→997 for three back-to-back records. The plugin instead submits each record's `runner._dispatch_plugin_message_injection(...)` coroutine with `asyncio.run_coroutine_threadsafe(coro, runner._gateway_loop)` and waits for its result, with a 10 s deadline, before the next record. The tool checks `ctx._gateway_injection_allowed()` before spawning the child, because this path bypasses the consent check `inject_message` performs; a missing consent returns `{"ok": false, "error": "plugins.entries.cafleet.allow_gateway_injection is not true; run 'cafleet setup --coding-agent hermes'"}`.
 
 **Tool `cafleet_listen(director_id: integer)`**, in toolset `cafleet`:
 
@@ -393,7 +397,7 @@ The tool imports all three on every call. If an import fails, or the attachment 
 3. When this key already owns a live receiver, return `{"ok": true, "pid": <pid>, "session_key": <key>, "existing": true}`.
 4. Read the executable record (`Path(__file__).with_name("executable")`). If it is missing or is not an executable file, return `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent hermes'"}`.
 5. Spawn `<recorded cafleet> message listen <director_id>` inside the gateway. The child gets the gateway's environment, plus `CAFLEET_DATABASE_URL` from the session environment when that value is non-empty. Return `{"ok": true, "pid": <pid>, "session_key": <key>}`.
-6. A reader thread injects each stdout line with `ctx.inject_message("[cafleet listen record] <line>", session_key=<key>)`.
+6. A reader thread injects each stdout line as `[cafleet listen record] <line>` into the session `<key>` through ordered injection, one record at a time.
 
 The listener runs without `--timeout`; the plugin performs no automatic replacement.
 
@@ -401,7 +405,8 @@ The listener runs without `--timeout`; the plugin performs no automatic replacem
 
 | Event | Plugin action |
 |---|---|
-| `inject_message` returns `False` | Kill the child, because the session is gone |
+| An ordered injection returns `False` | Kill the child, because the session is gone |
+| An ordered injection raises or exceeds its 10 s deadline | Kill the child and log the cause; the closed notice below is attempted once through the same path |
 | The child exits without a `closed` record | Inject `[cafleet listen closed] exit <code>: <last stderr line>` into the owning session |
 | A `closed` record | Already injected as a record; the receiver ends |
 
@@ -415,7 +420,7 @@ The child runs inside the shared Hermes gateway, which outlives client sessions.
 |---|---|
 | Session finalize | `on_session_finalize` for the owning session. CLI shutdown and the TUI session lifecycle fire it (`hermes_cli/lifecycle.py:81-97`). `on_session_end` is per-turn and unused. |
 | Client detach | A watchdog thread checks every 5 s that the gateway's live local session for the key has at least one subscriber. After 30 s with no subscriber the receiver ends; the grace covers client reconnects. A read error kills the child and logs the seam error. |
-| Injection refusal | `inject_message` returns `False` |
+| Injection refusal | An ordered injection returns `False` |
 
 `closed` `fleet_deleted` remains the normal end of reception.
 
@@ -586,6 +591,8 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 ### Step 6: Embedded extensions and presets
 
 - [x] Add `extensions/hermes/cafleet/plugin.yaml` and `__init__.py` (§4.1–4.2), and validate them with `hermes plugins validate` <!-- completed: 2026-11-05T22:42 -->
+- [ ] Update SPEC.md (the Hermes plugin delivery row and private-seam list) and any skill or docs text that names `inject_message` as the delivery to the §4.1 ordered injection <!-- completed: -->
+- [ ] `extensions/hermes/cafleet/__init__.py`: ordered injection through the gateway runner's dispatch coroutine with a 10 s deadline, the consent check before spawning, the fourth seam and its failure rows (§4.1–4.2); validate with `hermes plugins validate` on a temporary `HERMES_HOME` <!-- completed: -->
 - [x] Add `extensions/opencode/cafleet.ts` (§5) <!-- completed: 2026-11-05T22:42 -->
 - [x] Add `"cafleet": "deny"` to `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` <!-- completed: 2026-11-05T22:42 -->
 - [x] Add the `EXTENSIONS` table to `build.rs` <!-- completed: 2026-11-05T22:42 -->
@@ -635,7 +642,8 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 - [x] After every implementation member is deleted, confirm that no executing member depends on the installed assets. Then reinstall the CLI (`mise tasks --all` names the install task) and run `cafleet setup` for each backend in the real homes. <!-- completed: 2026-11-06T00:04 -->
 - [x] Verify the probe-residue table in §6 and stop if any probe change is present <!-- completed: 2026-11-06T00:03 -->
 - [x] Run A-Cl (Claude) <!-- completed: 2026-11-06T00:07 -->
-- [ ] After the full-queue fix, delete its implementation members, reinstall the CLI and rerun `cafleet setup` for each backend <!-- completed: -->
+- [x] After the full-queue fix, delete its implementation members, reinstall the CLI and rerun `cafleet setup` for each backend <!-- completed: 2026-11-06T02:14 -->
+- [ ] After the Hermes ordered-injection fix, delete its implementation members, reinstall the CLI and rerun `cafleet setup --coding-agent hermes` <!-- completed: -->
 - [ ] Run A-C (Codex) <!-- completed: -->
 - [ ] Run A-H (Hermes TUI) <!-- completed: -->
 - [ ] Run A-O (OpenCode) <!-- completed: -->
@@ -658,3 +666,4 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 | 2026-11-05 | Review round 2. Overview is now three sentences. Forwarding-mode stdout carries `ready` and the final `closed` record. A Codex closed notice is forwarded before a non-zero exit. The OpenCode Director-side `cafleet` permission now resolves through the base allow. A-C is limited to the escalated path. |
 | 2026-11-05 | Approved by the user after Reviewer approval; Status set to Approved |
 | 2026-11-06 | A-C found Codex 0.165.0's 100-submission thread-queue cap: a 200-record burst ended the forwarder at record 97. Approved by the user: a full-queue refusal is now a 1 s wait-and-retry of the same record with a 600 s limit (§3.1), the busy rule states that waiting behind earlier records passes (§1.1), and the forwarder stays tier 1 because Codex still starts every turn. |
+| 2026-11-06 | A-H found that Hermes `inject_message` returns before its dispatch commits, so three back-to-back records reordered twice. Approved by the user: the plugin awaits each record's gateway dispatch before the next (ordered injection, §4.1), adding a fourth private seam and a consent check; Hermes stays tier 2. |
