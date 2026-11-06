@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
-**Status**: In Progress
-**Progress**: 62/68 tasks complete
+**Status**: Complete
+**Progress**: 68/68 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -22,7 +22,7 @@ Turn the Director requirements in SPEC.md §6.7 into one general acceptance crit
 - [x] The CAFleet plugin tools refuse to run in member sessions, and the OpenCode member presets deny them.
 - [x] Live acceptance runs of the shipped mechanisms pass on the installed versions, and their observed results are recorded as evidence. The versions are Claude 2.1.312, Codex 0.165.0, Hermes 2026.9.24 and OpenCode 2.2.0. No CAFleet listener survives its owning session in any run. Recorded limits: A-O established that pause stops further continuations but not that a continuation already queued at the pause is dropped; A-C measured the forwarder's absence within milliseconds of `member delete` returning, not its own exit latency; A-M did not re-trigger a Hermes `smart` approval form.
 - [x] Every mention of the Hermes `heartbeat=60` / `process_manage` reception recipe and the Codex `write_stdin` read loop is removed from skills, docs and the SPEC backend sections. SPEC keeps tier 3 only as a general acceptance tier.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass. Lint and the docs build pass. `mise //:test` passes every test this design adds or changes but fails 5 runner-recovery/permission timing tests in every full run; `main` (feb770d7) fails exactly the same 5, so they pre-date this change and remain open outside it.
+- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass. Lint and the docs build pass. `mise //:test` passes every test this design adds or changes but fails 5 runner-recovery/permission timing tests in every full run; `main` (feb770d7) fails exactly the same 5, so they pre-date this change and remain open outside it. The final full run (1741 passed) also failed a sixth timing test from the same untouched `permission_response_contracts` group, which passes alone.
 
 ---
 
@@ -674,13 +674,13 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 ### Step 12: Review round 2
 
 - [x] SPEC.md, docs, skills and this design doc: the Claude owner-exit observation in the claude `listen` Evidence, the codex `goal` Evidence narrowed to the observed steps, the OpenCode preset deny restated as defense in depth, the queued-turn sentence scoped to the Codex forwarder and the plugins, the stale-continuation limit stated without a run ID, the receiver-recovery rows split by fix owner, and the plugin decisions below in §4.1–4.2, §5.1–5.2 and SPEC § Director extensions <!-- completed: 2026-11-06T07:01 -->
-- [ ] `src/cli/message.rs`: on an `Exit` or `Deadline` queue failure, check the pinned session first and end with `session_exited` when it has exited; unit test with a fake `codex` that fails after the pinned session is killed <!-- completed: -->
-- [ ] `src/assets.rs`: the cause `printed no absolute file path: <stdout>` for a non-absolute `hermes config path` in setup and doctor; unit tests with a relative config path <!-- completed: -->
-- [ ] `extensions/hermes/cafleet/__init__.py`: the non-local client refusal, UTF-8 decoding with the end-of-output sentinel in `finally:`, the transient-refusal retry with its 600 s limit, the `CAFLEET_*`-stripped child environment, finalize route resolution and the unload cleanup (§4.1–4.2); validate with `hermes plugins validate` <!-- completed: -->
-- [ ] `extensions/opencode/cafleet.ts`: the child `error` handler, the closed-notice decision on `close`, the tail-only stale-continuation drop, per-event failure handling and per-session serialization of goal operations (§5.1–5.2) <!-- completed: -->
+- [x] `src/cli/message.rs`: on an `Exit` or `Deadline` queue failure, check the pinned session first and end with `session_exited` when it has exited; unit test with a fake `codex` that fails after the pinned session is killed <!-- completed: 2026-11-06T07:22 -->
+- [x] `src/assets.rs`: the cause `printed no absolute file path: <stdout>` for a non-absolute `hermes config path` in setup and doctor; unit tests with a relative config path <!-- completed: 2026-11-06T07:22 -->
+- [x] `extensions/hermes/cafleet/__init__.py`: the non-local client refusal, UTF-8 decoding with the end-of-output sentinel in `finally:`, the transient-refusal retry with its 600 s limit, the `CAFLEET_*`-stripped child environment, finalize route resolution and the unload cleanup (§4.1–4.2); validate with `hermes plugins validate` <!-- completed: 2026-11-06T07:22 -->
+- [x] `extensions/opencode/cafleet.ts`: the child `error` handler, the closed-notice decision on `close`, the tail-only stale-continuation drop, per-event failure handling and per-session serialization of goal operations (§5.1–5.2) <!-- completed: 2026-11-06T07:22 -->
 - [x] Review round 3: the Hermes refusal retry keeps the 30 s detach grace, a plugin unload for a still-attached session injects one closed notice (§4.1–4.2), the Codex `session_exited` precedence over a failed or overdue `codex queue` (§3.1) and the OpenCode event-failure pause notice (§5.2), in SPEC.md, `skills/cafleet/reference/cli.md` and `skills/cafleet/reference/coding-agents.md`; validate with `hermes plugins validate` <!-- completed: 2026-11-06T07:30 -->
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: -->
-- [ ] After the plugin fixes, delete their implementation members, reinstall the CLI, rerun `cafleet setup --coding-agent hermes` and run the A-H burst of more than 32 records during a busy turn <!-- completed: -->
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: 2026-11-06T07:28 -->
+- [x] After the plugin fixes, delete their implementation members, reinstall the CLI, rerun `cafleet setup --coding-agent hermes` and run the A-H burst of more than 32 records during a busy turn <!-- completed: 2026-11-06T07:12 -->
 
 ---
 
