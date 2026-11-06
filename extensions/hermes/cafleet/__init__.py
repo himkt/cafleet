@@ -38,9 +38,12 @@ def _session_key() -> str:
     return session_key()
 
 
-def _session_env(name: str) -> str:
-    from gateway.session_context import get_session_env
-    return get_session_env(name, "") or ""
+def _client_tool_env() -> dict[str, str] | None:
+    """The calling session's tool-subprocess environment, or None for a session without a client."""
+    from agent.session_client_env import bound_client_env, tool_env
+    if bound_client_env() is None:
+        return None
+    return tool_env()
 
 
 def _gateway_runner():
@@ -195,10 +198,12 @@ class Receiver:
 
 def _listen(args: dict, **kwargs) -> str:
     try:
-        member_id = _session_env("CAFLEET_MEMBER_ID")
+        client_env = _client_tool_env()
     except Exception as exc:
-        return _result(ok=False, error=f"gateway.session_context.get_session_env: {exc}")
-    if member_id:
+        return _result(ok=False, error=f"agent.session_client_env: {exc}")
+    if client_env is None:
+        return _result(ok=False, error="cafleet_listen cannot read the calling session's client environment")
+    if client_env.get("CAFLEET_MEMBER_ID"):
         return _result(ok=False, error="cafleet_listen runs only in a Director session")
     try:
         session_key = _session_key()
@@ -225,7 +230,7 @@ def _listen(args: dict, **kwargs) -> str:
         if not _ctx._gateway_injection_allowed():
             return _result(ok=False, error=CONSENT_ERROR)
         env = dict(os.environ)
-        database_url = _session_env("CAFLEET_DATABASE_URL")
+        database_url = client_env.get("CAFLEET_DATABASE_URL")
         if database_url:
             env["CAFLEET_DATABASE_URL"] = database_url
         proc = subprocess.Popen(
