@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 50/58 tasks complete
+**Progress**: 58/59 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -10,18 +10,18 @@ Turn the Director requirements in SPEC.md §6.7 into one general acceptance crit
 
 ## Success Criteria
 
-- [ ] SPEC.md §6.7 Role requirements states:
+- [x] SPEC.md §6.7 Role requirements states:
   - the two independent Director requirements
   - the three listen tiers in order, with the gap between tiers 2 and 3
   - the subscribe probe
   - the tier-3 negative-evidence rule
   - the goal order and the extension-goal minimum bar
-- [ ] SPEC.md § Role eligibility and every backend's Role eligibility table in `skills/cafleet/reference/coding-agents.md` record, per requirement and backend, the source (`native`/`extension`), the delivery style (`subscribe`/`compromise`) and the evidence, plus one Director verdict row.
-- [ ] `cafleet setup` installs every embedded extension of the selected agent and performs the Hermes plugin enablement itself. `cafleet doctor` verifies each installed extension and the Hermes enablement.
-- [ ] `cafleet message listen --codex-thread THREAD` forwards each record through `codex queue` and exits when its Codex session process ends.
-- [ ] The CAFleet plugin tools refuse to run in member sessions, and the OpenCode member presets deny them.
-- [ ] Live acceptance runs of the shipped mechanisms pass on the installed versions, and their observed results are recorded as evidence. The versions are Claude 2.1.309, Codex 0.165.0, Hermes 2026.9.24 and OpenCode 2.2.0. No CAFleet listener survives its owning session in any run.
-- [ ] Every mention of the Hermes `heartbeat=60` / `process_manage` reception recipe and the Codex `write_stdin` read loop is removed from skills, docs and the SPEC backend sections. SPEC keeps tier 3 only as a general acceptance tier.
+- [x] SPEC.md § Role eligibility and every backend's Role eligibility table in `skills/cafleet/reference/coding-agents.md` record, per requirement and backend, the source (`native`/`extension`), the delivery style (`subscribe`/`compromise`) and the evidence, plus one Director verdict row.
+- [x] `cafleet setup` installs every embedded extension of the selected agent and performs the Hermes plugin enablement itself. `cafleet doctor` verifies each installed extension and the Hermes enablement.
+- [x] `cafleet message listen --codex-thread THREAD` forwards each record through `codex queue` and exits when its Codex session process ends.
+- [x] The CAFleet plugin tools refuse to run in member sessions, and the OpenCode member presets deny them.
+- [x] Live acceptance runs of the shipped mechanisms pass on the installed versions, and their observed results are recorded as evidence. The versions are Claude 2.1.309, Codex 0.165.0, Hermes 2026.9.24 and OpenCode 2.2.0. No CAFleet listener survives its owning session in any run.
+- [x] Every mention of the Hermes `heartbeat=60` / `process_manage` reception recipe and the Codex `write_stdin` read loop is removed from skills, docs and the SPEC backend sections. SPEC keeps tier 3 only as a general acceptance tier.
 - [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
 
 ---
@@ -596,6 +596,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 - [x] `extensions/hermes/cafleet/__init__.py`: ordered injection through the gateway runner's dispatch coroutine with a 10 s deadline, the consent check before spawning, the fourth seam and its failure rows (§4.1–4.2); validate with `hermes plugins validate` on a temporary `HERMES_HOME` <!-- completed: 2026-11-06T04:15 -->
 - [x] `extensions/hermes/cafleet/__init__.py` and SPEC.md: read `CAFLEET_MEMBER_ID` and `CAFLEET_DATABASE_URL` through `agent.session_client_env` (`bound_client_env()`, `tool_env()`), refusing an unbound session (§4.1) <!-- completed: 2026-11-06T04:34 -->
 - [x] Add `extensions/opencode/cafleet.ts` (§5) <!-- completed: 2026-11-05T22:42 -->
+- [x] `extensions/opencode/cafleet.ts` and SPEC.md: queue no `[cafleet listen closed]` notice for a receiver the plugin stops or that exits by `SIGTERM` (plugin cleanup or host shutdown), which A-O saw delivered on the next launch (§5.1) <!-- completed: 2026-11-06T05:16 -->
 - [x] Add `"cafleet": "deny"` to `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` <!-- completed: 2026-11-05T22:42 -->
 - [x] Add the `EXTENSIONS` table to `build.rs` <!-- completed: 2026-11-05T22:42 -->
 
@@ -635,7 +636,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 
 ### Step 9: Validation
 
-- [ ] `mise //:test` <!-- completed: -->
+- [x] `mise //:test` <!-- completed: 2026-11-06T05:23 -->
 - [x] `mise //:lint` <!-- completed: 2026-11-05T23:19 -->
 - [x] Run A-S with the built binary against temporary homes and database (§6 Isolation) <!-- completed: 2026-11-05T23:19 -->
 
@@ -645,16 +646,16 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 - [x] Verify the probe-residue table in §6 and stop if any probe change is present <!-- completed: 2026-11-06T00:03 -->
 - [x] Run A-Cl (Claude) <!-- completed: 2026-11-06T00:07 -->
 - [x] After the full-queue fix, delete its implementation members, reinstall the CLI and rerun `cafleet setup` for each backend <!-- completed: 2026-11-06T02:14 -->
-- [ ] After the Hermes ordered-injection fix, delete its implementation members, reinstall the CLI and rerun `cafleet setup --coding-agent hermes` <!-- completed: -->
-- [ ] Run A-C (Codex) <!-- completed: -->
-- [ ] Run A-H (Hermes TUI) <!-- completed: -->
-- [ ] Run A-O (OpenCode) <!-- completed: -->
-- [ ] Run A-M (Member re-check for OpenCode and Hermes) <!-- completed: -->
+- [x] After the Hermes ordered-injection fix, delete its implementation members, reinstall the CLI and rerun `cafleet setup --coding-agent hermes` <!-- completed: 2026-11-06T04:35 -->
+- [x] Run A-C (Codex) <!-- completed: 2026-11-06T03:21 -->
+- [x] Run A-H (Hermes TUI) <!-- completed: 2026-11-06T04:37 -->
+- [x] Run A-O (OpenCode) <!-- completed: 2026-11-06T05:22 -->
+- [x] Run A-M (Member re-check for OpenCode and Hermes) <!-- completed: 2026-11-06T05:09 -->
 - [x] Rewrite the SPEC § Role eligibility rows and the coding-agents.md rows from the observed results, recording `no` with the observed failure for any failed run. Update the dependent prose: host-evidence paragraphs, Note rows and docs verdict mentions. <!-- completed: 2026-11-06T05:19 -->
 
 ### Step 11: Final consistency
 
-- [ ] Search SPEC, docs, skills and rules for the remaining `heartbeat`, `process_manage` and `write_stdin` reception mentions and for the old Director wording ("streamed background output"). Each surviving mention must describe the current state. <!-- completed: -->
+- [x] Search SPEC, docs, skills and rules for the remaining `heartbeat`, `process_manage` and `write_stdin` reception mentions and for the old Director wording ("streamed background output"). Each surviving mention must describe the current state. <!-- completed: 2026-11-06T05:23 -->
 - [ ] Commit `design-docs/0000217-extension-backed-director-requirements/design-doc.md` with the implementation <!-- completed: -->
 
 ---
