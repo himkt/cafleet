@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 39/50 tasks complete
+**Progress**: 42/54 tasks complete
 **Last Updated**: 2026-11-05
 
 ## Overview
@@ -64,6 +64,7 @@ The probes produced findings the design must handle:
 | Codex sandbox | On this host bwrap cannot create namespaces, so the bridge and its `codex queue` children needed the escalated path (automatic review approved it). | The Codex recipe states the escalated path (§3.3) |
 | OpenCode pause race | A continuation queued 34 ms before `pause` still ran once. | Generation-tagged continuations, dropped by a `context` hook (§5.2) |
 | OpenCode no-progress loop | After restart, the goal's mandated command failed every turn, and continuations ran without progress. | No-progress stop (§5.2) |
+| Codex queue cap (A-C, 2026-11-06) | `codex queue` refuses a submission while the thread queue holds 100 (`queue cannot contain more than 100 submissions`); a 200-record burst ended the forwarder at record 97. | Full-queue wait-and-retry with a 600 s limit (§3.1) |
 
 ---
 
@@ -79,7 +80,7 @@ A *subscribe-style* listen delivers each record that the running `cafleet messag
 
 - When the session is idle, delivery starts a new turn.
 - When the session is busy, the record is delivered no later than the end of the running turn and never interrupts it. Earlier delivery between tool calls inside the turn also passes.
-- No record waits for an unrelated future turn.
+- No record waits for an unrelated future turn. A record queued behind earlier undelivered records is delivered after their turns; that wait passes, because each of those turns consumes an earlier record.
 - Records keep their emission order.
 
 | Tier | Name | Definition | Standing |
@@ -309,13 +310,16 @@ With `--codex-thread THREAD`, the listener keeps the record, ordering, replay, l
   [cafleet listen record] {"event":"message_ref","message_id":<id>,"from_member_id":<id>,"bytes":<n>} — read it with: cafleet message show <id> --json
   ```
 - **One at a time.** Each `codex queue` runs to exit before the next record is forwarded, with a 10 s deadline.
+- **Full queue.** Codex 0.165.0 refuses a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions (code -32600)`). A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a *full-queue refusal*, not a failure: the listener keeps the same record, waits 1 s, checks the pinned session (§3.2) and retries it. Later records wait behind it, so emission order holds and no record is dropped. The pinned session's exit during the wait ends the listener with `session_exited`.
+- **Full-queue limit.** When one record meets full-queue refusals for 600 s without being accepted, the listener fails (table below).
 - **Binary resolution.** `codex` resolves through the listener's `PATH` with the absolute-entry search of § Native executable resolution.
 
 | Condition | Behavior |
 |---|---|
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | No Codex session ancestor at startup (§3.2) | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| `codex queue` exits non-zero | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
+| `codex queue` exits non-zero, other than a full-queue refusal | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
+| Full-queue refusals for one record reach 600 s | stderr `codex thread <THREAD> queue stayed full for 600 s`, closed notice (one attempt, which can itself meet the full queue), exit 1 |
 | `codex queue` exceeds 10 s | kill it; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
 | Any other failure after `ready` (database, schema guard, deadline) | its existing stderr diagnostic, closed notice, exit 1 |
 | The pinned Codex process exits | stdout `closed` with reason `session_exited`, exit 0 (nothing is forwarded, since the session is gone) |
@@ -611,6 +615,14 @@ Steps 1–5 write the documentation before code. They restate the current verdic
   - the closed notice is forwarded before a non-zero exit after `ready`
   - a failed notice keeps the original diagnostic and exit 1
   <!-- completed: 2026-11-05T23:05 -->
+- [ ] Document the full-queue retry and the 600 s full-queue limit in SPEC §6.3 `message listen`, `skills/cafleet/reference/cli.md` and the codex Note rows (Codex's 100-submission queue cap) <!-- completed: -->
+- [ ] `src/cli/message.rs`: treat a full-queue refusal as a 1 s wait-and-retry of the same record with the pinned-session check, and fail with the full-queue-limit diagnostic after 600 s (§3.1) <!-- completed: -->
+- [ ] Unit tests in `src/cli/message.rs` with a fake `codex` that refuses with the full-queue text:
+  - refusals followed by acceptance forward the record once, and later records keep their order
+  - the pinned session's exit during the wait ends the listener with `session_exited`
+  - refusals past the limit (shortened for the test) exit 1 with the full-queue-limit diagnostic after the closed-notice attempt
+  - other non-zero exits still fail immediately
+  <!-- completed: -->
 
 ### Step 9: Validation
 
@@ -620,9 +632,10 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 
 ### Step 10: Live acceptance and evidence
 
-- [ ] After every implementation member is deleted, confirm that no executing member depends on the installed assets. Then reinstall the CLI (`mise tasks --all` names the install task) and run `cafleet setup` for each backend in the real homes. <!-- completed: -->
-- [ ] Verify the probe-residue table in §6 and stop if any probe change is present <!-- completed: -->
-- [ ] Run A-Cl (Claude) <!-- completed: -->
+- [x] After every implementation member is deleted, confirm that no executing member depends on the installed assets. Then reinstall the CLI (`mise tasks --all` names the install task) and run `cafleet setup` for each backend in the real homes. <!-- completed: 2026-11-06T00:04 -->
+- [x] Verify the probe-residue table in §6 and stop if any probe change is present <!-- completed: 2026-11-06T00:03 -->
+- [x] Run A-Cl (Claude) <!-- completed: 2026-11-06T00:07 -->
+- [ ] After the full-queue fix, delete its implementation members, reinstall the CLI and rerun `cafleet setup` for each backend <!-- completed: -->
 - [ ] Run A-C (Codex) <!-- completed: -->
 - [ ] Run A-H (Hermes TUI) <!-- completed: -->
 - [ ] Run A-O (OpenCode) <!-- completed: -->
@@ -644,3 +657,4 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 | 2026-11-05 | Review round 1. Relaxed the busy rule and added A-Cl. Defined tier-3 negative evidence and the `verdict` row cells. Resolved the Hermes home through `hermes config path`, handled *not set* and `plugins.disabled`, and fully specified the doctor rows. Codex forwarding now covers the forwarded events, a message reference, a 10 s deadline, a stdout scope and argv[0] ancestor pinning, and drops PDEATHSIG. The plugins execute only a setup-recorded `cafleet` and refuse member sessions. Restore is scoped per session, and the goal-authority wording is reconciled. Added implementation isolation, probe-residue verification and the docs pages. |
 | 2026-11-05 | Review round 2. Overview is now three sentences. Forwarding-mode stdout carries `ready` and the final `closed` record. A Codex closed notice is forwarded before a non-zero exit. The OpenCode Director-side `cafleet` permission now resolves through the base allow. A-C is limited to the escalated path. |
 | 2026-11-05 | Approved by the user after Reviewer approval; Status set to Approved |
+| 2026-11-06 | A-C found Codex 0.165.0's 100-submission thread-queue cap: a 200-record burst ended the forwarder at record 97. Approved by the user: a full-queue refusal is now a 1 s wait-and-retry of the same record with a 600 s limit (§3.1), the busy rule states that waiting behind earlier records passes (§1.1), and the forwarder stays tier 1 because Codex still starts every turn. |
