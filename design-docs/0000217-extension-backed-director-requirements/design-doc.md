@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
-**Status**: Approved
-**Progress**: 59/60 tasks complete
+**Status**: Complete
+**Progress**: 60/60 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -22,7 +22,7 @@ Turn the Director requirements in SPEC.md §6.7 into one general acceptance crit
 - [x] The CAFleet plugin tools refuse to run in member sessions, and the OpenCode member presets deny them.
 - [x] Live acceptance runs of the shipped mechanisms pass on the installed versions, and their observed results are recorded as evidence. The versions are Claude 2.1.312, Codex 0.165.0, Hermes 2026.9.24 and OpenCode 2.2.0. No CAFleet listener survives its owning session in any run. Recorded limits: A-O established that pause stops further continuations but not that a continuation already queued at the pause is dropped; A-C measured the forwarder's absence within milliseconds of `member delete` returning, not its own exit latency; A-M did not re-trigger a Hermes `smart` approval form.
 - [x] Every mention of the Hermes `heartbeat=60` / `process_manage` reception recipe and the Codex `write_stdin` read loop is removed from skills, docs and the SPEC backend sections. SPEC keeps tier 3 only as a general acceptance tier.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass. Lint and the docs build pass. `mise //:test` passes every test this design adds or changes but fails 5 runner-recovery/permission timing tests in every full run; `main` (feb770d7) fails exactly the same 5, so they pre-date this change and remain open outside it.
 
 ---
 
@@ -659,7 +659,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 ### Step 11: Final consistency
 
 - [x] Search SPEC, docs, skills and rules for the remaining `heartbeat`, `process_manage` and `write_stdin` reception mentions and for the old Director wording ("streamed background output"). Each surviving mention must describe the current state. <!-- completed: 2026-11-06T05:23 -->
-- [ ] Commit `design-docs/0000217-extension-backed-director-requirements/design-doc.md` with the implementation <!-- completed: -->
+- [x] Commit `design-docs/0000217-extension-backed-director-requirements/design-doc.md` with the implementation <!-- completed: 2026-11-06T05:37 -->
 
 ---
 
