@@ -157,7 +157,7 @@ export default Plugin.define({
       })
       child.on("exit", (code, signal) => {
         if (receivers.get(sessionID) === child) receivers.delete(sessionID)
-        if (sawClosed || stoppedReceivers.has(child)) return
+        if (sawClosed || stoppedReceivers.has(child) || signal === "SIGTERM") return
         delivery = delivery.then(() =>
           ctx.session
             .synthetic({
