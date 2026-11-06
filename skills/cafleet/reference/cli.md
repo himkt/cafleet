@@ -151,9 +151,10 @@ Order records by creation/message ID; suppress already-emitted IDs per process. 
 |---|---|
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | No Codex ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| `codex queue` exits non-zero, other than a full-queue refusal | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
+| `codex queue` exits non-zero, other than a full-queue refusal, while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
 | Full-queue refusals for one record reach 600 s | stderr `codex thread <THREAD> queue stayed full for 600 s`, closed notice, exit 1 |
-| `codex queue` exceeds 10 s | killed; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
+| `codex queue` exceeds 10 s while the pinned session is alive | killed; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
+| `codex queue` exits non-zero or exceeds 10 s after the pinned session exited | stdout `closed` `session_exited`, exit 0, no closed notice |
 | Any other failure after `ready` | its usual diagnostic, closed notice, exit 1 |
 
 The closed notice is one best-effort `codex queue` of `[cafleet listen closed] exit 1: <stderr diagnostic>`, bounded by 10 s and not retried on a full queue. When it also fails, stderr adds `failed to forward the closed notice to codex thread <THREAD>: <cause>` and the exit stays 1.

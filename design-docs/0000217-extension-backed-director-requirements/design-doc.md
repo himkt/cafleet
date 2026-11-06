@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: In Progress
-**Progress**: 61/67 tasks complete
+**Progress**: 62/68 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -320,11 +320,13 @@ With `--codex-thread THREAD`, the listener keeps the record, ordering, replay, l
 |---|---|
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | No Codex session ancestor at startup (§3.2) | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| `codex queue` exits non-zero, other than a full-queue refusal | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
+| `codex queue` exits non-zero, other than a full-queue refusal, while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
 | Full-queue refusals for one record reach 600 s | stderr `codex thread <THREAD> queue stayed full for 600 s`, closed notice (one attempt, which can itself meet the full queue), exit 1 |
-| `codex queue` exceeds 10 s | kill it; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
+| `codex queue` exceeds 10 s while the pinned session is alive | kill it; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
 | Any other failure after `ready` (database, schema guard, deadline) | its existing stderr diagnostic, closed notice, exit 1 |
 | The pinned Codex process exits | stdout `closed` with reason `session_exited`, exit 0 (nothing is forwarded, since the session is gone) |
+
+A `codex queue` that exits non-zero or exceeds 10 s makes the listener check the pinned session first. When that session has exited, the `session_exited` row applies: no diagnostic and no closed notice.
 
 **Closed notice.** Before every non-zero exit after `ready`, the listener makes one best-effort attempt, bounded by 10 s, to forward `[cafleet listen closed] exit 1: <stderr diagnostic>` with `codex queue`. This mirrors the plugins' `[cafleet listen closed]` turn, so an idle Codex Director learns that reception ended. When the attempt also fails, stderr keeps the original diagnostic and adds `failed to forward the closed notice to codex thread <THREAD>: <cause>`, and the exit status stays 1.
 
@@ -406,25 +408,26 @@ The listener runs without `--timeout`; the plugin performs no automatic replacem
 
 | Event | Plugin action |
 |---|---|
-| An ordered injection returns `False` while the session is still attached (`_session_attached`) | A transient refusal, for example the session authority's 32-row admission queue cap (`queue_full`) or a draining gateway: keep the record, wait 1 s and retry it; later records wait behind it |
-| One record meets refusals for 600 s while the session stays attached | Kill the child and log the cause; the closed notice below is attempted once through the same path |
-| An ordered injection returns `False` for a session no longer attached | Kill the child silently, because the session is gone |
+| An ordered injection returns `False` | A transient refusal, for example the session authority's 32-row admission queue cap (`queue_full`), a draining gateway or a client that briefly detached: keep the record, wait 1 s and retry it; later records wait behind it. The retry checks no attachment, so a reconnecting client keeps the 30 s detach grace of §4.2 and only the watchdog ends a detached session's receiver |
+| One record meets refusals for 600 s | Kill the child and log the cause; the closed notice below is attempted once through the same path |
 | An ordered injection raises or exceeds its 10 s deadline | Kill the child and log the cause; the closed notice below is attempted once through the same path |
 | The child exits without a `closed` record | Inject `[cafleet listen closed] exit <code>: <last stderr line>` into the owning session |
+| Plugin unload while the session is still attached | Inject `[cafleet listen closed] the plugin unloaded: exit <code>: <last stderr line>` once through ordered injection (§4.2) |
 | A `closed` record | Already injected as a record; the receiver ends |
+
+Each receiver attempts at most one closed notice. Session finalize, client detach and an unload for a detached session queue none; a draining gateway refuses the unload notice, which is not retried.
 
 The Director owns every replacement through receiver recovery.
 
 #### 4.2 Receiver lifecycle (Hermes)
 
-The child runs inside the shared Hermes gateway, which outlives client sessions. In H1/H2 the listener survived `member delete` and TUI `/exit`. The plugin binds each receiver to its owning session, and to its own loaded instance, with four signals. Any one of them kills the child and confirms that it exited:
+The child runs inside the shared Hermes gateway, which outlives client sessions. In H1/H2 the listener survived `member delete` and TUI `/exit`. The plugin binds each receiver to its owning session, and to its own loaded instance, with three signals. Any one of them kills the child and confirms that it exited:
 
 | Signal | Source |
 |---|---|
 | Session finalize | `on_session_finalize` for the owning session. CLI shutdown and the TUI session lifecycle fire it (`hermes_cli/lifecycle.py:81-97`). `on_session_end` is per-turn and unused. The hook resolves the finalized session's route through the session authority (`authority.sessions.get(session_id).route`) and stops the receiver whose `session_key` equals it, because compression rotates the session id and finalize runs on a thread where `HERMES_SESSION_KEY` is unbound; the existing session-id and session-key matches remain fallbacks. |
-| Plugin unload | `ctx.on_unload(...)` stops every receiver. A forced re-discovery (`hermes plugins install/enable`, the control-socket nudge, the reload verb) re-executes the module with an empty receiver map, so without it old receivers would keep running untracked and a repeat `cafleet_listen` would start a second listener. |
-| Client detach | A watchdog thread checks every 5 s that the gateway's live local session for the key has at least one subscriber. After 30 s with no subscriber the receiver ends; the grace covers client reconnects. A read error kills the child and logs the seam error. |
-| Injection refusal | An ordered injection returns `False` for a session no longer attached |
+| Plugin unload | `ctx.on_unload(...)` stops every receiver. A forced re-discovery (`hermes plugins install/enable`, the control-socket nudge, the reload verb) re-executes the module with an empty receiver map, so without it old receivers would keep running untracked and a repeat `cafleet_listen` would start a second listener. A re-discovery is not a session end: the gateway and the Director's session keep running. After the stop, a separate thread waits for the receiver's delivery to finish and, when the session is still attached, injects the unload closed notice (§4.1) so receiver recovery re-arms reception. The notice runs outside the callback because Hermes runs unload callbacks under the plugin manager's discovery lock. |
+| Client detach | A watchdog thread checks every 5 s that the gateway's live local session for the key has at least one subscriber. After 30 s with no subscriber the receiver ends, also while a refused record is being retried; the grace covers client reconnects. A read error kills the child and logs the seam error. |
 
 `closed` `fleet_deleted` remains the normal end of reception.
 
@@ -489,7 +492,7 @@ An operator configuration that adds a broad `ask` or `deny` rule overrides the b
 
 The reason: in O2-c, one queued continuation ran after `pause`. OpenCode 2.2.0 exposes `session.inbox.cancel` only on the HTTP API, not in the plugin `SessionDomain`.
 
-**Event failures.** Each event's handling is wrapped in `try/catch`: the plugin logs the cause and keeps the event loop alive, because one rejected await would otherwise end continuation, interrupt pausing and the no-progress stop for every session on the server. When a goal can no longer continue, the plugin pauses it with a `[cafleet goal]` notice.
+**Event failures.** Each event's handling is wrapped in `try/catch`: the plugin logs the cause and keeps the event loop alive, because one rejected await would otherwise end continuation, interrupt pausing and the no-progress stop for every session on the server. Any such failure while the session's goal is `active`, a transient storage or `synthetic` error included, pauses the goal and queues `[cafleet goal] paused: the goal cannot continue (<cause>); the operator resumes it with /cafleet-goal resume` with `resume: false`.
 
 **No-progress stop.**
 - A continuation turn that ends without a `cafleet_goal_progress` or `cafleet_goal_complete` call increments `idle_streak`.
@@ -675,6 +678,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 - [ ] `src/assets.rs`: the cause `printed no absolute file path: <stdout>` for a non-absolute `hermes config path` in setup and doctor; unit tests with a relative config path <!-- completed: -->
 - [ ] `extensions/hermes/cafleet/__init__.py`: the non-local client refusal, UTF-8 decoding with the end-of-output sentinel in `finally:`, the transient-refusal retry with its 600 s limit, the `CAFLEET_*`-stripped child environment, finalize route resolution and the unload cleanup (§4.1–4.2); validate with `hermes plugins validate` <!-- completed: -->
 - [ ] `extensions/opencode/cafleet.ts`: the child `error` handler, the closed-notice decision on `close`, the tail-only stale-continuation drop, per-event failure handling and per-session serialization of goal operations (§5.1–5.2) <!-- completed: -->
+- [x] Review round 3: the Hermes refusal retry keeps the 30 s detach grace, a plugin unload for a still-attached session injects one closed notice (§4.1–4.2), the Codex `session_exited` precedence over a failed or overdue `codex queue` (§3.1) and the OpenCode event-failure pause notice (§5.2), in SPEC.md, `skills/cafleet/reference/cli.md` and `skills/cafleet/reference/coding-agents.md`; validate with `hermes plugins validate` <!-- completed: 2026-11-06T07:30 -->
 - [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` <!-- completed: -->
 - [ ] After the plugin fixes, delete their implementation members, reinstall the CLI, rerun `cafleet setup --coding-agent hermes` and run the A-H burst of more than 32 records during a busy turn <!-- completed: -->
 
@@ -693,3 +697,4 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 | 2026-11-06 | A-H found that `get_session_env` cannot see a member's client environment, so a member session's `cafleet_listen` succeeded. The plugin now reads `CAFLEET_MEMBER_ID` and `CAFLEET_DATABASE_URL` through `agent.session_client_env` and refuses an unbound session (§4.1); the member-refusal intent is unchanged. |
 | 2026-11-06 | A-O found a spurious `[cafleet listen closed]` after a restart: receivers the plugin stops, or that exit by `SIGTERM` at host shutdown, now queue no notice (§5.1). Review round 1: the 50-continuation cap queues a paused notice and resume resets `continuations`; goal generations stay monotonic across clear (§5.2); the recorded Claude version is 2.1.312 and the acceptance limits are stated in the Success Criteria. |
 | 2026-11-06 | Review round 2. Hermes plugin (§4.1–4.2): a bound non-local client is refused; an injection refused while the session stays attached (the 32-row admission cap, a draining gateway) is retried every 1 s with a 600 s limit; the child starts with every `CAFLEET_*` name removed and takes `CAFLEET_DATABASE_URL` only from `tool_env()`; output decodes as UTF-8; finalize resolves the session's route through the authority; plugin unload stops every receiver. A-H adds a burst of more than 32 records during a busy turn. OpenCode plugin (§5, §5.1–5.2): the preset deny is defense in depth behind the environment refusal; the closed notice is decided on `close`, and a child `error` queues it; the stale-continuation drop covers only the undelivered tail; event failures are logged without ending the loop; goal operations are serialized per session. The Claude owner-exit check is recorded in the claude `listen` Evidence. |
+| 2026-11-06 | Review round 3. Hermes plugin (§4.1–4.2): every refused injection is retried, so a briefly detached client keeps the watchdog's 30 s detach grace, which alone ends a detached session's receiver; a plugin unload for a still-attached session injects `[cafleet listen closed] the plugin unloaded: …` once, outside the unload callback, and each receiver attempts at most one closed notice. Codex (§3.1): a failed or overdue `codex queue` after the pinned session exited ends with `session_exited`. OpenCode (§5.2): any event failure while the goal is `active` pauses it with the stated notice. |

@@ -94,16 +94,19 @@ class Receiver:
         self.proc = proc
         self.stopping = threading.Event()
         self.saw_closed = False
+        self.notice_attempted = False
         self.last_stderr = ""
         self.lines: queue.Queue[str | None] = queue.Queue()
         self.stderr_thread: threading.Thread | None = None
+        self.deliver_thread: threading.Thread | None = None
 
     def alive(self) -> bool:
         return self.proc.poll() is None
 
     def start(self) -> None:
         self.stderr_thread = self._spawn_thread(self._pump_stderr, "stderr")
-        for target, name in ((self._read_stdout, "stdout"), (self._deliver, "deliver"), (self._watch, "watchdog")):
+        self.deliver_thread = self._spawn_thread(self._deliver, "deliver")
+        for target, name in ((self._read_stdout, "stdout"), (self._watch, "watchdog")):
             self._spawn_thread(target, name)
 
     def _spawn_thread(self, target, name: str) -> threading.Thread:
@@ -152,13 +155,12 @@ class Receiver:
             self.lines.put(None)
 
     def _commit(self, text: str) -> bool:
-        """Inject one record, retrying while the still-attached session refuses it (a full admission
-        queue or a draining gateway); False once the receiver has ended."""
+        """Inject one record, retrying each refusal (a full admission queue, a draining gateway, a detached
+        client); False once the receiver has ended.
+
+        A detached session keeps retrying because the watchdog's detach grace decides when it is gone."""
         refused_since = None
         while not self._inject(text):
-            if not _session_attached(self.session_key):
-                self.stop("the session is no longer attached")
-                return False
             refused_since = refused_since or time.monotonic()
             if time.monotonic() - refused_since >= REFUSAL_LIMIT_S:
                 self.stop(f"the attached session refused one record for {REFUSAL_LIMIT_S:.0f} s")
@@ -189,12 +191,33 @@ class Receiver:
             if _receivers.get(self.session_key) is self:
                 del _receivers[self.session_key]
 
-    def _inject_closed_notice(self) -> None:
+    def _inject_closed_notice(self, reason: str = "") -> None:
+        if self.notice_attempted:
+            return
+        self.notice_attempted = True
         self.stderr_thread.join(timeout=EXIT_CONFIRM_S)
+        cause = f"{reason}: " if reason else ""
         try:
-            self._inject(f"{CLOSED_PREFIX}exit {self.proc.poll()}: {self.last_stderr}")
+            self._inject(f"{CLOSED_PREFIX}{cause}exit {self.proc.poll()}: {self.last_stderr}")
         except Exception as exc:
             logger.error("cafleet_listen: closed notice for session=%s failed: %r", self.session_key, exc)
+
+    def unload(self) -> None:
+        """Stop for a plugin unload, then tell a still-attached session on a separate thread.
+
+        Unload callbacks run under the plugin manager's discovery lock, so the notice waits outside them."""
+        self.stop("the plugin unloaded")
+        self._spawn_thread(self._notify_unloaded, "unload")
+
+    def _notify_unloaded(self) -> None:
+        self.deliver_thread.join()
+        try:
+            attached = _session_attached(self.session_key)
+        except Exception as exc:
+            logger.error("cafleet_listen: gateway.session_authorities.authority_for_home: %s", exc)
+            return
+        if attached:
+            self._inject_closed_notice("the plugin unloaded")
 
     def _pump_stderr(self) -> None:
         for raw in self.proc.stderr:
@@ -301,7 +324,7 @@ def _on_unload() -> None:
         receivers = list(_receivers.values())
         _receivers.clear()
     for receiver in receivers:
-        receiver.stop("the plugin unloaded")
+        receiver.unload()
 
 
 _SCHEMA = {
