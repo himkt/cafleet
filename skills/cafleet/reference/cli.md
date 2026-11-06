@@ -143,6 +143,7 @@ Order records by creation/message ID; suppress already-emitted IDs per process. 
 
 - Stdout carries only `ready` and the final `closed` record, written right before exit with every reason, `session_exited` included.
 - Each `message` record, and each `closed` record with reason `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in order through `codex queue --thread THREAD --message '[cafleet listen record] <compact record JSON>'`, one at a time with a 10 s deadline each. `ready` and `closed` `session_exited` are never forwarded.
+- A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a full-queue refusal (Codex caps a thread's queue at 100 submissions): the listener keeps the record, waits 1 s, checks the pinned session and retries it, so later records keep their order and none is dropped. The pinned session's exit during the wait ends the listener with `session_exited`.
 - A forwarded text over 65,536 bytes becomes `[cafleet listen record] {"event":"message_ref","message_id":<id>,"from_member_id":<id>,"bytes":<n>} — read it with: cafleet message show <id> --json`, where `bytes` is the length of the text it replaces.
 - At startup the listener pins its nearest ancestor whose argv[0] basename is exactly `codex`, skipping shells, `bwrap`, node launchers and `codex-linux-sandbox`. When that process exits (a reused pid counts as exited), stdout gets `closed` `session_exited` and the listener exits 0.
 
@@ -150,11 +151,12 @@ Order records by creation/message ID; suppress already-emitted IDs per process. 
 |---|---|
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | No Codex ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| `codex queue` exits non-zero | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
+| `codex queue` exits non-zero, other than a full-queue refusal | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
+| Full-queue refusals for one record reach 600 s | stderr `codex thread <THREAD> queue stayed full for 600 s`, closed notice, exit 1 |
 | `codex queue` exceeds 10 s | killed; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
 | Any other failure after `ready` | its usual diagnostic, closed notice, exit 1 |
 
-The closed notice is one best-effort `codex queue` of `[cafleet listen closed] exit 1: <stderr diagnostic>`, bounded by 10 s. When it also fails, stderr adds `failed to forward the closed notice to codex thread <THREAD>: <cause>` and the exit stays 1.
+The closed notice is one best-effort `codex queue` of `[cafleet listen closed] exit 1: <stderr diagnostic>`, bounded by 10 s and not retried on a full queue. When it also fails, stderr adds `failed to forward the closed notice to codex thread <THREAD>: <cause>` and the exit stays 1.
 
 ### `message ack`
 

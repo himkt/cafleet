@@ -878,18 +878,21 @@ Database contention retries stay inside the snapshot budget; exhaustion or anoth
 
   `bytes` is the byte length of the text the reference replaces.
 - **One at a time.** Each `codex queue` runs to exit, with a 10 s deadline, before the next record is forwarded.
+- **Full queue.** Codex refuses a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions`). A `codex queue` that exits non-zero with a stderr line containing `queue cannot contain more than` is a *full-queue refusal*, not a failure: the listener keeps the same record, waits 1 s, checks the pinned session (§ Liveness) and retries it. Later records wait behind it, so emission order holds and no record is dropped. The pinned session's exit during the wait ends the listener with `session_exited`.
+- **Full-queue limit.** When one record meets full-queue refusals for 600 s without being accepted, the listener fails.
 - **Binary resolution.** `codex` resolves through the listener's `PATH` with the absolute-entry search of §6.9 Native executable resolution.
 
 | Condition | Behavior |
 |---|---|
 | `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
 | No Codex session ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| `codex queue` exits non-zero | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
+| `codex queue` exits non-zero, other than a full-queue refusal | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, closed notice, exit 1 |
+| Full-queue refusals for one record reach 600 s | stderr `codex thread <THREAD> queue stayed full for 600 s`, closed notice, exit 1 |
 | `codex queue` exceeds 10 s | kill it; stderr `codex queue for thread <THREAD> did not finish within 10 s`, closed notice, exit 1 |
 | Any other failure after `ready` (database, schema guard, deadline) | its existing stderr diagnostic, closed notice, exit 1 |
 | The pinned Codex process exits | stdout `closed` with reason `session_exited`, exit 0; nothing is forwarded |
 
-**Closed notice.** Before every non-zero exit after `ready`, the listener makes one best-effort attempt, bounded by 10 s, to forward `[cafleet listen closed] exit 1: <stderr diagnostic>` with `codex queue`. When that attempt also fails, stderr keeps the original diagnostic and adds `failed to forward the closed notice to codex thread <THREAD>: <cause>`, and the exit status stays 1.
+**Closed notice.** Before every non-zero exit after `ready`, the listener makes one best-effort attempt, bounded by 10 s, to forward `[cafleet listen closed] exit 1: <stderr diagnostic>` with `codex queue`; the attempt can itself meet the full queue and is not retried. When that attempt also fails, stderr keeps the original diagnostic and adds `failed to forward the closed notice to codex thread <THREAD>: <cause>`, and the exit status stays 1.
 
 **Session pinning.** At startup the listener walks its ancestors, starting from its parent, reading `/proc/<pid>/stat` (ppid) and `/proc/<pid>/cmdline` on Linux and `ps -o ppid= -o args= -p <pid>` elsewhere. It pins the nearest ancestor whose argv[0] basename is exactly `codex`; shells, `bwrap`, node launchers and the sandbox helper (the same binary, run with argv[0] `codex-linux-sandbox`) are skipped. The executable path is not compared, because the helper shares it. A sandbox that unshares the PID namespace hides the ancestor, and startup fails with the missing-ancestor error.
 
@@ -1831,7 +1834,7 @@ A *subscribe-style* listen delivers each record that the running `cafleet messag
 
 - When the session is idle, delivery starts a new turn.
 - When the session is busy, the record is delivered no later than the end of the running turn and never interrupts it. Earlier delivery between tool calls inside the turn also passes.
-- No record waits for an unrelated future turn.
+- No record waits for an unrelated future turn. A record queued behind earlier undelivered records is delivered after their turns; that wait passes, because each of those turns consumes an earlier record.
 - Records keep their emission order.
 
 | Tier | Name | Definition | Standing |

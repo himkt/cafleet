@@ -1,8 +1,8 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 42/54 tasks complete
-**Last Updated**: 2026-11-05
+**Progress**: 43/54 tasks complete
+**Last Updated**: 2026-11-06
 
 ## Overview
 
@@ -615,7 +615,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
   - the closed notice is forwarded before a non-zero exit after `ready`
   - a failed notice keeps the original diagnostic and exit 1
   <!-- completed: 2026-11-05T23:05 -->
-- [ ] Document the full-queue retry and the 600 s full-queue limit in SPEC §6.3 `message listen`, `skills/cafleet/reference/cli.md` and the codex Note rows (Codex's 100-submission queue cap) <!-- completed: -->
+- [x] Document the full-queue retry and the 600 s full-queue limit in SPEC §6.3 `message listen`, `skills/cafleet/reference/cli.md` and the codex Note rows (Codex's 100-submission queue cap) <!-- completed: 2026-11-06T02:00 -->
 - [ ] `src/cli/message.rs`: treat a full-queue refusal as a 1 s wait-and-retry of the same record with the pinned-session check, and fail with the full-queue-limit diagnostic after 600 s (§3.1) <!-- completed: -->
 - [ ] Unit tests in `src/cli/message.rs` with a fake `codex` that refuses with the full-queue text:
   - refusals followed by acceptance forward the record once, and later records keep their order
