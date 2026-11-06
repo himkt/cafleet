@@ -309,6 +309,10 @@ pub(crate) trait ListenIo {
 
 pub(crate) trait ListenOutput {
     fn emit(&mut self, record: &Value, deadline: Deadline) -> Result<(), CafleetError>;
+    /// Whether the owning session ended while a record was being delivered.
+    fn session_exited(&self) -> bool {
+        false
+    }
 }
 
 struct BrokerListener<'a> {
@@ -427,6 +431,9 @@ pub(crate) fn listen(
                     let record = crate::output::json::listen_message(&message);
                     drop(message);
                     output.emit(&record, output_deadline)?;
+                    if output.session_exited() {
+                        return close(clock, output, member_id, "session_exited");
+                    }
                     emitted.flushed(message_id);
                     new_messages += 1;
                 }
@@ -582,6 +589,22 @@ fn with_nonblocking(
 const FORWARDED_TEXT_LIMIT: usize = 65_536;
 const CODEX_QUEUE_BUDGET: Duration = Duration::from_secs(10);
 const LISTEN_RECORD_PREFIX: &str = "[cafleet listen record] ";
+const FULL_QUEUE_REFUSAL: &str = "queue cannot contain more than";
+const FULL_QUEUE_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+const FULL_QUEUE_LIMIT: Duration = Duration::from_secs(600);
+
+#[cfg(not(test))]
+fn full_queue_limit() -> Duration {
+    FULL_QUEUE_LIMIT
+}
+
+/// A test-built listener takes a shortened limit, in whole seconds, from its environment.
+#[cfg(test)]
+fn full_queue_limit() -> Duration {
+    std::env::var("CAFLEET_TEST_CODEX_FULL_QUEUE_LIMIT_SECS").map_or(FULL_QUEUE_LIMIT, |secs| {
+        Duration::from_secs(secs.parse().expect("the test limit is whole seconds"))
+    })
+}
 
 /// Streams `member_id`'s inbox into a Codex thread: every record goes through `codex queue`, and
 /// stdout keeps only the `ready` and final `closed` records.
@@ -601,8 +624,13 @@ fn run_forwarder(
     let descriptor = io::stdout();
     let mut output = CodexForwarding {
         stdout: DescriptorOutput(descriptor.as_fd()),
-        queue: CodexQueue { codex, thread },
+        queue: CodexQueue {
+            codex,
+            thread,
+            session: &session,
+        },
         ready: false,
+        session_exited: false,
     };
     let result = with_nonblocking(descriptor.as_fd(), || {
         listen(
@@ -613,7 +641,7 @@ fn run_forwarder(
                     member_id,
                     fleet_id: None,
                 },
-                session,
+                session: &session,
             },
             &mut output,
             member_id,
@@ -628,7 +656,7 @@ fn run_forwarder(
 
 struct SessionBoundListener<'a> {
     broker: BrokerListener<'a>,
-    session: crate::runtime::ProcessIdentity,
+    session: &'a crate::runtime::ProcessIdentity,
 }
 
 impl ListenIo for SessionBoundListener<'_> {
@@ -637,14 +665,18 @@ impl ListenIo for SessionBoundListener<'_> {
     }
 
     fn session_exited(&mut self) -> Result<bool, CafleetError> {
-        let pid = nix::unistd::Pid::from_raw(
-            i32::try_from(self.session.pid).expect("a pinned pid fits the platform pid"),
-        );
-        if nix::sys::signal::kill(pid, None) == Err(Errno::ESRCH) {
-            return Ok(true);
-        }
-        Ok(!self.session.matches()?)
+        pinned_session_exited(self.session)
     }
+}
+
+fn pinned_session_exited(session: &crate::runtime::ProcessIdentity) -> Result<bool, CafleetError> {
+    let pid = nix::unistd::Pid::from_raw(
+        i32::try_from(session.pid).expect("a pinned pid fits the platform pid"),
+    );
+    if nix::sys::signal::kill(pid, None) == Err(Errno::ESRCH) {
+        return Ok(true);
+    }
+    Ok(!session.matches()?)
 }
 
 /// Pins the nearest ancestor whose argv[0] basename is exactly `codex`, skipping shells,
@@ -708,6 +740,7 @@ struct CodexForwarding<'a> {
     stdout: DescriptorOutput<'a>,
     queue: CodexQueue<'a>,
     ready: bool,
+    session_exited: bool,
 }
 
 impl ListenOutput for CodexForwarding<'_> {
@@ -718,10 +751,21 @@ impl ListenOutput for CodexForwarding<'_> {
                 self.ready = true;
                 Ok(())
             }
-            Some("message") => self.queue.forward_record(record),
+            Some("message") => {
+                self.session_exited =
+                    self.queue.forward_record(record)? == Forwarding::SessionExited;
+                Ok(())
+            }
             Some("closed") => {
-                if record["reason"] != "session_exited" {
-                    self.queue.forward_record(record)?;
+                if record["reason"] != "session_exited"
+                    && self.queue.forward_record(record)? == Forwarding::SessionExited
+                {
+                    let member_id = record["member_id"]
+                        .as_i64()
+                        .expect("a closed record names its member");
+                    let record = crate::output::json::listen_closed(member_id, "session_exited");
+                    self.stdout.emit(&record, deadline).ok();
+                    return Ok(());
                 }
                 // The final record may target the exited session's PTY; the exit status
                 // reflects reception, never this write.
@@ -731,20 +775,68 @@ impl ListenOutput for CodexForwarding<'_> {
             other => unreachable!("the listener emits no {other:?} record"),
         }
     }
+
+    fn session_exited(&self) -> bool {
+        self.session_exited
+    }
+}
+
+#[derive(PartialEq)]
+enum Forwarding {
+    Accepted,
+    /// The pinned session ended while the thread's queue was full, so the record has no reader.
+    SessionExited,
 }
 
 enum QueueFailure {
     Exit(String),
+    FullQueue(String),
     Deadline,
 }
 
 struct CodexQueue<'a> {
     codex: std::path::PathBuf,
     thread: &'a str,
+    session: &'a crate::runtime::ProcessIdentity,
 }
 
 impl CodexQueue<'_> {
-    fn forward_record(&self, record: &Value) -> Result<(), CafleetError> {
+    /// Queues `record`, retrying it while the thread's queue is full so later records keep
+    /// their order behind it.
+    fn forward_record(&self, record: &Value) -> Result<Forwarding, CafleetError> {
+        let text = Self::forwarded_text(record);
+        let mut full_since = None;
+        loop {
+            match self.queue(&text) {
+                Ok(()) => return Ok(Forwarding::Accepted),
+                Err(QueueFailure::FullQueue(_)) => {
+                    let limit = full_queue_limit();
+                    if full_since.get_or_insert_with(Instant::now).elapsed() >= limit {
+                        return Err(CafleetError::App(format!(
+                            "codex thread {} queue stayed full for {} s",
+                            self.thread,
+                            limit.as_secs()
+                        )));
+                    }
+                    std::thread::sleep(FULL_QUEUE_RETRY_INTERVAL);
+                    if pinned_session_exited(self.session)? {
+                        return Ok(Forwarding::SessionExited);
+                    }
+                }
+                Err(QueueFailure::Deadline) => {
+                    return Err(CafleetError::App(self.deadline_diagnostic()));
+                }
+                Err(QueueFailure::Exit(cause)) => {
+                    return Err(CafleetError::App(format!(
+                        "failed to forward record to codex thread {}: {cause}",
+                        self.thread
+                    )));
+                }
+            }
+        }
+    }
+
+    fn forwarded_text(record: &Value) -> String {
         let mut text = format!("{LISTEN_RECORD_PREFIX}{record}");
         if text.len() > FORWARDED_TEXT_LIMIT {
             let message = &record["message"];
@@ -759,15 +851,7 @@ impl CodexQueue<'_> {
                 message["message_id"],
             );
         }
-        self.queue(&text).map_err(|failure| {
-            CafleetError::App(match failure {
-                QueueFailure::Exit(cause) => format!(
-                    "failed to forward record to codex thread {}: {cause}",
-                    self.thread
-                ),
-                QueueFailure::Deadline => self.deadline_diagnostic(),
-            })
-        })
+        text
     }
 
     /// Makes one bounded attempt to tell the session that reception ended, keeping `error`.
@@ -777,7 +861,7 @@ impl CodexQueue<'_> {
             Ok(()) => error,
             Err(failure) => {
                 let cause = match failure {
-                    QueueFailure::Exit(cause) => cause,
+                    QueueFailure::Exit(cause) | QueueFailure::FullQueue(cause) => cause,
                     QueueFailure::Deadline => self.deadline_diagnostic(),
                 };
                 CafleetError::App(format!(
@@ -840,9 +924,14 @@ impl CodexQueue<'_> {
             .and_then(Result::ok)
             .map(|text| text.trim().to_owned())
             .filter(|text| !text.is_empty());
-        Err(QueueFailure::Exit(
-            stderr.unwrap_or_else(|| format!("codex exited with {status}")),
-        ))
+        Err(match stderr {
+            Some(text) if text.lines().any(|line| line.contains(FULL_QUEUE_REFUSAL)) => {
+                QueueFailure::FullQueue(text)
+            }
+            stderr => {
+                QueueFailure::Exit(stderr.unwrap_or_else(|| format!("codex exited with {status}")))
+            }
+        })
     }
 }
 
