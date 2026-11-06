@@ -2405,7 +2405,7 @@ The extensions that §6.3 Asset installation installs supply Director reception 
 | Executable record error | `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent hermes'"}` | `ok: false` with the record path and `run 'cafleet setup --coding-agent opencode'` |
 | Receiver end | Session finalize, 30 s with no client subscriber, or a refused, raising or overdue injection kills the child | Plugin cleanup kills every child when the server ends |
 
-A refused injection or a rejected `synthetic` call kills the child. A Hermes injection that raises or exceeds its 10 s deadline kills the child, logs the cause and attempts the closed notice below once through ordered injection. A child that exits without a `closed` record queues `[cafleet listen closed] exit <code>: <last stderr line>` into the owning session; a `closed` record is delivered as a record and ends the receiver.
+A refused injection or a rejected `synthetic` call kills the child. A Hermes injection that raises or exceeds its 10 s deadline kills the child, logs the cause and attempts the closed notice below once through ordered injection. A child that exits unexpectedly, without a `closed` record and without the plugin stopping it, queues `[cafleet listen closed] exit <code>: <last stderr line>` into the owning session; a child the plugin stops through a lifecycle signal, plugin cleanup or a refused injection queues no closed notice. A `closed` record is delivered as a record and ends the receiver.
 
 **Hermes plugin.** The plugin declares tool `cafleet_listen` and hook `on_session_finalize`. It depends on four private Hermes core seams outside the plugin API, which the tool resolves on every call:
 

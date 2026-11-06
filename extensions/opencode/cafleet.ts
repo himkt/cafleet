@@ -61,6 +61,7 @@ export default Plugin.define({
   async setup(ctx) {
     const isMember = Boolean(process.env.CAFLEET_MEMBER_ID)
     const receivers = new Map<string, ChildProcess>()
+    const stoppedReceivers = new WeakSet<ChildProcess>()
     const continuationGenerations = new Map<string, number>()
     const turns = new Map<string, TurnState>()
     const touched = new Set<string>()
@@ -129,13 +130,17 @@ export default Plugin.define({
       } as never)
     }
 
+    function stopReceiver(child: ChildProcess) {
+      stoppedReceivers.add(child)
+      child.kill()
+    }
+
     function startReceiver(sessionID: string, directorID: number) {
       const child = spawn(recordedExecutable(), ["message", "listen", String(directorID)], {
         stdio: ["ignore", "pipe", "pipe"],
       })
       receivers.set(sessionID, child)
       let sawClosed = false
-      let killed = false
       let lastStderr = ""
       let delivery: Promise<unknown> = Promise.resolve()
       createInterface({ input: child.stdout! }).on("line", (line) => {
@@ -144,10 +149,7 @@ export default Plugin.define({
         delivery = delivery.then(() =>
           ctx.session
             .synthetic({ sessionID, text: RECORD_PREFIX + line, delivery: "queue" })
-            .catch(() => {
-              killed = true
-              child.kill()
-            }),
+            .catch(() => stopReceiver(child)),
         )
       })
       createInterface({ input: child.stderr! }).on("line", (line) => {
@@ -155,7 +157,7 @@ export default Plugin.define({
       })
       child.on("exit", (code, signal) => {
         if (receivers.get(sessionID) === child) receivers.delete(sessionID)
-        if (sawClosed || killed) return
+        if (sawClosed || stoppedReceivers.has(child)) return
         delivery = delivery.then(() =>
           ctx.session
             .synthetic({
@@ -346,7 +348,7 @@ export default Plugin.define({
     })()
 
     return () => {
-      for (const child of receivers.values()) child.kill()
+      for (const child of receivers.values()) stopReceiver(child)
       receivers.clear()
     }
   },
