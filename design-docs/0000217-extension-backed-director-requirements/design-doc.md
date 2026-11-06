@@ -1,7 +1,7 @@
 # Extension-backed Director requirements
 
 **Status**: Approved
-**Progress**: 58/59 tasks complete
+**Progress**: 58/60 tasks complete
 **Last Updated**: 2026-11-06
 
 ## Overview
@@ -20,7 +20,7 @@ Turn the Director requirements in SPEC.md §6.7 into one general acceptance crit
 - [x] `cafleet setup` installs every embedded extension of the selected agent and performs the Hermes plugin enablement itself. `cafleet doctor` verifies each installed extension and the Hermes enablement.
 - [x] `cafleet message listen --codex-thread THREAD` forwards each record through `codex queue` and exits when its Codex session process ends.
 - [x] The CAFleet plugin tools refuse to run in member sessions, and the OpenCode member presets deny them.
-- [x] Live acceptance runs of the shipped mechanisms pass on the installed versions, and their observed results are recorded as evidence. The versions are Claude 2.1.309, Codex 0.165.0, Hermes 2026.9.24 and OpenCode 2.2.0. No CAFleet listener survives its owning session in any run.
+- [x] Live acceptance runs of the shipped mechanisms pass on the installed versions, and their observed results are recorded as evidence. The versions are Claude 2.1.312, Codex 0.165.0, Hermes 2026.9.24 and OpenCode 2.2.0. No CAFleet listener survives its owning session in any run. Recorded limits: A-O established that pause stops further continuations but not that a continuation already queued at the pause is dropped; A-C measured the forwarder's absence within milliseconds of `member delete` returning, not its own exit latency; A-M did not re-trigger a Hermes `smart` approval form.
 - [x] Every mention of the Hermes `heartbeat=60` / `process_manage` reception recipe and the Codex `write_stdin` read loop is removed from skills, docs and the SPEC backend sections. SPEC keeps tier 3 only as a general acceptance tier.
 - [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
 
@@ -144,7 +144,7 @@ Each backend section's Role eligibility table in `coding-agents.md` uses the sam
 
 | Backend | Goal | Listen | Director |
 |---|---|---|---|
-| `claude` 2.1.309 | native `/goal` | native subscribe (Monitor), from run A-Cl | `yes` |
+| `claude` 2.1.312 | native `/goal` | native subscribe (Monitor), from run A-Cl | `yes` |
 | `codex` 0.165.0 | native `/goal` | native subscribe (`codex queue` via `cafleet message listen --codex-thread`), from run A-C | `yes` |
 | `opencode` 2.2.0 | extension (CAFleet plugin), from run A-O | extension subscribe (CAFleet plugin), from run A-O | `yes`, effective from 2.2.0 |
 | `hermes` 2026.9.24 | native `/goal` on the TUI client, from run A-H | extension subscribe (CAFleet plugin, TUI client), from run A-H | `yes` |
@@ -469,8 +469,10 @@ An operator configuration that adds a broad `ask` or `deny` rule overrides the b
 | set | `/cafleet-goal <objective>` | Store `{objective, status: "active", generation, continuations: 0, idle_streak: 0}` under storage key `goal/<sessionID>`, put instruction entry `cafleet-goal`, queue the first continuation |
 | status | `/cafleet-goal status`; tool `cafleet_goal_status` | The command queues a synthetic `[cafleet goal] status: <json>` turn. The tool returns the stored JSON. |
 | pause | `/cafleet-goal pause` | Status `paused`, bump `generation`, update the entry |
-| resume | `/cafleet-goal resume` | Status `active`, bump `generation`, reset `idle_streak`, queue a continuation |
+| resume | `/cafleet-goal resume` | Status `active`, bump `generation`, reset `idle_streak` and `continuations`, queue a continuation |
 | clear | `/cafleet-goal clear` | Bump `generation`, remove the storage key and the entry |
+
+**Monotonic generations.** Generations increase monotonically per session across clear. Every operation that bumps `generation` also stores the new value under storage key `goal-generation/<sessionID>`, which clear keeps; set starts at that value plus one. A continuation queued before a clear therefore never matches a later goal's generation.
 | complete | tool `cafleet_goal_complete(summary)` | Status `complete`, bump `generation`, update the entry |
 | progress | tool `cafleet_goal_progress(note)` | Reset `idle_streak` |
 
@@ -485,7 +487,7 @@ The reason: in O2-c, one queued continuation ran after `pause`. OpenCode 2.2.0 e
 **No-progress stop.**
 - A continuation turn that ends without a `cafleet_goal_progress` or `cafleet_goal_complete` call increments `idle_streak`.
 - At 3, the goal pauses. The plugin then queues `[cafleet goal] paused: no progress in 3 consecutive continuation turns; the operator resumes it with /cafleet-goal resume`, with `resume: false`.
-- The 50-continuation cap also pauses the goal.
+- The 50-continuation cap also pauses the goal. The plugin then queues `[cafleet goal] paused: reached 50 continuations; the operator resumes it with /cafleet-goal resume`, with `resume: false`. Resume resets `continuations` to 0 together with `idle_streak`, so a resumed goal gets a fresh budget of 50.
 
 The reason: in O2-e, a mandated command failed every turn, and the goal looped without progress.
 
@@ -597,6 +599,7 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 - [x] `extensions/hermes/cafleet/__init__.py` and SPEC.md: read `CAFLEET_MEMBER_ID` and `CAFLEET_DATABASE_URL` through `agent.session_client_env` (`bound_client_env()`, `tool_env()`), refusing an unbound session (§4.1) <!-- completed: 2026-11-06T04:34 -->
 - [x] Add `extensions/opencode/cafleet.ts` (§5) <!-- completed: 2026-11-05T22:42 -->
 - [x] `extensions/opencode/cafleet.ts` and SPEC.md: queue no `[cafleet listen closed]` notice for a receiver the plugin stops or that exits by `SIGTERM` (plugin cleanup or host shutdown), which A-O saw delivered on the next launch (§5.1) <!-- completed: 2026-11-06T05:16 -->
+- [ ] Review round 1: exclude `__pycache__` from the `build.rs` embed walk and `.gitignore` it; implement the 50-continuation cap notice and the resume reset, and monotonic goal generations through `goal-generation/<sessionID>` (§5.2) in `extensions/opencode/cafleet.ts`, SPEC.md and the opencode Note rows; restate the stale-continuation Note as the mechanism with its A-O limit <!-- completed: -->
 - [x] Add `"cafleet": "deny"` to `presets/opencode/cafleet.md` and `presets/opencode/cafleet-ask.md` <!-- completed: 2026-11-05T22:42 -->
 - [x] Add the `EXTENSIONS` table to `build.rs` <!-- completed: 2026-11-05T22:42 -->
 
@@ -671,3 +674,4 @@ Steps 1–5 write the documentation before code. They restate the current verdic
 | 2026-11-06 | A-C found Codex 0.165.0's 100-submission thread-queue cap: a 200-record burst ended the forwarder at record 97. Approved by the user: a full-queue refusal is now a 1 s wait-and-retry of the same record with a 600 s limit (§3.1), the busy rule states that waiting behind earlier records passes (§1.1), and the forwarder stays tier 1 because Codex still starts every turn. |
 | 2026-11-06 | A-H found that Hermes `inject_message` returns before its dispatch commits, so three back-to-back records reordered twice. Approved by the user: the plugin awaits each record's gateway dispatch before the next (ordered injection, §4.1), adding a fourth private seam and a consent check; Hermes stays tier 2. |
 | 2026-11-06 | A-H found that `get_session_env` cannot see a member's client environment, so a member session's `cafleet_listen` succeeded. The plugin now reads `CAFLEET_MEMBER_ID` and `CAFLEET_DATABASE_URL` through `agent.session_client_env` and refuses an unbound session (§4.1); the member-refusal intent is unchanged. |
+| 2026-11-06 | A-O found a spurious `[cafleet listen closed]` after a restart: receivers the plugin stops, or that exit by `SIGTERM` at host shutdown, now queue no notice (§5.1). Review round 1: the 50-continuation cap queues a paused notice and resume resets `continuations`; goal generations stay monotonic across clear (§5.2); the recorded Claude version is 2.1.312 and the acceptance limits are stated in the Success Criteria. |
