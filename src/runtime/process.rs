@@ -393,13 +393,30 @@ impl PtySession {
         Ok(native)
     }
     pub(crate) fn try_wait(&mut self) -> Result<Option<ChildExit>> {
+        self.try_wait_with(&mut NativeProcessObservations)
+    }
+
+    /// Pins the process group only once the leader is a zombie: until it is reaped, the zombie
+    /// keeps its PID and therefore the group ID, so the scan still sees every live member.
+    fn try_wait_with(
+        &mut self,
+        observed: &mut impl ProcessObservations,
+    ) -> Result<Option<ChildExit>> {
         if self.exit.is_some() {
             return Ok(self.exit);
         }
         if self.child.is_none() {
             return Ok(None);
         }
-        self.refresh_owned()?;
+        let leader = self
+            .native
+            .as_ref()
+            .expect("a spawned child has its native identity")
+            .pid;
+        if !observed.stopped(leader)? {
+            return Ok(None);
+        }
+        self.refresh_owned_with(observed)?;
         let child = std_child(self.child.as_mut().expect("checked child"))?;
         if let Some(status) = child.try_wait().map_err(io_error)? {
             self.exit = Some(match status.signal() {
@@ -1428,6 +1445,205 @@ mod tests {
             session.refresh_owned_with(&mut script).unwrap();
             script.finished();
             assert_state(&session, &pinned, true, clock);
+        }
+
+        mod leader_wait_tests {
+            use crate::runtime::process::tests::ownership_refresh_tests::*;
+            use std::os::unix::process::CommandExt;
+
+            /// Delegates to the script and records that every group scan sees the leader unreaped.
+            struct ScanBeforeReap {
+                script: Script,
+                leader: i64,
+                scans: usize,
+            }
+
+            impl ProcessObservations for ScanBeforeReap {
+                fn members(&mut self, group: i32) -> Result<Vec<i64>> {
+                    assert!(
+                        ProcessIdentity::read(self.leader).unwrap().is_some(),
+                        "the group scan runs while the exited leader is still unreaped"
+                    );
+                    self.scans += 1;
+                    self.script.members(group)
+                }
+
+                fn identity(&mut self, pid: i64) -> Result<Option<ProcessIdentity>> {
+                    self.script.identity(pid)
+                }
+
+                fn stopped(&mut self, pid: i64) -> Result<bool> {
+                    self.script.stopped(pid)
+                }
+            }
+
+            fn leader(script: &str) -> (Box<dyn Child + Send + Sync>, ProcessIdentity) {
+                let child = std::process::Command::new("/bin/sh")
+                    .args(["-c", script])
+                    .process_group(0)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .unwrap();
+                let native = ProcessIdentity::read(i64::from(child.id()))
+                    .unwrap()
+                    .expect("a just-spawned leader is visible");
+                (Box::new(child), native)
+            }
+
+            fn running(
+                child: Box<dyn Child + Send + Sync>,
+                native: &ProcessIdentity,
+            ) -> PtySession {
+                PtySession {
+                    master: None,
+                    slave: None,
+                    io: None,
+                    child: Some(child),
+                    native: Some(native.clone()),
+                    exit: None,
+                    owned: [(native.pid, native.clone())].into_iter().collect(),
+                    group_closed: false,
+                    shutdown_clock: None,
+                }
+            }
+
+            fn exited_leader(script: &str) -> (PtySession, ProcessIdentity) {
+                let (child, native) = leader(script);
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while !stopped(native.pid).unwrap() {
+                    assert!(Instant::now() < deadline, "the fixture leader did not exit");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                (running(child, &native), native)
+            }
+
+            fn group_of(native: &ProcessIdentity) -> i32 {
+                i32::try_from(native.pid).unwrap()
+            }
+
+            fn assert_reaped(native: &ProcessIdentity) {
+                assert_eq!(
+                    nix::sys::wait::waitpid(
+                        nix::unistd::Pid::from_raw(group_of(native)),
+                        Some(nix::sys::wait::WaitPidFlag::WNOHANG)
+                    ),
+                    Err(nix::errno::Errno::ECHILD)
+                );
+            }
+
+            #[test]
+            fn try_wait_with_a_live_leader_checks_only_the_leader_and_scans_no_group() {
+                let (child, native) = leader("exec /bin/sleep 30");
+                let mut session = running(child, &native);
+                for _ in 0..3 {
+                    let mut script = Script::new([Step::Stopped(native.pid, Ok(false))]);
+                    assert_eq!(session.try_wait_with(&mut script).unwrap(), None);
+                    script.finished();
+                }
+                assert_eq!(
+                    session.owned,
+                    [(native.pid, native.clone())].into_iter().collect()
+                );
+                assert_eq!(session.exit, None);
+                assert!(session.shutdown_clock.is_none());
+                assert!(!session.group_closed);
+                assert!(
+                    ProcessIdentity::read(native.pid).unwrap().is_some(),
+                    "a live leader is not reaped"
+                );
+                let outcome = session.shutdown(ShutdownClock::new(Instant::now()));
+                assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
+                assert_reaped(&native);
+            }
+
+            #[test]
+            fn try_wait_with_a_failed_leader_check_propagates_without_a_scan_or_reap() {
+                let (mut session, native) = exited_leader("exit 0");
+                let failure = CafleetError::App("synthetic-leader-check".into());
+                let mut script = Script::new([Step::Stopped(native.pid, Err(failure.clone()))]);
+                let actual = session
+                    .try_wait_with(&mut script)
+                    .expect_err("the leader check failure must propagate");
+                assert_eq!(format!("{actual:?}"), format!("{failure:?}"));
+                script.finished();
+                assert_eq!(session.exit, None);
+                assert!(
+                    ProcessIdentity::read(native.pid).unwrap().is_some(),
+                    "a failed leader check does not reap"
+                );
+                assert_eq!(session.try_wait().unwrap(), Some(ChildExit::Code(0)));
+            }
+
+            #[test]
+            fn try_wait_with_an_exited_leader_scans_once_pins_live_members_then_reaps() {
+                let (mut session, native) = exited_leader("exit 3");
+                let mut observations = ScanBeforeReap {
+                    script: Script::new([
+                        Step::Stopped(native.pid, Ok(true)),
+                        Step::Members(group_of(&native), Ok(vec![native.pid, B])),
+                        observed(native.clone()),
+                        Step::Stopped(native.pid, Ok(true)),
+                        observed(identity(B)),
+                        Step::Stopped(B, Ok(false)),
+                        observed(native.clone()),
+                    ]),
+                    leader: native.pid,
+                    scans: 0,
+                };
+                assert_eq!(
+                    session.try_wait_with(&mut observations).unwrap(),
+                    Some(ChildExit::Code(3))
+                );
+                assert_eq!(observations.scans, 1);
+                observations.script.finished();
+                assert_eq!(
+                    session.owned,
+                    [(native.pid, native.clone()), (B, identity(B))]
+                        .into_iter()
+                        .collect()
+                );
+                assert!(!session.group_closed);
+                assert_eq!(session.exit, Some(ChildExit::Code(3)));
+                assert!(session.shutdown_clock.is_some());
+                assert_reaped(&native);
+
+                let mut settled = Script::new([]);
+                assert_eq!(
+                    session.try_wait_with(&mut settled).unwrap(),
+                    Some(ChildExit::Code(3)),
+                    "a recorded exit is returned without observing again"
+                );
+                settled.finished();
+            }
+
+            #[test]
+            fn try_wait_with_an_exited_leader_and_no_live_member_closes_the_group_then_reaps() {
+                let (mut session, native) = exited_leader("exit 0");
+                let mut observations = ScanBeforeReap {
+                    script: Script::new([
+                        Step::Stopped(native.pid, Ok(true)),
+                        Step::Members(group_of(&native), Ok(vec![native.pid])),
+                        observed(native.clone()),
+                        Step::Stopped(native.pid, Ok(true)),
+                    ]),
+                    leader: native.pid,
+                    scans: 0,
+                };
+                assert_eq!(
+                    session.try_wait_with(&mut observations).unwrap(),
+                    Some(ChildExit::Code(0))
+                );
+                assert_eq!(observations.scans, 1);
+                observations.script.finished();
+                assert!(session.group_closed);
+                assert_eq!(
+                    session.owned,
+                    [(native.pid, native.clone())].into_iter().collect()
+                );
+                assert_reaped(&native);
+            }
         }
     }
 }
