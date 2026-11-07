@@ -2204,7 +2204,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 ["first", "second", "third"].map(|body| broker.send(worker, director, body));
             let forwarder = start(
                 &broker,
-                &listen_args(director, Some(4)),
+                &listen_args(director, Some(2)),
                 Some(&accepting_codex()),
                 Launch::Session,
             );
@@ -2284,7 +2284,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             assert_eq!(broker.record_text(exceeds).len(), RECORD_LIMIT + 1);
             let forwarder = start(
                 &broker,
-                &listen_args(director, Some(3)),
+                &listen_args(director, Some(2)),
                 Some(&accepting_codex()),
                 Launch::Session,
             );

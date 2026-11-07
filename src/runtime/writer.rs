@@ -1684,32 +1684,57 @@ mod tests {
             storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
         let policy=storage::evidence::EvidencePolicy::redacted(&serde_json::json!({"schema_version":1,"patterns":["absent-fixture-canary"],"sensitive_rules":[]}),&["runner-lifecycle"]).unwrap();
         let until = Instant::now() + Duration::from_secs(30);
+        let run = fixture.fixture.run.clone();
         let large = |sequence| {
-            let mut value = transition(&fixture, sequence);
+            let mut value = run_transition(&run, sequence);
             let mut raw = value.evidence_json.clone();
             raw["sensitive"] = serde_json::json!(false);
             raw["excerpt"] = serde_json::json!("x".repeat(6000));
             value.evidence_json = policy.apply(&raw).unwrap();
             value.kind = RuntimeEventKind::PermissionDeniedObserved;
             value.cause_json = None;
-            value
+            let bytes = frame(&value);
+            (value, bytes)
         };
+        let capacity = 16 * 1024 * 1024;
+        let count = i64::try_from(capacity / large(1).1.len() + 2).unwrap();
+        let chunk = (count + 7) / 8;
+        let frames: Vec<_> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|worker| {
+                    let large = &large;
+                    scope.spawn(move || {
+                        (worker * chunk + 1..=(worker * chunk + chunk).min(count))
+                            .map(large)
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|worker| worker.join().unwrap())
+                .collect()
+        });
         let mut fitting = Vec::new();
         let mut used = 0;
-        let overflow = (1..=4096)
-            .map(large)
-            .find(|value| {
-                let size = frame(value).len();
-                if used + size > 16 * 1024 * 1024 {
+        let (overflow, _) = frames
+            .into_iter()
+            .find(|(value, bytes)| {
+                if used + bytes.len() > capacity {
                     return true;
                 }
-                used += size;
-                fitting.push(value.clone());
+                used += bytes.len();
+                fitting.push((value.clone(), bytes.clone()));
                 false
             })
             .expect("fixture must reach the fixed outbox capacity");
-        let last = fitting.pop().unwrap();
-        let io = FaultIo::from_bytes(fitting.iter().flat_map(frame).collect());
+        let (last, _) = fitting.pop().unwrap();
+        let io = FaultIo::from_bytes(
+            fitting
+                .iter()
+                .flat_map(|(_, bytes)| bytes.clone())
+                .collect(),
+        );
         let mut outbox = open(&fixture, io.clone());
         assert!(outbox.scan(until).unwrap().incomplete_tail.is_none());
         outbox.append_synced(&last, until).unwrap();
@@ -1717,7 +1742,7 @@ mod tests {
         let before = io.snapshot_bytes();
         assert!(outbox.append_synced(&overflow, until).is_err());
         assert_eq!(io.snapshot_bytes(), before);
-        assert!(used <= 16 * 1024 * 1024);
+        assert!(used <= capacity);
     }
 
     #[test]
@@ -2886,14 +2911,19 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn transition(fixture: &WriterFixture, sequence: i64) -> ObservedTransition {
+        run_transition(&fixture.fixture.run, sequence)
+    }
+
+    /// The coverage-unknown transition `sequence` of `run`, usable off the fixture's thread.
+    pub(crate) fn run_transition(run: &storage::RunRecord, sequence: i64) -> ObservedTransition {
         let evidence = storage::evidence::run_metadata(
-            &fixture.fixture.run,
+            run,
             "runner-lifecycle",
             u64::try_from(sequence).unwrap(),
         )
         .unwrap();
         ObservedTransition {
-            run_id: fixture.fixture.run.run_id,
+            run_id: run.run_id,
             event_seq: sequence,
             episode_seq: None,
             kind: RuntimeEventKind::CoverageUnknown,

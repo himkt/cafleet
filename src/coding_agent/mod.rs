@@ -1237,17 +1237,26 @@ mod tests {
                 ),
             );
             // A stub launch can take about half a second on a macOS host, so the bound leaves the
-            // stub time to record its pid and reach its sleep before the probe times out.
+            // stub time to record its pid and reach its sleep before the probe times out. A loaded
+            // host can still kill the stub before it records its pid; only an attempt whose stub
+            // recorded its pid can show the reap, so such an attempt is repeated.
             let bound = Duration::from_secs(2);
-            let start = Instant::now();
-            let result = CodingAgent::Claude.probe_native_version(&path, start + bound);
-            assert!(result.is_err());
-            assert!(
-                start.elapsed() < bound + Duration::from_secs(1),
-                "{:?}",
-                start.elapsed()
-            );
-            let pid: i32 = std::fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+            let pid = (0..3)
+                .find_map(|_| {
+                    let start = Instant::now();
+                    let result = CodingAgent::Claude.probe_native_version(&path, start + bound);
+                    assert!(result.is_err());
+                    assert!(
+                        start.elapsed() < bound + Duration::from_secs(1),
+                        "{:?}",
+                        start.elapsed()
+                    );
+                    std::fs::read_to_string(&pid_file)
+                        .ok()
+                        .filter(|pid| !pid.is_empty())
+                })
+                .expect("the stub records its pid within the bound in one of three attempts");
+            let pid: i32 = pid.parse().unwrap();
             assert_eq!(
                 nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None),
                 Err(nix::errno::Errno::ESRCH),
