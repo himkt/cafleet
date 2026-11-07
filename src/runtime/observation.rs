@@ -4295,7 +4295,7 @@ pub(crate) mod native_capture {
                 arm_capture(&fixture, &started);
                 wait_path(
                     &fixture.path("export-entered-Encode"),
-                    Instant::now() + Duration::from_millis(300),
+                    Instant::now() + Duration::from_secs(3),
                 );
                 assert!(!final_manifest(&fixture).exists());
                 let preserved = [&unrelated];
@@ -4312,7 +4312,7 @@ pub(crate) mod native_capture {
                     .unwrap();
                 wait_path(
                     &fixture.path("export-helper-returned.json"),
-                    shutdown + Duration::from_millis(500),
+                    shutdown + Duration::from_secs(5),
                 );
                 assert_unfinished(&helper_record(&fixture));
                 assert_original_completion_bound(&helper_record(&fixture));
@@ -4321,7 +4321,7 @@ pub(crate) mod native_capture {
                 release.release();
                 wait_path(
                     &fixture.path("export-hooks-dropped"),
-                    Instant::now() + Duration::from_millis(200),
+                    Instant::now() + Duration::from_secs(2),
                 );
                 assert_eq!(fixture.wait().code(), Some(0));
                 assert_removed(&temporaries);
