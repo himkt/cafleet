@@ -7191,6 +7191,10 @@ pub(crate) mod native_capture {
                         "Use the terminal tool to run exactly {} {argument} as one foreground command. Preserve any native approval request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
                         helper.display()
                     ),
+                    (Some(argument), CodingAgent::Pi) => format!(
+                        "Use the bash tool to run exactly {} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
+                        helper.display()
+                    ),
                     (None, _) => DRIVER_TOOL_FREE_PROMPT.into(),
                 }
             }

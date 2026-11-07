@@ -557,7 +557,7 @@ mod tests {
 
     fn expected_presets(agent: CodingAgent, base: &Path) -> Vec<(&'static str, PathBuf)> {
         match agent {
-            CodingAgent::Claude | CodingAgent::Hermes => vec![],
+            CodingAgent::Claude | CodingAgent::Hermes | CodingAgent::Pi => vec![],
             CodingAgent::Codex => vec![("codex/cafleet.rules", base.join("rules/cafleet.rules"))],
             CodingAgent::Opencode => vec![
                 ("opencode/cafleet.md", base.join("agents/cafleet.md")),
@@ -578,6 +578,7 @@ mod tests {
             CodingAgent::Claude | CodingAgent::Codex => return vec![],
             CodingAgent::Opencode => (OPENCODE_EXTENSION_PREFIX, base.join("plugins")),
             CodingAgent::Hermes => (HERMES_EXTENSION_PREFIX, fake.plugin_dir()),
+            CodingAgent::Pi => ("pi/", base.join("extensions")),
         };
         embedded_extension(prefix)
             .into_iter()
@@ -590,6 +591,7 @@ mod tests {
             CodingAgent::Claude | CodingAgent::Codex => None,
             CodingAgent::Opencode => Some(base.join("plugins/cafleet.executable")),
             CodingAgent::Hermes => Some(fake.plugin_dir().join("executable")),
+            CodingAgent::Pi => Some(base.join("extensions/cafleet.executable")),
         }
     }
 
@@ -680,7 +682,7 @@ mod tests {
                 symlink(external.join("keep"), target).unwrap();
             }
             match agent {
-                CodingAgent::Opencode => {
+                CodingAgent::Opencode | CodingAgent::Pi => {
                     for (_, target) in &extensions {
                         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
                         symlink(external.join("keep"), target).unwrap();
@@ -778,7 +780,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             match agent {
-                CodingAgent::Opencode => expected.extend(
+                CodingAgent::Opencode | CodingAgent::Pi => expected.extend(
                     extensions
                         .iter()
                         .map(|(_, target)| extension_line(*agent, "9.8.7", target)),

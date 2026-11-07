@@ -2259,6 +2259,12 @@ mod tests {
         use crate::db::test_support::table_snapshot;
 
         fn invalid_creation(backend: CodingAgent, extra: &[String]) -> CafleetError {
+            let mut extra = extra.to_vec();
+            extra.push("literal assignment".into());
+            invalid_creation_with_body(backend, &extra)
+        }
+
+        fn invalid_creation_with_body(backend: CodingAgent, extra: &[String]) -> CafleetError {
             let dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&dir);
             let (fleet, _) = crate::broker::fleets::test_support::create_fleet_fixture(
@@ -2272,7 +2278,6 @@ mod tests {
             arguments[4] = fleet.to_string();
             arguments.extend(["--coding-agent".into(), backend.name().into()]);
             arguments.extend_from_slice(extra);
-            arguments.push("literal assignment".into());
             let Command::Member(command) = CliArgs::try_parse_from(arguments).unwrap().command
             else {
                 panic!("member command expected")
@@ -2374,6 +2379,39 @@ mod tests {
             for choice in backend.policy_choices() {
                 assert!(failure.message().contains(choice));
             }
+        }
+
+        #[test]
+        fn pi_prompt_beginning_with_an_at_sign_fails_before_any_creation_effect() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("prompt.txt");
+            std::fs::write(&file, "@notes.md review this").unwrap();
+            for extra in [
+                vec!["@notes.md review this".to_owned()],
+                vec!["--file".to_owned(), file.to_str().unwrap().to_owned()],
+            ] {
+                let failure = invalid_creation_with_body(CodingAgent::Pi, &extra);
+                assert_eq!(failure.exit_code(), 2);
+                assert_eq!(
+                    failure.message(),
+                    "a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment)."
+                );
+            }
+        }
+
+        #[test]
+        fn pi_model_with_a_thinking_suffix_fails_before_any_creation_effect() {
+            let failure = invalid_creation(
+                CodingAgent::Pi,
+                &[
+                    "--model".into(),
+                    "openrouter/moonshotai/kimi-k2.6:high".into(),
+                ],
+            );
+            assert_eq!(
+                failure.message(),
+                "--model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got 'openrouter/moonshotai/kimi-k2.6:high')."
+            );
         }
 
         #[test]
