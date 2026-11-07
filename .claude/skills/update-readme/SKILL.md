@@ -16,6 +16,6 @@ Retain the title/demo/pitch, Install, Documentation and License surfaces. Align 
 
 ## SPEC maintenance
 
-SPEC owns every contract and is the self-contained reimplementation specification. Reconcile it with the shipped binary and code: current CLI options/defaults, environment, schema, native input, finite receiving, authored errors, JSON order, text layouts, runtime, multiplexer and backend behavior. Preserve its numbered structure and required detail, update the affected contracts together, remove obsolete concepts completely and keep the description affirmative.
+SPEC owns every contract and is the self-contained reimplementation specification. Reconcile it with the shipped binary and code: current CLI options/defaults, environment, schema, native input, finite receiving, authored errors, JSON order, text layouts, runtime, multiplexer and backend behavior. Preserve its section numbering (an empty numbered section is removed without renumbering the others) and required detail, update the affected contracts together, remove obsolete concepts completely and keep the description affirmative.
 
 Retain exact current argv, SQL and error blocks, and reference bundled preset files by path. Verify `§` cross-references against the section headings. Report the focused validation performed and material limitations. Write all maintained artifacts in English.
