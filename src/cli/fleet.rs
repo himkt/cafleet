@@ -408,6 +408,24 @@ fn revalidate_member(
 
 /// `scope` revalidates the caller's wider deletion state, such as a fleet's
 /// placement set, before each irreversible step up to the pane close.
+/// Waits within `deadline` for the runner to finish once a settlement has ended its client: until
+/// it exits or settles the run it still holds the run, and recovery would read the member as live.
+fn await_runner_exit(
+    conn: &mut Connection,
+    run_id: i64,
+    deadline: Deadline,
+) -> Result<(), CafleetError> {
+    loop {
+        let run = with_database_budget(conn, deadline, |conn| {
+            crate::broker::runtime::get_run(conn, run_id)
+        })?;
+        if !run.status.terminal() || run.is_settled() || !run.owner_process().matches()? {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 pub(crate) fn end_member(
     conn: &mut Connection,
     settings: &Settings,
@@ -444,6 +462,7 @@ pub(crate) fn end_member(
             crate::coding_agent::hermes::settlement_deadline(),
         )?;
         *deadline = deadline.extended_by(started.elapsed());
+        await_runner_exit(conn, run.run_id, *deadline)?;
     }
     let deadline = *deadline;
     with_database_budget(conn, deadline, |conn| {
@@ -2242,5 +2261,60 @@ mod tests {
         host.close_pane(&placement, fresh).unwrap();
         host.restore_layout().unwrap();
         assert_eq!(runner.run_argvs().len(), 1, "{:?}", runner.run_argvs());
+    }
+
+    #[test]
+    fn deletion_waits_for_the_runner_a_settlement_left_running_only_within_its_deadline() {
+        let mut fixture = Fixture::new();
+        let owned_by = |conn: &Connection, owner: &crate::runtime::ProcessIdentity| {
+            conn.execute(
+                "UPDATE member_runs SET status='exited', cleanup_state='incomplete', owner_pid=?1, owner_start_identity=?2 WHERE run_id=?3",
+                rusqlite::params![owner.pid, owner.start_identity, fixture.run.run_id],
+            )
+            .unwrap();
+        };
+        let mut runner = std::process::Command::new("sleep")
+            .arg("0.3")
+            .spawn()
+            .unwrap();
+        let identity = crate::runtime::ProcessIdentity::read(i64::from(runner.id()))
+            .unwrap()
+            .unwrap();
+        owned_by(&fixture.conn, &identity);
+        let reaper = std::thread::spawn(move || runner.wait().unwrap());
+        let started = Instant::now();
+        crate::cli::fleet::await_runner_exit(
+            &mut fixture.conn,
+            fixture.run.run_id,
+            crate::time::Deadline::new(),
+        )
+        .unwrap();
+        assert!(
+            started.elapsed() >= Duration::from_millis(250),
+            "{:?}",
+            started.elapsed()
+        );
+        reaper.join().unwrap();
+
+        owned_by(
+            &fixture.conn,
+            &crate::runtime::ProcessIdentity::current().unwrap(),
+        );
+        let started = Instant::now();
+        let error = crate::cli::fleet::await_runner_exit(
+            &mut fixture.conn,
+            fixture.run.run_id,
+            crate::time::Deadline::until(started + Duration::from_millis(100)),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, crate::error::CafleetError::DeadlineExceeded),
+            "{error:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
     }
 }
