@@ -59,7 +59,7 @@ cafleet member create --fleet-id <fleet-id> \
 | `--permission-mode` | Per [Member launch policy](#member-launch-policy). |
 | `--file PATH` | Every team-skill spawn, pointing at its audit render (§ *Member Create — Scratch and audit files*); a positional `PROMPT` suits only trivial one-line spawns |
 
-`--model` and `--effort` apply only at spawn time, and the effort level is never persisted. Spawn preflight failures — a missing backend binary, a missing or unreadable preset, a failed backend configuration preflight — exit 1 before registration. [member create](../reference/cli.md#member-create) owns per-backend flag syntax, validation, forwarding and failure compensation; [Error messages](../reference/cli.md#error-messages) owns exact text; each backend's section in [coding-agents.md](../reference/coding-agents.md) owns its deltas.
+`--model` and `--effort` apply only at spawn time, and the effort level is never persisted. Spawn preflight failures — a missing backend binary, a missing or unreadable preset or extension, a failed backend configuration preflight — exit 1 before registration. [member create](../reference/cli.md#member-create) owns per-backend flag syntax, validation, forwarding and failure compensation; [Error messages](../reference/cli.md#error-messages) owns exact text; each backend's section in [coding-agents.md](../reference/coding-agents.md) owns its deltas.
 
 ### Member launch policy
 
@@ -144,6 +144,7 @@ Determine CWD and HOME and check every backend's config root, regardless of the 
 | codex | `~/.codex` |
 | opencode | `~/.config/opencode` |
 | hermes | `~/.hermes` |
+| pi | `~/.pi/agent` |
 
 When CWD is neither HOME nor a config root/subtree, BASE is literal CWD, including ordinary projects under HOME. Otherwise ask through {decision_surface}: `Select the base directory for output files:`. Offer `/tmp/cafleet (recommended)`, literal CWD and free text. Resolve relative free text against CWD; persist nothing, so later HOME/config-scope resolution asks again. A selected temporary BASE is valid; use the selected root consistently.
 
@@ -269,7 +270,7 @@ The host owns continuation, native tools and user gates; CAFleet persists messag
 1. Complete [Required reading](#required-reading) and the supplied host rules, then resolve each member's backend/model/effort before writing its prompt.
 2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues. Preserve the user's host continuation controls as supplied.
 3. Register the current Director with `cafleet fleet create --name <name> --coding-agent <backend> --json` and capture literal fleet and Director IDs; every later command targets the recorded placement. A Hermes Director passes `--pane <pane-id>` read through its leading-`!` local shell, and `--mux-server <server>` selects a non-default server ([fleet commands](../reference/cli.md#fleet-commands)). With a custom database, pass `--database-url <url>` on every command, this one included.
-4. Arm one `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md): a native tool, the `--codex-thread` forwarder or a CAFleet plugin tool. Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. Every receiver failure or closure follows [receiver recovery](#receiver-recovery).
+4. Arm one `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md): a native tool, the `--codex-thread` forwarder or a CAFleet plugin or extension tool. Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. Every receiver failure or closure follows [receiver recovery](#receiver-recovery).
 5. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
 6. Receive each member's ready and ACK it. Dispatch that member's assignment as soon as its inputs exist; other members' readiness does not delay it.
 7. Keep native reception active and follow [Director wake](#director-wake) for the fleet's lifetime; [Shutdown](#shutdown) ends it through fleet deletion.
@@ -302,6 +303,7 @@ Retain pending messages across recovery. Repeated receiver failures require diag
 | Forwarded `closed` record (Codex `--codex-thread`) | Read the retained exec session once for its final output, then follow the row for the record's reason |
 | `closed` `session_exited` | The owning Codex session ended with its forwarder; a resumed or new session starts one fresh receiver |
 | `[cafleet listen closed]` turn | The receiver exited without a normal closure; inspect the diagnostic, then start one replacement |
+| `[cafleet listen closed] the extension runtime was replaced (<reason>); …` turn | The extension stopped the old receiver when its runtime was replaced; start one replacement in the current session |
 | Extension tool missing, or an `ok: false` naming `cafleet setup` | Run `cafleet doctor`, which checks missing or differing extensions and the Hermes enablement, and route the `cafleet setup --coding-agent <agent>` fix it names through the operator; meanwhile use manual reads |
 | Extension tool permission refused | Route the permission rule in the backend's Note → applies at row through the operator; meanwhile use manual reads |
 | Any other extension `ok: false` | Surface its error text to the operator; meanwhile use manual reads |

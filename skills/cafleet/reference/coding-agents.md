@@ -411,3 +411,59 @@ Reception makes no pane input and leaves `/goal` authority with the host.
 |---|---|---|
 | Director | `yes` | `goal` `native` `/goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both on the TUI client (2026.9.24) |
 | Member | `yes` | Default `smart` approval-prompt coverage (ESCALATE and override); the Hermes profile from `2026.9.24` |
+
+## pi
+
+### Runtime bindings
+
+| Placeholder | Value |
+|---|---|
+| `{decision_surface}` | the `cafleet_ask` tool of the CAFleet pi extension, with the literal Director ID, one question and its choices; an `answered` result records the decision (members relay) |
+| `{permission_flags}` | `--cafleet-gate cafleet` (default mode `cafleet`, class `auto`: the CAFleet member gate's deny-by-default bash allowlist and protected `.git`/`.pi`/`.agents` directories, no form); `--cafleet-gate cafleet-ask` (class `manual`: an unmatched bash command opens the gate's approval form) when `--permission-mode cafleet-ask` is selected |
+| `{pane_title}` | `pi --name <member-name>`; pi titles the terminal `π - <name> - <cwd basename>` |
+| `{skill_loader}` | pi's skill loader: pi lists each installed skill's name, description and `SKILL.md` path; read that `SKILL.md`, its own backend section and role-required references with the `read` tool |
+| `{effort_levels}` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`, forwarded as `--thinking <level>`; pi clamps the level to the model) |
+
+### Role defaults
+
+| Placeholder | Value |
+|---|---|
+| `{reviewer_model}` | `—` (omit `--model`; the operator's configured default applies) |
+| `{reviewer_effort}` | `—` |
+| `{other_model}` | `—` (omit `--model`; the operator's configured default applies) |
+| `{other_effort}` | `—` |
+
+### Model catalog
+
+No maintained catalog. `--model VALUE` passes through verbatim as pi's `--model VALUE` (`provider/id`, an exact id or a fuzzy name) without a `:<thinking>` suffix, and pi rejects unknown models; pass the thinking level with `--effort`. Omitted, the member uses `defaultProvider` and `defaultModel` from `<pi base>/settings.json`, where `<pi base>` is `$PI_CODING_AGENT_DIR`, else `~/.pi/agent`.
+
+### Note → applies at
+
+| Note | Applies at |
+|---|---|
+| The CAFleet pi extension (`<pi base>/extensions/cafleet.ts` with its `cafleet.executable` record) auto-loads in every pi session. It provides `cafleet_listen`, `cafleet_ask`, `/cafleet-goal` and the goal tools, each verifying its literal `director_id` and otherwise refusing with `cafleet tools run only in a Director session: <stderr>`. | `{decision_surface}`; [setup and doctor](cli.md#setup-and-doctor); [Director wake](../roles/director.md#director-wake); [member routing](../roles/member.md#reconsider-then-route) |
+| Default `cafleet` mode (class `auto`): the member gate runs each allowlisted simple command. It blocks every other bash command and every tool outside bash, read, grep, find, ls, edit and write, with a reason ending in `route the command to the Director if it is required`; route a required blocked command. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [Director dispatch](../roles/director.md#director-side-dispatch) |
+| In both launch modes, `edit` and `write` are blocked below `.git/`, `.pi/` and `.agents/` with `the CAFleet member gate protects .git, .pi and .agents from edit and write; route the change to the Director if it is required`, because Git hooks and project pi resources run outside the allowlist in later sessions. The path check follows no symbolic link. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [Director dispatch](../roles/director.md#director-side-dispatch) |
+| Explicit `cafleet-ask` (class `manual`): an unmatched bash command opens the `CAFleet member gate` form. The member waits while the Director answers it; a deny returns `the operator denied this command` to the member, which continues its run. | `{permission_flags}`; [runtime procedure](../roles/director.md#consume-observed-interactions); [native interactions](../roles/member.md#native-interactions) |
+| A pane runs `pi --cafleet-gate <mode> --no-approve --tui-mode fullscreen --name <name>`; optional `--model` and `--thinking` follow, then `--` and the prompt, as a fresh session. `member create` forwards a set `PI_CODING_AGENT_DIR`, and a gated member whose extension cannot register `--cafleet-gate` exits at startup (`runner_exited`). | `{permission_flags}`; [member create](cli.md#member-create) |
+| Leading-`!` input runs the command and stores its output without starting a turn. After `member exec`, send an explicit continuation message so the member acts on the output. | [Director dispatch](../roles/director.md#director-side-dispatch); [member exec](cli.md#member-exec) |
+| Escape interrupts a running pi turn and dismisses an open gate form, and Enter while the member works queues the text as a steering message. | [Command execution](../roles/member.md#command-execution); [member prompt](cli.md#member-prompt) |
+| A pi Director runs plain `pi` from the project directory, registers with plain `fleet create`, and replaces its receiver after `/reload`, `/new`, `/resume` or `/fork` when the runtime-replaced notice arrives. | [Spawn Protocol](../roles/director.md#spawn-protocol); [receiver recovery](../roles/director.md#receiver-recovery) |
+
+#### pi native Director reception
+
+1. Launch the Director with plain `pi` from the project directory, so the CAFleet pi extension loads, and register with `cafleet fleet create --name <name> --coding-agent pi --json`.
+2. After registration, call `cafleet_listen` with the literal Director ID as `director_id`, adding `database_url` when the fleet uses a non-default database. Require `ok` and the `ready` record; a repeat call returns the existing receiver with `existing: true`.
+3. Each record arrives as a `[cafleet listen record]` message: it starts a turn when you are idle and otherwise arrives at the end of the running turn. Consume it, reconcile with `cafleet message poll <director-id> --json`, record deferred actions, ACK and act within authorization.
+4. The operator sets, pauses, resumes and clears the goal with `/cafleet-goal <objective>`, `/cafleet-goal pause`, `/cafleet-goal resume` and `/cafleet-goal clear`; `/cafleet-goal status` and `cafleet_goal_status` report it.
+5. While working toward an active goal, report each step with `cafleet_goal_progress` and finish with `cafleet_goal_complete`, passing `director_id`, and `database_url` when needed, on every goal tool. Reception itself calls no goal tool.
+6. A `[cafleet listen closed]` message, including the runtime-replaced notice after `/reload`, `/new`, `/resume` or `/fork`, an `ok: false` result or a missing tool follows [receiver recovery](../roles/director.md#receiver-recovery). A missing tool or an executable-record error is fixed by `cafleet setup --coding-agent pi`, which `cafleet doctor` names.
+
+After a restart on the same session (`pi --continue`), re-arm with `cafleet_listen` on the first turn; that turn also continues an active goal. Quitting pi ends the receiver. Reception makes no pane input.
+
+### Role eligibility
+
+| Role | Eligible | Basis |
+|---|---|---|
+| Director | `no` | `goal` `extension` and `listen` `extension` `subscribe` through the CAFleet pi extension (1.5.0 minimum): not established (acceptance run A-P pending) |
+| Member | `no` | The omitted `cafleet` gate mode and the pi profile from `1.5.0`: not established (acceptance run A-M pending) |

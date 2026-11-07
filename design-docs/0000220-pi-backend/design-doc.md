@@ -1,7 +1,7 @@
 # pi coding-agent backend
 
 **Status**: Approved
-**Progress**: 14/52 tasks complete
+**Progress**: 19/52 tasks complete
 **Last Updated**: 2026-11-07
 
 ## Overview
@@ -552,14 +552,14 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 
 ### Step 4: Skills
 
-- [ ] `skills/cafleet/reference/coding-agents.md`: `## pi` with the §6 subsections and the native reception recipe (§4.6) <!-- completed: -->
-- [ ] `skills/cafleet/reference/cli.md`: config-location override list, `member create` pi argv and model rule, permission choices and mode classes, the effort row, the version-probe example, setup lines and the `pi.extension` doctor row <!-- completed: -->
-- [ ] `skills/cafleet/roles/director.md`: the pi config-dir row, and receiver-recovery wording covering the runtime-replaced notice <!-- completed: -->
-- [ ] `skills/cafleet/reference/model-selection.md`: pi resolution rows (no catalog, inference never selects pi, explicit pass-through without a thinking suffix) <!-- completed: -->
+- [x] `skills/cafleet/reference/coding-agents.md`: `## pi` with the §6 subsections and the native reception recipe (§4.6) <!-- completed: 2026-11-07T23:55 -->
+- [x] `skills/cafleet/reference/cli.md`: config-location override list, `member create` pi argv and model rule, permission choices and mode classes, the effort row, the version-probe example, setup lines and the `pi.extension` doctor row <!-- completed: 2026-11-07T23:55 -->
+- [x] `skills/cafleet/roles/director.md`: the pi config-dir row, and receiver-recovery wording covering the runtime-replaced notice <!-- completed: 2026-11-07T23:55 -->
+- [x] `skills/cafleet/reference/model-selection.md`: pi resolution rows (no catalog, inference never selects pi, explicit pass-through without a thinking suffix) <!-- completed: 2026-11-07T23:55 -->
 
 ### Step 5: Project rules
 
-- [ ] Confirm that `.claude/rules/` describes the change through existing backend-neutral rules; edit only a rule whose convention changes <!-- completed: -->
+- [x] Confirm that `.claude/rules/` describes the change through existing backend-neutral rules; edit only a rule whose convention changes <!-- completed: 2026-11-07T23:55 -->
 
 ### Step 6: Registry, argv and validation
 
