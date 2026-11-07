@@ -30,34 +30,29 @@ Exact command facts for running CAFleet and interpreting its results.
 
 ## Positional subject ids
 
-Place the complete DB-assigned integer subject immediately after its subcommand. Related fleet/recipient state comes from that row; missing or malformed IDs use native parser errors, exit 2. Members read literal `FLEET ID:`, `YOUR MEMBER ID:`, `DIRECTOR MEMBER ID:` and `CODING AGENT:` spawn lines. `message send` requires active integer `--from-member-id` and `--to-member-id` in the same live fleet; the sender determines the fleet.
+Place the complete DB-assigned integer subject immediately after its subcommand. Related fleet/recipient state comes from that row; missing or malformed IDs use native parser errors, exit 2. Members read literal `FLEET ID:`, `YOUR MEMBER ID:`, `DIRECTOR MEMBER ID:`, `CODING AGENT:` and `DATABASE URL:` spawn lines. `message send` requires active integer `--from-member-id` and `--to-member-id` in the same live fleet; the sender determines the fleet.
 
 ## Director-only command guard
 
-The Director-only commands are exactly `member prompt`, `member exec`, `member press`, `member recover`, `permission respond` and `input reconcile`. When `CAFLEET_MEMBER_ID` is present with any value, including empty, each exits 1 after argument parsing and before reading settings or opening the database or multiplexer, prints nothing on stdout and writes this to stderr:
+The Director-only commands are exactly `member prompt`, `member exec`, `member press`, `member recover`, `permission respond` and `input reconcile`. Each requires `--from-member-id <director-member-id>`, a positive integer (missing: parse error, exit 2); `permission respond` takes it as its pinned Director. After parsing and the schema-version guard, and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet (a member's fleet, or the fleet of the run owning an input or interaction) and requires it live with that ID as its root Director. An unknown subject keeps its not-found error, which comes first. Otherwise it exits 1, prints nothing on stdout and writes this to stderr:
 
 ```
-Error: 'cafleet <command>' is a Director-only command and this process runs inside CAFleet member <value> (CAFLEET_MEMBER_ID is set); send the request to your Director.
+Error: 'cafleet <command>' is a Director-only command and member <id> is not the root Director of fleet <fleet_id>; send the request to your Director.
 ```
 
-Every other command, including `permission inspect`, `input show`, `event show`, `member list`, `member capture` and the lifecycle commands, runs the same with or without the variable. The guard is an accident guard, not a security boundary, and holds when the backend passes the member's environment to its tool commands; Hermes passes it through `terminal.client_env_passthrough`.
+Every other command, including `permission inspect`, `input show`, `event show`, `member list`, `member capture` and the lifecycle commands, takes no caller ID. The guard is cooperative, not a security boundary: it stops a member that passes its own `YOUR MEMBER ID:`, and a member that copies `DIRECTOR MEMBER ID:` passes it. A Director-only command the Director dispatches into a member pane with `member exec` is checked by the ID it carries.
 
-## Environment variables
+## Database selection
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `CAFLEET_DATABASE_URL` | `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db`, `<VERSION>` being the package version (e.g. `0.31.1`) | SQLite path |
-| `CAFLEET_MULTIPLEXER` | Auto-detect | `tmux` or `herdr` override |
-| `CAFLEET_MAX_TEXT_LEN` | `200` | CLI text-output body codepoint limit |
-| `CAFLEET_MEMBER_ID` | Unset | Set by the runner in each member's spawn environment. Presence refuses the Director-only commands (§ Director-only command guard); the value is shown, never parsed. |
+The global option `--database-url <url>`, accepted before or after the subcommand, selects the SQLite database; omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the package version (e.g. `0.31.1`). Explicit `sqlite:///<path>` resolves relative paths against cwd and leaves literal tildes unexpanded. CAFleet reads no `CAFLEET_*` environment variable.
 
-Explicit `sqlite:///<path>` resolves relative paths against cwd and leaves literal tildes unexpanded. Counts require nonnegative integers: `<NAME> must be a non-negative integer (got '<value>')`.
+A member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. One that omits it on a custom-database fleet reaches the default database: absent, the command fails with `no cafleet database; run 'cafleet setup'`; present, its literal IDs may match another fleet.
 
-Config-location overrides `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR` and `HERMES_HOME` (default `~/.hermes`) require absolute paths: `Error: <VAR> must be an absolute path (got '<value>')`, exit 1. Creation forwards `CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID` and the selected backend's set override.
+Config-location overrides `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR` and `HERMES_HOME` (default `~/.hermes`) require absolute paths: `Error: <VAR> must be an absolute path (got '<value>')`, exit 1; a set override or `HOME` that is not valid UTF-8 fails with `Error: <VAR> is not valid UTF-8`, exit 1. Creation forwards only the selected backend's set override, and launches the runner with `--database-url sqlite:///<canonical path>`.
 
 ## Output shapes
 
-Use JSON for complete untruncated text. Message records contain `message_id`, `from_member_id`, integer `to_member_id`, `created_at`, `status_state`, `status_timestamp` and `text`. ACK changes `input_required` to `completed` and stamps consumption independently of assignment progress.
+Use JSON for complete untruncated text; text output truncates message bodies at a fixed 200 codepoints. Message records contain `message_id`, `from_member_id`, integer `to_member_id`, `created_at`, `status_state`, `status_timestamp` and `text`. ACK changes `input_required` to `completed` and stamps consumption independently of assignment progress.
 
 Fleet creation returns `fleet_id`, `name`, `created_at` and `director` identity/description/registration/placement; lists return records and show includes nullable `deleted_at`. Deletion returns `fleet_id`, `deregistered_count` and `members`. Send returns `message`, `notification_sent`, `input_id`, `delivery`; poll returns an array; ACK/show return `message`. Member deletion returns `member_id`, `pane_status`; capture returns `member_id`, `pane_id`, `lines`, `content`, `captured_at`, `content_sha256`. Runtime commands define their fields below.
 
@@ -73,7 +68,7 @@ Place `--json` before any `--` literal-key separator. JSON is compact UTF-8; app
 
 Broker prefix rules such as `Bash(cafleet message *)` cover finite wait/listen, including `cafleet message listen ID --timeout 300`; authorize Monitor separately. Literal IDs preserve matching. An operator may keep `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` under ask to confirm each of the Director's explicit pane-input dispatches; ask outranks allow. Director permission responses remain subject to effective native/managed rules.
 
-Claude receives `Bash(cafleet message *)` at spawn. The Codex rules file allows every `cafleet` command, and the OpenCode presets allow `cafleet *`; the Director-only commands refuse inside a member through the runner guard (§ Director-only command guard). Members retain broker reception/evidence-routing authority.
+Claude receives `Bash(cafleet message *)` at spawn. The Codex rules file allows every `cafleet` command, and the OpenCode presets allow `cafleet *`; the Director-only commands refuse a member's own ID (§ Director-only command guard). Members retain broker reception/evidence-routing authority.
 
 ## Text bodies
 
@@ -81,7 +76,24 @@ Send/create require exactly one positional body or `--file PATH`; `--file -` rea
 
 ## Fleet commands
 
-`cafleet fleet create --name NAME --coding-agent AGENT [--json]` registers the current tmux/herdr pane as root Director without spawning. Outside a session: `cafleet fleet create must be run inside a tmux or herdr session`. Director messages use broker reception.
+`cafleet fleet create --name NAME --coding-agent AGENT [--pane PANE_ID [--mux-server SERVER]] [--json]` registers the Director's pane and its multiplexer server as the root Director's placement without spawning. It and doctor's `multiplexer` row are the only readers of the caller's multiplexer environment; every later command targets the recorded server (`tmux -S <socket>` or `herdr --session <name>`) and placement. A failed `TMUX`/`HERDR_ENV` detection gives `cafleet fleet create must be run inside a tmux or herdr session`. Director messages use broker reception.
+
+| Input | Source, first match wins |
+|---|---|
+| tmux server | `--mux-server`; everything before the last two commas of `TMUX`; `tmux display-message -p '#{socket_path}'` |
+| herdr session | `--mux-server`; `HERDR_SESSION`; the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; `default` |
+| Director pane | `--pane`; `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr) |
+
+Each failure exits 1 before any write:
+
+| Condition | Error |
+|---|---|
+| tmux finds no server | `Error: no tmux server found; pass --mux-server <socket path>` |
+| The pane is not on the chosen server (a tmux reply with an empty field or another `pane_id`) | `Error: pane <pane-id> was not found on the <backend> server <server>; pass --pane and --mux-server for the Director's pane` |
+| herdr without `--pane` and with `HERDR_PANE_ID` unset | `Error: cafleet fleet create cannot identify its herdr pane because HERDR_PANE_ID is not set; pass --pane <pane-id>` |
+| `HERMES_SESSION_ID` is set and `--pane` is absent | `Error: cafleet fleet create cannot identify its pane inside a Hermes session; pass --pane <pane-id>` |
+
+A Hermes Director's terminal tools run in the shared gateway and may carry another pane's `TMUX_PANE`, so it reads its pane with Hermes's leading-`!` local shell (`! echo $TMUX_PANE` or `! echo $HERDR_PANE_ID`) and passes `--pane <pane-id>`.
 
 `cafleet fleet list [--json]` reads the registry. `cafleet fleet show FLEET_ID [--json]` includes deleted fleets; unknown IDs give `fleet 'X' not found.`, exit 1.
 
@@ -181,7 +193,7 @@ Delivery fallback leads with Escape and uses:
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
 ```
 
-Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C0/DEL controls to `\xNN`. At most 4000 Unicode scalars appear inline; longer text becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.` independently of `CAFLEET_MAX_TEXT_LEN`. Delivery method selects the clause before writing. Preview leaves consumption `input_required`.
+Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C0/DEL controls to `\xNN`. At most 4000 Unicode scalars appear inline; longer text becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.` independently of the 200-codepoint text-output limit. Delivery method selects the clause before writing. Preview leaves consumption `input_required`.
 
 ### Wrapped delivery methods
 
@@ -189,7 +201,7 @@ Validate identity, ownership, reachability, storage and receipt history first; f
 
 An open/candidate interaction (`permission_request`, `question`, `trust`, `update`, `unknown_interaction`, including obscured) or earlier queued input defers with zero bytes, including Escape. A verified empty composer with a measured plan receives literal input, 500 ms settle and the measured submit key without Escape. Terminal replies leave submission valid; human input stops it with `uncertain_cause=manual_input`.
 
-A measured plan with an unverified/nonempty composer queues under `composer_busy`, then drains when empty; three minutes waiting solely on that condition permits fallback `idle_timeout`. Interaction/earlier-input time is excluded. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID Escape`.
+A measured plan with an unverified/nonempty composer queues under `composer_busy`, then drains when empty; three minutes waiting solely on that condition permits fallback `idle_timeout`. Interaction/earlier-input time is excluded. Working members with empty composers receive profile input queued natively behind their turn. Explicit interruption uses `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
 
 Absent plan/profile/version probe uses fallback `submission_plan_unavailable`: Escape, settle, literal (`! ` prefix for exec), settle, Enter. Recheck interactions before each stage; permission answers require their tested plan.
 
@@ -234,18 +246,18 @@ Effort validation precedes side effects:
 
 Invalid OpenCode model: `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').`, exit 2.
 
-Hermes availability preflight, after the config-dir and PATH checks: one bounded `hermes config get --json terminal.client_env_passthrough` under the member's `HERMES_HOME`. Each failure exits 1 before registration:
+The split reference (session, window, Director pane) and the multiplexer server come from the Director's recorded placement; the new placement copies its server.
+
+Hermes availability preflight, after the config-dir and PATH checks: `hermes config path` (resolves the effective home for deletion settlement) and the native version probe run concurrently under the member's `HERMES_HOME`, within one deadline of the smaller of 2 s and the creation deadline; the `config path` result is evaluated first. Each `config path` failure exits 1 before registration:
 
 | Condition | Error |
 |---|---|
-| Command fails, times out or prints no JSON array of strings | `Error: cannot read hermes configuration through 'hermes config get': <cause>` |
-| The list lacks a CAFleet member name | `Error: hermes terminal.client_env_passthrough lacks CAFleet's member names: <name>, …; run 'cafleet setup --coding-agent hermes'` |
-| `hermes config path` (resolves the effective home for deletion settlement) fails or times out | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
+| `hermes config path` fails or times out | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
 | `hermes config path` prints no absolute file path | `Error: cannot read hermes configuration through 'hermes config path': printed no absolute file path: <stdout>` |
 
 The member environment forwards a set `HERMES_HOME`.
 
-Substitute exactly `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` into literal identity lines. Double literal braces `{{`/`}}`; malformed/unknown placeholders exit 2 before registration (§ Error messages).
+Substitute exactly `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}` into literal lines; `{database_url}` renders `default` for the default database and `sqlite:///<canonical path>` otherwise. A non-default database with a prompt lacking `{database_url}` exits 1 before registration: `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url`. Double literal braces `{{`/`}}`; malformed/unknown placeholders exit 2 before registration (§ Error messages).
 
 Probe native `--version`; select the greatest bundled `min_version` not exceeding it by SemVer precedence (ignore build metadata). Newer versions reuse the newest profile. Below-minimum versions fail before registration/pane creation: `unsupported native version for BACKEND: VERSION; minimum supported version is MIN_VERSION`, exit 1. Hermes takes its version from a first line matching `^Hermes Agent v\S+ \((?P<version>[^)]+)\)$` (`Hermes Agent vunknown (2026.9.24)` records `2026.9.24`). Failed probes, including a first line with zero or several SemVer tokens or a non-matching Hermes line, warn `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.` and continue with unknown coverage/fallback. Creation waits for native-child startup.
 
@@ -265,7 +277,7 @@ Failure compensation shuts down owned runner/child, closes pane, removes descrip
 
 ### `member prompt`
 
-`cafleet member prompt MEMBER_ID TEXT [--json]` requires a nonblank control-free line: `text must be one non-empty line without control characters.`, exit 2.
+`cafleet member prompt MEMBER_ID --from-member-id DIRECTOR_ID TEXT [--json]` requires a nonblank control-free line: `text must be one non-empty line without control characters.`, exit 2.
 
 Director target: `cannot prompt the Director's own pane`, exit 1. An ordinary member requires a recorded run; absence fails before pane I/O with `member <ID> has no recorded run`, exit 1. Runner delivery uses profile/fallback/queue, and exit 0 establishes submission/queue acceptance. Result fields: `member_id,pane_id,text,input_id,delivery`.
 
@@ -276,7 +288,7 @@ Director target: `cannot prompt the Director's own pane`, exit 1. An ordinary me
 
 ### `member exec`
 
-`cafleet member exec MEMBER_ID COMMAND [--json]` or `cafleet member exec MEMBER_ID --file PATH [--json]`; `--file -` reads UTF-8 stdin, stripping at most one final LF/CRLF. Exactly one source; a nonblank line excludes CR/LF, NUL, tabs and other C0/DEL: `command must be one non-empty line without control characters.`, exit 2 before I/O. Multiline tasks use one-line script invocations.
+`cafleet member exec MEMBER_ID --from-member-id DIRECTOR_ID COMMAND [--json]` or `cafleet member exec MEMBER_ID --from-member-id DIRECTOR_ID --file PATH [--json]`; `--file -` reads UTF-8 stdin, stripping at most one final LF/CRLF. Exactly one source; a nonblank line excludes CR/LF, NUL, tabs and other C0/DEL: `command must be one non-empty line without control characters.`, exit 2 before I/O. Multiline tasks use one-line script invocations.
 
 An ordinary member requires a recorded run; absence fails before pane I/O with `member <ID> has no recorded run`, exit 1. The runner submits `! ` plus command through profile/fallback/queue. The host owns cwd, environment, permissions, output and exit. Exit 0 establishes submission/queue acceptance; JSON contains `member_id,pane_id,coding_agent,command,dispatched,input_id,delivery`, with `dispatched=false` when queued.
 
@@ -291,7 +303,7 @@ A failing first write may partially type; failure after Enter may have executed.
 
 ### `member press`
 
-`cafleet member press MEMBER_ID KEY... [--json]` requests 1–64 ordered keys, each at most 32 UTF-8 bytes, with no implicit Escape/Enter or shell submission. For punctuation use `cafleet member press 42 -- '-' '+' ';'`; place `--json` before `--`. Wrapped members receive manual keys through the outer pane. Exit 0 establishes backend acknowledgment, independently of native approval/effects; fields are `member_id,pane_id,keys,status`, with `status=acknowledged`.
+`cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID KEY... [--json]` requests 1–64 ordered keys, each at most 32 UTF-8 bytes, with no implicit Escape/Enter or shell submission. For punctuation use `cafleet member press 42 --from-member-id 1 -- '-' '+' ';'`; place `--json` before `--`. Wrapped members receive manual keys through the outer pane. Exit 0 establishes backend acknowledgment, independently of native approval/effects; fields are `member_id,pane_id,keys,status`, with `status=acknowledged`.
 
 | Condition | Error body (exit 2) |
 |---|---|
@@ -371,7 +383,7 @@ Delivery results contain `input_id,message_id,delivery,stage`, null interaction/
 
 ### `input show` and `input reconcile`
 
-`cafleet input show INPUT_ID [--json]`; `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]`. Result `input` contains `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,uncertain_cause`.
+`cafleet input show INPUT_ID [--json]`; `cafleet input reconcile INPUT_ID --from-member-id DIRECTOR_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]`. Result `input` contains `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,uncertain_cause`.
 
 Kinds: `preview,prompt,exec,permission_response`; states: `ready,in_progress,accepted,uncertain,settled`. Ready certifies zero bytes. Stored dispositions: `submitted,not_submitted,abandoned_uncertain`; CLI: `submitted,not-submitted,abandoned-uncertain`. Preview keys: `preview:<run_id>:<message_id>`. Receipts hold digests, excluding literals. Ordinary-input SHA-256 covers canonical JSON `run_id,kind,message_id,literal`; previews use canonical wrapped lines ending at the resume clause, prompt/exec submitted literals. Stable receipt IDs.
 
@@ -424,9 +436,9 @@ A wrong-kind answer is a structured zero-byte `rejected` response (exit 1): `cho
 
 ### `member recover`
 
-`cafleet member recover MEMBER_ID [--json]` reconciles active/deregistered recorded runs without starting agents; absent run fails before mutation.
+`cafleet member recover MEMBER_ID --from-member-id DIRECTOR_ID [--json]` reconciles active/deregistered recorded runs without starting agents; absent run fails before mutation.
 
-Exceptional form: `cafleet member recover MEMBER_ID --owner-terminated --expected-run-id RUN_ID --expected-owner-epoch EPOCH --evidence-ref REFERENCE [--json]`. All four options are required, with positive inspected snapshot IDs/epoch and nonempty operator attestation that owner/startup processes ended. Invalid combinations exit 2; changed ownership rejects and positive live evidence protects the owner.
+Exceptional form: `cafleet member recover MEMBER_ID --from-member-id DIRECTOR_ID --owner-terminated --expected-run-id RUN_ID --expected-owner-epoch EPOCH --evidence-ref REFERENCE [--json]`. All four options are required, with positive inspected snapshot IDs/epoch and nonempty operator attestation that owner/startup processes ended. Invalid combinations exit 2; changed ownership rejects and positive live evidence protects the owner.
 
 Result fields: `member_id,run_id,outcome,replayed_count,inbox_count,archived_count,status,cleanup_diagnostics`. Outcomes: `recovered,recovering,live_or_unreachable,operator_reconciliation_required`. Counts cover newly committed work; incomplete/unreachable outcomes remain distinct from recovery.
 
@@ -436,7 +448,7 @@ Result fields: `member_id,run_id,outcome,replayed_count,inbox_count,archived_cou
 
 Codex installs `<codex home>/rules/cafleet.rules`, holding only `prefix_rule(pattern = ["cafleet"], decision = "allow")`. OpenCode installs the `cafleet` and `cafleet-ask` agent presets, whose shell maps end with `"cafleet *": "allow"` and whose permission maps set `"cafleet": "deny"`, then the CAFleet plugin `<preset base>/plugins/cafleet.ts` and its executable record `<preset base>/plugins/cafleet.executable`, printing `opencode: installed extension (v<version>) -> <preset base>/plugins/cafleet.ts`. An executable record holds the canonical absolute path of the `cafleet` that ran setup; the plugins run only that path. Setup writes no Director-only deny, ask or prompt entry into any backend configuration.
 
-For `hermes`, setup installs the skills, runs `hermes config path`, installs the CAFleet plugin into `<hermes home>/plugins/cafleet/` (the config path's parent directory, following an active profile) with its executable record `executable`, printing `hermes: installed extension (v<version>) -> <hermes home>/plugins/cafleet`, then merges `CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID`, `TMUX`, `TMUX_PANE`, `HERDR_ENV`, `HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH` and `HERDR_SESSION` into `terminal.client_env_passthrough` through `hermes config path`, `hermes config get --json terminal.client_env_passthrough` and `hermes config set terminal.client_env_passthrough '<compact JSON>'`, keeping existing entries and their order and appending missing names. It prints `hermes: terminal.client_env_passthrough already holds CAFleet's member names -> <config path>` or `hermes: added terminal.client_env_passthrough names -> <config path>: <name>, …`. Failure: `failed to install hermes terminal.client_env_passthrough names into <config path>: <cause>`, no installation record; when `hermes config path` itself fails, `<config path>` is the resolved Hermes base. Then setup enables the plugin: it fails when `plugins.disabled` lists `cafleet` (`plugins.disabled lists cafleet; remove it from plugins.disabled, then rerun 'cafleet setup --coding-agent hermes'`), appends `cafleet` to `plugins.enabled` after existing entries when missing, sets `plugins.entries.cafleet.allow_gateway_injection` to `true` when it is not, re-reads both and prints `hermes: plugin cafleet already enabled -> <config path>` or `hermes: enabled plugin cafleet -> <config path>`. A key is not set when `hermes config get` exits 1 with one stderr line equal to `Config key not set: <key>`; an unset `plugins.enabled` counts as empty. Failure: `failed to enable hermes plugin cafleet in <config path>: <cause>`, no installation record. Setup never runs `hermes plugins enable`. `--coding-agent hermes` requires `hermes` on `PATH`; plain `cafleet setup` without it installs the skills, records the installation and prints `hermes: skipped the plugin and terminal.client_env_passthrough names (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`.
+For `hermes`, setup installs the skills, then runs `hermes config path` and `hermes config get --json plugins` concurrently under one 10 s deadline, with `HERMES_HOME` set to the resolved base. A `config path` failure fails with `failed to install extension into <resolved Hermes base>: <cause>`. It installs the CAFleet plugin into `<hermes home>/plugins/cafleet/` (the config path's parent directory, following an active profile) with its executable record `executable`, printing `hermes: installed extension (v<version>) -> <hermes home>/plugins/cafleet`. Then it enables the plugin from the `plugins` subtree, where a missing `disabled`, `enabled` or `entries.cafleet.allow_gateway_injection` member is *not set*: it fails when `disabled` lists `cafleet` (`plugins.disabled lists cafleet; remove it from plugins.disabled, then rerun 'cafleet setup --coding-agent hermes'`), appends `cafleet` to `plugins.enabled` after existing entries when missing, and sets `plugins.entries.cafleet.allow_gateway_injection` to `true` when it is not, each `config set` serially under its own 10 s deadline. Only after a write does it re-read `plugins` once (10 s) and require both values. It prints `hermes: plugin cafleet already enabled -> <config path>` or `hermes: enabled plugin cafleet -> <config path>`. A key is not set when `hermes config get` exits 1 with one stderr line equal to `Config key not set: <key>`; an unset `plugins.enabled` counts as empty. Failure: `failed to enable hermes plugin cafleet in <config path>: <cause>`, no installation record. Setup never runs `hermes plugins enable`. `--coding-agent hermes` requires `hermes` on `PATH`; plain `cafleet setup` without it installs the skills, records the installation and prints `hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`.
 
 `cafleet doctor [--verbose] [--json]` runs every check without aborting. Statuses are `ok`, `info`, `warn` and `error`; doctor exits 1 with `Error: doctor found errors` after printing when any check is `error`, otherwise 0, `warn` included.
 
@@ -446,9 +458,9 @@ For `hermes`, setup installs the skills, runs `hermes config path`, installs the
 | `cafleet doctor --verbose` | One `<status> <name>: <detail>` row per check, no summary |
 | `cafleet doctor --json` | `{"summary":[…],"checks":[…]}`; summary entries `component,status,detail` (`members` adds `state,member_ids`), check entries `name,status,detail` (`member_runtime` entries add `member_id,state`) |
 
-A backend line reads `ok <agent>: ready`, `info <agent>: not installed (<agent> is not on PATH)`, `error <agent>: <configuration cause>`, or its problem phrases joined by `; ` at the worst status, ending ` — run 'cafleet setup --coding-agent <agent>'` when setup fixes one, for example `warn codex: assets from cafleet 0.30.0 (this is 0.31.1) — run 'cafleet setup --coding-agent codex'`. A recorded version other than the CLI's, or no installation recorded, is `warn`. The Hermes check `hermes.client_env_passthrough` reports `hermes terminal.client_env_passthrough lacks CAFleet's member names: <name>, …; run 'cafleet setup --coding-agent hermes'` as `error`.
+A backend line reads `ok <agent>: ready`, `info <agent>: not installed (<agent> is not on PATH)`, `error <agent>: <configuration cause>`, or its problem phrases joined by `; ` at the worst status, an identical phrase listed once (`info hermes: no Hermes home at <base> — run 'cafleet setup --coding-agent hermes'`), ending ` — run 'cafleet setup --coding-agent <agent>'` when setup fixes one, for example `warn codex: assets from cafleet 0.30.0 (this is 0.31.1) — run 'cafleet setup --coding-agent codex'`. A recorded version other than the CLI's, or no installation recorded, is `warn`.
 
-Extension checks precede `<agent>.installation`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.client_env_passthrough`, and `hermes.plugin_enabled` follows `hermes.extension`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable.
+Extension checks precede `<agent>.installation`: `opencode.extension` follows the OpenCode preset checks, `hermes.extension` follows `hermes.executable`, and `hermes.plugin_enabled` follows `hermes.extension`. Each is `info` `unavailable: executable is absent` or `unavailable: configuration failed: <cause>` when its backend is unusable. The two Hermes rows share one concurrent batch, `hermes config path` and `hermes config get --json plugins`, under one 2 s deadline, overlapping doctor's other checks. When the resolved Hermes base does not exist, doctor runs no `hermes` process (a `hermes` call would create the home) and both rows are `info` `unavailable: no Hermes home at <base>`.
 
 | Check | `ok` detail | `error` details |
 |---|---|---|
@@ -456,22 +468,22 @@ Extension checks precede `<agent>.installation`: `opencode.extension` follows th
 | `hermes.extension` | The plugin directory | `cannot read hermes configuration through 'hermes config path': <cause>`; `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent hermes'`; `<record path>: <cause>; run 'cafleet setup --coding-agent hermes'` |
 | `hermes.plugin_enabled` | `cafleet enabled with gateway injection` | `cannot read hermes configuration through 'hermes config get': <cause>`; `hermes plugins.disabled lists cafleet; remove it, then run 'cafleet setup --coding-agent hermes'`; `hermes plugin cafleet is not enabled: <key>, …; run 'cafleet setup --coding-agent hermes'` |
 
-An extension check is `ok` only when every embedded file equals its installed copy and the executable record names an existing executable file. Their summary phrases are `extension <path> is missing or differs from the embedded copy` and `extension executable record <path> is unusable: <cause>` (setup fix), `cannot read hermes configuration through 'hermes config path': <cause>` and `hermes plugins.disabled lists cafleet` (no setup fix), and `hermes plugin cafleet is not enabled: <key>, …` (setup fix).
+An extension check is `ok` only when every embedded file equals its installed copy and the executable record names an existing executable file. Their summary phrases are `extension <path> is missing or differs from the embedded copy` and `extension executable record <path> is unusable: <cause>` (setup fix), `cannot read hermes configuration through 'hermes config path': <cause>`, `cannot read hermes configuration through 'hermes config get': <cause>` and `hermes plugins.disabled lists cafleet` (no setup fix), `hermes plugin cafleet is not enabled: <key>, …` (setup fix) and `info` `no Hermes home at <base>` (setup fix).
 
-`members` lines group member IDs by state, one line per occupied state: `<status> members: <N> <label>: <ID ranges>[ — run '<command>'[ or '<command>']]`. Three or more consecutive IDs collapse to `a-b`; `ID` in the command stays literal. With no live member the line is `ok members: none running`; a database that is not current gives `info members: not checked (database unavailable)`; a failed run query gives `error members: could not be checked: <cause>`.
+`members` lines group member IDs by state, one line per occupied state: `<status> members: <N> <label>: <ID ranges>[ — run '<command>'[ or '<command>']]`. Three or more consecutive IDs collapse to `a-b`; `ID` in the command stays literal, and a `member recover` command fills in `--from-member-id` with the fleet Director ID when every listed member shares one Director (else `<director-id>` stays literal). With no live member the line is `ok members: none running`; a database that is not current gives `info members: not checked (database unavailable)`; a failed run query gives `error members: could not be checked: <cause>`. Unclassified runs are probed up to 16 at a time within one 5 s budget, each bounded by the smaller of 100 ms and the budget left when its probe starts.
 
 | Label | Status | Next command |
 |---|---|---|
 | `running` | `ok` | — |
-| `not responding` | `warn` | `cafleet member recover ID` |
-| `lost runtime` | `warn` | `cafleet member recover ID` or `cafleet member delete ID` |
-| `interrupted launch` | `warn` | `cafleet member recover ID` |
+| `not responding` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
+| `lost runtime` | `warn` | `cafleet member recover ID --from-member-id <director-id>` or `cafleet member delete ID` |
+| `interrupted launch` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
 | `agent exited` | `warn` | `cafleet member delete ID` |
-| `deleted with leftover runtime` | `warn` | `cafleet member recover ID` |
+| `deleted with leftover runtime` | `warn` | `cafleet member recover ID --from-member-id <director-id>` |
 | `could not be checked` | `error` | `cafleet doctor --verbose` |
 | `not checked (time limit)` | `info` | `cafleet member show ID` |
 
-Ended runs of deregistered members are hidden from the summary and appear in `--verbose` as `info member_runtime.<run_id>: member <id> ended: run <status>, cleanup complete`. Other verbose runtime rows read `<status> member_runtime.<run_id>: member <id> <label>: <phrase>; …`, ending ` — run '<command>'` with the literal member ID, for example `warn member_runtime.9: member 9 lost runtime: owner lock is free; runtime did not answer the health probe: <cause> — run 'cafleet member recover 9' or 'cafleet member delete 9'`.
+Ended runs of deregistered members are hidden from the summary and appear in `--verbose` as `info member_runtime.<run_id>: member <id> ended: run <status>, cleanup complete`. Other verbose runtime rows read `<status> member_runtime.<run_id>: member <id> <label>: <phrase>; …`, ending ` — run '<command>'` with the literal member ID, for example `warn member_runtime.9: member 9 lost runtime: owner lock is free; runtime did not answer the health probe: <cause> — run 'cafleet member recover 9 --from-member-id 2' or 'cafleet member delete 9'`.
 
 ## Error messages
 
@@ -481,11 +493,14 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 |---|---|---|---|
 | (any command except `setup` and `doctor`) | No database | `no cafleet database; run 'cafleet setup'` | 1 |
 | (any command except `setup` and `doctor`) | Incompatible database file, including one from another cafleet version | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` | 1 |
-| `member prompt` / `member exec` / `member press` / `member recover` / `permission respond` / `input reconcile` | `CAFLEET_MEMBER_ID` is set, with any value | `Error: 'cafleet <command>' is a Director-only command and this process runs inside CAFleet member <value> (CAFLEET_MEMBER_ID is set); send the request to your Director.` | 1 |
+| (any command with output) | Writing stdout fails with an error other than a broken pipe; a broken pipe stops output and keeps the command's own result | `Error: failed to write output: <cause>` | 1 |
+| `member prompt` / `member exec` / `member press` / `member recover` / `permission respond` / `input reconcile` | `--from-member-id` is not the live subject fleet's root Director | `Error: 'cafleet <command>' is a Director-only command and member <id> is not the root Director of fleet <fleet_id>; send the request to your Director.` | 1 |
+| `fleet create` | No server, the pane is not on it, or no identifiable pane | The errors under § Fleet commands | 1 |
 | `member create` | The backend binary is missing | `Error: binary <name> not found on PATH` | 1 |
 | `message listen --codex-thread` | `codex` is missing, or no Codex ancestor process exists | `Error: binary codex not found on PATH`; `Error: --codex-thread requires a codex ancestor process` | 1 |
 | `member create` | The selected opencode preset is missing or unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
-| `member create` | The hermes configuration is unreadable or its `terminal.client_env_passthrough` lacks a CAFleet member name | The preflight errors under § `member create` | 1 |
+| `member create` | `hermes config path` is unreadable | The preflight errors under § `member create` | 1 |
+| `member create` | A non-default database and a prompt without `{database_url}` | `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url` | 1 |
 | `member delete` | A `hermes` run's work stop cannot be verified | `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` | 1 |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID | `Error: fleet '<fleet-id>' not found.` | 1 |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
@@ -493,7 +508,7 @@ Application errors print as stderr text even with `--json`, each prefixed `Error
 | `member create` | The fleet's root Director has no concrete placement | `Error: fleet <fleet-id>'s root Director (member <id>) has no concrete placement.` | 1 |
 | `member create` | `--coding-agent` omitted and the spawning Director not found | `Error: Director (member <director-id>) not found.` | 1 |
 | `member create` | `--coding-agent` omitted and the spawning Director has no placement row | `Error: Director (member <director-id>) has no placement; supply --coding-agent.` | 1 |
-| `member create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 |
+| `member create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text.` | 2 |
 | `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` | 1 |
 | `message ack` / `message show` | An unknown `MESSAGE_ID` | `Error: Message <message-id> not found` | 1 |

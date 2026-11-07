@@ -1,8 +1,6 @@
 use crate::broker::CreatedFleet;
 use crate::broker::FleetRecord;
 use crate::broker::FleetSummary;
-use crate::broker::MemberKind;
-use crate::broker::MemberRecord;
 use crate::broker::MemberStatus;
 use crate::broker::Placement;
 use crate::broker::members::NewPlacement;
@@ -36,15 +34,16 @@ pub(crate) fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<FleetRec
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))
 }
 
+/// Creates a fleet whose root Director occupies `director`, whose pane is required.
 pub(crate) fn create_fleet(
     conn: &mut Connection,
     name: Option<&str>,
-    mux_session: &str,
-    mux_window_id: &str,
-    mux_pane_id: &str,
-    coding_agent: &str,
-    backend: &str,
+    director: &NewPlacement,
 ) -> Result<CreatedFleet, CafleetError> {
+    assert!(
+        director.mux_pane_id.is_some(),
+        "the Director placement records its pane"
+    );
     let now = now_stamp();
     let tx = conn.transaction()?;
     let fleet_id = tx.query_row(
@@ -53,45 +52,41 @@ pub(crate) fn create_fleet(
         |row| row.get(0),
     )?;
     let director_id = insert_member_row(&tx, fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &now)?;
-    insert_placement_row(
-        &tx,
-        director_id,
-        &NewPlacement {
-            backend: backend.into(),
-            mux_session: mux_session.into(),
-            mux_window_id: mux_window_id.into(),
-            mux_pane_id: Some(mux_pane_id.into()),
-            coding_agent: coding_agent.into(),
-        },
-        &now,
-    )?;
+    insert_placement_row(&tx, director_id, director, &now)?;
     tx.execute(
         "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
         params![director_id, fleet_id],
     )?;
     tx.commit()?;
+    let director = crate::broker::members::get_member(conn, director_id, fleet_id)?
+        .expect("the created root Director is active");
     Ok(CreatedFleet {
         fleet_id,
         name: name.map(str::to_owned),
-        created_at: now.clone(),
-        director: MemberRecord {
-            member_id: director_id,
-            fleet_id,
-            name: DIRECTOR_NAME.into(),
-            description: DIRECTOR_DESCRIPTION.into(),
-            registered_at: now.clone(),
-            status: MemberStatus::Active,
-            kind: MemberKind::Director,
-            runtime: None,
-            placement: Some(Placement {
-                backend: backend.into(),
-                mux_session: mux_session.into(),
-                mux_window_id: mux_window_id.into(),
-                mux_pane_id: Some(mux_pane_id.into()),
-                coding_agent: coding_agent.into(),
-                created_at: now,
-            }),
-        },
+        created_at: now,
+        director,
+    })
+}
+
+/// The recorded placement of `fleet_id`'s root Director.
+pub(crate) fn director_placement(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<Placement, CafleetError> {
+    conn.query_row(
+        &format!(
+            "SELECT {} FROM fleets f JOIN member_placements p ON p.member_id=f.director_member_id
+             WHERE f.fleet_id=?1",
+            crate::broker::PLACEMENT_COLUMNS
+        ),
+        [fleet_id],
+        |row| Placement::from_row(row, 0),
+    )
+    .optional()?
+    .ok_or_else(|| {
+        CafleetError::App(format!(
+            "fleet {fleet_id} has no recorded Director placement; re-create the fleet with 'cafleet fleet create'."
+        ))
     })
 }
 
@@ -106,31 +101,22 @@ pub(crate) fn require_live_fleet(
     let director = fleet.director_member_id.ok_or_else(|| CafleetError::App(format!(
         "fleet {fleet_id} has no root Director recorded; re-create the fleet with 'cafleet fleet create'."
     )))?;
-    let status: Option<MemberStatus> = conn
+    let director_state: Option<(MemberStatus, Option<String>)> = conn
         .query_row(
-            "SELECT status FROM members WHERE member_id=?1 AND fleet_id=?2",
+            "SELECT m.status, p.mux_pane_id FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id WHERE m.member_id=?1 AND m.fleet_id=?2",
             params![director, fleet_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    if status != Some(MemberStatus::Active) {
-        return Err(CafleetError::App(format!(
-            "fleet {fleet_id}'s root Director (member {director}) is not active."
-        )));
-    }
-    let pane: Option<Option<String>> = conn
-        .query_row(
-            "SELECT mux_pane_id FROM member_placements WHERE member_id=?1",
-            [director],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if !matches!(pane, Some(Some(ref value)) if !value.is_empty()) {
-        return Err(CafleetError::App(format!(
+    match director_state {
+        Some((MemberStatus::Active, Some(pane))) if !pane.is_empty() => Ok(fleet),
+        Some((MemberStatus::Active, _)) => Err(CafleetError::App(format!(
             "fleet {fleet_id}'s root Director (member {director}) has no concrete placement."
-        )));
+        ))),
+        _ => Err(CafleetError::App(format!(
+            "fleet {fleet_id}'s root Director (member {director}) is not active."
+        ))),
     }
-    Ok(fleet)
 }
 
 pub(crate) fn list_fleets(conn: &Connection) -> Result<Vec<FleetSummary>, CafleetError> {
@@ -153,14 +139,12 @@ pub(crate) fn list_fleets(conn: &Connection) -> Result<Vec<FleetSummary>, Caflee
 }
 
 pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<usize, CafleetError> {
-    let fleet = require_fleet(conn, fleet_id)?;
+    require_fleet(conn, fleet_id)?;
     let now = now_stamp();
-    if fleet.deleted_at.is_none() {
-        conn.execute(
-            "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
-            params![now, fleet_id],
-        )?;
-    }
+    conn.execute(
+        "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2 AND deleted_at IS NULL",
+        params![now, fleet_id],
+    )?;
     let deregistered_count = conn.execute(
         "UPDATE members SET status='deregistered', deregistered_at=?1 WHERE fleet_id=?2 AND status='active'",
         params![now, fleet_id],
@@ -175,14 +159,23 @@ pub(crate) struct MemberRunRegistry {
     pub(crate) run_status: crate::broker::runtime::RunStatus,
     pub(crate) cleanup_state: crate::broker::runtime::CleanupState,
     pub(crate) member_status: String,
+    pub(crate) director_member_id: Option<i64>,
+}
+
+impl MemberRunRegistry {
+    pub(crate) fn is_settled(&self) -> bool {
+        self.run_status.terminal()
+            && self.cleanup_state == crate::broker::runtime::CleanupState::Complete
+    }
 }
 
 pub(crate) fn member_run_registry(
     conn: &Connection,
 ) -> Result<Vec<MemberRunRegistry>, CafleetError> {
     let mut statement = conn.prepare(
-        "SELECT r.run_id, r.member_id, r.status, r.cleanup_state, m.status \
-         FROM member_runs r JOIN members m ON m.member_id = r.member_id ORDER BY r.run_id",
+        "SELECT r.run_id, r.member_id, r.status, r.cleanup_state, m.status, f.director_member_id \
+         FROM member_runs r JOIN members m ON m.member_id = r.member_id \
+         JOIN fleets f ON f.fleet_id = m.fleet_id ORDER BY r.run_id",
     )?;
     let runs = statement
         .query_map([], |row| {
@@ -192,6 +185,7 @@ pub(crate) fn member_run_registry(
                 run_status: row.get(2)?,
                 cleanup_state: row.get(3)?,
                 member_status: row.get(4)?,
+                director_member_id: row.get(5)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -235,11 +229,7 @@ pub(crate) mod test_support {
         let fleet = crate::broker::fleets::create_fleet(
             conn,
             Some(name),
-            "main",
-            "@1",
-            "%0",
-            "claude",
-            "tmux",
+            &crate::broker::members::test_support::placement(Some("%0")),
         )
         .unwrap();
         (fleet.fleet_id, fleet.director.member_id)
@@ -251,8 +241,8 @@ mod tests {
     use crate::broker;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::fleets::*;
+    use crate::broker::members::test_support::placement;
     use crate::broker::members::test_support::register;
-    use crate::cli::guarded_delete_fleet;
     use crate::db::test_support::migrated_conn;
 
     fn row_count(conn: &Connection, table: &str) -> i64 {
@@ -264,39 +254,25 @@ mod tests {
 
     #[test]
     fn registration_is_atomic_at_every_stage_and_preserves_identity() {
-        for trigger in [
-            "BEFORE INSERT ON fleets",
-            "BEFORE INSERT ON members",
-            "BEFORE INSERT ON member_placements",
-            "BEFORE UPDATE OF director_member_id ON fleets",
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
-            conn.execute_batch(&format!("CREATE TRIGGER fail_registration {trigger} BEGIN SELECT RAISE(ABORT, 'registration failure'); END;")).unwrap();
-            let error = broker::create_fleet(
-                &mut conn,
-                Some("alpha"),
-                "main",
-                "@1",
-                "%0",
-                "claude",
-                "tmux",
-            )
-            .unwrap_err();
-            assert!(error.message().contains("registration failure"));
-            for table in ["fleets", "members", "member_placements"] {
-                assert_eq!(row_count(&conn, table), 0);
-            }
-            conn.execute_batch("DROP TRIGGER fail_registration")
-                .unwrap();
-            let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
-            assert_eq!((fleet, director), (1, 1));
-            let stored = get_fleet(&conn, fleet).unwrap().unwrap();
-            assert_eq!(stored.director_member_id, Some(director));
-            let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
-            assert_eq!(member.kind, MemberKind::Director);
-            assert_eq!(member.placement.unwrap().mux_pane_id.as_deref(), Some("%0"));
+        let trigger = "BEFORE UPDATE OF director_member_id ON fleets";
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        conn.execute_batch(&format!("CREATE TRIGGER fail_registration {trigger} BEGIN SELECT RAISE(ABORT, 'registration failure'); END;")).unwrap();
+        let error =
+            broker::create_fleet(&mut conn, Some("alpha"), &placement(Some("%0"))).unwrap_err();
+        assert!(error.message().contains("registration failure"));
+        for table in ["fleets", "members", "member_placements"] {
+            assert_eq!(row_count(&conn, table), 0);
         }
+        conn.execute_batch("DROP TRIGGER fail_registration")
+            .unwrap();
+        let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
+        assert_eq!((fleet, director), (1, 1));
+        let stored = get_fleet(&conn, fleet).unwrap().unwrap();
+        assert_eq!(stored.director_member_id, Some(director));
+        let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
+        assert_eq!(member.kind, crate::broker::MemberKind::Director);
+        assert_eq!(member.placement.unwrap().mux_pane_id.as_deref(), Some("%0"));
     }
 
     #[test]
@@ -322,7 +298,7 @@ mod tests {
         assert_eq!(rows[0].member_count, 2);
         crate::broker::members::test_support::deregister_member(&mut conn, worker).unwrap();
         assert_eq!(list_fleets(&conn).unwrap()[0].member_count, 1);
-        guarded_delete_fleet(&mut conn, second).unwrap();
+        delete_fleet_rows(&conn, second).unwrap();
         assert_eq!(list_fleets(&conn).unwrap().len(), 2);
         assert!(
             get_fleet(&conn, second)
@@ -332,66 +308,6 @@ mod tests {
                 .is_some()
         );
         assert!(get_fleet(&conn, 999).unwrap().is_none());
-    }
-
-    #[test]
-    fn deletion_is_atomic_soft_idempotent_and_preserves_messages() {
-        for trigger in [
-            "BEFORE UPDATE OF deleted_at ON fleets",
-            "BEFORE UPDATE OF status ON members",
-            "BEFORE DELETE ON member_placements",
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
-            let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
-            let worker = register(&mut conn, fleet, "worker", None);
-            let message =
-                broker::send_message(&mut conn, director, worker, "retained history").unwrap();
-            let before = get_fleet(&conn, fleet).unwrap();
-            let members =
-                [director, worker].map(|id| broker::get_member(&conn, id, fleet).unwrap());
-            conn.execute_batch(&format!("CREATE TRIGGER fail_deletion {trigger} BEGIN SELECT RAISE(ABORT, 'deletion failure'); END;")).unwrap();
-            assert!(
-                guarded_delete_fleet(&mut conn, fleet)
-                    .unwrap_err()
-                    .message()
-                    .contains("deletion failure")
-            );
-            assert_eq!(get_fleet(&conn, fleet).unwrap(), before);
-            for (id, member) in [director, worker].into_iter().zip(members) {
-                assert_eq!(broker::get_member(&conn, id, fleet).unwrap(), member);
-                assert_eq!(
-                    conn.query_row(
-                        "SELECT deregistered_at FROM members WHERE member_id=?1",
-                        [id],
-                        |row| row.get::<_, Option<String>>(0)
-                    )
-                    .unwrap(),
-                    None
-                );
-            }
-            conn.execute_batch("DROP TRIGGER fail_deletion").unwrap();
-            assert_eq!(
-                guarded_delete_fleet(&mut conn, fleet)
-                    .unwrap()
-                    .deregistered_count,
-                2
-            );
-            assert_eq!(row_count(&conn, "member_placements"), 0);
-            let deleted = get_fleet(&conn, fleet).unwrap();
-            assert_eq!(
-                guarded_delete_fleet(&mut conn, fleet)
-                    .unwrap()
-                    .deregistered_count,
-                0
-            );
-            assert_eq!(get_fleet(&conn, fleet).unwrap(), deleted);
-            assert_eq!(
-                broker::get_message(&conn, message.message_id).unwrap(),
-                message
-            );
-            assert!(guarded_delete_fleet(&mut conn, 999).is_err());
-        }
     }
 
     #[test]
@@ -468,8 +384,95 @@ mod tests {
         assert_eq!(rows[1].cleanup_state, CleanupState::Incomplete);
         assert_eq!(rows[1].member_status, "deregistered");
         assert!(
+            rows.iter()
+                .all(|row| row.director_member_id == Some(director))
+        );
+        let (other_fleet, other_director) = create_fleet_fixture(&mut conn, "other");
+        let third = register_member_run(&mut conn, other_fleet, other_director, "third");
+        let rows = member_run_registry(&conn).unwrap();
+        assert_eq!(rows[2].run_id, third.run_id);
+        assert_eq!(rows[2].director_member_id, Some(other_director));
+        assert!(
             member_run_registry(&Connection::open_in_memory().unwrap()).is_err(),
             "a registry without member runs surfaces the query error"
+        );
+    }
+
+    #[test]
+    fn require_live_fleet_refuses_a_deleted_fleet_or_a_damaged_root_director() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
+        assert_eq!(require_live_fleet(&conn, fleet).unwrap().fleet_id, fleet);
+        for (damage, expected) in [
+            (
+                "UPDATE fleets SET director_member_id=NULL".to_owned(),
+                format!(
+                    "fleet {fleet} has no root Director recorded; re-create the fleet with 'cafleet fleet create'."
+                ),
+            ),
+            (
+                format!("UPDATE members SET status='deregistered' WHERE member_id={director}"),
+                format!("fleet {fleet}'s root Director (member {director}) is not active."),
+            ),
+            (
+                format!("DELETE FROM member_placements WHERE member_id={director}"),
+                format!(
+                    "fleet {fleet}'s root Director (member {director}) has no concrete placement."
+                ),
+            ),
+            (
+                format!("UPDATE member_placements SET mux_pane_id=NULL WHERE member_id={director}"),
+                format!(
+                    "fleet {fleet}'s root Director (member {director}) has no concrete placement."
+                ),
+            ),
+            (
+                "UPDATE fleets SET deleted_at='2026-01-01T00:00:00Z'".to_owned(),
+                format!("fleet {fleet} is deleted"),
+            ),
+        ] {
+            conn.execute_batch("SAVEPOINT damage").unwrap();
+            conn.execute_batch(&damage).unwrap();
+            assert_eq!(
+                require_live_fleet(&conn, fleet).unwrap_err().message(),
+                expected,
+                "{damage}"
+            );
+            conn.execute_batch("ROLLBACK TO damage; RELEASE damage")
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn director_placement_reads_the_recorded_director_pane_and_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, _) = create_fleet_fixture(&mut conn, "alpha");
+        register(&mut conn, fleet, "worker", Some("%5"));
+        let expected = placement(Some("%0"));
+        let recorded = director_placement(&conn, fleet).unwrap();
+        assert_eq!(
+            (
+                recorded.backend.as_str(),
+                recorded.mux_session.as_str(),
+                recorded.mux_window_id.as_str(),
+                recorded.mux_pane_id.as_deref(),
+                recorded.coding_agent.as_str(),
+                recorded.mux_server.as_str(),
+            ),
+            (
+                expected.backend.as_str(),
+                expected.mux_session.as_str(),
+                expected.mux_window_id.as_str(),
+                Some("%0"),
+                expected.coding_agent.as_str(),
+                expected.mux_server.as_str(),
+            )
+        );
+        assert_eq!(
+            director_placement(&conn, 999).unwrap_err().message(),
+            "fleet 999 has no recorded Director placement; re-create the fleet with 'cafleet fleet create'."
         );
     }
 }

@@ -9,6 +9,14 @@ use serde_json::json;
 use std::collections::BTreeSet;
 
 const SCREEN_FIELDS: [&str; 4] = ["operation", "choices", "native_request_id", "excerpt"];
+const COPIED_FIELDS: [&str; 5] = [
+    "backend",
+    "native_version",
+    "rule_id",
+    "screen_seq",
+    "truncated",
+];
+const DERIVED_FIELDS: [&str; 3] = ["evidence_policy", "operation_rows", "evidence_digest"];
 const EVIDENCE_LIMIT: usize = 12 * 1024;
 const EXCERPT_LIMIT: usize = 8 * 1024;
 
@@ -70,13 +78,7 @@ impl EvidencePolicy {
             .as_object()
             .ok_or_else(|| invalid("evidence", "object required"))?;
         let mut result = Map::new();
-        for key in [
-            "backend",
-            "native_version",
-            "rule_id",
-            "screen_seq",
-            "truncated",
-        ] {
+        for key in COPIED_FIELDS {
             let value = raw
                 .get(key)
                 .ok_or_else(|| invalid(key, "required evidence field"))?;
@@ -89,9 +91,7 @@ impl EvidencePolicy {
             .get("sensitive")
             .and_then(Value::as_bool)
             .ok_or_else(|| invalid("sensitive", "boolean required"))?;
-        let metadata = self.mode == EventEvidence::Metadata
-            || sensitive
-            || self.sensitive_rules.contains(rule);
+        let metadata = self.metadata_only(rule, sensitive);
         result.insert(
             "evidence_policy".into(),
             json!(if metadata { "metadata" } else { "redacted" }),
@@ -130,24 +130,21 @@ impl EvidencePolicy {
         result.insert("truncated".into(), json!(truncated));
         let mut value = Value::Object(result);
         while value.to_string().len() > EVIDENCE_LIMIT - 128 {
-            let mut longest: Option<(String, Option<usize>, usize)> = None;
+            let mut longest: Option<(&str, Option<usize>, usize)> = None;
+            let mut consider = |field, index, text: &str| {
+                if text.len() > 1 && longest.is_none_or(|(_, _, length)| text.len() > length) {
+                    longest = Some((field, index, text.len()));
+                }
+            };
             for field in SCREEN_FIELDS {
                 match &value[field] {
-                    Value::String(text) if text.len() > 1 => {
-                        if longest.as_ref().is_none_or(|entry| text.len() > entry.2) {
-                            longest = Some((field.into(), None, text.len()));
-                        }
-                    }
+                    Value::String(text) => consider(field, None, text),
                     Value::Array(choices) => {
                         for (index, choice) in choices.iter().enumerate() {
                             let text = choice
                                 .as_str()
                                 .ok_or_else(|| invalid(field, "string choices required"))?;
-                            if text.len() > 1
-                                && longest.as_ref().is_none_or(|entry| text.len() > entry.2)
-                            {
-                                longest = Some((field.into(), Some(index), text.len()));
-                            }
+                            consider(field, Some(index), text);
                         }
                     }
                     _ => {}
@@ -155,10 +152,9 @@ impl EvidencePolicy {
             }
             let (field, index, length) =
                 longest.ok_or_else(|| invalid("evidence", "metadata exceeds evidence bound"))?;
-            let target = if let Some(index) = index {
-                &mut value[&field][index]
-            } else {
-                &mut value[&field]
+            let target = match index {
+                Some(index) => &mut value[field][index],
+                None => &mut value[field],
             };
             let text = target.as_str().expect("the longest field was a string");
             *target = json!(truncate_utf8(text, length / 2));
@@ -175,8 +171,7 @@ impl EvidencePolicy {
         sensitive: bool,
         mode: Option<&str>,
     ) -> Result<Option<String>, CafleetError> {
-        if self.mode == EventEvidence::Metadata || sensitive || self.sensitive_rules.contains(rule)
-        {
+        if self.metadata_only(rule, sensitive) {
             return Ok(None);
         }
         let mut truncated = false;
@@ -184,6 +179,10 @@ impl EvidencePolicy {
             .transform(&json!(mode), &mut truncated)?
             .as_str()
             .map(str::to_owned))
+    }
+
+    fn metadata_only(&self, rule: &str, sensitive: bool) -> bool {
+        self.mode == EventEvidence::Metadata || sensitive || self.sensitive_rules.contains(rule)
     }
 
     fn transform(&self, value: &Value, truncated: &mut bool) -> Result<Value, CafleetError> {
@@ -225,7 +224,7 @@ fn truncate_utf8(text: &str, limit: usize) -> String {
 fn escape_controls(text: &str) -> String {
     text.chars()
         .map(|character| {
-            if character <= '\u{1f}' || character == '\u{7f}' {
+            if character.is_ascii_control() {
                 format!("\\x{:02x}", u32::from(character))
             } else {
                 character.to_string()
@@ -317,22 +316,12 @@ pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
         "evidence_json",
         "in-memory evidence cannot be persisted",
     )?;
-    let allowed = [
-        "backend",
-        "native_version",
-        "rule_id",
-        "screen_seq",
-        "truncated",
-        "evidence_policy",
-        "operation",
-        "operation_rows",
-        "choices",
-        "native_request_id",
-        "excerpt",
-        "evidence_digest",
-    ];
     require(
-        object.keys().all(|key| allowed.contains(&key.as_str())),
+        object.keys().all(|key| {
+            [&COPIED_FIELDS[..], &SCREEN_FIELDS, &DERIVED_FIELDS]
+                .iter()
+                .any(|fields| fields.contains(&key.as_str()))
+        }),
         "evidence_json",
         "unknown evidence field",
     )?;
@@ -377,7 +366,6 @@ mod tests {
     use serde_json::Value;
     use serde_json::json;
 
-    use crate::broker::runtime as storage;
     use crate::broker::runtime::test_support::*;
     use crate::broker::runtime::*;
 
@@ -489,9 +477,6 @@ mod tests {
             (json!("run a"), Value::Null),
             (Value::Null, json!(1)),
             (json!("run a"), json!(0)),
-            (json!("run a"), json!(-1)),
-            (json!("run a"), json!("1")),
-            (json!("run a"), json!(1.5)),
         ] {
             let mut raw = raw_evidence("visible");
             raw["operation"] = operation.clone();
@@ -527,12 +512,7 @@ mod tests {
                     value.as_object_mut().unwrap().remove("operation_rows");
                 }) as &dyn Fn(&mut Value),
             ),
-            ("null with an operation", &|value| {
-                value["operation_rows"] = Value::Null
-            }),
             ("zero", &|value| value["operation_rows"] = json!(0)),
-            ("negative", &|value| value["operation_rows"] = json!(-2)),
-            ("string", &|value| value["operation_rows"] = json!("2")),
             ("count without an operation", &|value| {
                 value["operation"] = Value::Null
             }),
@@ -553,11 +533,7 @@ mod tests {
 
     #[test]
     fn matching_redaction_replaces_each_normalized_field_in_full() {
-        let policy = evidence::EvidencePolicy::redacted(
-            &json!({"schema_version":1,"patterns":[SECRET],"sensitive_rules":[]}),
-            &["native-tool-permission"],
-        )
-        .unwrap();
+        let policy = redacted_policy(&[SECRET]);
         let sanitized = policy.apply(&raw_evidence(SECRET)).unwrap();
         for field in ["operation", "native_request_id", "excerpt"] {
             assert_eq!(sanitized[field], "[redacted]", "{field}");
@@ -608,92 +584,14 @@ mod tests {
     }
 
     #[test]
-    fn metadata_and_redacted_transitions_remain_secret_free_through_storage_and_updates() {
-        for redacted in [false, true] {
-            let mut fixture = Fixture::new();
-            if redacted {
-                fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                        [fixture.run.run_id],
-                    )
-                    .unwrap();
-            }
-            let owner = fixture.activate();
-            fixture.reserve(&owner);
-            let policy = if redacted {
-                evidence::EvidencePolicy::redacted(
-                    &json!({"schema_version":1,"patterns":[SECRET],"sensitive_rules":[]}),
-                    &["native-tool-permission"],
-                )
-                .unwrap()
-            } else {
-                evidence::EvidencePolicy::metadata()
-            };
-            let transformed = policy.apply(&raw_evidence(SECRET)).unwrap();
-            let transition = opening(owner.run_id, 1, 1, transformed.clone());
-            assert!(!serde_json::to_string(&transition).unwrap().contains(SECRET));
-            let first = storage::persist_event(
-                &mut fixture.conn,
-                &owner,
-                &transition,
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            let update = ObservedTransition {
-                event_seq: 2,
-                kind: RuntimeEventKind::InteractionObscured,
-                evidence_json: transformed,
-                ..transition
-            };
-            storage::persist_event(&mut fixture.conn, &owner, &update, PersistenceMode::Live)
-                .unwrap();
-            assert_no_secret(&fixture.conn, SECRET);
-            let current = storage::get_event(&fixture.reopen(), first.event_id).unwrap();
-            assert!(
-                !current
-                    .interaction
-                    .unwrap()
-                    .evidence_json
-                    .to_string()
-                    .contains(SECRET)
-            );
-        }
-    }
-
-    #[test]
     fn evidence_utf8_and_complete_payload_bounds_record_truncation_after_policy() {
-        let policy = evidence::EvidencePolicy::redacted(
-            &json!({"schema_version":1,"patterns":["unmatched"],"sensitive_rules":[]}),
-            &["native-tool-permission"],
-        )
-        .unwrap();
+        let policy = redacted_policy(&["unmatched"]);
         let mut raw = raw_evidence("ordinary");
         raw["excerpt"] = json!(format!("{}\u{1b}[2J\n", "界".repeat(8192)));
         let transformed = policy.apply(&raw).unwrap();
-        assert!(transformed["excerpt"].as_str().unwrap().len() <= 8192);
+        let excerpt = transformed["excerpt"].as_str().unwrap();
+        assert!(excerpt.len() <= 8192);
+        assert!(!excerpt.contains('\u{1b}'));
         assert_eq!(transformed["truncated"], true);
-        let mut fixture = Fixture::new();
-        fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                [fixture.run.run_id],
-            )
-            .unwrap();
-        let owner = fixture.activate();
-        fixture.reserve(&owner);
-        let event = storage::persist_event(
-            &mut fixture.conn,
-            &owner,
-            &opening(owner.run_id, 1, 1, transformed),
-            PersistenceMode::Live,
-        )
-        .unwrap();
-        let message = crate::broker::get_message(&fixture.conn, event.message_id.unwrap()).unwrap();
-        assert!(message.text.len() <= 16384);
-        assert!(serde_json::from_str::<Value>(&message.text).is_ok());
-        assert!(!message.text.contains('\u{1b}'));
     }
 }

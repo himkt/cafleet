@@ -18,19 +18,6 @@ pub(crate) const MESSAGE_COLUMNS: &str =
 pub(crate) const PENDING_PREVIEW: &str =
     "status_state='input_required' AND notified_at IS NULL AND from_member_id!=to_member_id";
 
-pub(crate) fn message_row(
-    conn: &Connection,
-    message_id: i64,
-) -> Result<Option<MessageRecord>, CafleetError> {
-    conn.query_row(
-        &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE message_id=?1"),
-        [message_id],
-        map_message_row,
-    )
-    .optional()
-    .map_err(crate::error::CafleetError::from)
-}
-
 pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRecord> {
     Ok(MessageRecord {
         message_id: row.get(0)?,
@@ -47,8 +34,13 @@ pub(crate) fn get_message(
     conn: &Connection,
     message_id: i64,
 ) -> Result<MessageRecord, CafleetError> {
-    message_row(conn, message_id)?
-        .ok_or_else(|| CafleetError::App(format!("Message {message_id} not found")))
+    conn.query_row(
+        &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE message_id=?1"),
+        [message_id],
+        map_message_row,
+    )
+    .optional()?
+    .ok_or_else(|| CafleetError::App(format!("Message {message_id} not found")))
 }
 
 fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetError> {
@@ -114,14 +106,13 @@ pub(crate) fn oldest_pending_preview(
              WHERE to_member_id=?1 AND {PENDING_PREVIEW} \
              ORDER BY created_at, message_id"
     ))?;
-    let rows = statement.query_map([member_id], map_message_row)?;
-    for row in rows {
-        let message = row?;
-        if !attempted.contains(&message.message_id) {
-            return Ok(Some(message));
-        }
-    }
-    Ok(None)
+    let mut rows = statement.query_map([member_id], map_message_row)?;
+    rows.find(|row| {
+        row.as_ref()
+            .map_or(true, |message| !attempted.contains(&message.message_id))
+    })
+    .transpose()
+    .map_err(CafleetError::from)
 }
 
 pub(crate) fn poll_messages(
@@ -199,16 +190,16 @@ fn listen_snapshot_with_clock(
         );
         let cleanup = conn
             .progress_handler(0, None::<fn() -> bool>)
-            .map_err(crate::error::CafleetError::from);
-        let cleanup = cleanup.map_err(|cleanup| {
-            if result.is_err() {
-                CafleetError::App(format!(
-                    "removing listener progress handler failed: {cleanup}"
-                ))
-            } else {
-                cleanup
-            }
-        });
+            .map_err(|cleanup| {
+                let cleanup = CafleetError::from(cleanup);
+                if result.is_err() {
+                    CafleetError::App(format!(
+                        "removing listener progress handler failed: {cleanup}"
+                    ))
+                } else {
+                    cleanup
+                }
+            });
         CafleetError::merge_cleanup(result, cleanup)
     })
 }
@@ -230,22 +221,18 @@ fn read_listen_snapshot(
             Ok(snapshot)
         },
     );
-    let result = match result {
-        Err(_) if interrupted.load(Ordering::Relaxed) => Err(CafleetError::DeadlineExceeded),
-        result => result,
+    let error = match result {
+        Ok(snapshot) => return Ok(snapshot),
+        Err(_) if interrupted.load(Ordering::Relaxed) => CafleetError::DeadlineExceeded,
+        Err(error) => error,
     };
-    match result {
-        Ok(snapshot) => Ok(snapshot),
-        Err(error) => {
-            let cleanup = tx
-                .rollback()
-                .map_err(crate::error::CafleetError::from)
-                .map_err(|cleanup| {
-                    CafleetError::App(format!("rolling back listener snapshot failed: {cleanup}"))
-                });
-            CafleetError::merge_cleanup(Err(error), cleanup)
-        }
-    }
+    let cleanup = tx.rollback().map_err(|cleanup| {
+        CafleetError::App(format!(
+            "rolling back listener snapshot failed: {}",
+            CafleetError::from(cleanup)
+        ))
+    });
+    CafleetError::merge_cleanup(Err(error), cleanup)
 }
 
 fn select_listen_snapshot(
@@ -344,12 +331,9 @@ pub(crate) fn ack_message(
     if let Some(message) = updated {
         return Ok(message);
     }
-    let Some(message) = message_row(conn, message_id)? else {
-        return Err(CafleetError::App(format!("Message {message_id} not found")));
-    };
     Err(CafleetError::App(format!(
         "Cannot ACK message in state {}",
-        message.status.as_str()
+        get_message(conn, message_id)?.status.as_str()
     )))
 }
 
@@ -380,27 +364,11 @@ pub(crate) fn pending_previews(
 pub(crate) mod test_support {
     use rusqlite::Connection;
 
-    use crate::broker;
     pub(crate) fn broker_fixture() -> (tempfile::TempDir, Connection, i64, i64, i64) {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::connect(&format!(
-            "sqlite:///{}",
-            dir.path().join("listen.db").display()
-        ))
-        .unwrap();
-        crate::db::initialize(&mut conn).unwrap();
-        let created = broker::create_fleet(
-            &mut conn,
-            Some("listen"),
-            "main",
-            "@1",
-            "%0",
-            "claude",
-            "tmux",
-        )
-        .unwrap();
-        let fleet = created.fleet_id;
-        let director = created.director.member_id;
+        let mut conn = crate::db::test_support::migrated_conn(&dir);
+        let (fleet, director) =
+            crate::broker::fleets::test_support::create_fleet_fixture(&mut conn, "listen");
         let worker = crate::broker::members::test_support::register_member(
             &mut conn,
             fleet,
@@ -728,6 +696,20 @@ mod tests {
             }
         }
 
+        /// Replaces `messages` with a view that multiplies every stored row a million times.
+        fn install_million_row_messages_view(conn: &Connection) {
+            conn.execute_batch(
+                "ALTER TABLE messages RENAME TO stored_messages;
+                 CREATE VIEW messages AS
+                 WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000)
+                 SELECT m.message_id+n.x*1000000 AS message_id, m.from_member_id, m.to_member_id,
+                        printf('%09d', 1000000-n.x) AS created_at, m.status_state, m.status_timestamp, m.text,
+                        m.notified_at
+                 FROM stored_messages m CROSS JOIN n;",
+            )
+            .unwrap();
+        }
+
         fn assert_handler_cleared(conn: &Connection) {
             let result: i64 = conn.query_row(
         "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000) SELECT sum(x) FROM n", [], |row| row.get(0),
@@ -745,6 +727,9 @@ mod tests {
             let earlier = broker::send_message(&mut conn, director, director, "self").unwrap();
             let tied = broker::send_message(&mut conn, worker, director, "notified").unwrap();
             conn.execute("UPDATE messages SET created_at='1900-01-01T00:00:00+00:00', notified_at=status_timestamp WHERE message_id IN (?1, ?2)", [earlier.message_id, tied.message_id]).unwrap();
+            let acknowledged =
+                broker::send_message(&mut conn, worker, director, "consumed").unwrap();
+            broker::ack_message(&mut conn, acknowledged.message_id).unwrap();
             let changes = conn.total_changes();
             let messages = snapshot_messages(
                 listen_snapshot(&mut conn, director, Some(fleet), Deadline::new()).unwrap(),
@@ -756,21 +741,6 @@ mod tests {
             );
             assert_eq!(conn.total_changes(), changes);
             assert_handler_cleared(&conn);
-        }
-
-        #[test]
-        fn broker_snapshots_exclude_acks_committed_before_the_snapshot() {
-            let (_dir, mut conn, fleet, director, worker) = broker_fixture();
-            let acknowledged =
-                broker::send_message(&mut conn, worker, director, "consumed").unwrap();
-            broker::ack_message(&mut conn, acknowledged.message_id).unwrap();
-            assert!(
-                snapshot_messages(
-                    listen_snapshot(&mut conn, director, None, Deadline::new()).unwrap(),
-                    fleet
-                )
-                .is_empty()
-            );
         }
 
         #[test]
@@ -830,15 +800,7 @@ mod tests {
         fn a_long_running_select_without_lock_contention_is_interrupted_and_cleans_its_handler() {
             let (_dir, mut conn, fleet, director, worker) = broker_fixture();
             broker::send_message(&mut conn, worker, director, "expensive selection").unwrap();
-            conn.execute_batch(
-        "ALTER TABLE messages RENAME TO stored_messages;
-         CREATE VIEW messages AS
-         WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000)
-         SELECT m.message_id+n.x*1000000 AS message_id, m.from_member_id, m.to_member_id,
-                printf('%09d', 1000000-n.x) AS created_at, m.status_state, m.status_timestamp, m.text,
-                m.notified_at
-         FROM stored_messages m CROSS JOIN n;"
-    ).unwrap();
+            install_million_row_messages_view(&conn);
             let started = Instant::now();
             let result = listen_snapshot(
                 &mut conn,
@@ -979,15 +941,7 @@ mod tests {
                 "externally interrupted selection",
             )
             .unwrap();
-            conn.execute_batch(
-        "ALTER TABLE messages RENAME TO stored_messages;
-         CREATE VIEW messages AS
-         WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000)
-         SELECT m.message_id+n.x*1000000 AS message_id, m.from_member_id, m.to_member_id,
-                printf('%09d', 1000000-n.x) AS created_at, m.status_state, m.status_timestamp, m.text,
-                m.notified_at
-         FROM stored_messages m CROSS JOIN n;"
-    ).unwrap();
+            install_million_row_messages_view(&conn);
             let interrupt = conn.get_interrupt_handle();
             let (prepared, preparation) = std::sync::mpsc::sync_channel(1);
             let interrupted = std::thread::spawn(move || {
@@ -1034,22 +988,6 @@ mod tests {
             pending_previews(&conn, fleet, director).unwrap(),
             vec![(placed, message.message_id)]
         );
-    }
-
-    #[test]
-    fn an_ordinary_subject_retries_ordinary_members_and_preserves_the_directors_inbox() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "director");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let observer = register(&mut conn, fleet, "observer", Some("%3"));
-        let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
-        let assignment = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-        assert_eq!(
-            pending_previews(&conn, fleet, observer).unwrap(),
-            vec![(worker, assignment.message_id)]
-        );
-        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }
 
     #[test]

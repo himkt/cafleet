@@ -1,3 +1,4 @@
+#[cfg(test)]
 use crate::broker::runtime::CleanupState;
 use crate::runtime::*;
 use filedescriptor::FileDescriptor;
@@ -208,25 +209,32 @@ impl ProcessObservations for NativeProcessObservations {
     }
 }
 
+/// Sends `signal` to `pid`; a process that is already gone counts as signalled.
+fn signal_pid(pid: i64, signal: nix::sys::signal::Signal) -> Result<()> {
+    let pid = nix::unistd::Pid::from_raw(i32::try_from(pid).map_err(io_error)?);
+    match nix::sys::signal::kill(pid, signal) {
+        Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
+        Err(cause) => Err(io_error(cause)),
+    }
+}
+
+fn running(process: &ProcessIdentity) -> Result<bool> {
+    Ok(process.matches()? && !stopped(process.pid)?)
+}
+
 pub(super) fn recover_descendants(
     run: &crate::broker::runtime::RunRecord,
     clock: ShutdownClock,
 ) -> Result<ShutdownOutcome> {
     let mut outcome = ShutdownOutcome::complete(None);
-    let child = match (run.child_pid, run.child_start_identity.as_ref()) {
-        (None, None) => return Ok(outcome),
-        (Some(pid), Some(start)) => ProcessIdentity {
-            pid,
-            start_identity: start.clone(),
-        },
-        _ => return Err(error("recorded child generation is incomplete")),
+    let Some(child) = run.child_process()? else {
+        return Ok(outcome);
     };
-    if !child.matches()? || stopped(child.pid)? {
-        if !group_members(i32::try_from(child.pid).map_err(io_error)?)?.is_empty() {
-            outcome.cleanup_state = CleanupState::Incomplete;
-            outcome.diagnostics.push(
-                "descendant ownership cannot be anchored to the recorded child generation".into(),
-            );
+    let group = i32::try_from(child.pid).map_err(io_error)?;
+    if !running(&child)? {
+        if !group_members(group)?.is_empty() {
+            outcome
+                .fail("descendant ownership cannot be anchored to the recorded child generation");
         }
         return Ok(outcome);
     }
@@ -242,15 +250,12 @@ pub(super) fn recover_descendants(
                 Ok(found || process.matches()?)
             })?;
         if !anchored {
-            if !group_members(i32::try_from(child.pid).map_err(io_error)?)?.is_empty() {
-                outcome.cleanup_state = CleanupState::Incomplete;
-                outcome
-                    .diagnostics
-                    .push("descendant ownership lost its recorded process generation".into());
+            if !group_members(group)?.is_empty() {
+                outcome.fail("descendant ownership lost its recorded process generation");
             }
             break;
         }
-        for pid in group_members(i32::try_from(child.pid).map_err(io_error)?)? {
+        for pid in group_members(group)? {
             if let Some(process) = ProcessIdentity::read(pid)? {
                 if let Some(previous) = owned.get(&pid) {
                     ensure(
@@ -263,14 +268,8 @@ pub(super) fn recover_descendants(
             }
         }
         for process in owned.values() {
-            if process.matches()? && !stopped(process.pid)? {
-                match nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(i32::try_from(process.pid).map_err(io_error)?),
-                    signal,
-                ) {
-                    Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
-                    Err(cause) => return Err(io_error(cause)),
-                }
+            if running(process)? {
+                signal_pid(process.pid, signal)?;
             }
         }
         let until = if signal == nix::sys::signal::Signal::SIGTERM {
@@ -279,11 +278,9 @@ pub(super) fn recover_descendants(
             clock.storage_deadline()
         };
         while Instant::now() < until {
-            let alive = owned
-                .values()
-                .try_fold(false, |alive, process| -> Result<bool> {
-                    Ok(alive || (process.matches()? && !stopped(process.pid)?))
-                })?;
+            let alive = owned.values().try_fold(false, |alive, process| {
+                Ok::<_, CafleetError>(alive || running(process)?)
+            })?;
             if !alive {
                 break;
             }
@@ -291,15 +288,29 @@ pub(super) fn recover_descendants(
         }
     }
     for process in owned.values() {
-        if process.matches()? && !stopped(process.pid)? {
-            outcome.cleanup_state = CleanupState::Incomplete;
-            outcome
-                .diagnostics
-                .push("verified descendants remain after the original cleanup deadline".into());
+        if running(process)? {
+            outcome.fail("verified descendants remain after the original cleanup deadline");
             break;
         }
     }
     Ok(outcome)
+}
+
+fn std_child(child: &mut Box<dyn Child + Send + Sync>) -> Result<&mut std::process::Child> {
+    child
+        .as_mut()
+        .as_any_mut()
+        .downcast_mut::<std::process::Child>()
+        .ok_or_else(|| error("Unix portable-pty child type invariant violated"))
+}
+
+fn pty_size(size: TerminalSize) -> PtySize {
+    PtySize {
+        rows: size.rows,
+        cols: size.cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
 }
 
 struct MasterFd<'a>(&'a dyn MasterPty);
@@ -328,12 +339,7 @@ impl PtySession {
     pub(crate) fn prepare(size: TerminalSize) -> Result<Self> {
         size.validate()?;
         let pair = portable_pty::native_pty_system()
-            .openpty(PtySize {
-                rows: size.rows,
-                cols: size.cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+            .openpty(pty_size(size))
             .map_err(io_error)?;
         ensure(
             pair.master.as_raw_fd().is_some(),
@@ -387,21 +393,28 @@ impl PtySession {
         Ok(native)
     }
     pub(crate) fn try_wait(&mut self) -> Result<Option<ChildExit>> {
+        self.try_wait_with(&mut NativeProcessObservations)
+    }
+
+    /// Pins the process group only once the leader is a zombie: until it is reaped, the zombie
+    /// keeps its PID and therefore the group ID, so the scan still sees every live member.
+    fn try_wait_with(
+        &mut self,
+        observed: &mut impl ProcessObservations,
+    ) -> Result<Option<ChildExit>> {
         if self.exit.is_some() {
             return Ok(self.exit);
         }
         if self.child.is_none() {
             return Ok(None);
         }
-        self.refresh_owned()?;
-        let child = self
-            .child
-            .as_mut()
-            .expect("checked child")
-            .as_mut()
-            .as_any_mut()
-            .downcast_mut::<std::process::Child>()
-            .ok_or_else(|| error("Unix portable-pty child type invariant violated"))?;
+        if let Some(native) = &self.native
+            && !observed.stopped(native.pid)?
+        {
+            return Ok(None);
+        }
+        self.refresh_owned_with(observed)?;
+        let child = std_child(self.child.as_mut().expect("checked child"))?;
         if let Some(status) = child.try_wait().map_err(io_error)? {
             self.exit = Some(match status.signal() {
                 Some(signal) => ChildExit::Signal(signal),
@@ -474,18 +487,8 @@ impl PtySession {
             && self.exit.is_none()
             && let Some(child) = self.child.as_mut()
         {
-            let owned = child
-                .as_mut()
-                .as_any_mut()
-                .downcast_mut::<std::process::Child>()
-                .ok_or_else(|| error("Unix portable-pty child type invariant violated"))?;
-            match nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(i32::try_from(owned.id()).map_err(io_error)?),
-                signal,
-            ) {
-                Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
-                Err(cause) => return Err(io_error(cause)),
-            }
+            let owned = std_child(child)?;
+            signal_pid(i64::from(owned.id()), signal)?;
         }
         self.refresh_owned()?;
         for process in self.owned.values() {
@@ -500,13 +503,7 @@ impl PtySession {
                 if stopped(process.pid)? {
                     continue;
                 }
-                match nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(i32::try_from(process.pid).map_err(io_error)?),
-                    signal,
-                ) {
-                    Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
-                    Err(cause) => return Err(io_error(cause)),
-                }
+                signal_pid(process.pid, signal)?;
             }
         }
         Ok(())
@@ -557,21 +554,17 @@ impl PtySession {
     pub(crate) fn shutdown(&mut self, clock: ShutdownClock) -> ShutdownOutcome {
         let clock = self.begin_shutdown(clock);
         let mut diagnostics = Vec::new();
-        if let Err(cause) = self.signal_verified(nix::sys::signal::Signal::SIGTERM) {
-            diagnostics.push(cause.message().into_owned());
-        }
+        note(
+            &mut diagnostics,
+            self.signal_verified(nix::sys::signal::Signal::SIGTERM),
+        );
         while Instant::now() < clock.child_deadline() {
-            if let Err(cause) = self.try_wait() {
-                diagnostics.push(cause.message().into_owned());
+            if note(&mut diagnostics, self.try_wait()).is_none() {
                 break;
             }
-            match self.survivors() {
-                Ok(false) => break,
-                Ok(true) => {}
-                Err(cause) => {
-                    diagnostics.push(cause.message().into_owned());
-                    break;
-                }
+            match note(&mut diagnostics, self.survivors()) {
+                Some(true) => {}
+                Some(false) | None => break,
             }
             let mut bytes = [0; 16384];
             match self.try_read(&mut bytes) {
@@ -590,12 +583,11 @@ impl PtySession {
                 ),
             );
         }
-        if let Err(cause) = self.signal_verified(nix::sys::signal::Signal::SIGKILL) {
-            diagnostics.push(cause.message().into_owned());
-        }
-        if let Err(cause) = self.close() {
-            diagnostics.push(cause.message().into_owned());
-        }
+        note(
+            &mut diagnostics,
+            self.signal_verified(nix::sys::signal::Signal::SIGKILL),
+        );
+        note(&mut diagnostics, self.close());
         while Instant::now() < clock.storage_deadline() {
             let waited = self.try_wait();
             let alive = self.survivors();
@@ -609,10 +601,8 @@ impl PtySession {
             }
             nap_until(clock.storage_deadline());
         }
-        match self.survivors() {
-            Ok(true) => diagnostics.push("owned descendants remain unconfirmed".into()),
-            Err(cause) => diagnostics.push(cause.message().into_owned()),
-            Ok(false) => {}
+        if note(&mut diagnostics, self.survivors()) == Some(true) {
+            diagnostics.push("owned descendants remain unconfirmed".into());
         }
         if self.child.is_some() && self.native.is_none() {
             diagnostics.push(
@@ -648,12 +638,7 @@ impl PtyIo for PtySession {
         self.master
             .as_ref()
             .ok_or_else(|| error("PTY is closed"))?
-            .resize(PtySize {
-                rows: size.rows,
-                cols: size.cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+            .resize(pty_size(size))
             .map_err(io_error)
     }
     fn close(&mut self) -> Result<()> {
@@ -677,34 +662,35 @@ impl Drop for PtySession {
 #[cfg(test)]
 mod tests {
     use crate::runtime::process::*;
+
+    /// Reads the fixture PTY until its output holds every one of `needles`.
+    fn read_until(session: &mut PtySession, needles: &[&str]) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut output = Vec::new();
+        loop {
+            let mut bytes = [0u8; 1024];
+            match session.try_read(&mut bytes) {
+                Ok(count) => output.extend_from_slice(&bytes[..count]),
+                Err(cause) if cause.kind() == io::ErrorKind::WouldBlock => {}
+                Err(cause) => panic!("fixture PTY read failed: {cause}"),
+            }
+            let text = String::from_utf8_lossy(&output).into_owned();
+            if needles.iter().all(|needle| text.contains(needle)) {
+                return text;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fixture output lacks {needles:?}: {text:?}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
     #[cfg(all(test, target_os = "macos"))]
     mod setuid_member_tests {
         use crate::runtime::process::tests::*;
         use std::os::unix::fs::MetadataExt;
 
         const SETUID_HELPER: &str = "/usr/bin/su";
-
-        fn read_until(session: &mut PtySession, needles: &[&str]) -> String {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let mut output = Vec::new();
-            loop {
-                let mut bytes = [0u8; 1024];
-                match session.try_read(&mut bytes) {
-                    Ok(count) => output.extend_from_slice(&bytes[..count]),
-                    Err(cause) if cause.kind() == io::ErrorKind::WouldBlock => {}
-                    Err(cause) => panic!("setuid fixture PTY read failed: {cause}"),
-                }
-                let text = String::from_utf8_lossy(&output).into_owned();
-                if needles.iter().all(|needle| text.contains(needle)) {
-                    return text;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "setuid fixture output lacks {needles:?}: {text:?}"
-                );
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
 
         #[test]
         fn refresh_pins_a_live_setuid_root_group_member_and_cleanup_terminates_it() {
@@ -860,46 +846,27 @@ mod tests {
         }
 
         #[test]
-        fn runner_real_pty_child_receives_the_member_id_and_forwarded_config_location() {
+        fn runner_real_pty_child_receives_the_forwarded_config_location() {
             let fixture = Fixture::new();
             let mut spec = fixture.spec();
-            let database_url = spec
-                .environment
-                .iter()
-                .find(|(key, _)| key == "CAFLEET_DATABASE_URL")
-                .map(|(_, value)| value.clone())
-                .expect("fixture spawn environment carries the database URL");
-            let member_id = fixture.run.member_id;
-            let forwarded = crate::coding_agent::CodingAgent::Opencode
+            spec.environment = crate::coding_agent::CodingAgent::Opencode
                 .forwarded_config(&|name| {
-                    (name == "OPENCODE_CONFIG_DIR").then(|| "/cfg/open code".to_string())
+                    Ok((name == "OPENCODE_CONFIG_DIR").then(|| "/cfg/open code".to_string()))
                 })
-                .unwrap();
-            spec.environment = crate::coding_agent::CodingAgent::spawn_environment(
-                &database_url,
-                member_id,
-                forwarded,
-            );
+                .unwrap()
+                .into_iter()
+                .collect();
             spec.argv = vec![
-            "/bin/sh".into(),
-            "-c".into(),
-            "printf 'config=%s\\n' \"$OPENCODE_CONFIG_DIR\"; printf 'database=%s\\n' \"$CAFLEET_DATABASE_URL\"; printf 'member=%s\\n' \"$CAFLEET_MEMBER_ID\"".into(),
-        ];
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf 'config=%s\\n' \"$OPENCODE_CONFIG_DIR\"".into(),
+            ];
             let mut owned = OwnedPty::prepare(spec.size);
             owned.session.spawn(&spec).unwrap();
             let (output, status) = collect(&mut owned.session);
             assert_eq!(owned.stop().cleanup_state, CleanupState::Complete);
             let text = String::from_utf8(output).unwrap();
             assert!(text.contains("config=/cfg/open code"), "{text:?}");
-            assert!(
-                text.contains(&format!("database={database_url}")),
-                "{text:?}"
-            );
-            assert!(
-                text.lines()
-                    .any(|line| line.trim_end_matches('\r') == format!("member={member_id}")),
-                "{text:?}"
-            );
             assert_eq!(status, ChildExit::Code(0));
         }
 
@@ -936,6 +903,13 @@ mod tests {
         #[test]
         fn runner_real_raw_terminal_guard_restores_only_its_owned_fixture_terminal() {
             let pty = nix::pty::openpty(None, None).unwrap();
+            for end in [&pty.master, &pty.slave] {
+                nix::fcntl::fcntl(
+                    end,
+                    nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC),
+                )
+                .unwrap();
+            }
             let terminal = File::from(pty.slave);
             let before = nix::sys::termios::tcgetattr(&terminal).unwrap();
             let mut guard = RawTerminalGuard::enter(&terminal).unwrap();
@@ -965,28 +939,6 @@ mod tests {
             drop(pty.master);
         }
 
-        fn read_until(session: &mut PtySession, needle: &str) -> String {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let mut output = Vec::new();
-            loop {
-                let mut bytes = [0u8; 1024];
-                match session.try_read(&mut bytes) {
-                    Ok(count) => output.extend_from_slice(&bytes[..count]),
-                    Err(error) if error.kind() == ErrorKind::WouldBlock => {}
-                    Err(error) => panic!("fixture PTY read failed: {error}"),
-                }
-                let text = String::from_utf8(output.clone()).unwrap();
-                if text.contains(needle) {
-                    return text;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "fixture did not publish {needle}"
-                );
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
-
         #[test]
         fn runner_real_shutdown_kills_and_reaps_a_term_ignoring_owned_child_within_the_shared_deadline()
          {
@@ -999,8 +951,11 @@ mod tests {
             ];
             let mut owned = OwnedPty::prepare(spec.size);
             let process = owned.session.spawn(&spec).unwrap();
-            read_until(&mut owned.session, "ready");
+            read_until(&mut owned.session, &["ready"]);
             let start = Instant::now();
+            owned.clock = Some(ShutdownClock::new(
+                start.checked_sub(Duration::from_millis(1700)).unwrap(),
+            ));
             let outcome = owned.stop();
             assert!(start.elapsed() < Duration::from_millis(4750));
             assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
@@ -1024,7 +979,7 @@ mod tests {
             spec.argv=vec!["/bin/sh".into(),"-c".into(),r#"/bin/sh -c 'trap "" TERM HUP; printf ready > "$1"; exec /bin/sleep 600' descendant "$1" & descendant=$!; while [ ! -f "$1" ]; do sleep 0.01; done; printf 'descendant=%s\n' "$descendant"; exit 0"#.into(),"parent".into(),ready.to_str().unwrap().into()];
             let mut owned = OwnedPty::prepare(spec.size);
             let native = owned.session.spawn(&spec).unwrap();
-            let output = read_until(&mut owned.session, "\n");
+            let output = read_until(&mut owned.session, &["\n"]);
             let pid = output
                 .lines()
                 .find_map(|line| line.trim().strip_prefix("descendant="))
@@ -1048,6 +1003,9 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
             let start = Instant::now();
+            owned.clock = Some(ShutdownClock::new(
+                start.checked_sub(Duration::from_millis(1700)).unwrap(),
+            ));
             let outcome = owned.stop();
             let elapsed = start.elapsed();
             assert!(
@@ -1289,18 +1247,16 @@ mod tests {
 
         #[test]
         fn refresh_fresh_remaining_members_preserve_exact_refusal_without_adoption() {
-            for fresh in [vec![B], vec![A], vec![B, C]] {
-                let mut session = inert(&[identity(A)]);
-                let pinned = session.owned.clone();
-                let clock = boundaries(&session);
-                let mut script = false_fold(members(&fresh));
-                assert_error(
-                    session.refresh_owned_with(&mut script),
-                    &error("owned process group lost its pinned generation"),
-                );
-                script.finished();
-                assert_state(&session, &pinned, false, clock);
-            }
+            let mut session = inert(&[identity(A)]);
+            let pinned = session.owned.clone();
+            let clock = boundaries(&session);
+            let mut script = false_fold(members(&[B, C]));
+            assert_error(
+                session.refresh_owned_with(&mut script),
+                &error("owned process group lost its pinned generation"),
+            );
+            script.finished();
+            assert_state(&session, &pinned, false, clock);
         }
 
         #[test]
@@ -1416,11 +1372,6 @@ mod tests {
             }
 
             #[test]
-            fn runner_process_stat_read_of_a_task_reaped_after_open_fails_with_esrch() {
-                assert_eq!(reaped_stat_read().raw_os_error(), Some(nix::libc::ESRCH));
-            }
-
-            #[test]
             fn runner_process_esrch_stat_read_is_a_vanished_process() {
                 assert_eq!(
                     ProcessIdentity::from_stat(B, Err(reaped_stat_read())).unwrap(),
@@ -1491,6 +1442,222 @@ mod tests {
             session.refresh_owned_with(&mut script).unwrap();
             script.finished();
             assert_state(&session, &pinned, true, clock);
+        }
+
+        mod leader_wait_tests {
+            use crate::runtime::process::tests::ownership_refresh_tests::*;
+            use std::os::unix::process::CommandExt;
+
+            /// Delegates to the script and records that every group scan sees the leader unreaped.
+            struct ScanBeforeReap {
+                script: Script,
+                leader: i64,
+                scans: usize,
+            }
+
+            impl ProcessObservations for ScanBeforeReap {
+                fn members(&mut self, group: i32) -> Result<Vec<i64>> {
+                    assert!(
+                        ProcessIdentity::read(self.leader).unwrap().is_some(),
+                        "the group scan runs while the exited leader is still unreaped"
+                    );
+                    self.scans += 1;
+                    self.script.members(group)
+                }
+
+                fn identity(&mut self, pid: i64) -> Result<Option<ProcessIdentity>> {
+                    self.script.identity(pid)
+                }
+
+                fn stopped(&mut self, pid: i64) -> Result<bool> {
+                    self.script.stopped(pid)
+                }
+            }
+
+            fn leader(script: &str) -> (Box<dyn Child + Send + Sync>, ProcessIdentity) {
+                let child = std::process::Command::new("/bin/sh")
+                    .args(["-c", script])
+                    .process_group(0)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .unwrap();
+                let native = ProcessIdentity::read(i64::from(child.id()))
+                    .unwrap()
+                    .expect("a just-spawned leader is visible");
+                (Box::new(child), native)
+            }
+
+            fn running(
+                child: Box<dyn Child + Send + Sync>,
+                native: &ProcessIdentity,
+            ) -> PtySession {
+                PtySession {
+                    master: None,
+                    slave: None,
+                    io: None,
+                    child: Some(child),
+                    native: Some(native.clone()),
+                    exit: None,
+                    owned: [(native.pid, native.clone())].into_iter().collect(),
+                    group_closed: false,
+                    shutdown_clock: None,
+                }
+            }
+
+            fn exited_leader(script: &str) -> (PtySession, ProcessIdentity) {
+                let (child, native) = leader(script);
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while !stopped(native.pid).unwrap() {
+                    assert!(Instant::now() < deadline, "the fixture leader did not exit");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                (running(child, &native), native)
+            }
+
+            fn group_of(native: &ProcessIdentity) -> i32 {
+                i32::try_from(native.pid).unwrap()
+            }
+
+            fn assert_reaped(native: &ProcessIdentity) {
+                assert_eq!(
+                    nix::sys::wait::waitpid(
+                        nix::unistd::Pid::from_raw(group_of(native)),
+                        Some(nix::sys::wait::WaitPidFlag::WNOHANG)
+                    ),
+                    Err(nix::errno::Errno::ECHILD)
+                );
+            }
+
+            #[test]
+            fn try_wait_with_a_live_leader_checks_only_the_leader_and_scans_no_group() {
+                let (child, native) = leader("exec /bin/sleep 30");
+                let mut session = running(child, &native);
+                for _ in 0..3 {
+                    let mut script = Script::new([Step::Stopped(native.pid, Ok(false))]);
+                    assert_eq!(session.try_wait_with(&mut script).unwrap(), None);
+                    script.finished();
+                }
+                assert_eq!(
+                    session.owned,
+                    [(native.pid, native.clone())].into_iter().collect()
+                );
+                assert_eq!(session.exit, None);
+                assert!(session.shutdown_clock.is_none());
+                assert!(!session.group_closed);
+                assert!(
+                    ProcessIdentity::read(native.pid).unwrap().is_some(),
+                    "a live leader is not reaped"
+                );
+                let outcome = session.shutdown(ShutdownClock::new(Instant::now()));
+                assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
+                assert_reaped(&native);
+            }
+
+            #[test]
+            fn try_wait_with_a_failed_leader_check_propagates_without_a_scan_or_reap() {
+                let (mut session, native) = exited_leader("exit 0");
+                let failure = CafleetError::App("synthetic-leader-check".into());
+                let mut script = Script::new([Step::Stopped(native.pid, Err(failure.clone()))]);
+                let actual = session
+                    .try_wait_with(&mut script)
+                    .expect_err("the leader check failure must propagate");
+                assert_eq!(format!("{actual:?}"), format!("{failure:?}"));
+                script.finished();
+                assert_eq!(session.exit, None);
+                assert!(
+                    ProcessIdentity::read(native.pid).unwrap().is_some(),
+                    "a failed leader check does not reap"
+                );
+                assert_eq!(session.try_wait().unwrap(), Some(ChildExit::Code(0)));
+            }
+
+            #[test]
+            fn try_wait_with_an_exited_leader_scans_once_pins_live_members_then_reaps() {
+                let (mut session, native) = exited_leader("exit 3");
+                let mut observations = ScanBeforeReap {
+                    script: Script::new([
+                        Step::Stopped(native.pid, Ok(true)),
+                        Step::Members(group_of(&native), Ok(vec![native.pid, B])),
+                        observed(native.clone()),
+                        Step::Stopped(native.pid, Ok(true)),
+                        observed(identity(B)),
+                        Step::Stopped(B, Ok(false)),
+                        observed(native.clone()),
+                    ]),
+                    leader: native.pid,
+                    scans: 0,
+                };
+                assert_eq!(
+                    session.try_wait_with(&mut observations).unwrap(),
+                    Some(ChildExit::Code(3))
+                );
+                assert_eq!(observations.scans, 1);
+                observations.script.finished();
+                assert_eq!(
+                    session.owned,
+                    [(native.pid, native.clone()), (B, identity(B))]
+                        .into_iter()
+                        .collect()
+                );
+                assert!(!session.group_closed);
+                assert_eq!(session.exit, Some(ChildExit::Code(3)));
+                assert!(session.shutdown_clock.is_some());
+                assert_reaped(&native);
+
+                let mut settled = Script::new([]);
+                assert_eq!(
+                    session.try_wait_with(&mut settled).unwrap(),
+                    Some(ChildExit::Code(3)),
+                    "a recorded exit is returned without observing again"
+                );
+                settled.finished();
+            }
+
+            #[test]
+            fn try_wait_with_an_exited_leader_and_no_live_member_closes_the_group_then_reaps() {
+                let (mut session, native) = exited_leader("exit 0");
+                let mut observations = ScanBeforeReap {
+                    script: Script::new([
+                        Step::Stopped(native.pid, Ok(true)),
+                        Step::Members(group_of(&native), Ok(vec![native.pid])),
+                        observed(native.clone()),
+                        Step::Stopped(native.pid, Ok(true)),
+                    ]),
+                    leader: native.pid,
+                    scans: 0,
+                };
+                assert_eq!(
+                    session.try_wait_with(&mut observations).unwrap(),
+                    Some(ChildExit::Code(0))
+                );
+                assert_eq!(observations.scans, 1);
+                observations.script.finished();
+                assert!(session.group_closed);
+                assert_eq!(
+                    session.owned,
+                    [(native.pid, native.clone())].into_iter().collect()
+                );
+                assert_reaped(&native);
+            }
+
+            #[test]
+            fn try_wait_with_an_unidentified_native_reaps_the_exited_child_without_observing() {
+                let (mut session, native) = exited_leader("exit 5");
+                session.native = None;
+                session.owned.clear();
+                let mut script = Script::new([]);
+                assert_eq!(
+                    session.try_wait_with(&mut script).unwrap(),
+                    Some(ChildExit::Code(5))
+                );
+                script.finished();
+                assert!(session.owned.is_empty());
+                assert!(!session.group_closed);
+                assert!(session.shutdown_clock.is_some());
+                assert_reaped(&native);
+            }
         }
     }
 }

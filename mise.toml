@@ -24,7 +24,7 @@ run = [{ task = "//:install" }, { task = "//:skill-install" }]
 description = "Install the CLI and the working-tree skills"
 
 [tasks.test]
-run = "cargo test --bin cafleet"
+run = "RUST_TEST_THREADS=${RUST_TEST_THREADS:-$(( $(nproc) < 32 ? $(nproc) : 32 ))} cargo test --bin cafleet"
 description = "Run inline unit tests (positional args forward to the cargo test harness)"
 
 [tasks.lint]

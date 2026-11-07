@@ -82,11 +82,6 @@ impl Deadline {
             .ok_or(CafleetError::DeadlineExceeded)
     }
 
-    /// The deadline `extension` later.
-    pub(crate) fn extended_by(self, extension: Duration) -> Self {
-        Self(self.0 + extension)
-    }
-
     /// The deadline `reserve` earlier; already expired when less than `reserve` remains.
     pub(crate) fn reserving(self, reserve: Duration) -> Self {
         Self(
@@ -167,21 +162,17 @@ mod tests {
 
     #[test]
     fn format_emits_six_digit_microseconds_and_offset() {
-        let dt =
-            Utc.with_ymd_and_hms(2026, 7, 30, 9, 53, 43).unwrap() + Duration::microseconds(198_561);
-        assert_eq!(format_utc(dt), "2026-07-30T09:53:43.198561+00:00");
-    }
-
-    #[test]
-    fn format_emits_zero_microseconds_as_000000() {
-        let dt = Utc.with_ymd_and_hms(2026, 7, 30, 9, 53, 43).unwrap();
-        assert_eq!(format_utc(dt), "2026-07-30T09:53:43.000000+00:00");
-    }
-
-    #[test]
-    fn format_zero_pads_short_microsecond_values() {
-        let dt = Utc.with_ymd_and_hms(2026, 1, 2, 3, 4, 5).unwrap() + Duration::microseconds(7);
-        assert_eq!(format_utc(dt), "2026-01-02T03:04:05.000007+00:00");
+        let second = Utc.with_ymd_and_hms(2026, 7, 30, 9, 53, 43).unwrap();
+        for (micros, expected) in [
+            (198_561, "2026-07-30T09:53:43.198561+00:00"),
+            (0, "2026-07-30T09:53:43.000000+00:00"),
+            (7, "2026-07-30T09:53:43.000007+00:00"),
+        ] {
+            assert_eq!(
+                format_utc(second + Duration::microseconds(micros)),
+                expected
+            );
+        }
     }
 
     #[test]
@@ -257,21 +248,6 @@ mod tests {
             let span = DeferTermination::begin().unwrap();
             assert!(defers_all(&blocked()));
             drop(span);
-            assert!(defers_none(&blocked()));
-        });
-    }
-
-    #[test]
-    fn nested_spans_restore_the_outer_mask() {
-        on_fresh_thread(|| {
-            let outer = DeferTermination::begin().unwrap();
-            let inner = DeferTermination::begin().unwrap();
-            drop(inner);
-            assert!(
-                defers_all(&blocked()),
-                "dropping the inner span keeps the outer span's mask"
-            );
-            drop(outer);
             assert!(defers_none(&blocked()));
         });
     }

@@ -34,7 +34,7 @@ system:
 | [`claude` (Claude Code)](#claude-code) | `~/.claude/settings.json` | The permission profile below that matches the Director's mode | The skills |
 | [`codex` (OpenAI Codex CLI)](#codex) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` |
 | [`opencode`](#opencode) | — | — | The skills, the `cafleet` and `cafleet-ask` agent presets in `~/.config/opencode/agents/`, and the CAFleet plugin in `~/.config/opencode/plugins/` |
-| [`hermes` (Hermes Agent)](#hermes) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills, the CAFleet plugin in `~/.hermes/plugins/cafleet/` and its enablement, plus CAFleet's member variables merged into `terminal.client_env_passthrough` |
+| [`hermes` (Hermes Agent)](#hermes) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills, the CAFleet plugin in `~/.hermes/plugins/cafleet/`, `cafleet` added to `plugins.enabled` and `plugins.entries.cafleet.allow_gateway_injection` set to `true` |
 
 The paths above are defaults. `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
 `HERMES_HOME` relocate their backend's installed assets. `OPENCODE_CONFIG_DIR` relocates only the OpenCode
@@ -61,7 +61,8 @@ reviews each other member call.
 explicit native input into a member's pane, and both profiles list them under
 optional `ask` entries: keep them when you want to confirm each of the
 Director's dispatches, or drop them to let the Director dispatch without a
-prompt. Inside a member process every Director-only command refuses, which
+prompt. Every Director-only command takes the caller's ID as
+`--from-member-id` and refuses unless it is the fleet's root Director, which
 catches a member's accidental invocation; this guard is not a security
 boundary ([Command routing](concepts/members.md#command-routing)).
 
@@ -175,11 +176,11 @@ writable_roots = ["/home/<you>/.local/share/cafleet"]
 local socket, which the Codex sandbox classifies as network access; without it
 cafleet commands fail with `Operation not permitted`. `writable_roots` grants
 write access to the directory of the selected database file, the default
-`~/.local/share/cafleet` unless `CAFLEET_DATABASE_URL` selects another.
+`~/.local/share/cafleet` unless `--database-url` selects another.
 
 `cafleet setup` installs `~/.codex/rules/cafleet.rules`, which allows every
 `cafleet` command. Codex members need it to run their broker commands, and
-the Director-only commands refuse inside a member process on their own. Codex
+the Director-only commands refuse a member's own ID on their own. Codex
 applies the strictest decision across every `*.rules` file in that directory,
 and setup overwrites its own file on every install, so put your own rules,
 such as `prompt` rules to confirm the Director's commands, in a separate file
@@ -239,48 +240,51 @@ rule, add this rule after it so the Director keeps the plugin tools:
 { "action": "cafleet", "resource": "*", "effect": "allow" }
 ```
 
-The plugin refuses to run inside a member, which it recognizes by the member
-environment. Both member presets also deny the plugin tools, which covers a
-member whose environment lacks that marker.
+Each plugin tool takes the Director's ID and runs only after `cafleet member
+show` confirms that ID is a root Director. Both member presets also deny the
+plugin tools.
 
 ### Hermes
 
 Hermes members use your existing Hermes configuration: your configured default
 provider and model, and your profile when `active_profile` selects one. Each
 member starts a fresh conversation. Run `cafleet setup --coding-agent hermes`
-with `hermes` on `PATH`. Besides the skills, it adds CAFleet's member variables
-(`CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID` and the tmux and herdr pane
-variables) to `terminal.client_env_passthrough` in the file
-`hermes config path` reports, keeping your own entries, their order and the
-rest of the file. Hermes runs every session's terminal tools in one shared
-gateway, and this list lets each member's tools see that member's own values,
-including the `CAFLEET_MEMBER_ID` marker of the
-[Director-only command guard](concepts/members.md#command-routing). Rerunning
-setup adds only missing names, after your existing entries.
-Setup also installs the CAFleet plugin into the `plugins/cafleet/` directory
-of the Hermes home that `hermes config path` reports, including an active
-profile's home, with an `executable` file naming the `cafleet` it runs. It then
-enables the plugin by adding `cafleet` to `plugins.enabled` and setting
+with `hermes` on `PATH`. Besides the skills, it installs the CAFleet plugin into
+the `plugins/cafleet/` directory of the Hermes home that `hermes config path`
+reports, including an active profile's home, with an `executable` file naming
+the `cafleet` it runs. It then edits the file `hermes config path` reports,
+keeping the rest of the file: it adds `cafleet` to `plugins.enabled` and sets
 `plugins.entries.cafleet.allow_gateway_injection` to `true`. Setup fails
 instead when `plugins.disabled` lists `cafleet`; remove it from that list and
 rerun setup. Once `plugins.enabled` exists, Hermes loads only the user plugins
 it lists, so another installed plugin that was not enabled stays disabled until
 you add it.
 A plain `cafleet setup` on a host without `hermes` installs the skills and
-skips the plugin and both merges; run `cafleet setup --coding-agent hermes`
-after installing Hermes.
+skips the plugin; run `cafleet setup --coding-agent hermes` after installing
+Hermes.
 
 Run a Hermes Director in the TUI client, `hermes chat --tui` (or set
-`display.interface: tui`). After registering the fleet, the Director starts
-reception with the plugin's `cafleet_listen` tool, and each broker record
-arrives as its own turn, in the order the broker delivered it. The classic CLI runs those turns without showing them
-in its pane, so members keep the classic CLI and the Director uses the TUI.
+`display.interface: tui`). Hermes runs every session's terminal tools in one
+shared gateway, which may carry another pane's variables, so a Hermes Director
+names its own pane when it registers the fleet:
 
-`cafleet member create` reads your effective Hermes configuration and refuses
-to start a member when a member variable is missing from the list.
-`cafleet doctor` reports the list, the installed plugin and its enablement on
-its `hermes` summary line, for example
-`error hermes: terminal.client_env_passthrough lacks CAFleet's member names: CAFLEET_MEMBER_ID — run 'cafleet setup --coding-agent hermes'`.
+1. Read the pane ID with Hermes's leading-`!` local shell, which runs in your
+   pane's own environment: `! echo $TMUX_PANE` in tmux, or
+   `! echo $HERDR_PANE_ID` in herdr.
+2. Register the fleet with that ID:
+   `cafleet fleet create --name <name> --coding-agent hermes --pane <pane-id>`.
+   Add `--mux-server <server>` when the pane is not on the server CAFleet
+   finds by default.
+3. Start reception with the plugin's `cafleet_listen` tool, passing the
+   Director ID. Each broker record arrives as its own turn, in the order the
+   broker delivered it.
+
+The classic CLI runs those turns without showing them in its pane, so members
+keep the classic CLI and the Director uses the TUI.
+
+`cafleet doctor` reports the installed plugin and its enablement on its
+`hermes` summary line, for example
+`error hermes: hermes plugin cafleet is not enabled: plugins.enabled — run 'cafleet setup --coding-agent hermes'`.
 
 CAFleet needs no `approvals.deny` entries; keep every `cafleet …` glob out of
 that list. Hermes applies `approvals.deny` to every session, so such a glob

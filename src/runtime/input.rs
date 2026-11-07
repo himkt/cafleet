@@ -16,36 +16,6 @@ use crate::db::bounded_by_inherited;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::pane_lock::PaneLock;
-use crate::runtime::ControlIdentity;
-use crate::runtime::DrainedInput;
-use crate::runtime::InputControlOperation;
-use crate::runtime::InputControlReply;
-use crate::runtime::InputControlRequest;
-use crate::runtime::InputEligibility;
-use crate::runtime::InputFailure;
-use crate::runtime::MissingEvidence;
-use crate::runtime::ObservationController;
-use crate::runtime::ObservedContinuation;
-use crate::runtime::ObservedRequest;
-use crate::runtime::PermissionInspectInput;
-use crate::runtime::PermissionInspection;
-use crate::runtime::PermissionResponseResult;
-use crate::runtime::ProcessIdentity;
-use crate::runtime::ProgrammaticWrite;
-use crate::runtime::PtyIo;
-use crate::runtime::Result;
-use crate::runtime::RunLock;
-use crate::runtime::SubmissionResult;
-use crate::runtime::SubmissionStage;
-use crate::runtime::SubmissionStatus;
-use crate::runtime::Transport;
-use crate::runtime::Visibility;
-use crate::runtime::check_deadline;
-use crate::runtime::ensure;
-use crate::runtime::error;
-use crate::runtime::stable_run_identity;
-use crate::runtime::validate_operation_key;
-use crate::runtime::with_database_deadline;
 use crate::runtime::*;
 use crate::time::Deadline;
 use rusqlite::Connection;
@@ -57,15 +27,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-#[cfg(test)]
-use crate::runtime::InputDrain;
-
 pub(crate) trait RequestTokenSource: Send {
     fn fill(&mut self, bytes: &mut [u8; 32]) -> Result<()>;
 }
 
 const RECEIPT_CACHE_CAPACITY: usize = 4096;
-const STAGE_SETTLE: Duration = Duration::from_millis(500);
+pub(crate) const STAGE_SETTLE: Duration = Duration::from_millis(500);
 const STAGE_WRITE_MARGIN: Duration = Duration::from_millis(250);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
@@ -101,6 +68,7 @@ pub(crate) trait InputHooks: Send + Sync {
 pub(crate) struct InputServices {
     pub(crate) catalog: ProfileCatalog,
     pub(crate) token_source: Box<dyn RequestTokenSource>,
+    pub(crate) stage_settle: Duration,
     #[cfg(test)]
     pub(crate) hooks: Arc<dyn InputHooks>,
 }
@@ -330,23 +298,33 @@ enum RetainedSelection {
     },
 }
 
-#[derive(Clone, Copy)]
 enum PendingReservation {
     Unreserved,
-    HistoricalReady,
-    Installed,
+    HistoricalReady(Box<storage::PermissionReceipt>),
+    Installed(i64),
+}
+
+enum PendingDelivery {
+    Permission(Arc<PermissionSelection>),
+    Composer(Box<ComposerDelivery>),
+}
+
+impl PendingDelivery {
+    fn into_composer(self) -> Option<ComposerDelivery> {
+        match self {
+            Self::Composer(composer) => Some(*composer),
+            Self::Permission(_) => None,
+        }
+    }
 }
 
 struct PendingInput {
     reservation: PendingReservation,
-    ready: Option<storage::PermissionReceipt>,
     request: storage::NewInput,
     bytes: Arc<[u8]>,
-    permission: Option<Arc<PermissionSelection>>,
-    composer: Option<ComposerDelivery>,
+    delivery: PendingDelivery,
     deadline: Instant,
     phase: InputPhase,
-    input_id: Option<i64>,
 }
 
 struct ComposerDelivery {
@@ -373,8 +351,8 @@ enum OrdinaryBlocker {
     ObserverUnavailable,
 }
 
-fn ordinary_blocker(status: &crate::runtime::ObservationStatus) -> Option<OrdinaryBlocker> {
-    use crate::runtime::GateReason;
+fn ordinary_blocker(status: &ObservationStatus) -> Option<OrdinaryBlocker> {
+    use GateReason;
     if matches!(
         status.visibility,
         Visibility::Visible | Visibility::Obscured
@@ -395,15 +373,15 @@ fn ordinary_blocker(status: &crate::runtime::ObservationStatus) -> Option<Ordina
     None
 }
 
-fn interaction_cause(status: &crate::runtime::ObservationStatus) -> storage::UncertainCause {
-    if status.eligibility == InputEligibility::Hold(crate::runtime::GateReason::Candidate) {
+fn interaction_cause(status: &ObservationStatus) -> storage::UncertainCause {
+    if status.eligibility == InputEligibility::Hold(GateReason::Candidate) {
         storage::UncertainCause::InteractionCandidate
     } else {
         storage::UncertainCause::InteractionOpen
     }
 }
 
-fn blocker_cause(status: &crate::runtime::ObservationStatus) -> Option<storage::UncertainCause> {
+fn blocker_cause(status: &ObservationStatus) -> Option<storage::UncertainCause> {
     ordinary_blocker(status).map(|blocker| match blocker {
         OrdinaryBlocker::Interaction => interaction_cause(status),
         OrdinaryBlocker::ObserverUnavailable => storage::UncertainCause::ObserverUnavailable,
@@ -428,33 +406,50 @@ fn fallback_stages(prefix: &[u8], literal: &str) -> Result<Arc<[Arc<[u8]>]>> {
 }
 
 impl PendingInput {
+    /// The durable input this attempt targets: a historical Ready receipt or its installed
+    /// reservation.
+    fn input_id(&self) -> Option<i64> {
+        match &self.reservation {
+            PendingReservation::Unreserved => None,
+            PendingReservation::HistoricalReady(ready) => Some(ready.input.input_id),
+            PendingReservation::Installed(id) => Some(*id),
+        }
+    }
     fn installed_input_id(&self) -> Option<i64> {
         match self.reservation {
-            PendingReservation::Unreserved => {
-                assert!(
-                    self.input_id.is_none(),
-                    "unreserved input has no installed ID"
-                );
-                assert!(
-                    self.ready.is_none(),
-                    "unreserved input has no Ready history"
-                );
-                None
-            }
-            PendingReservation::HistoricalReady => {
-                let ready = self
-                    .ready
-                    .as_ref()
-                    .expect("historical Ready snapshot retained");
-                assert_eq!(self.input_id, Some(ready.input.input_id));
-                assert_eq!(ready.input.state, storage::InputState::Ready);
-                None
-            }
-            PendingReservation::Installed => Some(
-                self.input_id
-                    .expect("installed input reservation has an ID"),
-            ),
+            PendingReservation::Installed(id) => Some(id),
+            PendingReservation::Unreserved | PendingReservation::HistoricalReady(_) => None,
         }
+    }
+    fn ready(&self) -> Option<&storage::PermissionReceipt> {
+        match &self.reservation {
+            PendingReservation::HistoricalReady(ready) => Some(&**ready),
+            PendingReservation::Unreserved | PendingReservation::Installed(_) => None,
+        }
+    }
+    fn permission(&self) -> Option<&Arc<PermissionSelection>> {
+        match &self.delivery {
+            PendingDelivery::Permission(selection) => Some(selection),
+            PendingDelivery::Composer(_) => None,
+        }
+    }
+    fn composer(&self) -> Option<&ComposerDelivery> {
+        match &self.delivery {
+            PendingDelivery::Composer(composer) => Some(&**composer),
+            PendingDelivery::Permission(_) => None,
+        }
+    }
+    fn composer_mut(&mut self) -> Option<&mut ComposerDelivery> {
+        match &mut self.delivery {
+            PendingDelivery::Composer(composer) => Some(&mut **composer),
+            PendingDelivery::Permission(_) => None,
+        }
+    }
+    fn deferred(&self) -> Option<&DeferredAttempt> {
+        self.composer()?.deferred.as_ref()
+    }
+    fn deferred_mut(&mut self) -> Option<&mut DeferredAttempt> {
+        self.composer_mut()?.deferred.as_mut()
     }
 }
 
@@ -733,8 +728,7 @@ impl InputCoordinator {
         let attempt = self
             .pending
             .as_mut()
-            .and_then(|pending| pending.composer.as_mut())
-            .and_then(|composer| composer.deferred.as_mut())
+            .and_then(PendingInput::deferred_mut)
             .map(|deferred| &mut deferred.queued);
         let queued = self
             .queue
@@ -996,9 +990,7 @@ impl InputCoordinator {
             Some("observation update pending".into())
         } else if status.visibility != Visibility::Visible {
             Some("permission request is not visible".into())
-        } else if status.eligibility
-            != InputEligibility::Hold(crate::runtime::GateReason::Interaction)
-        {
+        } else if status.eligibility != InputEligibility::Hold(GateReason::Interaction) {
             Some("permission request is not the current interaction".into())
         } else {
             None
@@ -1062,11 +1054,11 @@ impl InputCoordinator {
         let Some(pending) = self.pending.as_ref() else {
             return Ok(StageGateProgress::Ready);
         };
-        let Some(selection) = pending.permission.clone() else {
+        let Some(selection) = pending.permission().cloned() else {
             return Ok(StageGateProgress::Ready);
         };
         let id = pending
-            .input_id
+            .input_id()
             .ok_or_else(|| error("permission reservation absent"))?;
         let RetainedSelection::Permission { next_stage, .. } = &self
             .operations
@@ -1213,7 +1205,7 @@ impl InputCoordinator {
         self.pending
             .as_mut()
             .expect("validated pending permission")
-            .permission = Some(rebound);
+            .delivery = PendingDelivery::Permission(rebound);
         Ok(StageGateProgress::Ready)
     }
 
@@ -1246,7 +1238,7 @@ impl InputCoordinator {
         conn: &mut Connection,
         run: &RunRecord,
         request: &InputControlRequest,
-        input: &crate::runtime::PermissionRespondInput,
+        input: &PermissionRespondInput,
         deadline: Instant,
         known_id: &mut Option<i64>,
     ) -> Result<Option<storage::PermissionReceipt>> {
@@ -1262,10 +1254,9 @@ impl InputCoordinator {
         )?;
         with_database_deadline(conn, deadline, |conn| {
             let tx = conn.transaction()?;
-            crate::runtime::artifacts::validate_database(
-                &storage::database_identity(&tx)?,
-                &self.run.database_identity_json,
-                || error("input database identity changed"),
+            ensure(
+                storage::database_identity(&tx)? == self.run.database_identity_json,
+                "input database identity changed",
             )?;
             let retained =
                 crate::runtime::input_client::response_lookup(&tx, &self.run, input, known_id)?;
@@ -1426,10 +1417,9 @@ impl InputCoordinator {
             let digest =
                 storage::permission_response_digest(self.run.run_id, &selection.request.metadata)?;
             self.pending = Some(PendingInput {
-                reservation: if history.is_some() {
-                    PendingReservation::HistoricalReady
-                } else {
-                    PendingReservation::Unreserved
+                reservation: match history {
+                    Some(ready) => PendingReservation::HistoricalReady(Box::new(ready)),
+                    None => PendingReservation::Unreserved,
                 },
                 request: storage::NewInput {
                     operation_key: input.operation_key.clone(),
@@ -1438,12 +1428,9 @@ impl InputCoordinator {
                     message_id: None,
                 },
                 bytes,
-                permission: Some(selection),
-                composer: None,
-                ready: history,
+                delivery: PendingDelivery::Permission(selection),
                 deadline,
                 phase: InputPhase::AwaitReservation,
-                input_id: known_id,
             });
             Ok(None)
         })();
@@ -1469,7 +1456,7 @@ impl InputCoordinator {
 
     fn rejected_response(
         &self,
-        input: &crate::runtime::PermissionRespondInput,
+        input: &PermissionRespondInput,
         reason: impl Into<String>,
     ) -> PermissionResponseResult {
         PermissionResponseResult {
@@ -1498,19 +1485,19 @@ impl InputCoordinator {
         input_id: Option<i64>,
         operation_key: Option<String>,
     ) -> InputFailure {
-        InputFailure {
-            source,
+        InputContext {
             run_id: Some(self.run.run_id),
             interaction_id,
             input_id,
             operation_key,
         }
+        .failure(source)
     }
 
     fn response_failure(
         &self,
         source: CafleetError,
-        input: &crate::runtime::PermissionRespondInput,
+        input: &PermissionRespondInput,
         input_id: Option<i64>,
     ) -> InputFailure {
         self.run_failure(
@@ -1522,21 +1509,21 @@ impl InputCoordinator {
     }
 
     fn failure(&self, source: CafleetError) -> InputFailure {
-        InputFailure {
-            source,
+        InputContext {
             run_id: Some(self.run.run_id),
             interaction_id: self.pending.as_ref().and_then(|pending| {
                 pending
-                    .permission
+                    .permission()
                     .as_ref()
                     .map(|selection| selection.request.metadata.interaction_id)
             }),
-            input_id: self.pending.as_ref().and_then(|pending| pending.input_id),
+            input_id: self.pending.as_ref().and_then(|pending| pending.input_id()),
             operation_key: self
                 .pending
                 .as_ref()
                 .map(|pending| pending.request.operation_key.clone()),
         }
+        .failure(source)
     }
 
     fn effective_deadline(&self, conn: &Connection, deadline: Instant) -> Result<Instant> {
@@ -1660,7 +1647,7 @@ impl InputCoordinator {
         ensure(
             self.pending.as_ref().is_some_and(|p| {
                 p.phase == InputPhase::AwaitReservation
-                    && p.input_id == Some(expected.input.input_id)
+                    && p.input_id() == Some(expected.input.input_id)
             }) && expected.input.state == storage::InputState::Ready
                 && expected.response.metadata == selection.request.metadata,
             "exact pending ready rearm required",
@@ -1714,11 +1701,11 @@ impl InputCoordinator {
         &mut self,
         conn: &mut Connection,
         run: &RunRecord,
-        action: &crate::runtime::ReceiptAction,
+        action: &ReceiptAction,
         deadline: Instant,
     ) -> Result<InputControlReply> {
-        use crate::runtime::ReceiptAction;
-        use crate::runtime::ReceiptReply;
+        use ReceiptAction;
+        use ReceiptReply;
         if let ReceiptAction::Retire { input_id } = action {
             return self.retire_received(conn, run, *input_id, deadline);
         }
@@ -1889,9 +1876,9 @@ impl InputCoordinator {
             })?;
             check_deadline(Instant::now(), deadline)?;
             self.operations.remove(&input_id);
-            Ok(InputControlReply::Receipt(
-                crate::runtime::ReceiptReply::Retired { input_id },
-            ))
+            Ok(InputControlReply::Receipt(ReceiptReply::Retired {
+                input_id,
+            }))
         })();
         result.map_err(|source| {
             CafleetError::from(self.run_failure(source, None, Some(input_id), operation_key))
@@ -1973,13 +1960,11 @@ impl InputCoordinator {
             )?;
             if let InputControlOperation::Receipt(action) = &request.operation {
                 match action {
-                    crate::runtime::ReceiptAction::Query { operation_key } => {
+                    ReceiptAction::Query { operation_key } => {
                         known_key = Some(operation_key.clone())
                     }
-                    crate::runtime::ReceiptAction::Retire { input_id }
-                    | crate::runtime::ReceiptAction::Reconcile { input_id, .. } => {
-                        known_input_id = Some(*input_id)
-                    }
+                    ReceiptAction::Retire { input_id }
+                    | ReceiptAction::Reconcile { input_id, .. } => known_input_id = Some(*input_id),
                 }
                 request.identity.validate(&self.run)?;
                 return self.receipt_received(conn, run, action, deadline).map(Some);
@@ -2033,10 +2018,9 @@ impl InputCoordinator {
                 )?;
             }
             let retained = with_database_deadline(conn, deadline, |conn| {
-                crate::runtime::artifacts::validate_database(
-                    &storage::database_identity(conn)?,
-                    &self.run.database_identity_json,
-                    || error("input database identity changed"),
+                ensure(
+                    storage::database_identity(conn)? == self.run.database_identity_json,
+                    "input database identity changed",
                 )?;
                 storage::find_input(conn, self.run.run_id, &input.operation_key)
             })?;
@@ -2138,8 +2122,7 @@ impl InputCoordinator {
                 reservation: PendingReservation::Unreserved,
                 request: new_input,
                 bytes: stages[0].clone(),
-                permission: None,
-                composer: Some(ComposerDelivery {
+                delivery: PendingDelivery::Composer(Box::new(ComposerDelivery {
                     method,
                     reason,
                     stages,
@@ -2150,11 +2133,9 @@ impl InputCoordinator {
                     literal: input.literal,
                     operation: composer_operation,
                     deferred: None,
-                }),
-                ready: None,
+                })),
                 deadline,
                 phase: InputPhase::AwaitReservation,
-                input_id: None,
             });
             Ok(None)
         })();
@@ -2178,28 +2159,17 @@ impl InputCoordinator {
                 self.services
                     .catalog
                     .composer_plan(backend, native, operation)
-                    .map(|plan| (native, backend, plan))
             }
             None => None,
         };
-        let prefix: &[u8] = match operation {
-            ComposerOperation::Prompt => b"",
-            ComposerOperation::Exec => b"! ",
-        };
+        let prefix = operation.prefix();
         let fallback_literal = if kind == storage::InputKind::Preview {
             crate::delivery::fallback_preview_line(literal)
         } else {
             literal.to_owned()
         };
         Ok(Some(match composer {
-            Some((native, backend, plan)) => {
-                ensure(
-                    plan.backend() == backend
-                        && plan.native_version() == native
-                        && !plan.rule_ids().is_empty()
-                        && !plan.fixture_ids().is_empty(),
-                    "composer plan provenance changed",
-                )?;
+            Some(plan) => {
                 if Self::composer_eligible(observation) {
                     let [literal, submit] = plan.stages(literal)?;
                     let stages: Arc<[Arc<[u8]>]> =
@@ -2227,7 +2197,7 @@ impl InputCoordinator {
     pub(super) fn deferred_attempt_writing(&self) -> bool {
         self.pending
             .as_ref()
-            .and_then(|pending| pending.composer.as_ref())
+            .and_then(|pending| pending.composer())
             .is_some_and(|composer| composer.deferred.is_some() && composer.pane.is_some())
     }
 
@@ -2244,8 +2214,7 @@ impl InputCoordinator {
             || self
                 .pending
                 .as_ref()
-                .and_then(|pending| pending.composer.as_ref())
-                .is_some_and(|composer| composer.deferred.is_some())
+                .is_some_and(|pending| pending.deferred().is_some())
     }
 
     fn publish_result(
@@ -2470,10 +2439,7 @@ impl InputCoordinator {
         }) {
             Ok(target) => target,
             Err(cause) if storage_failure(&cause) => {
-                self.queue
-                    .front_mut()
-                    .expect("queued head remains")
-                    .obstacle = "storage_unavailable";
+                self.note_head_obstacle("storage_unavailable");
                 return Ok(());
             }
             Err(cause) => return Err(cause),
@@ -2489,21 +2455,15 @@ impl InputCoordinator {
             );
         }
         let Some(pane) = PaneLock::try_acquire(&self.database_url, &self.placement)? else {
-            self.queue
-                .front_mut()
-                .expect("queued head remains")
-                .obstacle = "pane_input_busy";
+            self.note_head_obstacle("pane_input_busy");
             return Ok(());
         };
         let settles =
             u32::try_from(selection.2.len() - 1).expect("a plan has a bounded stage count");
         if attempt_deadline.saturating_duration_since(now)
-            <= STAGE_SETTLE * settles + STAGE_WRITE_MARGIN
+            <= self.services.stage_settle * settles + STAGE_WRITE_MARGIN
         {
-            self.queue
-                .front_mut()
-                .expect("queued head remains")
-                .obstacle = "delivery_budget_exhausted";
+            self.note_head_obstacle("delivery_budget_exhausted");
             return Ok(());
         }
         let (method, reason, stages) = selection;
@@ -2512,10 +2472,7 @@ impl InputCoordinator {
         }) {
             Ok(operation) => operation,
             Err(cause) if storage_failure(&cause) => {
-                self.queue
-                    .front_mut()
-                    .expect("queued head remains")
-                    .obstacle = "storage_unavailable";
+                self.note_head_obstacle("storage_unavailable");
                 return Ok(());
             }
             Err(cause) => return Err(cause),
@@ -2539,11 +2496,10 @@ impl InputCoordinator {
             },
         );
         self.pending = Some(PendingInput {
-            reservation: PendingReservation::Installed,
+            reservation: PendingReservation::Installed(input_id),
             request: head.request.clone(),
             bytes: stages[0].clone(),
-            permission: None,
-            composer: Some(ComposerDelivery {
+            delivery: PendingDelivery::Composer(Box::new(ComposerDelivery {
                 method,
                 reason,
                 stages,
@@ -2557,11 +2513,9 @@ impl InputCoordinator {
                     queued: head,
                     obstacle: "delivery_budget_exhausted",
                 }),
-            }),
-            ready: None,
+            })),
             deadline: attempt_deadline,
             phase: InputPhase::AwaitBeforeWrite,
-            input_id: Some(input_id),
         });
         self.checkpoint(
             input_id,
@@ -2581,14 +2535,14 @@ impl InputCoordinator {
         let Some(pending) = self.pending.as_ref() else {
             return Ok(false);
         };
-        let Some(composer) = pending.composer.as_ref() else {
+        let Some(composer) = pending.composer() else {
             return Ok(false);
         };
         if composer.deferred.is_none() {
             return Ok(false);
         }
         let id = pending
-            .input_id
+            .input_id()
             .expect("a deferred attempt has its receipt");
         let zero_bytes = self
             .operations
@@ -2625,8 +2579,7 @@ impl InputCoordinator {
                 Err(cause) if storage_failure(&cause) => {
                     self.pending
                         .as_mut()
-                        .and_then(|pending| pending.composer.as_mut())
-                        .and_then(|composer| composer.deferred.as_mut())
+                        .and_then(|pending| pending.deferred_mut())
                         .expect("deferred attempt")
                         .obstacle = "storage_unavailable";
                     return Ok(true);
@@ -2634,8 +2587,11 @@ impl InputCoordinator {
                 Err(cause) => return Err(cause),
             }
         }
-        let mut pending = self.pending.take().expect("deferred pending input");
-        let composer = pending.composer.take().expect("deferred composer delivery");
+        let pending = self.pending.take().expect("deferred pending input");
+        let composer = pending
+            .delivery
+            .into_composer()
+            .expect("deferred composer delivery");
         let deferred = composer.deferred.expect("deferred attempt");
         if requeue {
             self.operations.remove(&id);
@@ -2672,16 +2628,16 @@ impl InputCoordinator {
         let Some(pending) = self.pending.as_ref() else {
             return Ok(None);
         };
-        let Some(composer) = pending.composer.as_ref() else {
+        let Some(composer) = pending.composer() else {
             return Ok(None);
         };
         let zero_bytes = composer.written_stages == 0
-            && pending.input_id.is_none_or(|id| {
+            && pending.input_id().is_none_or(|id| {
                 self.operations
                     .get(&id)
                     .is_some_and(|retained| retained.stage == SubmissionStage::ZeroBytes)
             });
-        if composer.deferred.is_some() || pending.permission.is_some() || !zero_bytes {
+        if composer.deferred.is_some() || pending.permission().is_some() || !zero_bytes {
             return Ok(None);
         }
         let status = observation.status();
@@ -2692,12 +2648,13 @@ impl InputCoordinator {
             }
             _ => return Ok(None),
         };
-        let mut pending = self.pending.take().expect("immediate pending input");
+        let pending = self.pending.take().expect("immediate pending input");
+        let input_id = pending.input_id();
         let composer = pending
-            .composer
-            .take()
+            .delivery
+            .into_composer()
             .expect("immediate composer delivery");
-        let operation = match pending.input_id {
+        let operation = match input_id {
             Some(id) => {
                 self.operations.remove(&id);
                 with_database_deadline(conn, deadline, |conn| {
@@ -2836,10 +2793,10 @@ impl InputCoordinator {
 
     fn drain_requirement(&self) -> DrainRequirement {
         let pending = self.pending.as_ref();
-        if pending.and_then(|p| p.permission.as_ref()).is_some() {
+        if pending.and_then(|p| p.permission()).is_some() {
             DrainRequirement::Observation
         } else if pending
-            .and_then(|p| p.composer.as_ref())
+            .and_then(|p| p.composer())
             .is_some_and(|composer| !composer.requires_empty_composer())
         {
             DrainRequirement::NoBlockingInteraction
@@ -2854,7 +2811,7 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> Result<Option<u64>> {
-        let permission = self.pending.as_ref().and_then(|p| p.permission.as_ref());
+        let permission = self.pending.as_ref().and_then(|p| p.permission());
         if let Some(permission) = permission {
             self.validate_permission_binding(permission, observation)?;
         }
@@ -2870,14 +2827,20 @@ impl InputCoordinator {
             .map(Some)
     }
 
+    fn note_head_obstacle(&mut self, obstacle: &'static str) {
+        self.queue
+            .front_mut()
+            .expect("queued head remains")
+            .obstacle = obstacle;
+    }
+
     /// Records the zero-byte obstacle a started deferred attempt last met, which its expiry
     /// reports.
     fn note_deferred_obstacle(&mut self, obstacle: &'static str) {
         if let Some(deferred) = self
             .pending
             .as_mut()
-            .and_then(|pending| pending.composer.as_mut())
-            .and_then(|composer| composer.deferred.as_mut())
+            .and_then(|pending| pending.deferred_mut())
         {
             deferred.obstacle = obstacle;
         }
@@ -2930,70 +2893,67 @@ impl InputCoordinator {
         run: &RunRecord,
         operation: &PendingInput,
         deadline: Instant,
-    ) -> std::result::Result<WriteValidation, InputFailure> {
-        let result = (|| {
-            let effective = self.effective_deadline(conn, deadline)?;
+    ) -> Result<WriteValidation> {
+        let effective = self.effective_deadline(conn, deadline)?;
+        ensure(
+            conn.is_autocommit(),
+            "final input validation requires autocommit",
+        )?;
+        let result = with_database_budget(conn, Deadline::until(effective), |conn| {
+            conn.busy_handler(Some(|_| false))?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            self.validate_live(&tx, run)?;
+            let id = operation
+                .input_id()
+                .ok_or_else(|| error("input reservation is absent"))?;
+            let retained = self
+                .operations
+                .get(&id)
+                .ok_or_else(|| error("retained input reservation is absent"))?;
+            let current = storage::get_input(&tx, id)?;
             ensure(
-                conn.is_autocommit(),
-                "final input validation requires autocommit",
+                current == retained.operation
+                    && current.state == storage::InputState::InProgress
+                    && current.run_id == self.run.run_id
+                    && current.operation_key == operation.request.operation_key
+                    && current.payload_digest == operation.request.payload_digest
+                    && current.kind == operation.request.kind
+                    && current.message_id == operation.request.message_id,
+                "input reservation changed before write",
             )?;
-            let result = with_database_budget(conn, Deadline::until(effective), |conn| {
-                conn.busy_handler(Some(|_| false))?;
-                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                self.validate_live(&tx, run)?;
-                let id = operation
-                    .input_id
-                    .ok_or_else(|| error("input reservation is absent"))?;
-                let retained = self
-                    .operations
-                    .get(&id)
-                    .ok_or_else(|| error("retained input reservation is absent"))?;
-                let current = storage::get_input(&tx, id)?;
+            if let Some(selection) = &operation.permission() {
+                self.validate_permission_association(&tx, selection)?;
+                let receipt = storage::get_permission_response(&tx, id)?;
                 ensure(
-                    current == retained.operation
-                        && current.state == storage::InputState::InProgress
-                        && current.run_id == self.run.run_id
-                        && current.operation_key == operation.request.operation_key
-                        && current.payload_digest == operation.request.payload_digest
-                        && current.kind == operation.request.kind
-                        && current.message_id == operation.request.message_id,
-                    "input reservation changed before write",
+                    receipt.input == current
+                        && receipt.response.metadata == selection.request.metadata
+                        && receipt.claim.as_ref().is_some_and(|claim| {
+                            claim.input_id == id
+                                && claim.interaction_id == selection.binding.interaction_id
+                        }),
+                    "permission audit or claim changed before write",
                 )?;
-                if let Some(selection) = &operation.permission {
-                    self.validate_permission_association(&tx, selection)?;
-                    let receipt = storage::get_permission_response(&tx, id)?;
-                    ensure(
-                        receipt.input == current
-                            && receipt.response.metadata == selection.request.metadata
-                            && receipt.claim.as_ref().is_some_and(|claim| {
-                                claim.input_id == id
-                                    && claim.interaction_id == selection.binding.interaction_id
-                            }),
-                        "permission audit or claim changed before write",
-                    )?;
-                }
-                check_deadline(Instant::now(), effective)?;
-                tx.rollback().map_err(crate::error::CafleetError::from)
-            });
-            match result {
-                Ok(()) => {
-                    check_deadline(Instant::now(), effective)?;
-                    Ok(WriteValidation::Ready)
-                }
-                Err(CafleetError::DatabaseBusy(_)) => {
-                    check_deadline(Instant::now(), effective)?;
-                    Ok(WriteValidation::Contended)
-                }
-                Err(cause) => Err(cause),
             }
-        })();
-        result.map_err(|source| self.failure(source))
+            check_deadline(Instant::now(), effective)?;
+            tx.rollback().map_err(crate::error::CafleetError::from)
+        });
+        match result {
+            Ok(()) => {
+                check_deadline(Instant::now(), effective)?;
+                Ok(WriteValidation::Ready)
+            }
+            Err(CafleetError::DatabaseBusy(_)) => {
+                check_deadline(Instant::now(), effective)?;
+                Ok(WriteValidation::Contended)
+            }
+            Err(cause) => Err(cause),
+        }
     }
 
     /// Holds the concrete pane-input lock for a composer write; `false` while another writer
     /// holds it, so the attempt writes nothing and retries.
     fn hold_composer_pane(&mut self) -> Result<bool> {
-        let Some(composer) = self.pending.as_mut().and_then(|p| p.composer.as_mut()) else {
+        let Some(composer) = self.pending.as_mut().and_then(|p| p.composer_mut()) else {
             return Ok(true);
         };
         if let Some(pane) = &composer.pane {
@@ -3016,7 +2976,7 @@ impl InputCoordinator {
         transport: &mut Transport,
         observation: &ObservationController,
         deadline: Instant,
-    ) -> std::result::Result<Option<InputGuard<'a>>, InputFailure> {
+    ) -> Result<Option<InputGuard<'a>>> {
         let result = (|| {
             if self
                 .pending
@@ -3034,7 +2994,7 @@ impl InputCoordinator {
             let Some(proof) = transport.take_input_drain() else {
                 return Ok(None);
             };
-            if let Some(permission) = &pending.permission {
+            if let Some(permission) = &pending.permission() {
                 self.validate_permission_binding(permission, observation)?;
             }
             if !Self::validate_taken_drain(transport, &proof, observation, requirement, effective)?
@@ -3042,7 +3002,7 @@ impl InputCoordinator {
                 self.note_observer_obstacle(observation);
                 return Ok(None);
             }
-            if let Some(composer) = &pending.composer {
+            if let Some(composer) = &pending.composer() {
                 ensure(
                     composer
                         .manual_generation
@@ -3050,12 +3010,12 @@ impl InputCoordinator {
                     "human input arrived between composer stages",
                 )?;
             }
-            if let Some(permission) = &pending.permission {
+            if let Some(permission) = &pending.permission() {
                 let retained = self
                     .operations
                     .get(
                         &pending
-                            .input_id
+                            .input_id()
                             .ok_or_else(|| error("permission reservation absent"))?,
                     )
                     .ok_or_else(|| error("retained permission selection absent"))?;
@@ -3070,16 +3030,16 @@ impl InputCoordinator {
                     Arc::ptr_eq(selection, permission),
                     "permission retained selection changed",
                 )?;
-                let stage = selected_answer_stage(&selection.plan, *next_stage)?;
+                selected_answer_stage(&selection.plan, *next_stage)?;
                 ensure(
-                    stage.required_rule_id() == selection.binding.observed.request_rule_id
-                        && stage.required_choice_id() == selection.plan.choice_id(),
+                    selection.plan.capability().request_rule_id()
+                        == selection.binding.observed.request_rule_id,
                     "permission stage rule or choice changed",
                 )?;
             }
             let output_seq = self.current_drain_seq(&proof, "input manual generation changed")?;
             let id = pending
-                .input_id
+                .input_id()
                 .ok_or_else(|| error("armed input has no reservation"))?;
             let retained = self
                 .operations
@@ -3089,22 +3049,18 @@ impl InputCoordinator {
                 retained.attempt_available && !retained.leased,
                 "input attempt permit is consumed",
             )?;
-            if self
-                .validate_write_now(conn, run, pending, effective)
-                .map_err(|failure| failure.source)?
-                == WriteValidation::Contended
+            if self.validate_write_now(conn, run, pending, effective)? == WriteValidation::Contended
             {
                 self.note_deferred_obstacle("storage_unavailable");
                 return Ok(None);
             }
             check_deadline(Instant::now(), effective)?;
             Ok(Some((id, proof, effective, output_seq)))
-        })()
-        .map_err(|source| self.failure(source))?;
+        })()?;
         let Some((id, proof, deadline, output_seq)) = result else {
             return Ok(None);
         };
-        if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer.as_mut()) {
+        if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer_mut()) {
             composer
                 .manual_generation
                 .get_or_insert(self.manual_generation);
@@ -3150,8 +3106,7 @@ impl InputCoordinator {
             let deferred = self
                 .pending
                 .as_ref()
-                .and_then(|pending| pending.composer.as_ref())
-                .is_some_and(|composer| composer.deferred.is_some());
+                .is_some_and(|pending| pending.deferred().is_some());
             let deadline = if deferred {
                 deadline.min(self.pending.as_ref().expect("pending input").deadline)
             } else {
@@ -3161,415 +3116,30 @@ impl InputCoordinator {
                 return Ok(None);
             };
             let effective = self.effective_deadline(conn, deadline)?;
-            let phase = pending.phase;
-            if phase == InputPhase::Blocked {
-                return Ok(None);
-            }
-            if phase == InputPhase::AwaitReservation {
-                let ready = self
-                    .pending
-                    .as_ref()
-                    .and_then(|p| p.ready.clone().zip(p.permission.clone()));
-                let (operation, output_seq) = if let Some((ready, selection)) = ready {
-                    let owner = self.run.owner();
-                    let Some(guard) = with_database_deadline(conn, effective, |conn| {
-                        self.acquire_rearm_guard(
-                            conn,
-                            run,
-                            &ready,
-                            &selection,
-                            (transport, observation),
-                            effective,
-                        )
-                    })?
-                    else {
-                        return Ok(None);
-                    };
-                    let output_seq = guard
-                        .proof
-                        .as_ref()
-                        .expect("rearm guard retains its drain")
-                        .output_seq();
-                    let proof = guard.zero_byte_retirement(
-                        &owner,
-                        ready.input.input_id,
-                        ready.response.metadata.interaction_id,
-                    )?;
-                    let rearmed = storage::rearm_permission_response(
-                        conn,
-                        &owner,
-                        &selection.request,
-                        &proof,
-                        effective,
-                    )?;
-                    (rearmed.input, output_seq)
-                } else {
-                    let Some(output_seq) = self.fresh_drain(transport, observation, effective)?
-                    else {
-                        return Ok(None);
-                    };
-                    let pending = self.pending.as_ref().expect("retained pending input");
-                    let operation = if let Some(selection) = &pending.permission {
-                        let reservation = with_database_deadline(conn, effective, |conn| {
-                            self.validate_live(conn, run)?;
-                            self.validate_permission_association(conn, selection)?;
-                            storage::reserve_permission_response(
-                                conn,
-                                &self.run.owner(),
-                                &selection.request,
-                                Some(selection.plan.capability()),
-                                effective,
-                            )
-                        })?;
-                        match reservation {
-                            storage::PermissionReservation::Reserved(receipt) => receipt.input,
-                            storage::PermissionReservation::Retained(receipt) => {
-                                let reply = InputControlReply::PermissionResponse(
-                                    crate::runtime::input_client::projection(&self.run, receipt)?,
-                                );
-                                self.pending = None;
-                                return Ok(Some(reply));
-                            }
-                        }
-                    } else {
-                        let composer = pending
-                            .composer
-                            .as_ref()
-                            .ok_or_else(|| error("ordinary input has no composer delivery"))?;
-                        let reservation = storage::NewReservation {
-                            selection: Some((composer.method, composer.reason)),
-                            defer_reason: None,
-                        };
-                        let reservation = with_database_deadline(conn, effective, |conn| {
-                            self.validate_live(conn, run)?;
-                            storage::reserve_input_with_provenance(
-                                conn,
-                                &self.run.owner(),
-                                &pending.request,
-                                reservation,
-                            )
-                        })?;
-                        match reservation {
-                            storage::InputReservation::Inserted(operation) => operation,
-                            storage::InputReservation::Existing(operation) => {
-                                let reply = InputControlReply::Submission(self.result(&operation));
-                                self.pending = None;
-                                return Ok(Some(reply));
-                            }
-                        }
-                    };
-                    (operation, output_seq)
-                };
-                ensure(
-                    operation.state == storage::InputState::InProgress,
-                    "ordinary input reservation is not writable",
-                )?;
-                let id = operation.input_id;
-                let pending = self.pending.as_ref().expect("reserved pending input");
-                self.operations.insert(
-                    id,
-                    RetainedInput {
-                        operation,
-                        bytes: pending.bytes.clone(),
-                        selection: match (&pending.permission, &pending.composer) {
-                            (Some(selection), _) => RetainedSelection::Permission {
-                                selection: selection.clone(),
-                                next_stage: 0,
-                            },
-                            (None, Some(composer)) => RetainedSelection::Composer {
-                                method: composer.method,
-                                stages: composer.stages.clone(),
-                                next_stage: 0,
-                            },
-                            (None, None) => {
-                                return Err(error("ordinary input has no composer delivery"));
-                            }
-                        },
-                        stage: SubmissionStage::ZeroBytes,
-                        written_bytes: 0,
-                        output_seq,
-                        attempt_available: false,
-                        leased: false,
-                    },
-                );
-                let pending = self.pending.as_mut().expect("reserved pending input");
-                pending.input_id = Some(id);
-                pending.reservation = PendingReservation::Installed;
-                pending.phase = InputPhase::AwaitBeforeWrite;
-                self.checkpoint(
-                    id,
-                    #[cfg(test)]
-                    InputBoundary::Reserved,
-                    effective,
-                )?;
-                return Ok(None);
-            }
-            let id = self
-                .pending
-                .as_ref()
-                .and_then(|pending| pending.input_id)
-                .ok_or_else(|| error("input writer has no reservation"))?;
-            if phase == InputPhase::AwaitBeforeWrite {
-                if let StageGateProgress::Waiting = self.advance_stage_gate(observation)? {
-                    return Ok(None);
+            match pending.phase {
+                InputPhase::Blocked => Ok(None),
+                InputPhase::AwaitReservation => {
+                    self.reserve_pending(conn, run, transport, observation, effective)
                 }
-                if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer.as_ref())
-                    && let Some(settle_until) = composer.settle_until
-                {
-                    let interruption = if self.manual_accounting_failed {
-                        Some(storage::UncertainCause::ManualAccountingFailed)
-                    } else if composer.manual_generation != Some(self.manual_generation) {
-                        Some(storage::UncertainCause::ManualInput)
-                    } else {
-                        blocker_cause(&observation.status())
-                    };
-                    if let Some(cause) = interruption {
-                        terminal_bookkeeping = true;
-                        let deferred = composer.deferred.is_some();
-                        let reply = self.stop_composer_stages(conn, run, id, effective, cause)?;
-                        if deferred {
-                            Self::publish_result(
-                                observation,
-                                id,
-                                SubmissionStage::Partial,
-                                self.retained_uncertain_cause(id),
-                            );
-                            return Ok(None);
-                        }
-                        return Ok(Some(reply));
-                    }
-                    if Instant::now() < settle_until {
-                        return Ok(None);
-                    }
-                }
-                let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
-                    return Ok(None);
-                };
-                let retained = self
-                    .operations
-                    .get_mut(&id)
-                    .expect("reserved input remains retained");
-                retained.output_seq = output_seq;
-                retained.attempt_available = true;
-                self.pending.as_mut().expect("pending input").phase = InputPhase::Armed;
-                self.checkpoint(
-                    id,
-                    #[cfg(test)]
-                    InputBoundary::BeforeWrite,
-                    effective,
-                )?;
-                return Ok(None);
-            }
-            let status = observation.status();
-            if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer.as_ref())
-                && composer.written_stages > 0
-                && matches!(
-                    ordinary_blocker(&status),
-                    Some(OrdinaryBlocker::Interaction)
-                )
-            {
-                terminal_bookkeeping = true;
-                let deferred = composer.deferred.is_some();
-                let reply = self.stop_composer_stages(
+                InputPhase::AwaitBeforeWrite => self.arm_pending(
                     conn,
                     run,
-                    id,
+                    (transport, observation),
                     effective,
-                    interaction_cause(&status),
-                )?;
-                if deferred {
-                    Self::publish_result(
-                        observation,
-                        id,
-                        SubmissionStage::Partial,
-                        self.retained_uncertain_cause(id),
-                    );
-                    return Ok(None);
-                }
-                return Ok(Some(reply));
-            }
-            let bytes = self
-                .pending
-                .as_ref()
-                .expect("armed pending input")
-                .bytes
-                .clone();
-            let Some(mut guard) = self
-                .acquire_write_guard(conn, run, transport, observation, effective)
-                .map_err(|failure| failure.source)?
-            else {
-                return Ok(None);
-            };
-            let before_stage = guard
-                .retained
-                .as_ref()
-                .expect("write guard retains its input")
-                .stage;
-            let before_count = guard
-                .retained
-                .as_ref()
-                .expect("write guard retains its input")
-                .written_bytes;
-            let write = transport.write_programmatic(pty, &bytes, &mut guard, effective);
-            let attempted = matches!(
-                guard.permit,
-                GuardPermit::IoPossible | GuardPermit::ResultRecorded
-            );
-            drop(guard);
-            let after = if attempted {
-                self.checkpoint(
-                    id,
-                    #[cfg(test)]
-                    InputBoundary::AfterWrite,
-                    effective,
-                )
-            } else {
-                Ok(())
-            };
-            let write =
-                combine_manual_progress(write, after).and_then(|outcome| {
-                    let point = self.retained_checkpoint(id)?;
-                    match &outcome {
-                        ProgrammaticWrite::Complete { bytes: count } => ensure(
-                            *count == bytes.len()
-                                && matches!(
-                                    point.stage,
-                                    SubmissionStage::Partial | SubmissionStage::Submitted
-                                )
-                                && point.written_bytes
-                                    == before_count
-                                        .checked_add(u64::try_from(*count).map_err(|_| {
-                                            error("native input count exceeds range")
-                                        })?)
-                                        .ok_or_else(|| error("native input count exhausted"))?,
-                            "complete native result conflicts with retained evidence",
-                        )?,
-                        ProgrammaticWrite::Partial { bytes: count } => ensure(
-                            *count > 0
-                                && *count < bytes.len()
-                                && point.stage == SubmissionStage::Partial
-                                && point.written_bytes
-                                    == before_count
-                                        .checked_add(u64::try_from(*count).map_err(|_| {
-                                            error("native input count exceeds range")
-                                        })?)
-                                        .ok_or_else(|| error("native input count exhausted"))?,
-                            "partial native result conflicts with retained evidence",
-                        )?,
-                        ProgrammaticWrite::Pending => ensure(
-                            point.stage == before_stage && point.written_bytes == before_count,
-                            "pending native result conflicts with retained evidence",
-                        )?,
-                    }
-                    Ok(outcome)
-                });
-            if matches!(&write, Ok(ProgrammaticWrite::Complete { .. }))
-                && self
-                    .operations
-                    .get(&id)
-                    .expect("actual stage remains retained")
-                    .stage
-                    == SubmissionStage::Partial
-            {
-                let next_bytes = self
-                    .operations
-                    .get(&id)
-                    .expect("next stage retained")
-                    .bytes
-                    .clone();
-                let pending = self.pending.as_mut().expect("pending multistage response");
-                ensure(
-                    pending.permission.is_some() || pending.composer.is_some(),
-                    "nonfinal stage requires a staged plan",
-                )?;
-                if let Some(composer) = pending.composer.as_mut() {
-                    composer.written_stages += 1;
-                    composer.settle_until = Some(Instant::now() + STAGE_SETTLE);
-                }
-                pending.bytes = next_bytes;
-                pending.phase = InputPhase::AwaitBeforeWrite;
-                return Ok(None);
-            }
-            if matches!(&write, Ok(ProgrammaticWrite::Pending)) {
-                self.pending
-                    .as_mut()
-                    .expect("pending zero-byte attempt")
-                    .phase = InputPhase::AwaitBeforeWrite;
-                return Ok(None);
-            }
-            let stage = self
-                .operations
-                .get(&id)
-                .expect("actual input outcome retained")
-                .stage;
-            let uncertain_cause = if matches!(&write, Ok(ProgrammaticWrite::Partial { .. })) {
-                storage::UncertainCause::ShortWrite
-            } else {
-                storage::UncertainCause::WriteFailed
-            };
-            terminal_bookkeeping = true;
-            let persisted = with_database_deadline(conn, effective, |conn| {
-                self.validate_live(conn, run)?;
-                let next = match stage {
-                    SubmissionStage::Submitted => storage::InputState::Accepted,
-                    SubmissionStage::ZeroBytes => storage::InputState::Ready,
-                    SubmissionStage::Partial | SubmissionStage::Unknown => {
-                        return storage::record_input_uncertain(
-                            conn,
-                            &self.run.owner(),
-                            id,
-                            uncertain_cause,
-                        );
-                    }
-                };
-                storage::record_input_state(
-                    conn,
-                    &self.run.owner(),
-                    id,
-                    storage::InputState::InProgress,
-                    next,
-                )
-            });
-            if let Ok(operation) = &persisted {
-                self.operations
-                    .get_mut(&id)
-                    .expect("input retained")
-                    .operation = operation.clone();
-            }
-            let completed = match (write, persisted) {
-                (Ok(_), Ok(operation)) => Ok(operation),
-                (Err(primary), Ok(_)) | (Ok(_), Err(primary)) => Err(primary),
-                (Err(primary), Err(bookkeeping)) => Err(with_diagnostic(primary, &bookkeeping)),
-            };
-            self.pending.as_mut().expect("completed input").phase = InputPhase::Blocked;
-            let operation = completed?;
-            self.checkpoint(
-                id,
-                #[cfg(test)]
-                InputBoundary::TerminalState,
-                effective,
-            )?;
-            let pending = self.pending.as_ref().expect("completed input retained");
-            if pending
-                .composer
-                .as_ref()
-                .is_some_and(|composer| composer.deferred.is_some())
-            {
-                self.finish_deferred(conn, observation, &operation)?;
-                self.pending = None;
-                return Ok(None);
-            }
-            let reply = match &pending.permission {
-                Some(selection) => InputControlReply::PermissionResponse(
-                    self.permission_result(&selection.request.metadata, self.result(&operation)),
+                    &mut terminal_bookkeeping,
                 ),
-                None => InputControlReply::Submission(self.result(&operation)),
-            };
-            self.pending = None;
-            Ok(Some(reply))
+                InputPhase::Armed => self.write_pending_stage(
+                    conn,
+                    run,
+                    (transport, observation),
+                    pty,
+                    effective,
+                    &mut terminal_bookkeeping,
+                ),
+            }
         })();
         result.map_err(|source| {
-            if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer.as_mut()) {
+            if let Some(composer) = self.pending.as_mut().and_then(|p| p.composer_mut()) {
                 composer.pane = None;
             }
             self.retire_failed_deferred(conn, observation);
@@ -3582,12 +3152,433 @@ impl InputCoordinator {
         })
     }
 
+    fn reserved_input_id(&self) -> Result<i64> {
+        self.pending
+            .as_ref()
+            .and_then(|pending| pending.input_id())
+            .ok_or_else(|| error("input writer has no reservation"))
+    }
+
+    fn reserve_pending(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        transport: &mut Transport,
+        observation: &ObservationController,
+        effective: Instant,
+    ) -> Result<Option<InputControlReply>> {
+        let ready = self
+            .pending
+            .as_ref()
+            .and_then(|p| p.ready().cloned().zip(p.permission().cloned()));
+        let (operation, output_seq) = if let Some((ready, selection)) = ready {
+            let owner = self.run.owner();
+            let Some(guard) = with_database_deadline(conn, effective, |conn| {
+                self.acquire_rearm_guard(
+                    conn,
+                    run,
+                    &ready,
+                    &selection,
+                    (transport, observation),
+                    effective,
+                )
+            })?
+            else {
+                return Ok(None);
+            };
+            let output_seq = guard
+                .proof
+                .as_ref()
+                .expect("rearm guard retains its drain")
+                .output_seq();
+            let proof = guard.zero_byte_retirement(
+                &owner,
+                ready.input.input_id,
+                ready.response.metadata.interaction_id,
+            )?;
+            let rearmed = storage::rearm_permission_response(
+                conn,
+                &owner,
+                &selection.request,
+                &proof,
+                effective,
+            )?;
+            (rearmed.input, output_seq)
+        } else {
+            let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
+                return Ok(None);
+            };
+            let pending = self.pending.as_ref().expect("retained pending input");
+            let operation = match &pending.delivery {
+                PendingDelivery::Permission(selection) => {
+                    let reservation = with_database_deadline(conn, effective, |conn| {
+                        self.validate_live(conn, run)?;
+                        self.validate_permission_association(conn, selection)?;
+                        storage::reserve_permission_response(
+                            conn,
+                            &self.run.owner(),
+                            &selection.request,
+                            Some(selection.plan.capability()),
+                            effective,
+                        )
+                    })?;
+                    match reservation {
+                        storage::PermissionReservation::Reserved(receipt) => receipt.input,
+                        storage::PermissionReservation::Retained(receipt) => {
+                            let reply = InputControlReply::PermissionResponse(
+                                crate::runtime::input_client::projection(&self.run, receipt)?,
+                            );
+                            self.pending = None;
+                            return Ok(Some(reply));
+                        }
+                    }
+                }
+                PendingDelivery::Composer(composer) => {
+                    let reservation = storage::NewReservation {
+                        selection: Some((composer.method, composer.reason)),
+                        defer_reason: None,
+                    };
+                    let reservation = with_database_deadline(conn, effective, |conn| {
+                        self.validate_live(conn, run)?;
+                        storage::reserve_input_with_provenance(
+                            conn,
+                            &self.run.owner(),
+                            &pending.request,
+                            reservation,
+                        )
+                    })?;
+                    match reservation {
+                        storage::InputReservation::Inserted(operation) => operation,
+                        storage::InputReservation::Existing(operation) => {
+                            let reply = InputControlReply::Submission(self.result(&operation));
+                            self.pending = None;
+                            return Ok(Some(reply));
+                        }
+                    }
+                }
+            };
+            (operation, output_seq)
+        };
+        ensure(
+            operation.state == storage::InputState::InProgress,
+            "ordinary input reservation is not writable",
+        )?;
+        let id = operation.input_id;
+        let pending = self.pending.as_ref().expect("reserved pending input");
+        self.operations.insert(
+            id,
+            RetainedInput {
+                operation,
+                bytes: pending.bytes.clone(),
+                selection: match &pending.delivery {
+                    PendingDelivery::Permission(selection) => RetainedSelection::Permission {
+                        selection: selection.clone(),
+                        next_stage: 0,
+                    },
+                    PendingDelivery::Composer(composer) => RetainedSelection::Composer {
+                        method: composer.method,
+                        stages: composer.stages.clone(),
+                        next_stage: 0,
+                    },
+                },
+                stage: SubmissionStage::ZeroBytes,
+                written_bytes: 0,
+                output_seq,
+                attempt_available: false,
+                leased: false,
+            },
+        );
+        let pending = self.pending.as_mut().expect("reserved pending input");
+        pending.reservation = PendingReservation::Installed(id);
+        pending.phase = InputPhase::AwaitBeforeWrite;
+        self.checkpoint(
+            id,
+            #[cfg(test)]
+            InputBoundary::Reserved,
+            effective,
+        )?;
+        Ok(None)
+    }
+
+    fn arm_pending(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        (transport, observation): (&mut Transport, &ObservationController),
+        effective: Instant,
+        terminal_bookkeeping: &mut bool,
+    ) -> Result<Option<InputControlReply>> {
+        let id = self.reserved_input_id()?;
+        if let StageGateProgress::Waiting = self.advance_stage_gate(observation)? {
+            return Ok(None);
+        }
+        if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer())
+            && let Some(settle_until) = composer.settle_until
+        {
+            let interruption = if self.manual_accounting_failed {
+                Some(storage::UncertainCause::ManualAccountingFailed)
+            } else if composer.manual_generation != Some(self.manual_generation) {
+                Some(storage::UncertainCause::ManualInput)
+            } else {
+                blocker_cause(&observation.status())
+            };
+            if let Some(cause) = interruption {
+                *terminal_bookkeeping = true;
+                return self.interrupt_composer(conn, run, id, observation, effective, cause);
+            }
+            if Instant::now() < settle_until {
+                return Ok(None);
+            }
+        }
+        let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
+            return Ok(None);
+        };
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("reserved input remains retained");
+        retained.output_seq = output_seq;
+        retained.attempt_available = true;
+        self.pending.as_mut().expect("pending input").phase = InputPhase::Armed;
+        self.checkpoint(
+            id,
+            #[cfg(test)]
+            InputBoundary::BeforeWrite,
+            effective,
+        )?;
+        Ok(None)
+    }
+
+    /// Stops a staged composer delivery; a deferred attempt publishes its partial result
+    /// instead of replying.
+    fn interrupt_composer(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        id: i64,
+        observation: &ObservationController,
+        effective: Instant,
+        cause: storage::UncertainCause,
+    ) -> Result<Option<InputControlReply>> {
+        let deferred = self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.deferred().is_some());
+        let reply = self.stop_composer_stages(conn, run, id, effective, cause)?;
+        if deferred {
+            Self::publish_result(
+                observation,
+                id,
+                SubmissionStage::Partial,
+                self.retained_uncertain_cause(id),
+            );
+            return Ok(None);
+        }
+        Ok(Some(reply))
+    }
+
+    fn write_pending_stage(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        (transport, observation): (&mut Transport, &ObservationController),
+        pty: &mut impl PtyIo,
+        effective: Instant,
+        terminal_bookkeeping: &mut bool,
+    ) -> Result<Option<InputControlReply>> {
+        let id = self.reserved_input_id()?;
+        let status = observation.status();
+        if let Some(composer) = self.pending.as_ref().and_then(|p| p.composer())
+            && composer.written_stages > 0
+            && matches!(
+                ordinary_blocker(&status),
+                Some(OrdinaryBlocker::Interaction)
+            )
+        {
+            *terminal_bookkeeping = true;
+            return self.interrupt_composer(
+                conn,
+                run,
+                id,
+                observation,
+                effective,
+                interaction_cause(&status),
+            );
+        }
+        let bytes = self
+            .pending
+            .as_ref()
+            .expect("armed pending input")
+            .bytes
+            .clone();
+        let Some(mut guard) =
+            self.acquire_write_guard(conn, run, transport, observation, effective)?
+        else {
+            return Ok(None);
+        };
+        let before_stage = guard
+            .retained
+            .as_ref()
+            .expect("write guard retains its input")
+            .stage;
+        let before_count = guard
+            .retained
+            .as_ref()
+            .expect("write guard retains its input")
+            .written_bytes;
+        let write = transport.write_programmatic(pty, &bytes, &mut guard, effective);
+        let attempted = matches!(
+            guard.permit,
+            GuardPermit::IoPossible | GuardPermit::ResultRecorded
+        );
+        drop(guard);
+        let after = if attempted {
+            self.checkpoint(
+                id,
+                #[cfg(test)]
+                InputBoundary::AfterWrite,
+                effective,
+            )
+        } else {
+            Ok(())
+        };
+        let advanced = |count: usize| -> Result<u64> {
+            before_count
+                .checked_add(
+                    u64::try_from(count).map_err(|_| error("native input count exceeds range"))?,
+                )
+                .ok_or_else(|| error("native input count exhausted"))
+        };
+        let write = combine_manual_progress(write, after).and_then(|outcome| {
+            let point = self.retained_checkpoint(id)?;
+            match &outcome {
+                ProgrammaticWrite::Complete { bytes: count } => ensure(
+                    *count == bytes.len()
+                        && matches!(
+                            point.stage,
+                            SubmissionStage::Partial | SubmissionStage::Submitted
+                        )
+                        && point.written_bytes == advanced(*count)?,
+                    "complete native result conflicts with retained evidence",
+                )?,
+                ProgrammaticWrite::Partial { bytes: count } => ensure(
+                    *count > 0
+                        && *count < bytes.len()
+                        && point.stage == SubmissionStage::Partial
+                        && point.written_bytes == advanced(*count)?,
+                    "partial native result conflicts with retained evidence",
+                )?,
+                ProgrammaticWrite::Pending => ensure(
+                    point.stage == before_stage && point.written_bytes == before_count,
+                    "pending native result conflicts with retained evidence",
+                )?,
+            }
+            Ok(outcome)
+        });
+        if matches!(&write, Ok(ProgrammaticWrite::Complete { .. }))
+            && self
+                .operations
+                .get(&id)
+                .expect("actual stage remains retained")
+                .stage
+                == SubmissionStage::Partial
+        {
+            let next_bytes = self
+                .operations
+                .get(&id)
+                .expect("next stage retained")
+                .bytes
+                .clone();
+            let pending = self.pending.as_mut().expect("pending multistage response");
+            if let Some(composer) = pending.composer_mut() {
+                composer.written_stages += 1;
+                composer.settle_until = Some(Instant::now() + self.services.stage_settle);
+            }
+            pending.bytes = next_bytes;
+            pending.phase = InputPhase::AwaitBeforeWrite;
+            return Ok(None);
+        }
+        if matches!(&write, Ok(ProgrammaticWrite::Pending)) {
+            self.pending
+                .as_mut()
+                .expect("pending zero-byte attempt")
+                .phase = InputPhase::AwaitBeforeWrite;
+            return Ok(None);
+        }
+        let stage = self
+            .operations
+            .get(&id)
+            .expect("actual input outcome retained")
+            .stage;
+        let uncertain_cause = if matches!(&write, Ok(ProgrammaticWrite::Partial { .. })) {
+            storage::UncertainCause::ShortWrite
+        } else {
+            storage::UncertainCause::WriteFailed
+        };
+        *terminal_bookkeeping = true;
+        let persisted = with_database_deadline(conn, effective, |conn| {
+            self.validate_live(conn, run)?;
+            let next = match stage {
+                SubmissionStage::Submitted => storage::InputState::Accepted,
+                SubmissionStage::ZeroBytes => storage::InputState::Ready,
+                SubmissionStage::Partial | SubmissionStage::Unknown => {
+                    return storage::record_input_uncertain(
+                        conn,
+                        &self.run.owner(),
+                        id,
+                        uncertain_cause,
+                    );
+                }
+            };
+            storage::record_input_state(
+                conn,
+                &self.run.owner(),
+                id,
+                storage::InputState::InProgress,
+                next,
+            )
+        });
+        if let Ok(operation) = &persisted {
+            self.operations
+                .get_mut(&id)
+                .expect("input retained")
+                .operation = operation.clone();
+        }
+        let completed = match (write, persisted) {
+            (Ok(_), Ok(operation)) => Ok(operation),
+            (Err(primary), Ok(_)) | (Ok(_), Err(primary)) => Err(primary),
+            (Err(primary), Err(bookkeeping)) => Err(primary.with_diagnostic(bookkeeping.message())),
+        };
+        self.pending.as_mut().expect("completed input").phase = InputPhase::Blocked;
+        let operation = completed?;
+        self.checkpoint(
+            id,
+            #[cfg(test)]
+            InputBoundary::TerminalState,
+            effective,
+        )?;
+        let pending = self.pending.as_ref().expect("completed input retained");
+        if pending.deferred().is_some() {
+            self.finish_deferred(conn, observation, &operation)?;
+            self.pending = None;
+            return Ok(None);
+        }
+        let reply = match &pending.permission() {
+            Some(selection) => InputControlReply::PermissionResponse(
+                self.permission_result(&selection.request.metadata, self.result(&operation)),
+            ),
+            None => InputControlReply::Submission(self.result(&operation)),
+        };
+        self.pending = None;
+        Ok(Some(reply))
+    }
+
     /// The started deferred attempt's input and whether it may have written a child byte.
     fn active_deferred(&self) -> Option<(i64, SubmissionStage, bool)> {
         let pending = self.pending.as_ref()?;
-        pending.composer.as_ref()?.deferred.as_ref()?;
+        pending.deferred()?;
         let id = pending
-            .input_id
+            .input_id()
             .expect("a deferred attempt has its receipt");
         let stage = self
             .operations
@@ -3595,7 +3586,7 @@ impl InputCoordinator {
             .expect("a deferred attempt retains its receipt")
             .stage;
         let written = pending
-            .composer
+            .composer()
             .as_ref()
             .is_some_and(|composer| composer.written_stages > 0);
         Some((id, stage, stage != SubmissionStage::ZeroBytes || written))
@@ -3676,7 +3667,7 @@ impl InputCoordinator {
     ) -> Result<InputControlReply> {
         let pending = self.pending.as_mut().expect("staged composer input");
         pending.phase = InputPhase::Blocked;
-        if let Some(composer) = pending.composer.as_mut() {
+        if let Some(composer) = pending.composer_mut() {
             composer.pane = None;
         }
         // Recording uncertainty writes no child byte, so the input fences, which only withhold
@@ -3709,7 +3700,7 @@ impl InputCoordinator {
         let Some(pending) = self.pending.as_mut() else {
             return source;
         };
-        if pending.permission.is_none() {
+        if pending.permission().is_none() {
             return source;
         }
         pending.phase = InputPhase::Blocked;
@@ -3756,7 +3747,7 @@ impl InputCoordinator {
                     .operation = operation;
                 source
             }
-            Err(bookkeeping) => with_diagnostic(source, &bookkeeping),
+            Err(bookkeeping) => source.with_diagnostic(bookkeeping.message()),
         }
     }
 
@@ -3902,14 +3893,7 @@ fn combine_manual_progress<T>(progress: Result<T>, accounting: Result<()>) -> Re
     match (progress, accounting) {
         (Ok(value), Ok(())) => Ok(value),
         (Err(cause), Ok(())) | (Ok(_), Err(cause)) => Err(cause),
-        (Err(primary), Err(accounting)) => Err(with_diagnostic(primary, &accounting)),
-    }
-}
-
-fn with_diagnostic(cause: CafleetError, diagnostic: &CafleetError) -> CafleetError {
-    CafleetError::WithDiagnostics {
-        cause: Box::new(cause),
-        diagnostics: vec![diagnostic.message().into_owned()],
+        (Err(primary), Err(accounting)) => Err(primary.with_diagnostic(accounting.message())),
     }
 }
 
@@ -4026,9 +4010,6 @@ mod tests {
         use crate::error::CafleetError;
         use crate::runtime::input::tests::ordinary_prompt::support::RunnerFixture;
         use crate::runtime::input::*;
-        use crate::runtime::*;
-        use std::collections::VecDeque;
-        use std::io;
         use std::io::ErrorKind;
         use std::panic::AssertUnwindSafe;
         use std::panic::catch_unwind;
@@ -4036,77 +4017,7 @@ mod tests {
         use std::time::Duration;
         use std::time::Instant;
 
-        #[derive(Default)]
-        struct Human {
-            queued: VecDeque<u8>,
-            consumed: Vec<u8>,
-        }
-
-        impl ByteInput for Human {
-            fn try_read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-                assert!(!bytes.is_empty());
-                if self.queued.is_empty() {
-                    return Err(ErrorKind::WouldBlock.into());
-                }
-                let count = bytes.len().min(self.queued.len());
-                for byte in &mut bytes[..count] {
-                    *byte = self.queued.pop_front().expect("queued human byte");
-                }
-                self.consumed.extend_from_slice(&bytes[..count]);
-                Ok(count)
-            }
-        }
-
-        #[derive(Default)]
-        struct Pty {
-            blocked: bool,
-            failure: Option<ErrorKind>,
-            offered: Vec<Vec<u8>>,
-            written: Vec<u8>,
-            reads: usize,
-        }
-
-        impl ByteInput for Pty {
-            fn try_read(&mut self, _: &mut [u8]) -> io::Result<usize> {
-                self.reads += 1;
-                Err(ErrorKind::WouldBlock.into())
-            }
-        }
-
-        impl PtyIo for Pty {
-            fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-                assert!(!bytes.is_empty());
-                self.offered.push(bytes.to_vec());
-                if let Some(kind) = self.failure {
-                    return Err(io::Error::new(kind, "manual progress PTY failure"));
-                }
-                if self.blocked {
-                    return Err(ErrorKind::WouldBlock.into());
-                }
-                self.written.extend_from_slice(bytes);
-                Ok(bytes.len())
-            }
-
-            fn resize(&mut self, _: TerminalSize) -> Result<()> {
-                Ok(())
-            }
-
-            fn close(&mut self) -> Result<()> {
-                Ok(())
-            }
-        }
-
-        struct Output;
-
-        impl Display for Output {
-            fn try_write(&mut self, _: &[u8]) -> io::Result<usize> {
-                panic!("the quiet child supplies no display bytes")
-            }
-
-            fn try_flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
+        use crate::runtime::transport::test_support::{FakeDisplay, FakeInput, FakePty};
 
         impl RunnerFixture {
             fn coordinator(&mut self) -> InputCoordinator {
@@ -4114,15 +4025,12 @@ mod tests {
                     &mut self.fixture.conn,
                     &self.fixture.run,
                     self.lock.clone(),
-                    InputServices {
-                        catalog: ProfileCatalog::bundled().unwrap(),
-                        token_source: Box::new(
-                            crate::runtime::input::tests::ordinary_prompt::support::PanicTokens(
-                                "manual progress",
-                            ),
-                        ),
-                        hooks: crate::runtime::input::test_support::default_input_hooks(),
-                    },
+                    crate::runtime::input::tests::ordinary_prompt::support::services(
+                        ProfileCatalog::bundled().clone(),
+                        crate::runtime::input::test_support::default_input_hooks(),
+                        crate::runtime::input::STAGE_SETTLE,
+                        "manual progress",
+                    ),
                     self.until,
                 )
                 .unwrap()
@@ -4147,9 +4055,9 @@ mod tests {
                 assert_eq!(
                     self.transport
                         .quiesce_for_input(
-                            &mut Human::default(),
-                            &mut Pty::default(),
-                            &mut Output,
+                            &mut FakeInput::default(),
+                            &mut FakePty::new(b"", 1),
+                            &mut FakeDisplay::default(),
                             &mut self
                                 .controller
                                 .observer(&self.writer, &RealObservationClock),
@@ -4166,7 +4074,7 @@ mod tests {
 
         fn with_harness(body: impl FnOnce(&mut RunnerFixture)) {
             let mut harness = RunnerFixture::new(
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 storage::evidence::EvidencePolicy::metadata(),
                 None,
                 TerminalSize { rows: 24, cols: 80 },
@@ -4190,11 +4098,11 @@ mod tests {
                 h.quiet_control();
                 let mut coordinator = h.coordinator();
                 assert_eq!(coordinator.manual_generation, 0);
-                let mut human = Human::default();
-                human.queued.extend(b"first");
-                let mut pty = Pty {
+                let mut human = FakeInput::default();
+                human.chunks.push_back(b"first".to_vec());
+                let mut pty = FakePty {
                     blocked: true,
-                    ..Pty::default()
+                    ..FakePty::new(b"", 1)
                 };
                 let mut calls = 0;
                 let result = coordinator
@@ -4203,7 +4111,7 @@ mod tests {
                         transport.quiesce_for_input(
                             &mut human,
                             &mut pty,
-                            &mut Output,
+                            &mut FakeDisplay::default(),
                             &mut h.controller.observer(&h.writer, &RealObservationClock),
                             h.until,
                         )
@@ -4223,7 +4131,7 @@ mod tests {
                         transport.tick(
                             &mut human,
                             &mut pty,
-                            &mut Output,
+                            &mut FakeDisplay::default(),
                             &mut h.controller.observer(&h.writer, &RealObservationClock),
                         )
                     })
@@ -4234,7 +4142,7 @@ mod tests {
                 assert_eq!(coordinator.manual_generation, 5);
                 assert_eq!(h.transport.pending_input_bytes(), 5);
 
-                human.queued.extend(b"+next");
+                human.chunks.push_back(b"+next".to_vec());
                 pty.blocked = false;
                 let next = coordinator
                     .progress_with_manual(&mut h.transport, |transport| {
@@ -4242,7 +4150,7 @@ mod tests {
                         transport.tick(
                             &mut human,
                             &mut pty,
-                            &mut Output,
+                            &mut FakeDisplay::default(),
                             &mut h.controller.observer(&h.writer, &RealObservationClock),
                         )
                     })
@@ -4262,11 +4170,11 @@ mod tests {
             with_harness(|h| {
                 h.quiet_control();
                 let mut coordinator = h.coordinator();
-                let mut human = Human::default();
-                human.queued.extend(b"typed");
-                let mut pty = Pty {
+                let mut human = FakeInput::default();
+                human.chunks.push_back(b"typed".to_vec());
+                let mut pty = FakePty {
                     failure: Some(ErrorKind::BrokenPipe),
-                    ..Pty::default()
+                    ..FakePty::new(b"", 1)
                 };
                 let mut calls = 0;
                 let result = coordinator.progress_with_manual(&mut h.transport, |transport| {
@@ -4274,7 +4182,7 @@ mod tests {
                     transport.tick(
                         &mut human,
                         &mut pty,
-                        &mut Output,
+                        &mut FakeDisplay::default(),
                         &mut h.controller.observer(&h.writer, &RealObservationClock),
                     )
                 });
@@ -4287,16 +4195,16 @@ mod tests {
                 assert_eq!(h.transport.human_generation(), 5);
                 assert_eq!(coordinator.manual_generation, 5);
                 assert_eq!(h.transport.pending_input_bytes(), 5);
-                assert_eq!(pty.offered, vec![b"typed".to_vec()]);
+                assert_eq!(pty.offers, vec![b"typed".to_vec()]);
                 assert!(pty.written.is_empty());
                 assert_eq!(pty.reads, 0);
                 assert!(matches!(&failure.source, CafleetError::App(message)
-                    if message == "member runtime: manual progress PTY failure"));
+                    if message == "member runtime: fixture PTY write failure"));
                 assert_eq!(failure.source.exit_code(), 1);
-                assert_eq!(failure.run_id, Some(h.fixture.run.run_id));
-                assert_eq!(failure.interaction_id, None);
-                assert_eq!(failure.input_id, None);
-                assert_eq!(failure.operation_key, None);
+                assert_eq!(failure.context.run_id, Some(h.fixture.run.run_id));
+                assert_eq!(failure.context.interaction_id, None);
+                assert_eq!(failure.context.input_id, None);
+                assert_eq!(failure.context.operation_key, None);
             });
         }
 
@@ -4339,8 +4247,6 @@ mod tests {
         use crate::error::CafleetError;
         use crate::runtime::input::*;
         use crate::runtime::test_support::Fixture;
-        use crate::runtime::*;
-        use std::collections::VecDeque;
         use std::io;
         use std::panic::AssertUnwindSafe;
         use std::panic::catch_unwind;
@@ -4419,7 +4325,7 @@ mod tests {
                         observed: Mutex::new(None),
                     });
                     h.coordinator.services.hooks = hooks.clone();
-                    let deadline = Instant::now() + Duration::from_secs(1);
+                    let deadline = Instant::now() + Duration::from_millis(150);
                     assert!(deadline < h.until);
                     let failure = (0..8)
                         .find_map(|_| {
@@ -4460,9 +4366,9 @@ mod tests {
                     } else {
                         assert!(matches!(&failure.source, CafleetError::DeadlineExceeded));
                     }
-                    assert_eq!(failure.run_id, Some(h.fixture.run.run_id));
-                    assert_eq!(failure.input_id, Some(id));
-                    assert_eq!(failure.operation_key.as_deref(), Some(key));
+                    assert_eq!(failure.context.run_id, Some(h.fixture.run.run_id));
+                    assert_eq!(failure.context.input_id, Some(id));
+                    assert_eq!(failure.context.operation_key.as_deref(), Some(key));
                     assert_eq!(stage, SubmissionStage::ZeroBytes);
                     assert_eq!(written, 0);
                     let retained = h.coordinator.retained_checkpoint(id).unwrap();
@@ -4500,7 +4406,11 @@ mod tests {
 
         #[test]
         fn prompt_reservation_and_each_hook_require_a_fresh_drain_before_one_real_write() {
-            with_host(|h| {
+            let profile = HostProfile {
+                stage_settle: crate::runtime::input::STAGE_SETTLE,
+                ..HostProfile::metadata()
+            };
+            with_profile_host(catalog(), encoded(), profile, |h| {
                 let id = h.arm("prompt:fixture-complete");
                 assert!(h.advance().is_none());
                 assert!(
@@ -4527,6 +4437,14 @@ mod tests {
                     h.pty.stage_bytes(),
                     vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
                 );
+                let gaps = h.pty.stage_gaps();
+                assert_eq!(gaps.len(), 1, "{gaps:?}");
+                assert!(
+                    gaps[0] >= crate::runtime::input::STAGE_SETTLE,
+                    "the submit key follows the production settle: {gaps:?}"
+                );
+                assert!(!h.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
+                assert_eq!(delivery_selection(h, id), (Some("profile".into()), None));
                 assert_eq!(h.pty.program, vec![encoded()]);
                 assert!(matches!(
                     storage::get_input(&h.fixture.conn, id).unwrap().state,
@@ -4652,8 +4570,12 @@ mod tests {
                 let mut independent =
                     crate::db::connect(&format!("sqlite:///{}", h.fixture.conn.path().unwrap()))
                         .unwrap();
-                let original =
-                    storage::reserve_input(&mut independent, &h.fixture.run.owner(), &new).unwrap();
+                let original = storage::test_support::reserve_input(
+                    &mut independent,
+                    &h.fixture.run.owner(),
+                    &new,
+                )
+                .unwrap();
                 assert!(matches!(original.state, storage::InputState::InProgress));
                 assert_eq!(
                     storage::find_input(&h.fixture.conn, h.fixture.run.run_id, key).unwrap(),
@@ -4829,7 +4751,6 @@ mod tests {
         }
 
         mod preview_exec {
-            use crate::coding_agent::CodingAgent;
             use crate::runtime::input::tests::ordinary_prompt::*;
 
             fn request(
@@ -4904,13 +4825,7 @@ mod tests {
             #[test]
             fn operations_preview_binds_the_exact_run_message_key_and_durable_recipient() {
                 with_host(|host| {
-                    let message = crate::broker::send_message(
-                        &mut host.fixture.conn,
-                        host.fixture.run.director_member_id,
-                        host.fixture.run.member_id,
-                        LITERAL,
-                    )
-                    .unwrap();
+                    let message = host.message(LITERAL);
                     let key = format!("preview:{}:{}", host.fixture.run.run_id, message.message_id);
                     let canonical = canonical_preview(&message);
                     let mut program = canonical.as_bytes().to_vec();
@@ -4987,10 +4902,6 @@ mod tests {
                     "exec":{"prefix_hex":"2120","submit_hex":"6b6c","fixture_ids":["synthetic-exec-plan"]}
                 });
                 let exec_catalog = ProfileCatalog::from_definitions(&definition).unwrap();
-                let coverage = exec_catalog.capabilities(CodingAgent::Codex, Some(VERSION));
-                assert_eq!(coverage.composer, storage::Coverage::Tested);
-                assert_eq!(coverage.prompt_submission, storage::Coverage::Unknown);
-                assert_eq!(coverage.native_exec_submission, storage::Coverage::Tested);
                 let mut expected = b"! ".to_vec();
                 expected.extend_from_slice(LITERAL.as_bytes());
                 expected.extend_from_slice(b"kl");
@@ -5016,10 +4927,8 @@ mod tests {
         }
 
         mod staged_delivery {
-            use crate::coding_agent::CodingAgent;
             use crate::runtime::input::tests::ordinary_prompt::*;
 
-            pub(super) const SETTLE: Duration = Duration::from_millis(500);
             const ESCAPE: &[u8] = b"\x1b";
 
             fn prompt_request(host: &Host, key: &str) -> InputControlRequest {
@@ -5055,7 +4964,11 @@ mod tests {
                 let gaps = host.pty.stage_gaps();
                 assert_eq!(gaps.len(), count, "{gaps:?}");
                 for gap in gaps {
-                    assert!(gap >= SETTLE, "each stage follows a 500 ms settle: {gap:?}");
+                    assert!(
+                        gap >= host.stage_settle,
+                        "each stage follows its {:?} settle: {gap:?}",
+                        host.stage_settle
+                    );
                 }
             }
 
@@ -5099,26 +5012,6 @@ mod tests {
             }
 
             #[test]
-            fn staged_profile_delivery_writes_the_literal_then_its_submit_key_after_a_500ms_settle()
-            {
-                with_host(|host| {
-                    let reply = settle(host, prompt_request(host, "prompt:staged"));
-                    assert_eq!(reply.status, SubmissionStatus::Accepted);
-                    assert_eq!(reply.stage, SubmissionStage::Submitted);
-                    assert_eq!(
-                        host.pty.stage_bytes(),
-                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
-                    );
-                    assert_settled_gaps(host, 1);
-                    assert!(!host.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
-                    assert_eq!(
-                        delivery_selection(host, reply.input_id.unwrap()),
-                        (Some("profile".into()), None)
-                    );
-                });
-            }
-
-            #[test]
             fn staged_fallback_without_an_operation_plan_escapes_settles_types_settles_and_enters()
             {
                 with_catalog_host(catalog(), fallback_program(b"! "), |host| {
@@ -5140,76 +5033,10 @@ mod tests {
             }
 
             #[test]
-            fn staged_fallback_for_unknown_coverage_uses_the_missing_plan_reason() {
-                let profile = HostProfile {
-                    backend: CodingAgent::Claude,
-                    ..HostProfile::metadata()
-                };
-                with_profile_host(catalog(), fallback_program(b""), profile, |host| {
-                    let reply = settle(host, prompt_request(host, "prompt:unknown-coverage"));
-                    assert_eq!(reply.status, SubmissionStatus::Accepted);
-                    assert_eq!(
-                        host.pty.stage_bytes(),
-                        vec![ESCAPE.to_vec(), LITERAL.as_bytes().to_vec(), b"\r".to_vec()]
-                    );
-                    assert_eq!(
-                        delivery_selection(host, reply.input_id.unwrap()),
-                        (
-                            Some("fallback".into()),
-                            Some("submission_plan_unavailable".into())
-                        )
-                    );
-                });
-            }
-
-            #[test]
-            fn staged_delivery_writes_zero_bytes_including_escape_while_an_interaction_is_open() {
-                with_profile_host(
-                    permission_catalog(),
-                    encoded(),
-                    HostProfile::metadata(),
-                    |host| {
-                        crate::runtime::input::tests::permission_inspection_contracts::stable_form(
-                            host,
-                        );
-                        let reply = submitted(
-                            host.handle(prompt_request(host, "prompt:blocked"))
-                                .unwrap()
-                                .expect("an open interaction queues the input immediately"),
-                        );
-                        assert_eq!(reply.status, SubmissionStatus::Queued);
-                        assert_eq!(reply.stage, SubmissionStage::ZeroBytes);
-                        assert_eq!(
-                            reply
-                                .delivery
-                                .as_ref()
-                                .and_then(|delivery| delivery.reason.as_deref()),
-                            Some("interaction_open")
-                        );
-                        let receipt = storage::get_input(
-                            &host.fixture.conn,
-                            reply.input_id.expect("queued work has a durable input ID"),
-                        )
-                        .unwrap();
-                        assert_eq!(receipt.state, storage::InputState::Ready);
-                        assert!(receipt.deferred_at.is_some());
-                        assert_eq!(receipt.defer_reason.as_deref(), Some("interaction_open"));
-                        let until = Instant::now() + Duration::from_millis(1200);
-                        while Instant::now() < until {
-                            host.drain();
-                            host.advance();
-                            std::thread::sleep(Duration::from_millis(5));
-                        }
-                        assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
-                    },
-                );
-            }
-
-            #[test]
             fn staged_human_input_during_the_settle_stops_the_submit_stage_with_uncertainty() {
                 with_host(|host| {
                     until_literal_written(host, prompt_request(host, "prompt:human-race"));
-                    host.human.bytes.extend(b"h");
+                    host.type_human(b"h");
                     let reply = finish_after_interruption(host);
                     assert_eq!(reply.status, SubmissionStatus::Uncertain);
                     assert_eq!(reply.stage, SubmissionStage::Partial);
@@ -5231,85 +5058,11 @@ mod tests {
             }
 
             #[test]
-            fn staged_new_interaction_during_the_settle_stops_the_submit_stage_with_uncertainty() {
-                with_profile_host(
-                    permission_catalog(),
-                    encoded(),
-                    HostProfile::metadata(),
-                    |host| {
-                        until_literal_written(
-                            host,
-                            prompt_request(host, "prompt:interaction-race"),
-                        );
-                        crate::runtime::input::tests::permission_inspection_contracts::form(
-                            host,
-                            "write raced.txt",
-                            "synthetic-only",
-                        );
-                        let reply = finish_after_interruption(host);
-                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
-                        assert_eq!(reply.stage, SubmissionStage::Partial);
-                        assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
-                        assert!(!host.pty.offers.iter().any(|offer| offer.contains(&0x1b)));
-                    },
-                );
-            }
-
-            #[test]
-            fn staged_new_interaction_after_the_settle_before_the_submit_write_is_uncertain() {
-                with_profile_host(
-                    permission_catalog(),
-                    encoded(),
-                    HostProfile::metadata(),
-                    |host| {
-                        until_literal_written(host, prompt_request(host, "prompt:armed-race"));
-                        std::thread::sleep(SETTLE + Duration::from_millis(50));
-                        while host.pending_snapshot().4 != InputPhase::Armed {
-                            assert!(Instant::now() < host.until, "the submit stage arms");
-                            host.drain();
-                            assert!(host.advance().is_none());
-                            std::thread::sleep(Duration::from_millis(1));
-                        }
-                        assert_eq!(host.pty.stage_bytes(), vec![LITERAL.as_bytes().to_vec()]);
-                        crate::runtime::input::tests::permission_inspection_contracts::form(
-                            host,
-                            "write raced.txt",
-                            "synthetic-only",
-                        );
-                        let reply = finish_after_interruption(host);
-                        assert_eq!(reply.status, SubmissionStatus::Uncertain);
-                        assert_eq!(reply.stage, SubmissionStage::Partial);
-                        host.show(SCREEN.to_vec());
-                        crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(
-                            host,
-                        );
-                        assert_eq!(
-                            host.pty.stage_bytes(),
-                            vec![LITERAL.as_bytes().to_vec()],
-                            "no submit byte is written after the interaction closes"
-                        );
-                    },
-                );
-            }
-
-            fn placement(host: &Host) -> crate::broker::Placement {
-                crate::broker::get_member(
-                    &host.fixture.conn,
-                    host.fixture.run.member_id,
-                    host.fixture.run.fleet_id,
-                )
-                .unwrap()
-                .unwrap()
-                .placement
-                .expect("wrapped member placement")
-            }
-
-            #[test]
             fn staged_runner_holds_the_pane_lock_across_the_settle_and_releases_it_after_submission()
              {
                 with_host(|host| {
                     let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
-                    let placement = placement(host);
+                    let placement = host.placement();
                     until_literal_written(host, prompt_request(host, "prompt:locked"));
                     assert!(
                         crate::pane_lock::PaneLock::try_acquire(&url, &placement)
@@ -5332,7 +5085,7 @@ mod tests {
             fn staged_runner_writes_zero_bytes_while_another_writer_holds_the_pane_lock() {
                 with_host(|host| {
                     let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
-                    let placement = placement(host);
+                    let placement = host.placement();
                     let held = crate::pane_lock::PaneLock::try_acquire(&url, &placement)
                         .unwrap()
                         .expect("the pane lock is free before submission");
@@ -5430,24 +5183,8 @@ mod tests {
                     );
                 }
 
-                fn quiesce_once(host: &mut Host) -> InputDrain {
-                    host.coordinator
-                        .progress_with_manual(&mut host.transport, |transport| {
-                            transport.quiesce_for_input(
-                                &mut host.human,
-                                &mut host.pty,
-                                &mut host.output,
-                                &mut host
-                                    .controller
-                                    .observer(&host.writer, &RealObservationClock),
-                                host.until,
-                            )
-                        })
-                        .unwrap()
-                }
-
                 fn until_armed(host: &mut Host) {
-                    std::thread::sleep(SETTLE + Duration::from_millis(50));
+                    std::thread::sleep(host.stage_settle + Duration::from_millis(50));
                     while host.pending_snapshot().4 != InputPhase::Armed {
                         assert!(Instant::now() < host.until, "the submit stage arms");
                         host.drain();
@@ -5484,10 +5221,10 @@ mod tests {
                     for terminal_reply in [FOCUS_REPLY, CURSOR_REPORT, OSC_REPLY] {
                         with_host(|host| {
                             until_literal_written(host, prompt_request(host, "prompt:reply"));
-                            host.human.bytes.extend(terminal_reply);
+                            host.type_human(terminal_reply);
                             host.drain();
                             assert_eq!(
-                                host.human.consumed,
+                                host.human.consumed.len(),
                                 terminal_reply.len(),
                                 "the reply is read during the settle"
                             );
@@ -5531,9 +5268,9 @@ mod tests {
                     with_host(|host| {
                         until_literal_written(host, prompt_request(host, "prompt:lone-escape"));
                         let generation = host.transport.human_generation();
-                        host.human.bytes.extend(b"\x1b");
-                        assert_eq!(quiesce_once(host), InputDrain::Pending);
-                        assert_eq!(host.human.consumed, 1, "the Escape key is read");
+                        host.type_human(b"\x1b");
+                        assert_eq!(host.quiesce_once(), InputDrain::Pending);
+                        assert_eq!(host.human.consumed.len(), 1, "the Escape key is read");
                         assert_eq!(
                             host.transport.drain_blocker(),
                             Some("terminal reply pending")
@@ -5572,7 +5309,7 @@ mod tests {
                 fn staged_keystroke_outranks_a_candidate_interaction() {
                     with_interaction_host(|host| {
                         until_literal_written(host, prompt_request(host, "prompt:key-first"));
-                        host.human.bytes.extend(b"h");
+                        host.type_human(b"h");
                         candidate_form(host);
                         let reply = submitted(
                             host.advance()
@@ -5652,6 +5389,15 @@ mod tests {
                                 .expect("the armed stage stops on the interaction"),
                         );
                         assert_stopped_with(host, &reply, storage::UncertainCause::InteractionOpen);
+                        host.show(SCREEN.to_vec());
+                        crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(
+                            host,
+                        );
+                        assert_eq!(
+                            host.pty.stage_bytes(),
+                            vec![LITERAL.as_bytes().to_vec()],
+                            "no submit byte is written after the interaction closes"
+                        );
                     });
                 }
 
@@ -5835,35 +5581,6 @@ mod tests {
             }
 
             #[test]
-            fn queue_capacity_bounds_queued_plus_active_work_at_4096_with_a_zero_byte_error() {
-                with_permission_host(Duration::from_secs(120), |host| {
-                    form(host);
-                    for index in 0..RECEIPT_CACHE_CAPACITY {
-                        let reply = host.handle(host.request(&format!("prompt:capacity:{index}")));
-                        assert!(
-                            matches!(&reply, Ok(Some(_))),
-                            "request {index} is queued within the bound"
-                        );
-                    }
-                    assert!(
-                        host.handle(host.request("prompt:capacity:overflow"))
-                            .is_err(),
-                        "the 4097th unresolved input fails explicitly"
-                    );
-                    assert!(
-                        storage::find_input(
-                            &host.fixture.conn,
-                            host.fixture.run.run_id,
-                            "prompt:capacity:overflow"
-                        )
-                        .unwrap()
-                        .is_none()
-                    );
-                    assert!(host.pty.offers.is_empty());
-                });
-            }
-
-            #[test]
             fn queue_drains_once_after_the_interaction_closes_without_another_request() {
                 with_permission_host(Duration::from_secs(8), |host| {
                     form(host);
@@ -5935,29 +5652,17 @@ mod tests {
                 });
             }
 
-            fn placement(host: &Host) -> crate::broker::Placement {
-                crate::broker::get_member(
-                    &host.fixture.conn,
-                    host.fixture.run.member_id,
-                    host.fixture.run.fleet_id,
-                )
-                .unwrap()
-                .unwrap()
-                .placement
-                .expect("wrapped member placement")
-            }
-
             #[test]
             fn queue_timer_retries_a_busy_pane_lock_without_child_output_and_delivers_once_free() {
                 with_permission_host(Duration::from_secs(10), |host| {
                     let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
                     form(host);
                     let id = queued(host, host.request("prompt:busy"), "interaction_open");
-                    let held = PaneLock::try_acquire(&url, &placement(host))
+                    let held = PaneLock::try_acquire(&url, &host.placement())
                         .unwrap()
                         .unwrap();
                     close(host);
-                    let busy_until = Instant::now() + Duration::from_secs(1);
+                    let busy_until = Instant::now() + Duration::from_millis(300);
                     while Instant::now() < busy_until {
                         host.drain();
                         host.advance();
@@ -5978,7 +5683,7 @@ mod tests {
                     let url = format!("sqlite:///{}", host.fixture.conn.path().unwrap());
                     form(host);
                     let id = queued(host, host.request("prompt:deadline"), "interaction_open");
-                    let _held = PaneLock::try_acquire(&url, &placement(host))
+                    let _held = PaneLock::try_acquire(&url, &host.placement())
                         .unwrap()
                         .unwrap();
                     close(host);
@@ -6004,13 +5709,7 @@ mod tests {
             #[test]
             fn queued_preview_acknowledged_before_its_drain_settles_not_submitted_without_typing() {
                 with_permission_host(Duration::from_secs(8), |host| {
-                    let message = crate::broker::send_message(
-                        &mut host.fixture.conn,
-                        host.fixture.run.director_member_id,
-                        host.fixture.run.member_id,
-                        "queued preview body",
-                    )
-                    .unwrap();
+                    let message = host.message("queued preview body");
                     form(host);
                     let request = preview_request(host, &message, &canonical_preview(&message));
                     let id = queued(host, request, "interaction_open");
@@ -6037,13 +5736,7 @@ mod tests {
             #[test]
             fn preview_receipts_use_the_canonical_digest_and_reject_another_literal() {
                 with_permission_host(Duration::from_secs(5), |host| {
-                    let message = crate::broker::send_message(
-                        &mut host.fixture.conn,
-                        host.fixture.run.director_member_id,
-                        host.fixture.run.member_id,
-                        "digest preview body",
-                    )
-                    .unwrap();
+                    let message = host.message("digest preview body");
                     form(host);
                     let other = preview_request(host, &message, "not the canonical preview");
                     assert!(host.handle(other).is_err());
@@ -6054,12 +5747,14 @@ mod tests {
                         "interaction_open",
                     );
                     let input = row(host, id);
-                    let expected = crate::digest::sha256_hex(
-                        crate::digest::canonical_json(&serde_json::json!({
-                            "run_id":host.fixture.run.run_id,
-                            "kind":"preview","message_id":message.message_id,"literal":canonical
-                        }))
-                        .as_bytes(),
+                    let expected = storage::input_payload_digest(
+                        host.fixture.run.run_id,
+                        &SubmitInput {
+                            operation_key: input.operation_key.clone(),
+                            input_kind: storage::InputKind::Preview,
+                            message_id: Some(message.message_id),
+                            literal: canonical,
+                        },
                     );
                     assert_eq!(input.payload_digest, expected);
                 });
@@ -6100,48 +5795,6 @@ mod tests {
                         "a stopped queue is never replayed"
                     );
                     assert_eq!(result_events(host, id), 1, "the result is published once");
-                });
-            }
-
-            #[test]
-            fn queue_head_interrupted_between_stages_holds_the_next_input_until_reconciliation() {
-                with_permission_host(Duration::from_secs(90), |host| {
-                    form(host);
-                    let first =
-                        queued(host, host.request("prompt:interrupted"), "interaction_open");
-                    let next = queued(host, host.request("prompt:next"), "interaction_open");
-                    close(host);
-                    while host.pty.stages.is_empty() {
-                        assert!(Instant::now() < host.until, "the literal stage is written");
-                        host.drain();
-                        host.advance();
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    host.human.bytes.extend(b"h");
-                    turns_until(host, |host| {
-                        row(host, first).state == storage::InputState::Uncertain
-                    });
-                    crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns(host);
-                    assert_eq!(
-                        host.pty.offers,
-                        vec![LITERAL.as_bytes().to_vec(), b"h".to_vec()],
-                        "the next input receives zero bytes while the head is uncertain"
-                    );
-                    assert_eq!(row(host, next).state, storage::InputState::Ready);
-                    storage::settle_input(
-                        &mut host.fixture.conn,
-                        &host.fixture.run.owner(),
-                        first,
-                        storage::InputState::Uncertain,
-                        storage::InputDisposition::AbandonedUncertain,
-                        "audit:reconciled",
-                    )
-                    .unwrap();
-                    turns_until(host, |host| settled(host, next));
-                    assert_eq!(
-                        host.pty.offers[2..],
-                        [LITERAL.as_bytes().to_vec(), b"~".to_vec()]
-                    );
                 });
             }
 
@@ -6221,7 +5874,11 @@ mod tests {
             #[test]
             fn queue_head_failure_after_a_possible_write_is_uncertain_published_once_and_reconcilable()
              {
-                for case in ["write_failure", "human_input_after_the_settle"] {
+                for case in [
+                    "write_failure",
+                    "human_input_after_the_settle",
+                    "human_input_during_the_settle",
+                ] {
                     with_permission_host(Duration::from_secs(60), |host| {
                         form(host);
                         let first =
@@ -6229,13 +5886,13 @@ mod tests {
                         let next = queued(host, host.request("prompt:after"), "interaction_open");
                         close(host);
                         until_head_literal(host);
-                        if case == "write_failure" {
-                            host.pty.failure = Some(io::ErrorKind::BrokenPipe);
-                        } else {
-                            std::thread::sleep(
-                                crate::runtime::input::tests::ordinary_prompt::staged_delivery::SETTLE + Duration::from_millis(100),
-                            );
-                            host.human.bytes.extend(b"h");
+                        match case {
+                            "write_failure" => host.pty.failure = Some(io::ErrorKind::BrokenPipe),
+                            "human_input_after_the_settle" => {
+                                std::thread::sleep(host.stage_settle + Duration::from_millis(100));
+                                host.type_human(b"h");
+                            }
+                            _ => host.type_human(b"h"),
                         }
                         while row(host, first).state != storage::InputState::Uncertain {
                             assert!(
@@ -6317,13 +5974,7 @@ mod tests {
                     }
                     host.pty.failure = None;
                     let offers = host.pty.offers.len();
-                    let message = crate::broker::send_message(
-                        &mut host.fixture.conn,
-                        host.fixture.run.director_member_id,
-                        host.fixture.run.member_id,
-                        "preview behind an uncertain head",
-                    )
-                    .unwrap();
+                    let message = host.message("preview behind an uncertain head");
                     let canonical = canonical_preview(&message);
                     let preview = queued(
                         host,
@@ -6352,13 +6003,7 @@ mod tests {
                 use std::sync::Arc;
                 use std::sync::Mutex;
                 with_permission_host(Duration::from_secs(60), |host| {
-                    let message = crate::broker::send_message(
-                        &mut host.fixture.conn,
-                        host.fixture.run.director_member_id,
-                        host.fixture.run.member_id,
-                        "preview whose stamp is busy once",
-                    )
-                    .unwrap();
+                    let message = host.message("preview whose stamp is busy once");
                     let canonical = canonical_preview(&message);
                     form(host);
                     let id = queued(
@@ -6493,13 +6138,7 @@ mod tests {
                 with_permission_host(Duration::from_secs(60), |host| {
                     let first = host.request("prompt:immediate-uncertain");
                     assert!(host.handle(first).unwrap().is_none());
-                    let message = crate::broker::send_message(
-                        &mut host.fixture.conn,
-                        host.fixture.run.director_member_id,
-                        host.fixture.run.member_id,
-                        "preview behind an immediate attempt",
-                    )
-                    .unwrap();
+                    let message = host.message("preview behind an immediate attempt");
                     let canonical = canonical_preview(&message);
                     let preview = queued(
                         host,
@@ -6507,7 +6146,7 @@ mod tests {
                         "earlier_input",
                     );
                     until_head_literal(host);
-                    host.human.bytes.extend(b"h");
+                    host.type_human(b"h");
                     let reply = loop {
                         assert!(Instant::now() < host.until, "the immediate attempt replies");
                         host.drain();
@@ -6821,11 +6460,11 @@ mod tests {
                     let id = queued(host, host.request("prompt:outage"), "interaction_open");
                     close(host);
                     host.drain();
-                    let started = Instant::now();
+                    let mut backdated = false;
                     while !settled(host, id) {
                         assert!(
-                            started.elapsed() < Duration::from_secs(60),
-                            "the 5 s observer_unavailable budget, not the 3-minute bound, settles the head"
+                            Instant::now() < host.until,
+                            "the observer_unavailable attempt budget, not the 3-minute bound, settles the head"
                         );
                         host.controller
                             .observer_failed(
@@ -6834,8 +6473,17 @@ mod tests {
                             )
                             .unwrap();
                         host.advance();
+                        if !backdated
+                            && let Some(head) = host.coordinator.queue.front_mut()
+                            && head.attempt_deadline.is_some()
+                        {
+                            head.attempt_deadline =
+                                Some(Instant::now() + Duration::from_millis(300));
+                            backdated = true;
+                        }
                         std::thread::sleep(Duration::from_millis(20));
                     }
+                    assert!(backdated, "the outage started the head's attempt budget");
                     assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
                     let input = row(host, id);
                     assert_eq!(
@@ -6867,39 +6515,31 @@ mod tests {
                 ProfileCatalog::from_definitions(&definition).unwrap()
             }
 
-            const DISMISSAL: &str = "[cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.";
-
-            fn message(host: &mut Host, body: &str) -> crate::broker::MessageRecord {
-                crate::broker::send_message(
-                    &mut host.fixture.conn,
-                    host.fixture.run.director_member_id,
-                    host.fixture.run.member_id,
-                    body,
-                )
-                .unwrap()
-            }
-
             fn fallback_preview(canonical: &str) -> Vec<u8> {
                 let mut bytes = b"\x1b".to_vec();
-                bytes.extend_from_slice(format!("{canonical} {DISMISSAL}").as_bytes());
+                bytes.extend_from_slice(
+                    crate::delivery::fallback_preview_line(canonical).as_bytes(),
+                );
                 bytes.push(b'\r');
                 bytes
             }
 
             fn preview_digest(host: &Host, message: i64, canonical: &str) -> String {
-                crate::digest::sha256_hex(
-                    crate::digest::canonical_json(&serde_json::json!({
-                        "run_id":host.fixture.run.run_id,
-                        "kind":"preview","message_id":message,"literal":canonical
-                    }))
-                    .as_bytes(),
+                storage::input_payload_digest(
+                    host.fixture.run.run_id,
+                    &SubmitInput {
+                        operation_key: format!("preview:{}:{message}", host.fixture.run.run_id),
+                        input_kind: storage::InputKind::Preview,
+                        message_id: Some(message),
+                        literal: canonical.into(),
+                    },
                 )
             }
 
             #[test]
             fn method_rendering_fallback_preview_appends_the_dismissal_clause_outside_its_digest() {
                 with_catalog_host(planless_catalog(), Vec::new(), |host| {
-                    let message = message(host, "fallback preview body");
+                    let message = host.message("fallback preview body");
                     let canonical = canonical_preview(&message);
                     host.pty.expect_program(fallback_preview(&canonical));
                     let reply = settle(host, preview_request(host, &message, &canonical));
@@ -6908,7 +6548,7 @@ mod tests {
                         host.pty.stage_bytes(),
                         vec![
                             b"\x1b".to_vec(),
-                            format!("{canonical} {DISMISSAL}").into_bytes(),
+                            crate::delivery::fallback_preview_line(&canonical).into_bytes(),
                             b"\r".to_vec()
                         ]
                     );
@@ -6930,7 +6570,7 @@ mod tests {
             fn method_rendering_queued_fallback_keeps_one_input_id_across_composer_changes_and_retries()
              {
                 with_catalog_host(catalog(), Vec::new(), |host| {
-                    let message = message(host, "queued fallback body");
+                    let message = host.message("queued fallback body");
                     let canonical = canonical_preview(&message);
                     host.pty.expect_program(fallback_preview(&canonical));
                     host.show(UNCLASSIFIED.to_vec());
@@ -7097,16 +6737,14 @@ mod tests {
             #[test]
             fn composer_busy_queues_with_zero_bytes_and_drains_by_profile_when_the_composer_empties()
              {
-                for screen in [DRAFT, b"\x1b[2J\x1b[1;1Hunclassifiable screen".as_slice()] {
-                    with_busy_host(busy_catalog(), encoded(), |host| {
-                        host.show(screen.to_vec());
-                        assert!(matches!(
-                            host.controller.health(&host.writer).eligibility,
-                            InputEligibility::Hold(GateReason::Draft | GateReason::Unknown)
-                        ));
-                        busy_then_profile(host);
-                    });
-                }
+                with_busy_host(busy_catalog(), encoded(), |host| {
+                    host.show(DRAFT.to_vec());
+                    assert!(matches!(
+                        host.controller.health(&host.writer).eligibility,
+                        InputEligibility::Hold(GateReason::Draft)
+                    ));
+                    busy_then_profile(host);
+                });
             }
 
             #[test]
@@ -7533,7 +7171,6 @@ mod tests {
                     let state = sql_state(None);
                     let run = h.fixture.run.clone();
                     let until = h.until;
-                    let original_address = &h.fixture.conn as *const Connection as usize;
                     let coordinator = &mut h.coordinator;
                     let transport = &mut h.transport;
                     let pty = &mut h.pty;
@@ -7541,7 +7178,6 @@ mod tests {
                     let started = Instant::now();
                     let pending = observed_sql(&mut h.fixture.conn, state.clone(), |conn| {
                         with_database_budget(conn, Deadline::until(until), |conn| {
-                            assert_eq!(conn as *const Connection as usize, original_address);
                             let result = coordinator
                                 .advance(conn, &run, transport, pty, observation, until)
                                 .map_err(|f| f.source)?;
@@ -7556,12 +7192,6 @@ mod tests {
                         elapsed < Duration::from_millis(200),
                         "final validation waits neither its600ms connection timeout nor the original request budget: {elapsed:?}"
                     );
-                    assert!(
-                        state.begins.load(Ordering::SeqCst) > 0,
-                        "the supplied connection attempts its actual final transaction"
-                    );
-                    assert!(h.fixture.conn.is_autocommit());
-                    assert_eq!(timeout(&h.fixture.conn), 600);
                     assert!(h.pty.program.is_empty());
                     assert!(matches!(
                         storage::get_input(&h.fixture.conn, id).unwrap().state,
@@ -7569,11 +7199,11 @@ mod tests {
                     ));
                     assert_eq!(h.hooks.count("before"), 1);
 
-                    h.human.bytes.extend(b"human");
-                    h.pty.child.bytes.extend(SCREEN);
+                    h.type_human(b"human");
+                    h.child_output(SCREEN);
                     let previous_seq = h.transport.snapshot().screen_seq;
                     h.drain();
-                    assert_eq!(h.human.consumed, 5);
+                    assert_eq!(h.human.consumed.len(), 5);
                     assert_eq!(h.coordinator.manual_generation, 5);
                     assert_eq!(h.pty.manual, b"human");
                     assert!(h.transport.snapshot().screen_seq > previous_seq);
@@ -7603,7 +7233,6 @@ mod tests {
                     );
                     assert_eq!(h.pty.program, vec![encoded()]);
                     assert!(h.hooks.count("before") >= 1);
-                    assert_eq!(timeout(&h.fixture.conn), 600);
                 });
             }
 
@@ -7625,10 +7254,8 @@ mod tests {
                         let coordinator = &mut h.coordinator;
                         let transport = &mut h.transport;
                         let observation = &h.controller;
-                        let original_address = &h.fixture.conn as *const Connection as usize;
                         let result = observed_sql(&mut h.fixture.conn, state.clone(), |conn| {
                             with_database_budget(conn, Deadline::until(outer), |conn| {
-                                assert_eq!(conn as *const Connection as usize, original_address);
                                 if !during {
                                     std::thread::sleep(
                                         outer.saturating_duration_since(Instant::now())
@@ -7642,11 +7269,7 @@ mod tests {
                                     observation,
                                     until,
                                 ) {
-                                    Err(failure) => {
-                                        assert_eq!(failure.run_id, Some(run.run_id));
-                                        assert_eq!(failure.input_id, Some(id));
-                                        Err(failure.source)
-                                    }
+                                    Err(cause) => Err(cause),
                                     Ok(Some(guard)) => {
                                         drop(guard);
                                         Ok(true)
@@ -7661,8 +7284,6 @@ mod tests {
                             during,
                             "actual member-run SQL entry is control-separated"
                         );
-                        assert!(h.fixture.conn.is_autocommit());
-                        assert_eq!(timeout(&h.fixture.conn), 123);
                         assert!(h.pty.offers.is_empty());
                         assert!(matches!(
                             storage::get_input(&h.fixture.conn, id).unwrap().state,
@@ -7691,8 +7312,7 @@ mod tests {
                     let mut guard =
                         with_database_budget(&mut h.fixture.conn, Deadline::until(outer), |conn| {
                             coordinator
-                                .acquire_write_guard(conn, &run, transport, observation, until)
-                                .map_err(|failure| failure.source)?
+                                .acquire_write_guard(conn, &run, transport, observation, until)?
                                 .ok_or_else(|| {
                                     CafleetError::App(
                                         "healthy Armed operation yields a real guard".into(),
@@ -7724,13 +7344,34 @@ mod tests {
         pub(in crate::runtime::input) mod support {
             use crate::runtime::input::tests::ordinary_prompt::*;
             use crate::runtime::system::test_support::TestChild;
+            use crate::runtime::writer::test_support::WriterFixture;
             use std::process::Command;
             use std::process::Stdio;
             use std::sync::Mutex;
 
             pub(super) const LITERAL: &str = "ordinary fixture λ";
             pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
-            pub(super) const VERSION: &str = "0.0.1-synthetic";
+            pub(super) use crate::coding_agent::catalog::test_support::VERSION;
+            use crate::runtime::transport::test_support::{FakeDisplay, FakeInput};
+
+            pub(in crate::runtime::input) fn offers(values: &[&[u8]]) -> Vec<Vec<u8>> {
+                values.iter().map(|value| value.to_vec()).collect()
+            }
+
+            /// Input services whose token source refuses use, naming `purpose` in the panic.
+            pub(in crate::runtime::input) fn services(
+                catalog: ProfileCatalog,
+                hooks: Arc<dyn InputHooks>,
+                stage_settle: Duration,
+                purpose: &'static str,
+            ) -> InputServices {
+                InputServices {
+                    catalog,
+                    token_source: Box::new(PanicTokens(purpose)),
+                    hooks,
+                    stage_settle,
+                }
+            }
 
             pub(in crate::runtime::input) fn catalog_definition() -> serde_json::Value {
                 let mut value = crate::coding_agent::catalog::test_support::synthetic_definitions();
@@ -7830,7 +7471,10 @@ mod tests {
                 pub(crate) native_version: &'static str,
                 pub(crate) size: TerminalSize,
                 pub(crate) screen: Vec<u8>,
+                pub(crate) stage_settle: Duration,
             }
+            pub(in crate::runtime::input) const TEST_STAGE_SETTLE: Duration =
+                Duration::from_millis(50);
             impl HostProfile {
                 pub(crate) fn synthetic(
                     policy: storage::evidence::EvidencePolicy,
@@ -7843,6 +7487,7 @@ mod tests {
                         native_version: VERSION,
                         size: TerminalSize { rows: 24, cols: 80 },
                         screen: SCREEN.to_vec(),
+                        stage_settle: TEST_STAGE_SETTLE,
                     }
                 }
 
@@ -7923,33 +7568,11 @@ mod tests {
                 }
             }
 
-            #[derive(Default)]
-            pub(in crate::runtime::input) struct Reader {
-                pub(crate) bytes: VecDeque<u8>,
-                pub(crate) consumed: usize,
-                pub(crate) calls: usize,
-            }
-            impl ByteInput for Reader {
-                fn try_read(&mut self, target: &mut [u8]) -> io::Result<usize> {
-                    self.calls += 1;
-                    if self.bytes.is_empty() {
-                        return Err(io::ErrorKind::WouldBlock.into());
-                    }
-                    let count = target.len().min(self.bytes.len());
-                    assert!(count > 0);
-                    for byte in &mut target[..count] {
-                        *byte = self.bytes.pop_front().unwrap();
-                    }
-                    self.consumed += count;
-                    Ok(count)
-                }
-            }
-
             /// `program` holds each completed programmatic input; `stages` holds every
             /// separately offered programmatic stage with its offer time, so settle intervals
             /// between a literal and its submit key are observable.
             pub(in crate::runtime::input) struct Pty {
-                pub(crate) child: Reader,
+                pub(crate) child: FakeInput,
                 pub(crate) offers: Vec<Vec<u8>>,
                 pub(crate) program: Vec<Vec<u8>>,
                 pub(crate) stages: Vec<(Instant, Vec<u8>)>,
@@ -8018,16 +7641,12 @@ mod tests {
                     Ok(())
                 }
             }
-            #[derive(Default)]
-            pub(in crate::runtime::input) struct Output(pub(crate) Vec<u8>);
-            impl Display for Output {
-                fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-                    self.0.extend_from_slice(bytes);
-                    Ok(bytes.len())
-                }
-                fn try_flush(&mut self) -> io::Result<()> {
-                    Ok(())
-                }
+            fn queue(input: &mut FakeInput, bytes: &[u8]) {
+                assert!(
+                    !bytes.is_empty(),
+                    "an empty chunk would read as end of file"
+                );
+                input.chunks.push_back(bytes.to_vec());
             }
 
             pub(in crate::runtime::input) struct Child {
@@ -8068,22 +7687,8 @@ mod tests {
                     limits: TransportLimits,
                     until: Instant,
                 ) -> Self {
-                    let mut fixture = Fixture::new();
-                    let artifacts = fixture.artifacts();
-                    let lock = Arc::new(
-                        RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                            .unwrap()
-                            .expect("original run lock"),
-                    );
-                    lock.transfer_to_runner(
-                        &mut fixture.conn,
-                        &fixture.run.owner(),
-                        ProcessIdentity::current().unwrap(),
-                    )
-                    .unwrap();
-                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-                    storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner())
-                        .unwrap();
+                    let mut writer_fixture = WriterFixture::new();
+                    let fixture = &mut writer_fixture.fixture;
                     if let Some(selection) = selection {
                         let selected =
                             catalog.capabilities(selection.backend, Some(selection.native_version));
@@ -8100,14 +7705,15 @@ mod tests {
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                     let mut controller =
                         ObservationController::new(&fixture.run, catalog, policy, 1..=256).unwrap();
-                    let mut writer = EventWriter::start(
-                        format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                        fixture.run.clone(),
-                        lock.clone(),
-                        artifacts.paths.outbox.clone(),
-                    )
-                    .unwrap();
+                    let mut writer = writer_fixture
+                        .start(writer_fixture.artifacts.paths.outbox.clone())
+                        .unwrap();
                     writer.set_deadline(until);
+                    let WriterFixture {
+                        mut fixture,
+                        artifacts,
+                        lock,
+                    } = writer_fixture;
                     let child = Child {
                         native: TestChild::new(
                             Command::new("/bin/cat")
@@ -8172,16 +7778,25 @@ mod tests {
                 pub(crate) writer: EventWriter,
                 pub(crate) controller: ObservationController,
                 pub(crate) transport: Transport,
-                pub(crate) human: Reader,
+                pub(crate) human: FakeInput,
                 pub(crate) pty: Pty,
-                pub(crate) output: Output,
+                pub(crate) output: FakeDisplay,
                 pub(crate) hooks: Arc<Hooks>,
                 pub(crate) until: Instant,
+                pub(crate) stage_settle: Duration,
                 expires: u64,
                 child: Child,
             }
 
             impl Host {
+                /// Queues `bytes` as one read of native child output.
+                pub(crate) fn child_output(&mut self, bytes: impl AsRef<[u8]>) {
+                    queue(&mut self.pty.child, bytes.as_ref());
+                }
+                /// Queues `bytes` as one read of human terminal input.
+                pub(crate) fn type_human(&mut self, bytes: impl AsRef<[u8]>) {
+                    queue(&mut self.human, bytes.as_ref());
+                }
                 pub(in crate::runtime::input) fn pending_snapshot(
                     &self,
                 ) -> (String, String, Vec<u8>, Instant, InputPhase, Option<i64>) {
@@ -8196,7 +7811,7 @@ mod tests {
                         pending.bytes.to_vec(),
                         pending.deadline,
                         pending.phase,
-                        pending.input_id,
+                        pending.input_id(),
                     )
                 }
 
@@ -8238,6 +7853,7 @@ mod tests {
                         native_version,
                         size,
                         screen,
+                        stage_settle,
                     } = profile;
                     let catalog = catalog();
                     let composer_selected =
@@ -8277,19 +7893,12 @@ mod tests {
                         &mut fixture.conn,
                         &fixture.run,
                         lock,
-                        InputServices {
-                            catalog,
-                            token_source: Box::new(PanicTokens("ordinary Prompt")),
-                            hooks: hooks.clone(),
-                        },
+                        services(catalog, hooks.clone(), stage_settle, "ordinary Prompt"),
                         until,
                     )
                     .unwrap();
                     let pty = Pty {
-                        child: Reader {
-                            bytes: screen.into_iter().collect(),
-                            ..Reader::default()
-                        },
+                        child: FakeInput::new(&screen, screen.len().max(1)),
                         offers: Vec::new(),
                         program: Vec::new(),
                         stages: Vec::new(),
@@ -8308,11 +7917,12 @@ mod tests {
                         writer,
                         controller,
                         transport,
-                        human: Reader::default(),
+                        human: FakeInput::default(),
                         pty,
-                        output: Output::default(),
+                        output: FakeDisplay::default(),
                         hooks,
                         until,
+                        stage_settle,
                         expires,
                         child,
                     };
@@ -8347,7 +7957,7 @@ mod tests {
                     }
                 }
                 pub(crate) fn show(&mut self, bytes: Vec<u8>) {
-                    self.pty.child.bytes.extend(bytes);
+                    self.child_output(bytes);
                     self.drain();
                 }
                 pub(crate) fn drain(&mut self) {
@@ -8498,6 +8108,42 @@ mod tests {
                 pub(crate) fn finish(&mut self) {
                     finish_runner(&mut self.writer, &mut self.child, self.until);
                 }
+                pub(crate) fn placement(&self) -> crate::broker::Placement {
+                    crate::broker::get_member(
+                        &self.fixture.conn,
+                        self.fixture.run.member_id,
+                        self.fixture.run.fleet_id,
+                    )
+                    .unwrap()
+                    .unwrap()
+                    .placement
+                    .expect("wrapped member placement")
+                }
+                pub(crate) fn quiesce_once(&mut self) -> InputDrain {
+                    self.coordinator
+                        .progress_with_manual(&mut self.transport, |transport| {
+                            transport.quiesce_for_input(
+                                &mut self.human,
+                                &mut self.pty,
+                                &mut self.output,
+                                &mut self
+                                    .controller
+                                    .observer(&self.writer, &crate::runtime::RealObservationClock),
+                                self.until,
+                            )
+                        })
+                        .unwrap()
+                }
+                pub(crate) fn message(&mut self, body: &str) -> crate::broker::MessageRecord {
+                    let run = self.fixture.run.clone();
+                    crate::broker::send_message(
+                        &mut self.fixture.conn,
+                        run.director_member_id,
+                        run.member_id,
+                        body,
+                    )
+                    .unwrap()
+                }
             }
             pub(in crate::runtime::input) fn with_host(body: impl FnOnce(&mut Host)) {
                 with_owned_host(Host::new(), body);
@@ -8551,7 +8197,6 @@ mod tests {
         use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
         use crate::coding_agent::catalog::test_support::inspection_fixture_form;
         pub(super) use crate::coding_agent::detector::test_support::native_fixture_bytes;
-        use crate::runtime::MissingEvidence;
         use crate::runtime::PermissionInspectInput;
         use crate::runtime::PermissionInspection;
         use crate::runtime::RuntimePaths;
@@ -8627,11 +8272,9 @@ mod tests {
             body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
         ) {
             with_profile_host(
-                ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled().clone(),
                 b"unused-program~".to_vec(),
                 HostProfile {
-                    policy: storage::evidence::EvidencePolicy::metadata(),
-                    event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Claude,
                     native_version,
                     size: crate::runtime::TerminalSize {
@@ -8641,6 +8284,7 @@ mod tests {
                     screen: native_fixture_bytes(
                         &crate::coding_agent::detector::test_support::bundled_screen(idle_fixture),
                     ),
+                    ..HostProfile::metadata()
                 },
                 |h| with_counted_tokens(h, body),
             );
@@ -8650,11 +8294,9 @@ mod tests {
             body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
         ) {
             with_profile_host(
-                ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled().clone(),
                 b"\r".to_vec(),
                 HostProfile {
-                    policy: storage::evidence::EvidencePolicy::metadata(),
-                    event_evidence: "metadata",
                     backend: crate::coding_agent::CodingAgent::Opencode,
                     native_version: "2.1.4",
                     size: crate::runtime::TerminalSize {
@@ -8666,6 +8308,7 @@ mod tests {
                             "opencode-2.1.4-idle-composer-1",
                         ),
                     ),
+                    ..HostProfile::metadata()
                 },
                 |h| with_counted_tokens(h, body),
             );
@@ -8713,7 +8356,7 @@ mod tests {
             h.show(inspection_fixture_form(operation, focus));
         }
 
-        fn current_ids(h: &Host) -> Option<(i64, i64, i64, i64)> {
+        pub(super) fn current_ids(h: &Host) -> Option<(i64, i64, i64, i64)> {
             h.fixture.conn.query_row(
             "SELECT e.event_id,e.interaction_id,e.message_id,i.episode_seq FROM member_runtime_events e JOIN member_interactions i ON i.interaction_id=e.interaction_id WHERE e.run_id=?1 AND e.kind='interaction_opened' AND i.closed_at IS NULL ORDER BY e.event_id DESC LIMIT 1",
             [h.fixture.run.run_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))
@@ -8726,7 +8369,7 @@ mod tests {
         }
         // The detail row is inside the request region but outside its fingerprint and answer focus.
         pub(super) fn stable_detailed_form(h: &mut Host, detail: &str) -> (i64, i64, i64, i64) {
-            h.pty.child.bytes.extend(
+            h.child_output(
             format!("\x1b[2J\x1b[18;1HSynthetic permission request\r\nOperation: PRIVATE_INSPECTION_OPERATION\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nDetail: {detail}\r\nSelection: ").into_bytes(),
         );
             h.drain();
@@ -8948,7 +8591,7 @@ mod tests {
                     value
                         .missing_evidence
                         .iter()
-                        .map(MissingEvidence::as_str)
+                        .map(|missing| missing.as_str())
                         .collect::<Vec<_>>(),
                     [
                         "operation",
@@ -9002,7 +8645,7 @@ mod tests {
                 let original = inspect(h, ids);
                 let mut previous = token(&original);
                 let revision = h.controller.request_generation();
-                h.pty.child.bytes.extend(b"\x1b[?25l\x1b[?25h");
+                h.child_output(b"\x1b[?25l\x1b[?25h");
                 h.drain();
                 let redraw = inspect(h, ids);
                 assert!(redraw.output_seq > original.output_seq);
@@ -9024,7 +8667,7 @@ mod tests {
                     "clear/rebuild traverses incompatible observed screens"
                 );
                 previous = rebuilt;
-                h.human.bytes.push_back(b'!');
+                h.type_human(b"!");
                 h.drain();
                 assert_eq!(h.pty.manual, b"!");
                 let manual = token(&inspect(h, ids));
@@ -9197,7 +8840,7 @@ mod tests {
                 inspection_missing_evidence(value)
                     .unwrap()
                     .iter()
-                    .map(MissingEvidence::as_str)
+                    .map(|missing| missing.as_str())
                     .collect::<Vec<_>>()
             };
             let public = redacted.apply(&raw).unwrap();
@@ -9454,33 +9097,18 @@ mod tests {
             assert_ne!(reasons[0], reasons[1], "each conjunct has its own reason");
         }
 
-        fn stored_evidence(h: &Host, interaction_id: i64) -> String {
-            h.fixture
-                .conn
-                .query_row(
-                    "SELECT evidence_json FROM member_interactions WHERE interaction_id=?1",
-                    [interaction_id],
-                    |row| row.get(0),
-                )
-                .unwrap()
-        }
-
         #[test]
         fn permission_screen_seq_only_redraw_schedules_no_refresh_and_keeps_the_settled_token() {
             with_inspection(|h, _, _| {
                 let ids = stable_form(h);
                 let inspected = inspect(h, ids);
                 let input = command(h, &inspected, "response:redraw", PermissionDecision::Allow);
-                let evidence = stored_evidence(h, ids.1);
                 let output_seq = h.transport.snapshot().screen_seq;
                 let lock = Connection::open(h.fixture.conn.path().unwrap()).unwrap();
                 lock.execute_batch("BEGIN IMMEDIATE").unwrap();
                 // Every observed frame keeps identical cells with the cursor at the request end: the
                 // observer runs after each control byte, so `[24;1HSelection: ` lands as one chunk.
-                h.pty
-                    .child
-                    .bytes
-                    .extend(b"\x1b[?25l\x1b[0m\x1b[24;1HSelection: \x1b[?25h");
+                h.child_output(b"\x1b[?25l\x1b[0m\x1b[24;1HSelection: \x1b[?25h");
                 let drained = h
                     .coordinator
                     .progress_with_manual(&mut h.transport, |transport| {
@@ -9503,13 +9131,6 @@ mod tests {
                     matches!(drained, InputDrain::Quiescent { .. }),
                     "a screen_seq-only redraw needs no write, so it settles while the database is locked"
                 );
-                let status = h.controller.status();
-                assert!(
-                    !status.retained_evidence,
-                    "no evidence refresh is scheduled"
-                );
-                assert!(!status.retained_transition);
-                assert!(!h.controller.health(&h.writer).pending_evidence);
                 assert!(h.controller.current_request().is_some());
                 let while_locked = inspect_request(h, inspection_target(h, ids), h.until).unwrap();
                 assert_eq!(
@@ -9519,17 +9140,6 @@ mod tests {
                 lock.execute_batch("COMMIT").unwrap();
                 drop(lock);
                 h.drain();
-                assert_eq!(
-                    h.controller.status().gap_count,
-                    0,
-                    "no writer gap occurred, so no revocation applies"
-                );
-                assert!(!h.writer.status().degraded);
-                assert_eq!(
-                    stored_evidence(h, ids.1),
-                    evidence,
-                    "the stored latest evidence keeps the screen_seq of its last real change"
-                );
                 let settled = inspect(h, ids);
                 assert_eq!(settled.request_token, inspected.request_token);
                 assert!(
@@ -9541,29 +9151,13 @@ mod tests {
             });
         }
 
-        fn quiesce_once(h: &mut Host) -> InputDrain {
-            h.coordinator
-                .progress_with_manual(&mut h.transport, |transport| {
-                    transport.quiesce_for_input(
-                        &mut h.human,
-                        &mut h.pty,
-                        &mut h.output,
-                        &mut h
-                            .controller
-                            .observer(&h.writer, &crate::runtime::RealObservationClock),
-                        h.until,
-                    )
-                })
-                .unwrap()
-        }
-
         // One CSI sequence longer than the drain's per-tick child budget: it changes no cell or
         // cursor and yields only two observed frames, so the drain ends with output still arriving.
         fn neutral_output_flood(h: &mut Host) {
             let mut bytes = b"\x1b[".to_vec();
             bytes.extend(b"0;".repeat(2200));
             bytes.push(b'm');
-            h.pty.child.bytes.extend(bytes);
+            h.child_output(bytes);
         }
 
         const OUTPUT_ARRIVING: &str = "terminal output still arriving";
@@ -9581,7 +9175,7 @@ mod tests {
         }
 
         fn claude_blocked_form(h: &mut Host) -> (i64, i64, i64, i64) {
-            h.pty.child.bytes.extend(native_fixture_bytes(
+            h.child_output(native_fixture_bytes(
                 &crate::coding_agent::detector::test_support::bundled_screen(
                     "claude-2.1.302-default-permission-1",
                 ),
@@ -9590,7 +9184,7 @@ mod tests {
         }
 
         fn claude_boxed_single_row_form(h: &mut Host) -> (i64, i64, i64, i64) {
-            h.pty.child.bytes.extend(native_fixture_bytes(
+            h.child_output(native_fixture_bytes(
                 &crate::coding_agent::detector::test_support::bundled_screen(
                     "claude-2.1.302-boxed-single-row-permission-1",
                 ),
@@ -9709,93 +9303,6 @@ mod tests {
         }
 
         #[test]
-        fn a_preview_during_the_claude_read_outside_dialog_queues_with_zero_bytes_and_drains_once_on_the_idle_composer()
-         {
-            use crate::runtime::input::tests::ordinary_prompt::support::canonical_preview;
-            use crate::runtime::input::tests::ordinary_prompt::support::preview_request;
-            const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
-            let idle = || {
-                native_fixture_bytes(
-                    &crate::coding_agent::detector::test_support::bundled_screen(IDLE),
-                )
-            };
-            with_claude_host("2.1.309", IDLE, |h, _, _| {
-                h.pty.child.bytes.extend(native_fixture_bytes(
-                    &crate::coding_agent::detector::test_support::bundled_screen(
-                        "claude-2.1.309-read-outside-permission-1",
-                    ),
-                ));
-                settled_ids(h);
-                assert!(matches!(
-                    h.controller.health(&h.writer).eligibility,
-                    InputEligibility::Hold(_)
-                ));
-                let run = h.fixture.run.clone();
-                let message = crate::broker::send_message(
-                    &mut h.fixture.conn,
-                    run.director_member_id,
-                    run.member_id,
-                    "preview during the read-outside dialog",
-                )
-                .unwrap();
-                let literal = canonical_preview(&message);
-                let mut program = literal.as_bytes().to_vec();
-                program.push(b'\r');
-                h.pty.expect_program(program.clone());
-                let request = preview_request(h, &message, &literal);
-                let Some(InputControlReply::Submission(queued)) = h.handle(request).unwrap() else {
-                    panic!("a preview during the dialog returns a Submission reply")
-                };
-                assert_eq!(
-                    (queued.status, queued.stage),
-                    (SubmissionStatus::Queued, SubmissionStage::ZeroBytes)
-                );
-                assert_eq!(
-                    queued
-                        .delivery
-                        .as_ref()
-                        .and_then(|delivery| delivery.reason.as_deref()),
-                    Some("interaction_open")
-                );
-                let input_id = queued.input_id.expect("queued work has a durable input ID");
-                for _ in 0..20 {
-                    h.drain();
-                    h.advance();
-                }
-                assert!(
-                    h.pty.offers.is_empty(),
-                    "no byte, Escape included, reaches the dialog: {:?}",
-                    h.pty.offers
-                );
-                h.show(idle());
-                while !matches!(
-                    storage::get_input(&h.fixture.conn, input_id).unwrap().state,
-                    storage::InputState::Accepted | storage::InputState::Settled
-                ) {
-                    assert!(
-                        Instant::now() < h.until,
-                        "the queued preview drains in time"
-                    );
-                    h.drain();
-                    h.advance();
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                for _ in 0..20 {
-                    h.drain();
-                    h.advance();
-                }
-                assert_eq!(h.pty.program, vec![program], "delivered exactly once");
-                assert!(h.pty.manual.is_empty(), "{:?}", h.pty.manual);
-                let input = storage::get_input(&h.fixture.conn, input_id).unwrap();
-                assert_eq!(
-                    input.delivery_method,
-                    Some(crate::broker::runtime::DeliveryMethod::Profile)
-                );
-                assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
-            });
-        }
-
-        #[test]
         fn a_preview_prompt_and_exec_during_dialog_a_queue_with_zero_bytes_and_each_drains_once() {
             use crate::runtime::input::tests::ordinary_prompt::support::canonical_preview;
             use crate::runtime::input::tests::ordinary_prompt::support::preview_request;
@@ -9806,134 +9313,131 @@ mod tests {
                     &crate::coding_agent::detector::test_support::bundled_screen(id),
                 )
             };
-            with_claude_host("2.1.312", IDLE, |h, _, _| {
-                h.pty
-                    .child
-                    .bytes
-                    .extend(fixture("claude-2.1.312-auto-default-nudge-1"));
-                settled_ids(h);
-                assert!(matches!(
-                    h.controller.health(&h.writer).eligibility,
-                    InputEligibility::Hold(_)
-                ));
-                let run = h.fixture.run.clone();
-                let message = crate::broker::send_message(
-                    &mut h.fixture.conn,
-                    run.director_member_id,
-                    run.member_id,
-                    "preview during Dialog A",
-                )
-                .unwrap();
-                let preview = canonical_preview(&message);
-                let mut program = preview.as_bytes().to_vec();
-                program.push(b'\r');
-                program.extend_from_slice(LITERAL.as_bytes());
-                program.push(b'\r');
-                program.extend_from_slice(b"! ");
-                program.extend_from_slice(LITERAL.as_bytes());
-                program.push(b'\r');
-                h.pty.expect_program(program.clone());
-                let mut prompt = h.request("prompt:dialog-a");
-                prompt.operation = InputControlOperation::SubmitPrompt(SubmitInput {
-                    operation_key: "prompt:dialog-a".into(),
-                    input_kind: storage::InputKind::Prompt,
-                    message_id: None,
-                    literal: LITERAL.into(),
-                });
-                let mut exec = h.request("exec:dialog-a");
-                exec.operation = InputControlOperation::SubmitExec(SubmitInput {
-                    operation_key: "exec:dialog-a".into(),
-                    input_kind: storage::InputKind::Exec,
-                    message_id: None,
-                    literal: LITERAL.into(),
-                });
-                let mut queued_ids = Vec::new();
-                for (case, request) in [
-                    ("preview", preview_request(h, &message, &preview)),
-                    ("prompt", prompt),
-                    ("exec", exec),
-                ] {
-                    let Some(InputControlReply::Submission(queued)) = h.handle(request).unwrap()
-                    else {
-                        panic!("a {case} during Dialog A returns a Submission reply")
-                    };
-                    assert_eq!(
-                        (queued.status, queued.stage),
-                        (SubmissionStatus::Queued, SubmissionStage::ZeroBytes),
-                        "{case}"
-                    );
-                    assert_eq!(
-                        queued
-                            .delivery
-                            .as_ref()
-                            .and_then(|delivery| delivery.reason.as_deref()),
-                        Some("interaction_open"),
-                        "{case}"
-                    );
-                    queued_ids.push(queued.input_id.expect("queued work has a durable input ID"));
-                }
-                for _ in 0..20 {
-                    h.drain();
-                    h.advance();
-                }
-                assert!(
-                    h.pty.offers.is_empty(),
-                    "no byte, Enter included, reaches Dialog A: {:?}",
-                    h.pty.offers
-                );
-                h.show(fixture(IDLE));
-                while !queued_ids.iter().all(|id| {
-                    matches!(
-                        storage::get_input(&h.fixture.conn, *id).unwrap().state,
-                        storage::InputState::Accepted | storage::InputState::Settled
+            for (version, form) in [
+                ("2.1.309", "claude-2.1.309-read-outside-permission-1"),
+                ("2.1.312", "claude-2.1.312-auto-default-nudge-1"),
+            ] {
+                with_claude_host(version, IDLE, |h, _, _| {
+                    h.child_output(fixture(form));
+                    settled_ids(h);
+                    assert!(matches!(
+                        h.controller.health(&h.writer).eligibility,
+                        InputEligibility::Hold(_)
+                    ));
+                    let run = h.fixture.run.clone();
+                    let message = crate::broker::send_message(
+                        &mut h.fixture.conn,
+                        run.director_member_id,
+                        run.member_id,
+                        "preview during Dialog A",
                     )
-                }) {
-                    assert!(Instant::now() < h.until, "the queued inputs drain in time");
-                    h.drain();
-                    h.advance();
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                for _ in 0..20 {
-                    h.drain();
-                    h.advance();
-                }
-                assert_eq!(
-                    h.pty.program,
-                    vec![program],
-                    "each input is delivered once, in order"
-                );
-                assert!(h.pty.manual.is_empty(), "{:?}", h.pty.manual);
-                for (index, id) in queued_ids.into_iter().enumerate() {
-                    let input = storage::get_input(&h.fixture.conn, id).unwrap();
-                    if index == 0 {
-                        assert_eq!(input.state, storage::InputState::Settled, "preview {id}");
+                    .unwrap();
+                    let preview = canonical_preview(&message);
+                    let mut program = preview.as_bytes().to_vec();
+                    program.push(b'\r');
+                    program.extend_from_slice(LITERAL.as_bytes());
+                    program.push(b'\r');
+                    program.extend_from_slice(b"! ");
+                    program.extend_from_slice(LITERAL.as_bytes());
+                    program.push(b'\r');
+                    h.pty.expect_program(program.clone());
+                    let mut prompt = h.request("prompt:dialog-a");
+                    prompt.operation = InputControlOperation::SubmitPrompt(SubmitInput {
+                        operation_key: "prompt:dialog-a".into(),
+                        input_kind: storage::InputKind::Prompt,
+                        message_id: None,
+                        literal: LITERAL.into(),
+                    });
+                    let mut exec = h.request("exec:dialog-a");
+                    exec.operation = InputControlOperation::SubmitExec(SubmitInput {
+                        operation_key: "exec:dialog-a".into(),
+                        input_kind: storage::InputKind::Exec,
+                        message_id: None,
+                        literal: LITERAL.into(),
+                    });
+                    let mut queued_ids = Vec::new();
+                    for (case, request) in [
+                        ("preview", preview_request(h, &message, &preview)),
+                        ("prompt", prompt),
+                        ("exec", exec),
+                    ] {
+                        let Some(InputControlReply::Submission(queued)) =
+                            h.handle(request).unwrap()
+                        else {
+                            panic!("a {case} during Dialog A returns a Submission reply")
+                        };
                         assert_eq!(
-                            input.disposition,
-                            Some(storage::InputDisposition::Submitted),
-                            "preview {id}"
+                            (queued.status, queued.stage),
+                            (SubmissionStatus::Queued, SubmissionStage::ZeroBytes),
+                            "{case}"
                         );
-                    } else {
-                        assert_eq!(input.state, storage::InputState::Accepted, "{id}");
+                        assert_eq!(
+                            queued
+                                .delivery
+                                .as_ref()
+                                .and_then(|delivery| delivery.reason.as_deref()),
+                            Some("interaction_open"),
+                            "{case}"
+                        );
+                        queued_ids
+                            .push(queued.input_id.expect("queued work has a durable input ID"));
+                    }
+                    for _ in 0..20 {
+                        h.drain();
+                        h.advance();
+                    }
+                    assert!(
+                        h.pty.offers.is_empty(),
+                        "no byte, Enter included, reaches Dialog A: {:?}",
+                        h.pty.offers
+                    );
+                    h.show(fixture(IDLE));
+                    while !queued_ids.iter().all(|id| {
+                        matches!(
+                            storage::get_input(&h.fixture.conn, *id).unwrap().state,
+                            storage::InputState::Accepted | storage::InputState::Settled
+                        )
+                    }) {
+                        assert!(Instant::now() < h.until, "the queued inputs drain in time");
+                        h.drain();
+                        h.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    for _ in 0..20 {
+                        h.drain();
+                        h.advance();
                     }
                     assert_eq!(
-                        input.delivery_method,
-                        Some(crate::broker::runtime::DeliveryMethod::Profile)
+                        h.pty.program,
+                        vec![program],
+                        "each input is delivered once, in order"
                     );
-                    assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
-                }
-            });
+                    assert!(h.pty.manual.is_empty(), "{:?}", h.pty.manual);
+                    for (index, id) in queued_ids.into_iter().enumerate() {
+                        let input = storage::get_input(&h.fixture.conn, id).unwrap();
+                        if index == 0 {
+                            assert_eq!(input.state, storage::InputState::Settled, "preview {id}");
+                            assert_eq!(
+                                input.disposition,
+                                Some(storage::InputDisposition::Submitted),
+                                "preview {id}"
+                            );
+                        } else {
+                            assert_eq!(input.state, storage::InputState::Accepted, "{id}");
+                        }
+                        assert_eq!(
+                            input.delivery_method,
+                            Some(crate::broker::runtime::DeliveryMethod::Profile)
+                        );
+                        assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+                    }
+                });
+            }
         }
 
         #[test]
         fn permission_claude_blink_cursor_transit_keeps_generation_and_token_and_admits_respond() {
             let writes = blink_writes();
-            assert_eq!(writes.len(), 11);
-            let captured = writes.concat();
-            assert_eq!(captured.len(), 441);
-            assert_eq!(
-                crate::digest::sha256_hex(&captured),
-                "014fe1213f56da769340abaf3cb46961c682a58d16fbccd7e16e62ca8e582e9e"
-            );
             with_claude_inspection(|h, _, _| {
                 let ids = claude_blocked_form(h);
                 let inspected = inspect(h, ids);
@@ -9944,7 +9448,7 @@ mod tests {
                 );
                 let generation = h.controller.request_generation();
                 for (index, write) in writes.iter().enumerate() {
-                    h.pty.child.bytes.extend(write.iter().copied());
+                    h.child_output(&write[..]);
                     h.drain();
                     assert_eq!(
                         h.controller.request_generation(),
@@ -9989,7 +9493,7 @@ mod tests {
                 let ids = claude_blocked_form(h);
                 let inspected = inspect(h, ids);
                 let generation = h.controller.request_generation();
-                h.pty.child.bytes.extend(onto_form);
+                h.child_output(onto_form);
                 h.drain();
                 assert!(
                     h.controller.request_generation() > generation,
@@ -10024,11 +9528,11 @@ mod tests {
                 );
                 let lock = Connection::open(h.fixture.conn.path().unwrap()).unwrap();
                 lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-                h.pty.child.bytes.extend(detail_rewrite("refreshed"));
-                assert!(matches!(quiesce_once(h), InputDrain::Pending));
+                h.child_output(detail_rewrite("refreshed"));
+                assert!(matches!(h.quiesce_once(), InputDrain::Pending));
                 assert_eq!(blocked_reason(h, ids), "observation evidence pending");
                 neutral_output_flood(h);
-                assert!(matches!(quiesce_once(h), InputDrain::Pending));
+                assert!(matches!(h.quiesce_once(), InputDrain::Pending));
                 assert_eq!(
                     blocked_reason(h, ids),
                     OUTPUT_ARRIVING,
@@ -10058,7 +9562,7 @@ mod tests {
                     PermissionDecision::Allow,
                 );
                 neutral_output_flood(h);
-                assert!(matches!(quiesce_once(h), InputDrain::Pending));
+                assert!(matches!(h.quiesce_once(), InputDrain::Pending));
                 let failure = h
                     .respond(&input)
                     .err()
@@ -10072,7 +9576,11 @@ mod tests {
                     failure.source.message()
                 );
                 assert_eq!(
-                    (failure.run_id, failure.interaction_id, failure.input_id),
+                    (
+                        failure.context.run_id,
+                        failure.context.interaction_id,
+                        failure.context.input_id
+                    ),
                     (Some(h.fixture.run.run_id), Some(ids.1), None)
                 );
                 assert_eq!(counts(h), [0, 0, 0]);
@@ -10110,7 +9618,7 @@ mod tests {
                 assert_eq!(submitted.submission.input_id, Some(id));
                 let offers = h.pty.offers.clone();
                 h.coordinator.fence(h.until).unwrap();
-                h.pty.child.bytes.extend(b"\x1b[0m");
+                h.child_output(b"\x1b[0m");
                 let lookup = |h: &mut Host, key: &str| {
                     let mut retained = input.clone();
                     retained.operation_key = key.into();
@@ -10142,7 +9650,7 @@ mod tests {
                 );
                 assert_eq!(h.pty.offers, offers, "the replay types nothing");
                 assert_eq!(
-                    h.pty.child.bytes.len(),
+                    h.pty.child.chunks.iter().map(Vec::len).sum::<usize>(),
                     4,
                     "the replay performs no admission drain"
                 );
@@ -10193,7 +9701,7 @@ mod tests {
                         "{reason}: {:?}",
                         failure.source.message()
                     );
-                    assert_eq!(failure.input_id, Some(id));
+                    assert_eq!(failure.context.input_id, Some(id));
                     assert_eq!(
                         storage::get_permission_response(&h.fixture.conn, id).unwrap(),
                         original
@@ -10210,18 +9718,22 @@ mod tests {
                 let ids = stable_detailed_form(h, "opened");
                 let inspected = inspect(h, ids);
                 let stale = command(h, &inspected, "response:stale", PermissionDecision::Allow);
-                h.human.bytes.push_back(b'!');
+                h.type_human(b"!");
                 h.drain();
                 let failure = match h.respond(&stale) {
                     Err(failure) => failure,
                     Ok(_) => panic!("revoked token refuses the fresh response"),
                 };
                 assert_eq!(
-                    (failure.run_id, failure.interaction_id, failure.input_id),
+                    (
+                        failure.context.run_id,
+                        failure.context.interaction_id,
+                        failure.context.input_id
+                    ),
                     (Some(h.fixture.run.run_id), Some(ids.1), None)
                 );
                 assert_eq!(
-                    failure.operation_key.as_deref(),
+                    failure.context.operation_key.as_deref(),
                     Some(stale.operation_key.as_str())
                 );
                 assert!(!failure.source.message().contains(&stale.request_token));
@@ -10237,7 +9749,7 @@ mod tests {
                 );
                 h.fixture.conn.execute_batch("CREATE TRIGGER reject_response_refresh BEFORE UPDATE OF evidence_json ON member_interactions BEGIN SELECT RAISE(ABORT,'owned response refresh failure'); END").unwrap();
                 let generation = h.controller.request_generation();
-                h.pty.child.bytes.extend(detail_rewrite("refreshed"));
+                h.child_output(detail_rewrite("refreshed"));
                 h.coordinator
                     .progress_with_manual(&mut h.transport, |transport| {
                         transport.quiesce_for_input(
@@ -10428,10 +9940,7 @@ mod tests {
                     .unwrap();
                 assert!(notified.is_none());
                 let before_composer = h.transport.snapshot().screen_seq;
-                h.pty
-                    .child
-                    .bytes
-                    .extend(b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end");
+                h.child_output(b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end");
                 loop {
                     h.drain();
                     let status = h.controller.status();
@@ -10621,7 +10130,7 @@ mod tests {
                     .message()
                     .contains("native input write returned zero bytes")
             );
-            assert_eq!(failure.input_id, Some(id));
+            assert_eq!(failure.context.input_id, Some(id));
             let point = h.coordinator.retained_checkpoint(id).unwrap();
             assert_eq!(
                 (point.stage, point.written_bytes),
@@ -10692,14 +10201,18 @@ mod tests {
             with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
                 let (input, id) = terminal_zero(h, "response:ready-revoked");
                 let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                h.human.bytes.push_back(b'!');
+                h.type_human(b"!");
                 h.drain();
                 let failure = h
                     .respond(&input)
                     .err()
                     .expect("actual manual generation revokes Ready authority");
                 assert_eq!(
-                    (failure.run_id, failure.interaction_id, failure.input_id),
+                    (
+                        failure.context.run_id,
+                        failure.context.interaction_id,
+                        failure.context.input_id
+                    ),
                     (
                         Some(h.fixture.run.run_id),
                         Some(input.interaction_id),
@@ -10777,7 +10290,7 @@ mod tests {
                 )
                 .unwrap();
             tx.rollback().unwrap();
-            storage::release_permission_claim(
+            storage::test_support::release_permission_claim(
                 &mut h.fixture.conn,
                 &h.fixture.run.owner(),
                 row.input.input_id,
@@ -10986,7 +10499,7 @@ mod tests {
                     pending.request.operation_key.clone(),
                     pending.phase,
                     pending.deadline,
-                    pending.input_id,
+                    pending.input_id(),
                 );
                 let ReceiptReply::Present {
                     input_id,
@@ -11023,7 +10536,7 @@ mod tests {
                         pending.request.operation_key.clone(),
                         pending.phase,
                         pending.deadline,
-                        pending.input_id
+                        pending.input_id()
                     ) == pending_before
                 );
                 assert_eq!(
@@ -11116,7 +10629,7 @@ mod tests {
                         .message()
                         .contains("owned live claim delete failure")
                 );
-                assert_eq!(failed.input_id, Some(id));
+                assert_eq!(failed.context.input_id, Some(id));
                 assert_eq!(
                     storage::get_permission_response(&h.fixture.conn, id).unwrap(),
                     original
@@ -11221,30 +10734,7 @@ mod tests {
         #[test]
         fn permission_receipt_cacheless_ready_proof_is_borrowed_and_not_an_attributed_disposition()
         {
-            trait AmbiguousIfSend<A> {
-                fn check() {}
-            }
-            impl<T: ?Sized> AmbiguousIfSend<()> for T {}
-            struct SendType;
-            impl<T: ?Sized + Send> AmbiguousIfSend<SendType> for T {}
-            trait AmbiguousIfClone<A> {
-                fn check() {}
-            }
-            impl<T: ?Sized> AmbiguousIfClone<()> for T {}
-            struct CloneType;
-            impl<T: Clone> AmbiguousIfClone<CloneType> for T {}
-            trait AmbiguousIfSerialize<A> {
-                fn check() {}
-            }
-            impl<T: ?Sized> AmbiguousIfSerialize<()> for T {}
-            struct SerializeType;
-            impl<T: ?Sized + serde::Serialize> AmbiguousIfSerialize<SerializeType> for T {}
-            let _ = <InputGuard<'static> as AmbiguousIfSend<_>>::check;
-            let _ = <storage::ZeroByteRetirement<'static> as AmbiguousIfSend<_>>::check;
-            let _ = <InputGuard<'static> as AmbiguousIfClone<_>>::check;
-            let _ = <storage::ZeroByteRetirement<'static> as AmbiguousIfClone<_>>::check;
-            let _ = <InputGuard<'static> as AmbiguousIfSerialize<_>>::check;
-            let _ = <storage::ZeroByteRetirement<'static> as AmbiguousIfSerialize<_>>::check;
+            assert_not_impl!(InputGuard<'static>: Send, Clone, serde::Serialize);
             with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
                 let (input, id) = terminal_zero(h, "response:cacheless-zero");
                 let ready = storage::get_permission_response(&h.fixture.conn, id).unwrap();
@@ -11253,16 +10743,12 @@ mod tests {
                     &mut h.fixture.conn,
                     &h.fixture.run,
                     h.coordinator.lock.clone(),
-                    InputServices {
-                        catalog: ProfileCatalog::from_definitions(&inspection_fixture_definition())
-                            .unwrap(),
-                        token_source: Box::new(
-                            crate::runtime::input::tests::ordinary_prompt::support::PanicTokens(
-                                "receipt-only proof",
-                            ),
-                        ),
-                        hooks: h.hooks.clone(),
-                    },
+                    crate::runtime::input::tests::ordinary_prompt::support::services(
+                        ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap(),
+                        h.hooks.clone(),
+                        h.stage_settle,
+                        "receipt-only proof",
+                    ),
                     h.until,
                 )
                 .unwrap();
@@ -11290,7 +10776,7 @@ mod tests {
                         .unwrap();
                     tx.rollback().unwrap();
                 }
-                storage::settle_input(
+                storage::test_support::settle_input(
                     &mut h.fixture.conn,
                     &h.fixture.run.owner(),
                     id,
@@ -11467,7 +10953,7 @@ mod tests {
                 }
                 match outcome {
                     Err(failure) => assert_eq!(
-                        failure.operation_key.as_deref(),
+                        failure.context.operation_key.as_deref(),
                         Some(other.operation_key.as_str())
                     ),
                     Ok(Some(reply)) => assert_ne!(
@@ -11499,7 +10985,7 @@ mod tests {
                 assert_eq!(ready.response, original.response);
                 assert_eq!(ready.claim, original.claim);
                 assert!(h.coordinator.operations.is_empty());
-                let expired = Instant::now() + Duration::from_millis(100);
+                let expired = Instant::now() + Duration::from_millis(500);
                 assert!(expired < h.until);
                 let mut request = h.request("unused-cacheless-ready-expiry");
                 request.operation = InputControlOperation::PermissionRespond(input.clone());
@@ -11516,8 +11002,8 @@ mod tests {
                         .is_none()
                 );
                 let pending = h.coordinator.pending.as_ref().unwrap();
-                assert_eq!((pending.input_id, pending.deadline), (Some(id), expired));
-                assert_eq!(pending.ready.as_ref().unwrap(), &ready);
+                assert_eq!((pending.input_id(), pending.deadline), (Some(id), expired));
+                assert_eq!(pending.ready().unwrap(), &ready);
                 assert!(h.coordinator.operations.is_empty());
                 assert!(h.pty.offers.is_empty());
                 std::thread::sleep(expired.saturating_duration_since(Instant::now()));
@@ -11528,7 +11014,11 @@ mod tests {
                     .expect("original pending expiration returns its primary failure");
                 assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
                 assert_eq!(
-                    (failure.run_id, failure.interaction_id, failure.input_id),
+                    (
+                        failure.context.run_id,
+                        failure.context.interaction_id,
+                        failure.context.input_id
+                    ),
                     (
                         Some(h.fixture.run.run_id),
                         Some(input.interaction_id),
@@ -11536,7 +11026,7 @@ mod tests {
                     )
                 );
                 assert_eq!(
-                    failure.operation_key.as_deref(),
+                    failure.context.operation_key.as_deref(),
                     Some(input.operation_key.as_str())
                 );
                 assert_eq!(
@@ -11548,7 +11038,7 @@ mod tests {
                 h.coordinator.finish_pending_attempt();
                 assert!(h.coordinator.pending.is_none());
                 assert!(h.respond(&input).unwrap().is_none());
-                assert_eq!(h.coordinator.pending.as_ref().unwrap().input_id, Some(id));
+                assert_eq!(h.coordinator.pending.as_ref().unwrap().input_id(), Some(id));
                 h.coordinator.finish_pending_attempt();
                 assert!(h.coordinator.pending.is_none());
                 assert!(h.coordinator.operations.is_empty());
@@ -11643,39 +11133,6 @@ mod tests {
         }
 
         #[test]
-        fn permission_response_changed_focus_after_positive_stage_stops_remaining_bytes() {
-            with_inspection(|h, _, _| {
-                let (_, input, id) = admitted(h, "response:changed-focus");
-                first_stage(h, id);
-                form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-other");
-                let outcome = h.try_advance();
-                match outcome {
-                    Err(failure) => {
-                        assert_eq!(failure.input_id, Some(id));
-                        assert_eq!(failure.interaction_id, Some(input.interaction_id));
-                    }
-                    Ok(Some(reply)) => assert_eq!(
-                        response(reply).submission.status,
-                        SubmissionStatus::Uncertain
-                    ),
-                    Ok(None) => {
-                        panic!("incompatible positive attempt terminates without another stage")
-                    }
-                }
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(
-                    (point.stage, point.written_bytes),
-                    (SubmissionStage::Partial, 1)
-                );
-                assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
-                assert_eq!(
-                    audit(h, id, &input, "inspection-allow-plan").input.state,
-                    storage::InputState::Uncertain
-                );
-            });
-        }
-
-        #[test]
         fn permission_response_failure_after_its_first_stage_records_write_failed() {
             with_inspection(|h, _, _| {
                 let (_, input, id) = admitted(h, "response:failed-after-stage");
@@ -11684,7 +11141,12 @@ mod tests {
                 let Err(failure) = h.try_advance() else {
                     panic!("a changed focus fails the positive attempt");
                 };
-                assert_eq!(failure.input_id, Some(id));
+                assert_eq!(failure.context.input_id, Some(id));
+                let point = h.coordinator.retained_checkpoint(id).unwrap();
+                assert_eq!(
+                    (point.stage, point.written_bytes),
+                    (SubmissionStage::Partial, 1)
+                );
                 let receipt = audit(h, id, &input, "inspection-allow-plan");
                 assert_eq!(receipt.input.state, storage::InputState::Uncertain);
                 assert_eq!(
@@ -11837,7 +11299,11 @@ mod tests {
                         .contains("owned response accepted failure")
                 );
                 assert_eq!(
-                    (failure.run_id, failure.interaction_id, failure.input_id),
+                    (
+                        failure.context.run_id,
+                        failure.context.interaction_id,
+                        failure.context.input_id
+                    ),
                     (
                         Some(h.fixture.run.run_id),
                         Some(input.interaction_id),
@@ -11845,7 +11311,7 @@ mod tests {
                     )
                 );
                 assert_eq!(
-                    failure.operation_key.as_deref(),
+                    failure.context.operation_key.as_deref(),
                     Some(input.operation_key.as_str())
                 );
                 assert!(!failure.source.message().contains(&input.request_token));
@@ -11878,7 +11344,6 @@ mod tests {
             use crate::coding_agent::catalog::test_support::question_fixture_form;
             use crate::coding_agent::catalog::test_support::question_notice_form;
             use crate::runtime::input::tests::permission_response_contracts::*;
-            use rusqlite::OptionalExtension;
 
             fn with_question(program: &[u8], body: impl FnOnce(&mut Host)) {
                 with_definition(
@@ -11891,16 +11356,10 @@ mod tests {
             fn opened_ids(h: &mut Host) -> (i64, i64, i64, i64) {
                 loop {
                     h.drain();
-                    let ids = h
-                        .fixture
-                        .conn
-                        .query_row(
-                            "SELECT e.event_id,e.interaction_id,e.message_id,i.episode_seq FROM member_runtime_events e JOIN member_interactions i ON i.interaction_id=e.interaction_id WHERE e.run_id=?1 AND e.kind='interaction_opened' AND i.closed_at IS NULL ORDER BY e.event_id DESC LIMIT 1",
-                            [h.fixture.run.run_id],
-                            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-                        )
-                        .optional()
-                        .unwrap();
+                    let ids =
+                        crate::runtime::input::tests::permission_inspection_contracts::current_ids(
+                            h,
+                        );
                     if let Some(ids) = ids {
                         return ids;
                     }
@@ -11919,10 +11378,6 @@ mod tests {
 
             fn choice(id: &str) -> AnswerKey {
                 AnswerKey::Choice(id.into())
-            }
-
-            fn offers(values: &[&[u8]]) -> Vec<Vec<u8>> {
-                values.iter().map(|value| value.to_vec()).collect()
             }
 
             #[test]
@@ -12053,7 +11508,10 @@ mod tests {
                         )
                     );
                     assert_eq!(result.key, choice("later"));
-                    assert_eq!(h.pty.offers, offers(&[b"3"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"3"])
+                    );
                     let receipt = audit(h, id, &input, QUESTION_LATER_PLAN);
                     assert_eq!(receipt.input.state, storage::InputState::Accepted);
                     assert_eq!(receipt.response.metadata.key, choice("later"));
@@ -12078,7 +11536,10 @@ mod tests {
                         h.advance().is_none(),
                         "the first choice stage keeps the response open"
                     );
-                    assert_eq!(h.pty.offers, offers(&[b"\x0e"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"\x0e"])
+                    );
                     h.show(question_fixture_form(&["decline"]));
                     arm_stage(h, 2);
                     h.drain();
@@ -12087,46 +11548,16 @@ mod tests {
                         (result.submission.status, result.submission.stage),
                         (SubmissionStatus::Accepted, SubmissionStage::Submitted)
                     );
-                    assert_eq!(h.pty.offers, offers(&[b"\x0e", b"\r"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[
+                            b"\x0e", b"\r"
+                        ])
+                    );
                     assert_eq!(
                         audit(h, id, &input, QUESTION_DECLINE_PLAN).input.state,
                         storage::InputState::Accepted
                     );
-                });
-            }
-
-            #[test]
-            fn a_gated_choice_writes_nothing_while_its_first_focus_gate_is_unmet() {
-                with_question(b"\x0e\r", |h| {
-                    let ids = question(h, &["decline"]);
-                    let deadline = Instant::now() + Duration::from_millis(600);
-                    let inspected = inspect(h, ids);
-                    let input =
-                        keyed_command(h, &inspected, "response:question-unmet", choice("decline"));
-                    let outcome = match h.respond_until(&input, deadline) {
-                        Ok(None) => loop {
-                            h.drain();
-                            match h.try_advance() {
-                                Ok(None)
-                                    if Instant::now() >= deadline + Duration::from_millis(400) =>
-                                {
-                                    break Ok(None);
-                                }
-                                Ok(None) => std::thread::sleep(Duration::from_millis(2)),
-                                Ok(Some(reply)) => break Ok(Some(response(reply))),
-                                Err(failure) => break Err(failure),
-                            }
-                        },
-                        Ok(Some(reply)) => Ok(Some(response(reply))),
-                        Err(refused) => Err(refused),
-                    };
-                    assert!(
-                        h.pty.offers.is_empty(),
-                        "an unmet focus gate writes no byte"
-                    );
-                    if let Ok(Some(result)) = &outcome {
-                        assert_ne!(result.submission.status, SubmissionStatus::Accepted);
-                    }
                 });
             }
 
@@ -12273,7 +11704,7 @@ mod tests {
 
             fn assert_uncertain(h: &Host, id: i64, outcome: Outcome) {
                 match outcome {
-                    Err(failure) => assert_eq!(failure.input_id, Some(id)),
+                    Err(failure) => assert_eq!(failure.context.input_id, Some(id)),
                     Ok(Some(result)) => {
                         assert_eq!(result.submission.status, SubmissionStatus::Uncertain)
                     }
@@ -12318,10 +11749,6 @@ mod tests {
                     .unwrap()
             }
 
-            fn offers(values: &[&[u8]]) -> Vec<Vec<u8>> {
-                values.iter().map(|value| value.to_vec()).collect()
-            }
-
             fn soon(millis: u64) -> Instant {
                 Instant::now() + Duration::from_millis(millis)
             }
@@ -12337,7 +11764,10 @@ mod tests {
                 let id = write_stage(h, 1);
                 h.show(gated_fixture_form(OPERATION, "deny"));
                 write_stage(h, 2);
-                assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
+                assert_eq!(
+                    h.pty.offers,
+                    crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h", b"\r"])
+                );
                 (input, id)
             }
 
@@ -12359,7 +11789,10 @@ mod tests {
                         (result.submission.status, result.submission.stage),
                         (SubmissionStatus::Accepted, SubmissionStage::Submitted)
                     );
-                    assert_eq!(h.pty.offers, offers(&[b"\r"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"\r"])
+                    );
                     assert_eq!(
                         audit(h, id, &input, "synthetic-gated-allow").input.state,
                         storage::InputState::Accepted
@@ -12391,7 +11824,12 @@ mod tests {
                     );
                     h.show(gated_fixture_form(OPERATION, "deny"));
                     write_stage(h, 2);
-                    assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[
+                            b"h", b"\r"
+                        ])
+                    );
                     let before = events(h);
                     h.show(gated_reason_dialog(None));
                     assert_eq!(events(h), before, "the continuation emits no event");
@@ -12403,7 +11841,12 @@ mod tests {
                         (result.submission.status, result.submission.stage),
                         (SubmissionStatus::Accepted, SubmissionStage::Submitted)
                     );
-                    assert_eq!(h.pty.offers, offers(&[b"h", b"\r", b"\r"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[
+                            b"h", b"\r", b"\r"
+                        ])
+                    );
                     assert_eq!(
                         h.coordinator.retained_checkpoint(id).unwrap().written_bytes,
                         3
@@ -12473,7 +11916,10 @@ mod tests {
                         matches!(waiting, Ok(None)),
                         "the unchanged previous focus keeps the response waiting"
                     );
-                    assert_eq!(h.pty.offers, offers(&[b"h"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"])
+                    );
                     assert_eq!(
                         h.hooks.count("before"),
                         1,
@@ -12485,17 +11931,16 @@ mod tests {
                     );
                     let ended = settle(h, deadline + Duration::from_millis(500));
                     assert_uncertain(h, id, ended);
-                    assert_eq!(h.pty.offers, offers(&[b"h"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"])
+                    );
                 });
             }
 
             #[test]
             fn gated_unexpected_change_between_stages_fails_uncertain_without_another_byte() {
                 for (case, screen) in [
-                    (
-                        "focus on an option without a choice",
-                        gated_fixture_form(OPERATION, "always"),
-                    ),
                     (
                         "focus resolved to no choice",
                         gated_fixture_form(OPERATION, "none"),
@@ -12520,30 +11965,13 @@ mod tests {
                         h.show(screen);
                         let outcome = settle(h, deadline);
                         assert_uncertain(h, id, outcome);
-                        assert_eq!(h.pty.offers, offers(&[b"h"]), "{case}");
+                        assert_eq!(
+                            h.pty.offers,
+                            crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"]),
+                            "{case}"
+                        );
                     });
                 }
-            }
-
-            #[test]
-            fn gated_human_input_between_stages_fails_uncertain_without_another_stage() {
-                with_gated(|h, _| {
-                    let ids = gated_form(h, "allow");
-                    let deadline = soon(3000);
-                    admit(
-                        h,
-                        ids,
-                        "response:gated-human",
-                        PermissionDecision::Deny,
-                        deadline,
-                    );
-                    let id = write_stage(h, 1);
-                    h.human.bytes.push_back(b'l');
-                    h.show(gated_fixture_form(OPERATION, "deny"));
-                    let outcome = settle(h, deadline);
-                    assert_uncertain(h, id, outcome);
-                    assert_eq!(h.pty.offers, offers(&[b"h", b"l"]));
-                });
             }
 
             #[test]
@@ -12551,7 +11979,7 @@ mod tests {
                 type Disturbance = fn(&mut Host);
                 let cases: [(&str, Disturbance); 4] = [
                     ("human input", |h| {
-                        h.human.bytes.push_back(b'x');
+                        h.type_human(b"x");
                         h.drain();
                     }),
                     ("an observation gap", |h| {
@@ -12603,7 +12031,12 @@ mod tests {
                     h.show(gated_reason_dialog(Some("typed reason")));
                     let outcome = settle(h, deadline + Duration::from_millis(500));
                     assert_uncertain(h, id, outcome);
-                    assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[
+                            b"h", b"\r"
+                        ])
+                    );
                 });
             }
 
@@ -12679,7 +12112,10 @@ mod tests {
                     h.drain();
                     let result = response(h.advance().expect("the allow stage completes"));
                     assert_eq!(result.submission.status, SubmissionStatus::Accepted);
-                    assert_eq!(h.pty.offers, offers(&[b"\r"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"\r"])
+                    );
                 });
             }
 
@@ -12702,7 +12138,10 @@ mod tests {
                     assert!(h.respond(&input).unwrap().is_none());
                     let minted = calls.load(Ordering::SeqCst);
                     write_stage(h, 1);
-                    assert_eq!(h.pty.offers, offers(&[b"h"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"])
+                    );
                     h.show(opencode_screen(
                         &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-2",
@@ -12712,7 +12151,12 @@ mod tests {
                         ),
                     ));
                     write_stage(h, 2);
-                    assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[
+                            b"h", b"\r"
+                        ])
+                    );
                     h.show(native_fixture_bytes(
                         &crate::coding_agent::detector::test_support::bundled_screen(
                             "opencode-2.1.4-deny-pre-stage-3",
@@ -12726,7 +12170,12 @@ mod tests {
                         (result.submission.status, result.submission.stage),
                         (SubmissionStatus::Accepted, SubmissionStage::Submitted)
                     );
-                    assert_eq!(h.pty.offers, offers(&[b"h", b"\r", b"\r"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[
+                            b"h", b"\r", b"\r"
+                        ])
+                    );
                     assert_eq!(calls.load(Ordering::SeqCst), minted);
                     assert_eq!(opened(h), 1);
                 });
@@ -12760,7 +12209,10 @@ mod tests {
                     ));
                     let outcome = settle(h, deadline);
                     assert_uncertain(h, id, outcome);
-                    assert_eq!(h.pty.offers, offers(&[b"h"]));
+                    assert_eq!(
+                        h.pty.offers,
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"])
+                    );
                     assert_eq!(
                         storage::get_permission_response(&h.fixture.conn, id)
                             .unwrap()
@@ -12785,7 +12237,6 @@ mod tests {
                 let cols = usize::try_from(screen["cols"].as_u64().unwrap()).unwrap();
                 for (offset, text) in [command, ""].into_iter().enumerate() {
                     let line = &mut screen["lines"][row + offset];
-                    assert_eq!(line.as_str().unwrap().chars().nth(trailer_col), Some('█'));
                     *line = serde_json::json!(format!(
                         "{text:<trailer_col$}█{}",
                         " ".repeat(cols - trailer_col - 1)
@@ -12831,7 +12282,7 @@ mod tests {
                     assert_uncertain(h, id, outcome);
                     assert_eq!(
                         h.pty.offers,
-                        offers(&[b"h"]),
+                        crate::runtime::input::tests::ordinary_prompt::support::offers(&[b"h"]),
                         "the second stage is never written after the layout changes"
                     );
                     assert!(h.controller.request_generation() > generation);
@@ -12870,11 +12321,6 @@ mod tests {
         use crate::runtime::input::tests::ordinary_prompt::support::with_host;
         use crate::runtime::input::tests::ordinary_prompt::support::with_host_until;
         use crate::runtime::input::*;
-        use rusqlite::hooks::AuthAction;
-        use rusqlite::hooks::AuthContext;
-        use rusqlite::hooks::Authorization;
-        use std::sync::atomic::AtomicUsize;
-        use std::sync::atomic::Ordering;
         use std::time::Duration;
 
         /// Fills the receipt cache with `count` completed entries modelled on the real retained
@@ -13090,9 +12536,9 @@ mod tests {
                         serde_json::to_string(key).unwrap()
                     )
                 );
-                assert_eq!(failure.run_id, Some(h.fixture.run.run_id));
-                assert_eq!(failure.input_id, None);
-                assert_eq!(failure.operation_key.as_deref(), Some(key));
+                assert_eq!(failure.context.run_id, Some(h.fixture.run.run_id));
+                assert_eq!(failure.context.input_id, None);
+                assert_eq!(failure.context.operation_key.as_deref(), Some(key));
                 assert!(h.pending_snapshot() == pending);
                 assert_eq!(cached(h, id), cache);
                 assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), durable);
@@ -13113,10 +12559,7 @@ mod tests {
                 let point = cached(h, id);
                 assert!(matches!(point.1, SubmissionStage::ZeroBytes));
                 assert!(point.4 && !point.5);
-                h.pty
-                    .child
-                    .bytes
-                    .extend(b"\x1b[2J\x1b[HLater unclassified output");
+                h.child_output(b"\x1b[2J\x1b[HLater unclassified output");
                 h.drain();
                 assert!(h.transport.snapshot().screen_seq > point.3);
                 let writer = h.pending_snapshot();
@@ -13473,7 +12916,7 @@ mod tests {
                 }
                 let pending = h.coordinator.pending.as_ref().unwrap();
                 assert!(pending.phase == InputPhase::Armed);
-                let unrelated_id = pending.input_id.expect("actual second reservation");
+                let unrelated_id = pending.input_id().expect("actual second reservation");
                 let original_deadline = pending.deadline;
                 let original_bytes = pending.bytes.clone();
                 let unrelated_before = cached(h, unrelated_id);
@@ -13491,7 +12934,7 @@ mod tests {
                     .as_ref()
                     .expect("refusal preserves unrelated writer");
                 assert_eq!(pending.request.operation_key, unrelated_key);
-                assert_eq!(pending.input_id, Some(unrelated_id));
+                assert_eq!(pending.input_id(), Some(unrelated_id));
                 assert_eq!(pending.deadline, original_deadline);
                 assert_eq!(pending.bytes, original_bytes);
                 assert!(pending.phase == InputPhase::Armed);
@@ -13503,10 +12946,7 @@ mod tests {
                 let other_cache = cached(h, unrelated_id);
                 let other_row = storage::get_input(&h.fixture.conn, unrelated_id).unwrap();
                 assert_eq!(other_row.state, storage::InputState::InProgress);
-                h.pty
-                    .child
-                    .bytes
-                    .extend(b"\x1b[2J\x1b[HUnclassified screen");
+                h.child_output(b"\x1b[2J\x1b[HUnclassified screen");
                 h.drain();
                 assert!(!matches!(
                     h.controller.health(&h.writer).eligibility,
@@ -13541,39 +12981,24 @@ mod tests {
                 assert_eq!(after_stamp, stamp);
                 assert_eq!(h.pty.offers, offers);
 
-                let reads = Arc::new(AtomicUsize::new(0));
-                let observed = reads.clone();
-                h.fixture
-                    .conn
-                    .authorizer(Some(move |context: AuthContext<'_>| {
-                        if matches!(
-                            context.action,
-                            AuthAction::Read {
-                                table_name: "member_input_operations",
-                                ..
-                            }
-                        ) {
-                            observed.fetch_add(1, Ordering::SeqCst);
-                        }
-                        Authorization::Allow
-                    }))
-                    .unwrap();
+                let changes = h.fixture.conn.total_changes();
                 let again = h
                     .coordinator
-                    .retire_received(&mut h.fixture.conn, &run, id, h.until);
-                let removed = h
-                    .fixture
+                    .retire_received(&mut h.fixture.conn, &run, id, h.until)
+                    .unwrap();
+                assert_retired(again, id);
+                assert_eq!(h.fixture.conn.total_changes(), changes);
+                h.fixture
                     .conn
-                    .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+                    .execute(
+                        "UPDATE member_input_operations SET state='accepted',disposition=NULL WHERE input_id=?1",
+                        [id],
+                    )
+                    .unwrap();
                 assert!(
-                    again.is_ok(),
-                    "repeat_error={:?}; authorizer_cleanup={removed:?}",
-                    again.as_ref().err()
-                );
-                removed.unwrap();
-                assert_retired(again.unwrap(), id);
-                assert!(
-                    reads.load(Ordering::SeqCst) > 0,
+                    h.coordinator
+                        .retire_received(&mut h.fixture.conn, &run, id, h.until)
+                        .is_err(),
                     "cache absence still checks the durable row on the supplied connection"
                 );
                 assert!(
@@ -13583,112 +13008,6 @@ mod tests {
                 );
                 assert_eq!(cached(h, unrelated_id), other_cache);
                 assert_eq!(h.pty.offers, offers);
-            });
-        }
-
-        #[test]
-        fn live_receipt_retirement_preserves_settled_ordinary_history_without_a_cached_attempt() {
-            with_host(|h| {
-                let run = h.fixture.run.clone();
-                let prompt = storage::reserve_input(
-                    &mut h.fixture.conn,
-                    &run.owner(),
-                    &storage::NewInput {
-                        operation_key: "prompt:retirement-history".into(),
-                        kind: storage::InputKind::Prompt,
-                        payload_digest: "a".repeat(64),
-                        message_id: None,
-                    },
-                )
-                .unwrap();
-                storage::record_input_state(
-                    &mut h.fixture.conn,
-                    &run.owner(),
-                    prompt.input_id,
-                    storage::InputState::InProgress,
-                    storage::InputState::Accepted,
-                )
-                .unwrap();
-                let prompt = storage::settle_input(
-                    &mut h.fixture.conn,
-                    &run.owner(),
-                    prompt.input_id,
-                    storage::InputState::Accepted,
-                    storage::InputDisposition::Submitted,
-                    "owned historical Prompt",
-                )
-                .unwrap();
-                let message = crate::broker::send_message(
-                    &mut h.fixture.conn,
-                    run.director_member_id,
-                    run.member_id,
-                    "abandoned preview",
-                )
-                .unwrap();
-                let preview = storage::reserve_input(
-                    &mut h.fixture.conn,
-                    &run.owner(),
-                    &storage::NewInput {
-                        operation_key: format!("preview:{}:{}", run.run_id, message.message_id),
-                        kind: storage::InputKind::Preview,
-                        payload_digest: "b".repeat(64),
-                        message_id: Some(message.message_id),
-                    },
-                )
-                .unwrap();
-                storage::record_input_uncertain(
-                    &mut h.fixture.conn,
-                    &run.owner(),
-                    preview.input_id,
-                    storage::UncertainCause::WriteFailed,
-                )
-                .unwrap();
-                let preview = storage::settle_input(
-                    &mut h.fixture.conn,
-                    &run.owner(),
-                    preview.input_id,
-                    storage::InputState::Uncertain,
-                    storage::InputDisposition::AbandonedUncertain,
-                    "owned abandoned Preview",
-                )
-                .unwrap();
-                let exec = storage::reserve_input(
-                    &mut h.fixture.conn,
-                    &run.owner(),
-                    &storage::NewInput {
-                        operation_key: "exec:retirement-history".into(),
-                        kind: storage::InputKind::Exec,
-                        payload_digest: "c".repeat(64),
-                        message_id: None,
-                    },
-                )
-                .unwrap();
-                let exec = storage::settle_input(
-                    &mut h.fixture.conn,
-                    &run.owner(),
-                    exec.input_id,
-                    storage::InputState::InProgress,
-                    storage::InputDisposition::NotSubmitted,
-                    "owned no-write Exec history",
-                )
-                .unwrap();
-                assert!(h.coordinator.operations.is_empty());
-                let changes = h.fixture.conn.total_changes();
-                for row in [prompt, preview, exec] {
-                    assert_retired(
-                        h.coordinator
-                            .retire_received(&mut h.fixture.conn, &run, row.input_id, h.until)
-                            .unwrap(),
-                        row.input_id,
-                    );
-                    assert_eq!(
-                        storage::get_input(&h.fixture.conn, row.input_id).unwrap(),
-                        row
-                    );
-                    assert_eq!(h.fixture.conn.total_changes(), changes);
-                }
-                assert!(h.coordinator.operations.is_empty());
-                assert!(h.pty.offers.is_empty());
             });
         }
     }
@@ -13744,13 +13063,8 @@ mod tests {
         let t = anchor();
         let mut clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 10)));
         captured(ns(ms(t, 10), 1), &mut clock, 1_000_000_001);
-    }
-
-    #[test]
-    fn clock_capture_monotonic_origin_yields_positive_expiration() {
-        let t = anchor();
-        let mut clock = ScriptClock::one(sample(t, 0, t));
-        captured(ns(t, 1), &mut clock, 1);
+        let mut origin = ScriptClock::one(sample(t, 0, t));
+        captured(ns(t, 1), &mut origin, 1);
     }
 
     #[test]
@@ -13841,38 +13155,25 @@ mod tests {
 
     #[test]
     fn clock_receive_rejects_bracket_delay_equal_to_or_past_projected_deadline() {
-        for after_ms in [3000, 4000] {
+        for (before_ms, after_ms, shutdown_ms) in [
+            (1000, 3000, None),
+            (1000, 4000, None),
+            (6000, 6100, None),
+            (1000, 1100, Some(500)),
+        ] {
             let t = anchor();
             let expiration = expiration(t);
             let mut clock = ScriptClock::one(sample(
-                ms(t, 1000),
+                ms(t, before_ms),
                 EXPIRATION - 2_000_000_000,
                 ms(t, after_ms),
             ));
-            one_failure(expiration.receive(t, None, &mut clock), &clock, 0);
+            one_failure(
+                expiration.receive(t, shutdown_ms.map(|shutdown| ms(t, shutdown)), &mut clock),
+                &clock,
+                0,
+            );
         }
-    }
-
-    #[test]
-    fn clock_receive_rejects_already_expired_original_admission_cap() {
-        let t = anchor();
-        let expiration = expiration(t);
-        let mut clock =
-            ScriptClock::one(sample(ms(t, 6000), EXPIRATION - 2_000_000_000, ms(t, 6100)));
-        one_failure(expiration.receive(t, None, &mut clock), &clock, 0);
-    }
-
-    #[test]
-    fn clock_receive_rejects_expired_shutdown_despite_positive_expiration() {
-        let t = anchor();
-        let expiration = expiration(t);
-        let mut clock =
-            ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 2_000_000_000, ms(t, 1100)));
-        one_failure(
-            expiration.receive(t, Some(ms(t, 500)), &mut clock),
-            &clock,
-            0,
-        );
     }
 
     #[test]

@@ -28,7 +28,7 @@ Resolve diagnosis issues. Load the Director role, backend reference and supervis
 cafleet fleet create --name demo --coding-agent claude
 ```
 
-Example output: `1 director=2`. Creation registers the current pane without starting another session; the backend flag declares the calling coding agent. Before creating members, the Director starts its listener through the installed CAFleet skill's backend recipe; the listener's startup replay recovers replies that race with its own startup. The [message listen contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) specifies the listener's records, and the [host evidence contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#host-evidence-and-native-input-authorization) states each backend's reception capabilities and evidence limits.
+Example output: `1 director=2`. Creation registers the current pane and its multiplexer server without starting another session; the backend flag declares the calling coding agent, and every later command targets the recorded pane and server. A Hermes Director passes its own pane, read with `! echo $TMUX_PANE` or `! echo $HERDR_PANE_ID`, as `--pane <pane-id>` ([Hermes setup](quickstart.md#hermes)); `--mux-server <server>` selects a server other than the one CAFleet finds by default. Before creating members, the Director starts its listener through the installed CAFleet skill's backend recipe; the listener's startup replay recovers replies that race with its own startup. The [message listen contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) specifies the listener's records, and the [host evidence contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#host-evidence-and-native-input-authorization) states each backend's reception capabilities and evidence limits.
 
 ### Create and dispatch a member
 
@@ -43,6 +43,8 @@ DIRECTOR MEMBER ID: {director_member_id}
 YOUR MEMBER ID: {member_id}
 BASE: /home/cafleet-demo/work/demo
 CODING AGENT: {coding_agent}
+DATABASE URL: {database_url}
+When DATABASE URL is not default, pass --database-url <that URL> on every cafleet command.
 As your first operational broker command, send: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
 Poll and ACK your assignment, perform it, poll before reporting completion and on every wake, then handle queued assignments before becoming idle.
 ```
@@ -92,7 +94,7 @@ Handle the request as [Consume a runtime event](concepts/members.md#consume-a-ru
 A member can ask `Need to run: mise //:test. My harness denied it.` Authorize and dispatch the exact command:
 
 ```bash
-cafleet member exec 3 "mise //:test"
+cafleet member exec 3 --from-member-id 2 "mise //:test"
 ```
 
 The CLI returns submission metadata. Inspect the native command and result:
@@ -104,7 +106,7 @@ cafleet member capture 3 --lines 80
 Once the command has finished, explicitly continue a member that has not resumed:
 
 ```bash
-cafleet member prompt 3 "Use the native command output and continue your assignment."
+cafleet member prompt 3 --from-member-id 2 "Use the native command output and continue your assignment."
 ```
 
 Inspect failed or uncertain input before authorizing any retry. [Command routing](concepts/members.md#command-routing) explains the evidence boundary.

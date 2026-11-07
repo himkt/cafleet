@@ -1,11 +1,13 @@
 use crate::multiplexer::BackendCore;
 use crate::multiplexer::CommandRunner;
+use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MultiplexerContext;
 use crate::multiplexer::MultiplexerError;
 use crate::multiplexer::PLACEMENT_MISMATCH;
 use crate::multiplexer::PaneCleanup;
 use crate::multiplexer::PaneOwnership;
 use serde_json::Value;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -13,10 +15,6 @@ const PANE_NOT_FOUND: &str = "pane_not_found";
 
 fn is_pane_not_found(stderr: &str) -> bool {
     error_code(stderr).as_deref() == Some(PANE_NOT_FOUND)
-}
-
-fn herdr_argv(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|part| part.to_string()).collect()
 }
 
 /// The herdr error envelope's `error.code`, when the stderr carries one.
@@ -93,79 +91,67 @@ fn sort_by_y(panes: &mut [&Value]) {
 
 pub(crate) struct HerdrMultiplexer {
     core: BackendCore,
+    /// The tab of the pane the last `close_pane` closed, which `restore_after_close` rebalances.
+    closed_tab: RefCell<Option<String>>,
 }
 
 impl HerdrMultiplexer {
     pub(crate) fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
+        Self::with_server(runner, env, None)
+    }
+
+    pub(crate) fn for_server(runner: Rc<dyn CommandRunner>, session: &str) -> Self {
+        Self::with_server(runner, HashMap::new(), Some(session.to_owned()))
+    }
+
+    fn with_server(
+        runner: Rc<dyn CommandRunner>,
+        env: HashMap<String, String>,
+        server: Option<String>,
+    ) -> Self {
         HerdrMultiplexer {
             core: BackendCore {
                 runner,
                 env,
                 name: "herdr",
-                session_variable: "HERDR_ENV",
                 pane_gone: is_pane_not_found,
+                server_flag: "--session",
+                server,
             },
+            closed_tab: RefCell::new(None),
         }
     }
 
-    pub(crate) fn bounded(&self, deadline: crate::time::Deadline) -> Self {
-        Self {
-            core: self.core.bounded(deadline),
-        }
-    }
-
-    pub(crate) fn name(&self) -> &'static str {
-        self.core.name
-    }
-
-    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, MultiplexerError> {
-        self.core.run(argv, timeout_secs)
-    }
-
-    fn run_json(
-        &self,
-        argv: &[String],
-        timeout_secs: Option<u64>,
-    ) -> Result<Value, MultiplexerError> {
-        let out = self.run(argv, timeout_secs)?;
-        parse_envelope(&out)
+    fn run_json(&self, argv: &[String]) -> Result<Value, MultiplexerError> {
+        parse_envelope(&self.core.run(argv, None)?)
     }
 
     fn list_panes(&self) -> Result<Vec<Value>, MultiplexerError> {
-        let result = self.run_json(&herdr_argv(&["herdr", "pane", "list"]), None)?;
+        let result = self.run_json(&self.core.argv(&["herdr", "pane", "list"]))?;
         panes_of(&result).cloned()
     }
+}
 
-    pub(crate) fn ensure_available(&self) -> Result<(), MultiplexerError> {
-        self.core.ensure_available()
+impl Multiplexer for HerdrMultiplexer {
+    fn core(&self) -> &BackendCore {
+        &self.core
     }
 
-    pub(crate) fn validate_key_target(
+    fn bounded(&self, deadline: crate::time::Deadline) -> Box<dyn Multiplexer> {
+        Box::new(Self {
+            core: self.core.bounded(deadline),
+            closed_tab: RefCell::new(None),
+        })
+    }
+
+    fn check_key_target(
         &self,
+        target: &str,
         placement: &crate::broker::Placement,
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
-        crate::multiplexer::check_deadline(deadline)?;
-        self.ensure_available()?;
-        crate::multiplexer::check_deadline(deadline)?;
-        let current = parse_envelope(&self.core.press_run(
-            &herdr_argv(&["herdr", "pane", "current"]),
-            deadline,
-            false,
-        )?)?;
-        let pane = &current["pane"];
-        let session = str_field(pane, "pane current", "workspace_id")?;
-        str_field(pane, "pane current", "tab_id")?;
-        str_field(pane, "pane current", "pane_id")?;
-        if session != placement.mux_session {
-            return Err(MultiplexerError::new(PLACEMENT_MISMATCH));
-        }
-        let target = placement
-            .mux_pane_id
-            .as_deref()
-            .ok_or_else(|| MultiplexerError::new("press target has no pane"))?;
         let result = parse_envelope(&self.core.press_run(
-            &herdr_argv(&["herdr", "pane", "list"]),
+            &self.core.argv(&["herdr", "pane", "list"]),
             deadline,
             false,
         )?)?;
@@ -187,35 +173,45 @@ impl HerdrMultiplexer {
         Ok(())
     }
 
-    pub(crate) fn send_keys(
+    fn send_keys(
         &self,
         pane_id: &str,
         keys: &crate::multiplexer::PressKeys,
         deadline: crate::time::Deadline,
     ) -> Result<(), MultiplexerError> {
-        let mut argv = herdr_argv(&["herdr", "pane", "send-keys", pane_id]);
+        let mut argv = self.core.argv(&["herdr", "pane", "send-keys", pane_id]);
         argv.extend(keys.herdr_arguments());
         self.core.send_keys(&argv, deadline)
     }
 
-    pub(crate) fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
-        let result = self.run_json(&herdr_argv(&["herdr", "pane", "current"]), None)?;
-        let pane = &result["pane"];
-        Ok(MultiplexerContext {
-            session: str_field(pane, "pane current", "workspace_id")?.to_string(),
-            window_id: str_field(pane, "pane current", "tab_id")?.to_string(),
-            pane_id: str_field(pane, "pane current", "pane_id")?.to_string(),
-        })
+    /// The caller pane's context, which `herdr pane current` resolves through `HERDR_PANE_ID`.
+    fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
+        let result = self.run_json(&self.core.argv(&["herdr", "pane", "current"]))?;
+        current_context(&result)
+    }
+
+    fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError> {
+        let argv = self
+            .core
+            .argv(&["herdr", "pane", "current", "--pane", pane]);
+        match self.core.runner.run(&argv, None) {
+            Ok(out) => current_context(&parse_envelope(&out)?).map(Some),
+            Err(crate::multiplexer::RunError::Failed { ref stderr })
+                if is_pane_not_found(stderr) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(self.core.map_error(&argv, None, error)),
+        }
     }
 
     /// Emulate tmux main-vertical: the first member splits the Director pane
     /// rightward; later members split the column's max pane downward, then the
     /// column is rebalanced to equal heights (best-effort, anchored on the
     /// Director's own pane).
-    pub(crate) fn split_window(
+    fn split_window(
         &self,
         reference: &MultiplexerContext,
-        env: &[(String, String)],
         command: &[String],
     ) -> Result<String, MultiplexerError> {
         let cwd = std::env::current_dir().map_err(|e| {
@@ -234,16 +230,18 @@ impl HerdrMultiplexer {
             }
         }
         let new_pane_id = match column.iter().max() {
-            None => self.split_pane(&reference.pane_id, "right", &cwd, env)?,
-            Some(target) => self.split_pane(target, "down", &cwd, env)?,
+            None => self.split_pane(&reference.pane_id, "right", &cwd)?,
+            Some(target) => self.split_pane(target, "down", &cwd)?,
         };
         let mut pane = PaneOwnership::new(new_pane_id.clone(), |id| self.kill_pane(id, true));
         let result: Result<(), MultiplexerError> = (|| {
             if !column.is_empty() {
                 let _ = self.resize_tab_column(&reference.pane_id);
             }
-            self.run(
-                &herdr_argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
+            self.core.run(
+                &self
+                    .core
+                    .argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
                 None,
             )?;
             Ok(())
@@ -254,14 +252,67 @@ impl HerdrMultiplexer {
         Ok(pane.finish())
     }
 
+    /// `herdr pane read` prints the raw terminal buffer (no envelope); the
+    /// shared capture windowing ([`crate::multiplexer::capture_window`]) enforces the last-N
+    /// window client-side — the daemon may return more rows than requested.
+    fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError> {
+        crate::multiplexer::check_capture_lines(lines)?;
+        let fetch_depth = lines + crate::multiplexer::CAPTURE_OVER_FETCH_LINES;
+        let raw = self.core.run(
+            &self.core.argv(&[
+                "herdr",
+                "pane",
+                "read",
+                target_pane_id,
+                "--format",
+                "ansi",
+                "--source",
+                "recent-unwrapped",
+                "--lines",
+                &fetch_depth.to_string(),
+            ]),
+            None,
+        )?;
+        Ok(crate::multiplexer::capture_window(&raw, lines))
+    }
+
+    fn kill_pane(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<(), MultiplexerError> {
+        if let Some(tab_id) = self.close_reading_tab(target_pane_id, ignore_missing)? {
+            let _ = self.resize_after_close(&tab_id);
+        }
+        Ok(())
+    }
+
+    fn close_pane(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<(), MultiplexerError> {
+        let tab_id = self.close_reading_tab(target_pane_id, ignore_missing)?;
+        *self.closed_tab.borrow_mut() = tab_id;
+        Ok(())
+    }
+
+    fn restore_after_close(&self) -> Result<(), MultiplexerError> {
+        match self.closed_tab.take() {
+            Some(tab_id) => self.resize_after_close(&tab_id),
+            None => Ok(()),
+        }
+    }
+}
+
+impl HerdrMultiplexer {
     fn split_pane(
         &self,
         pane_id: &str,
         direction: &str,
         cwd: &str,
-        env: &[(String, String)],
     ) -> Result<String, MultiplexerError> {
-        let mut args = herdr_argv(&[
+        let args = self.core.argv(&[
             "herdr",
             "pane",
             "split",
@@ -272,11 +323,8 @@ impl HerdrMultiplexer {
             "--cwd",
             cwd,
         ]);
-        for (key, value) in env {
-            args.push("--env".to_string());
-            args.push(format!("{key}={value}"));
-        }
         let result = self
+            .core
             .run(&args, None)
             .and_then(|raw| parse_envelope(&raw))
             .map_err(|error| error.with_pane_cleanup(PaneCleanup::Unknown))?;
@@ -295,10 +343,12 @@ impl HerdrMultiplexer {
         &self,
         anchor_pane_id: &str,
     ) -> Result<(Vec<Value>, Vec<Value>), MultiplexerError> {
-        let result = self.run_json(
-            &herdr_argv(&["herdr", "pane", "layout", "--pane", anchor_pane_id]),
-            None,
-        )?;
+        let result =
+            self.run_json(
+                &self
+                    .core
+                    .argv(&["herdr", "pane", "layout", "--pane", anchor_pane_id]),
+            )?;
         let layout = &result["layout"];
         let panes = layout["panes"]
             .as_array()
@@ -353,8 +403,8 @@ impl HerdrMultiplexer {
                 (&column[i + 1], "up", -delta)
             };
             let pane_id = str_field(pane, "pane layout", "pane_id")?;
-            self.run(
-                &herdr_argv(&[
+            self.core.run(
+                &self.core.argv(&[
                     "herdr",
                     "pane",
                     "resize",
@@ -371,53 +421,14 @@ impl HerdrMultiplexer {
         Ok(())
     }
 
-    /// `herdr pane read` prints the raw terminal buffer (no envelope); the
-    /// shared capture windowing ([`crate::multiplexer::capture_window`]) enforces the last-N
-    /// window client-side — the daemon may return more rows than requested.
-    pub(crate) fn capture_pane(
-        &self,
-        target_pane_id: &str,
-        lines: i64,
-    ) -> Result<String, MultiplexerError> {
-        crate::multiplexer::check_capture_lines(lines)?;
-        let fetch_depth = lines + crate::multiplexer::CAPTURE_OVER_FETCH_LINES;
-        let raw = self.run(
-            &herdr_argv(&[
-                "herdr",
-                "pane",
-                "read",
-                target_pane_id,
-                "--format",
-                "ansi",
-                "--source",
-                "recent-unwrapped",
-                "--lines",
-                &fetch_depth.to_string(),
-            ]),
-            None,
-        )?;
-        Ok(crate::multiplexer::capture_window(&raw, lines))
-    }
-
-    pub(crate) fn kill_pane(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<(), MultiplexerError> {
-        if let Some(tab_id) = self.close_pane(target_pane_id, ignore_missing)? {
-            let _ = self.resize_after_close(&tab_id);
-        }
-        Ok(())
-    }
-
-    pub(crate) fn close_pane(
+    fn close_reading_tab(
         &self,
         target_pane_id: &str,
         ignore_missing: bool,
     ) -> Result<Option<String>, MultiplexerError> {
         let target_tab_id = self.pane_tab_id(target_pane_id);
         self.core.run_tolerating_missing(
-            &herdr_argv(&["herdr", "pane", "close", target_pane_id]),
+            &self.core.argv(&["herdr", "pane", "close", target_pane_id]),
             ignore_missing,
             None,
         )?;
@@ -429,12 +440,12 @@ impl HerdrMultiplexer {
     /// close must proceed regardless.
     fn pane_tab_id(&self, pane_id: &str) -> Option<String> {
         let result = self
-            .run_json(&herdr_argv(&["herdr", "pane", "get", pane_id]), None)
+            .run_json(&self.core.argv(&["herdr", "pane", "get", pane_id]))
             .ok()?;
         result["pane"]["tab_id"].as_str().map(str::to_string)
     }
 
-    pub(crate) fn resize_after_close(&self, target_tab_id: &str) -> Result<(), MultiplexerError> {
+    fn resize_after_close(&self, target_tab_id: &str) -> Result<(), MultiplexerError> {
         let Some(anchor_pane_id) = self.surviving_pane_in_tab(target_tab_id)? else {
             return Ok(()); // the tab has no panes left — nothing to rebalance
         };
@@ -481,8 +492,8 @@ impl HerdrMultiplexer {
             return Ok(());
         }
         let pane_id = str_field(&panes[0], "pane layout", "pane_id")?;
-        self.run(
-            &herdr_argv(&[
+        self.core.run(
+            &self.core.argv(&[
                 "herdr",
                 "pane",
                 "resize",
@@ -497,6 +508,15 @@ impl HerdrMultiplexer {
         )?;
         Ok(())
     }
+}
+
+fn current_context(result: &Value) -> Result<MultiplexerContext, MultiplexerError> {
+    let pane = &result["pane"];
+    Ok(MultiplexerContext {
+        session: str_field(pane, "pane current", "workspace_id")?.to_string(),
+        window_id: str_field(pane, "pane current", "tab_id")?.to_string(),
+        pane_id: str_field(pane, "pane current", "pane_id")?.to_string(),
+    })
 }
 
 /// The members' right column: every pane outside the leftmost (Director)
@@ -519,6 +539,8 @@ fn right_column(panes: &[Value]) -> Result<Vec<Value>, MultiplexerError> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    use crate::multiplexer::Multiplexer;
 
     use crate::multiplexer::HerdrMultiplexer;
     use crate::multiplexer::MultiplexerContext;
@@ -573,30 +595,6 @@ mod tests {
     }
 
     #[test]
-    fn ensure_available_requires_the_binary_then_the_herdr_env() {
-        let runner = FakeRunner::without_binaries();
-        let mux = HerdrMultiplexer::new(runner, herdr_env());
-        assert_eq!(
-            mux.ensure_available().unwrap_err().to_string(),
-            "herdr binary not found on PATH"
-        );
-
-        let runner = FakeRunner::with_binary("herdr");
-        let mux = HerdrMultiplexer::new(runner, env(&[]));
-        assert_eq!(
-            mux.ensure_available().unwrap_err().to_string(),
-            "cafleet member commands must be run inside a herdr session"
-        );
-
-        let runner = FakeRunner::with_binary("herdr");
-        assert!(
-            HerdrMultiplexer::new(runner, herdr_env())
-                .ensure_available()
-                .is_ok()
-        );
-    }
-
-    #[test]
     fn context_discovery_reads_the_single_pane_current_envelope() {
         let runner = FakeRunner::with_binary("herdr");
         runner.respond(Ok(herdr_envelope(json!({
@@ -646,14 +644,7 @@ mod tests {
         runner.succeed(1);
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let pane = mux
-            .split_window(
-                &reference(),
-                &[(
-                    "CAFLEET_DATABASE_URL".to_string(),
-                    "sqlite:///x.db".to_string(),
-                )],
-                &argv(&["claude", "--name", "w 1"]),
-            )
+            .split_window(&reference(), &argv(&["claude", "--name", "w 1"]))
             .unwrap();
         assert_eq!(pane, "w1:p2");
         assert_eq!(
@@ -670,8 +661,6 @@ mod tests {
                     "--no-focus",
                     "--cwd",
                     &cwd(),
-                    "--env",
-                    "CAFLEET_DATABASE_URL=sqlite:///x.db",
                 ]),
                 argv(&["herdr", "pane", "run", "w1:p2", "claude --name 'w 1'"]),
             ],
@@ -705,9 +694,7 @@ mod tests {
         }))));
         runner.succeed(2);
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let pane = mux
-            .split_window(&reference(), &[], &argv(&["claude"]))
-            .unwrap();
+        let pane = mux.split_window(&reference(), &argv(&["claude"])).unwrap();
         assert_eq!(pane, "w1:p3");
         assert_eq!(
             runner.run_argvs(),
@@ -758,23 +745,8 @@ mod tests {
         }));
         runner.succeed(1);
         let mux = HerdrMultiplexer::new(runner, herdr_env());
-        let pane = mux
-            .split_window(&reference(), &[], &argv(&["claude"]))
-            .unwrap();
+        let pane = mux.split_window(&reference(), &argv(&["claude"])).unwrap();
         assert_eq!(pane, "w1:p3", "a rebalance failure never fails the spawn");
-    }
-
-    #[test]
-    fn capture_pane_over_fetch_survives_a_blank_tail_deeper_than_n() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Ok("drawn1\ndrawn2\n\n\n\n\n\n\n".to_string()));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        assert_eq!(
-            mux.capture_pane("w1:p2", 2).unwrap(),
-            "drawn1\ndrawn2",
-            "a depth-N fetch window would have been all-blank here"
-        );
-        assert_styled_read(&runner, "w1:p2", "1002");
     }
 
     #[test]
@@ -850,13 +822,10 @@ mod tests {
             "splits": [{"direction":"down", "rect":{"x":60,"y":15}, "ratio":0.2}]
         }}))));
         runner.succeed(1);
-        let mux = crate::multiplexer::AnyMultiplexer::Herdr(HerdrMultiplexer::new(
-            runner.clone(),
-            herdr_env(),
-        ));
-        let layout = mux.close_pane("w1:p2", false).unwrap();
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        mux.close_pane("w1:p2", false).unwrap();
         assert_eq!(runner.run_argvs().len(), 2);
-        mux.restore_after_close(layout).unwrap();
+        mux.restore_after_close().unwrap();
         let calls = runner.run_argvs();
         assert_eq!(
             calls[4],
@@ -942,7 +911,7 @@ mod tests {
             });
             let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
             let error = mux
-                .split_window(&reference(), &[], &argv(&["agent", "a'b", "$(literal)"]))
+                .split_window(&reference(), &argv(&["agent", "a'b", "$(literal)"]))
                 .unwrap_err();
             assert!(error.to_string().contains("primary run failure"));
             assert!(
@@ -978,7 +947,7 @@ mod tests {
             runner.respond(split);
             let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
             let error = mux
-                .split_window(&reference(), &[], &argv(&["agent"]))
+                .split_window(&reference(), &argv(&["agent"]))
                 .unwrap_err();
             assert!(matches!(
                 error.pane_cleanup(),

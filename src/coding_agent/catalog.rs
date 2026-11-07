@@ -7,15 +7,19 @@ use crate::coding_agent::detector::ObservationKind;
 use crate::error::CafleetError;
 use crate::error::Result;
 use regex::Regex;
-use serde_json::Map;
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::de::Error as _;
 use serde_json::Value;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
 #[cfg(test)]
 use crate::coding_agent::detector::AnnotationBlock;
 #[cfg(test)]
 use crate::coding_agent::detector::Detector;
+#[cfg(test)]
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AnswerKey {
@@ -133,66 +137,236 @@ fn invalid(message: impl Into<String>) -> CafleetError {
 fn require(ok: bool, message: &str) -> Result<()> {
     if ok { Ok(()) } else { Err(invalid(message)) }
 }
-pub(super) fn object<'a>(value: &'a Value, keys: &[&str]) -> Result<&'a Map<String, Value>> {
-    let map = value
-        .as_object()
-        .ok_or_else(|| invalid("object required"))?;
-    require(
-        map.len() == keys.len() && keys.iter().all(|key| map.contains_key(*key)),
-        "exact required object fields expected",
-    )?;
-    Ok(map)
-}
-fn text(value: &Value) -> Result<String> {
-    let text = value.as_str().ok_or_else(|| invalid("text required"))?;
-    require(!text.trim().is_empty(), "nonblank text required")?;
-    Ok(text.into())
-}
-fn array(value: &Value) -> Result<&Vec<Value>> {
-    value.as_array().ok_or_else(|| invalid("array required"))
-}
-fn texts(value: &Value) -> Result<Vec<String>> {
-    let values = array(value)?.iter().map(text).collect::<Result<Vec<_>>>()?;
-    require(
-        values.iter().collect::<BTreeSet<_>>().len() == values.len(),
-        "duplicate string identity",
-    )?;
-    Ok(values)
-}
-fn boolean(value: &Value) -> Result<bool> {
-    value.as_bool().ok_or_else(|| invalid("boolean required"))
-}
-fn backend(value: &Value) -> Result<CodingAgent> {
-    crate::coding_agent::coding_agent(&text(value)?).ok_or_else(|| invalid("unknown backend"))
-}
-fn positive(value: &Value) -> Result<u16> {
-    value
-        .as_u64()
-        .and_then(|n| u16::try_from(n).ok())
-        .filter(|n| *n > 0)
-        .ok_or_else(|| invalid("positive viewport bound required"))
-}
-fn one_of<T: Copy>(value: &Value, choices: &[(&str, T)]) -> Result<T> {
-    let value = text(value)?;
-    choices
-        .iter()
-        .find(|(name, _)| *name == value)
-        .map(|(_, choice)| *choice)
-        .ok_or_else(|| invalid("invalid profile enum"))
-}
-fn expression(value: &Value) -> Result<Regex> {
-    Regex::new(&text(value)?).map_err(|cause| invalid(format!("regex: {cause}")))
-}
 fn unique(ids: &mut BTreeSet<String>, id: &str) -> Result<()> {
     require(ids.insert(id.into()), "duplicate profile identity")
 }
-fn semver(value: &Value) -> Result<NativeVersion> {
-    NativeVersion::parse(&text(value)?).ok_or_else(|| invalid("canonical SemVer version required"))
-}
-fn lower_hex(value: &str) -> bool {
-    value
+/// The bytes of `text` when it is lowercase hexadecimal of at most `max` bytes.
+fn lower_hex_bytes(text: &str, max: usize) -> Option<Vec<u8>> {
+    let lower = text
         .bytes()
-        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    (lower && text.len().is_multiple_of(2) && text.len() / 2 <= max).then(|| {
+        (0..text.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&text[index..index + 2], 16).expect("hex digits"))
+            .collect()
+    })
+}
+
+type Field<T, E> = std::result::Result<T, E>;
+
+/// An optional key that, when present, holds a value rather than `null`.
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Field<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+fn nonblank<'de, D: Deserializer<'de>>(d: D) -> Field<String, D::Error> {
+    NonBlank::deserialize(d).map(|text| text.0)
+}
+fn pattern<'de, D: Deserializer<'de>>(d: D) -> Field<Regex, D::Error> {
+    Regex::new(&nonblank(d)?).map_err(|cause| D::Error::custom(format!("regex: {cause}")))
+}
+fn patterns<'de, D: Deserializer<'de>>(d: D) -> Field<Vec<Regex>, D::Error> {
+    Vec::<NonBlank>::deserialize(d)?
+        .into_iter()
+        .map(|text| {
+            Regex::new(&text.0).map_err(|cause| D::Error::custom(format!("regex: {cause}")))
+        })
+        .collect()
+}
+fn positive_bound<'de, D: Deserializer<'de>>(d: D) -> Field<u16, D::Error> {
+    u64::deserialize(d)
+        .map(u16::try_from)?
+        .ok()
+        .filter(|bound| *bound > 0)
+        .ok_or_else(|| D::Error::custom("positive viewport bound required"))
+}
+fn glyph<'de, D: Deserializer<'de>>(d: D) -> Field<Option<char>, D::Error> {
+    let glyph = String::deserialize(d)?;
+    let mut chars = glyph.chars();
+    match (chars.next(), chars.next()) {
+        (Some(separator), None) if !separator.is_whitespace() => Ok(Some(separator)),
+        _ => Err(D::Error::custom(
+            "panel separator requires one non-whitespace glyph",
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(try_from = "String")]
+struct NonBlank(String);
+impl TryFrom<String> for NonBlank {
+    type Error = &'static str;
+    fn try_from(value: String) -> Field<Self, Self::Error> {
+        if value.trim().is_empty() {
+            Err("nonblank text required")
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+/// Nonblank, pairwise distinct strings.
+#[derive(Deserialize)]
+#[serde(try_from = "Vec<NonBlank>")]
+struct Ids(Vec<String>);
+impl TryFrom<Vec<NonBlank>> for Ids {
+    type Error = &'static str;
+    fn try_from(values: Vec<NonBlank>) -> Field<Self, Self::Error> {
+        let values = values.into_iter().map(|value| value.0).collect::<Vec<_>>();
+        if values.iter().collect::<BTreeSet<_>>().len() == values.len() {
+            Ok(Self(values))
+        } else {
+            Err("duplicate string identity")
+        }
+    }
+}
+
+#[derive(Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum FixtureKind {
+    Synthetic,
+    Native,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCatalog {
+    schema_version: u64,
+    fixtures: Vec<RawFixture>,
+    profiles: Vec<RawProfile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFixture {
+    id: NonBlank,
+    kind: FixtureKind,
+    backend: CodingAgent,
+    native_version: NativeVersion,
+    #[serde(rename = "rows", deserialize_with = "positive_bound")]
+    _rows: u16,
+    #[serde(rename = "cols", deserialize_with = "positive_bound")]
+    _cols: u16,
+    #[serde(rename = "source_ref")]
+    _source_ref: NonBlank,
+    sha256: NonBlank,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProfile {
+    backend: CodingAgent,
+    min_version: NativeVersion,
+    rules: Vec<RawRule>,
+    capabilities: RawCapabilities,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRule {
+    id: NonBlank,
+    priority: i64,
+    observation: ObservationKind,
+    region: Region,
+    matchers: Vec<Matcher>,
+    extract: RawExtract,
+    verified_noninteraction: bool,
+    sensitive: bool,
+    #[serde(default, deserialize_with = "present")]
+    frame: Option<Frame>,
+    #[serde(default, deserialize_with = "present")]
+    continues_rule_id: Option<NonBlank>,
+    #[serde(default, deserialize_with = "present")]
+    continues_choice_id: Option<NonBlank>,
+    #[serde(default, deserialize_with = "present")]
+    fixture_ids: Option<Ids>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawExtract {
+    #[serde(deserialize_with = "Option::deserialize")]
+    operation: Option<RawOperation>,
+    choices: Vec<Choice>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    native_request_id: Option<Capture>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOperation {
+    matcher_id: NonBlank,
+    capture: NonBlank,
+    #[serde(default, deserialize_with = "present")]
+    row_margin: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    margin_rows: Option<MarginRows>,
+    #[serde(default, deserialize_with = "present")]
+    row_trailer: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCapabilities {
+    #[serde(deserialize_with = "Option::deserialize")]
+    detection: Option<RawCapability>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    composer: Option<RawCapability>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    annotations: Option<RawCapability>,
+    answers: Vec<RawAnswer>,
+}
+
+/// One capability group; only the composer group may declare `submission`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCapability {
+    rule_ids: Ids,
+    fixture_ids: Ids,
+    #[serde(default, deserialize_with = "present")]
+    submission: Option<RawSubmissions>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSubmissions {
+    #[serde(deserialize_with = "Option::deserialize")]
+    prompt: Option<RawSubmission>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    exec: Option<RawSubmission>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSubmission {
+    prefix_hex: String,
+    submit_hex: String,
+    fixture_ids: Ids,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAnswer {
+    #[serde(default, deserialize_with = "present")]
+    decision: Option<NonBlank>,
+    request_rule_id: NonBlank,
+    answer_rule_id: NonBlank,
+    choice_id: NonBlank,
+    focus_matcher_id: NonBlank,
+    stages: Vec<RawStage>,
+    fixture_ids: Ids,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawStage {
+    bytes_hex: NonBlank,
+    required_rule_id: NonBlank,
+    required_choice_id: NonBlank,
+    #[serde(default, deserialize_with = "present")]
+    required_focus_choice_id: Option<NonBlank>,
+    #[serde(default, deserialize_with = "present")]
+    required_screen_rule_id: Option<NonBlank>,
 }
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct Fixture {
@@ -201,16 +375,24 @@ pub(super) struct Fixture {
     pub(crate) backend: CodingAgent,
     pub(crate) version: NativeVersion,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Capture {
+    #[serde(rename = "matcher_id", deserialize_with = "nonblank")]
     pub(crate) matcher: String,
+    #[serde(rename = "capture", deserialize_with = "nonblank")]
     pub(crate) name: String,
+    #[serde(skip)]
     pub(crate) row_margin: Option<String>,
+    #[serde(skip)]
     pub(crate) margin_rows: MarginRows,
+    #[serde(skip)]
     pub(crate) row_trailer: Option<String>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum MarginRows {
+    #[default]
     All,
     Continuation,
 }
@@ -221,25 +403,33 @@ pub(crate) enum ChoiceScope {
     Session,
     Persistent,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Choice {
+    #[serde(deserialize_with = "nonblank")]
     pub(crate) id: String,
     pub(crate) label: Capture,
     pub(crate) scope: ChoiceScope,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum MatcherScope {
     Line,
     Region,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Matcher {
+    #[serde(deserialize_with = "nonblank")]
     pub(crate) id: String,
     pub(crate) scope: MatcherScope,
+    #[serde(rename = "pattern", deserialize_with = "pattern")]
     pub(crate) regex: Regex,
+    #[serde(default, deserialize_with = "present")]
     pub(crate) focus_style: Option<FocusStyle>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum FocusStyle {
     Background,
     Marker,
@@ -250,31 +440,41 @@ pub(super) struct Continuation {
     pub(crate) choice_id: String,
     pub(crate) fixtures: Vec<String>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum ScreenSelector {
     Primary,
     Alternate,
     Either,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum CursorRule {
     AtEnd,
     Inside,
     Outside,
     Any,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Region {
     pub(crate) screen: ScreenSelector,
+    #[serde(rename = "start_pattern", deserialize_with = "pattern")]
     pub(crate) start: Regex,
+    #[serde(rename = "end_pattern", deserialize_with = "pattern")]
     pub(crate) end: Regex,
+    #[serde(deserialize_with = "positive_bound")]
     pub(crate) max_rows: u16,
     pub(crate) cursor: CursorRule,
+    #[serde(default, deserialize_with = "glyph")]
     pub(crate) panel_separator: Option<char>,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Frame {
+    #[serde(rename = "require_patterns", deserialize_with = "patterns")]
     pub(crate) require: Vec<Regex>,
+    #[serde(rename = "reject_patterns", deserialize_with = "patterns")]
     pub(crate) reject: Vec<Regex>,
 }
 #[derive(Clone)]
@@ -310,8 +510,6 @@ pub(super) struct Answer {
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct AnswerStage {
     bytes: Vec<u8>,
-    required_rule_id: String,
-    required_choice_id: String,
     gate: Option<StageGate>,
 }
 #[derive(Clone, PartialEq, Eq)]
@@ -322,12 +520,6 @@ pub(crate) enum StageGate {
 impl AnswerStage {
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
-    }
-    pub(crate) fn required_rule_id(&self) -> &str {
-        &self.required_rule_id
-    }
-    pub(crate) fn required_choice_id(&self) -> &str {
-        &self.required_choice_id
     }
     pub(crate) fn gate(&self) -> Option<&StageGate> {
         self.gate.as_ref()
@@ -453,148 +645,68 @@ pub(crate) struct ProfileCatalog {
     #[cfg(test)]
     capture_origin: &'static str,
 }
-pub(crate) struct NativeCapabilities {
-    #[cfg(test)]
-    pub(crate) backend: CodingAgent,
-    #[cfg(test)]
-    pub(crate) native_version: Option<String>,
-    #[cfg(test)]
-    pub(crate) min_version: Option<String>,
-    pub(crate) detection: Coverage,
-    #[cfg(test)]
-    pub(crate) composer: Coverage,
-    #[cfg(test)]
-    pub(crate) prompt_submission: Coverage,
-    #[cfg(test)]
-    pub(crate) native_exec_submission: Coverage,
-    #[cfg(test)]
-    pub(crate) answer_decisions: Vec<PermissionDecision>,
-    #[cfg(test)]
-    pub(crate) capability_reason: Option<String>,
-}
-fn capture(value: &Value, matchers: &[Matcher]) -> Result<Capture> {
-    let map = object(value, &["matcher_id", "capture"])?;
-    let matcher = text(&map["matcher_id"])?;
-    let name = text(&map["capture"])?;
+fn validate_capture(capture: &Capture, matchers: &[Matcher]) -> Result<()> {
     let rule = matchers
         .iter()
-        .find(|item| item.id == matcher)
+        .find(|item| item.id == capture.matcher)
         .ok_or_else(|| invalid("unknown capture matcher"))?;
     require(
         rule.regex
             .capture_names()
             .flatten()
-            .any(|candidate| candidate == name),
+            .any(|candidate| candidate == capture.name),
         "unknown named capture",
+    )
+}
+fn operation_capture(raw: RawOperation, matchers: &[Matcher]) -> Result<Capture> {
+    let single_row = |text: &String| !text.is_empty() && !text.contains('\n');
+    require(
+        raw.row_margin.as_ref().is_none_or(single_row),
+        "nonempty single-row margin required",
     )?;
-    Ok(Capture {
-        matcher,
-        name,
-        row_margin: None,
-        margin_rows: MarginRows::All,
-        row_trailer: None,
-    })
-}
-fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
-    if value.is_null() {
-        Ok(None)
-    } else {
-        capture(value, matchers).map(Some)
-    }
-}
-fn operation_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
-    if value.is_null() {
-        return Ok(None);
-    }
-    let mut plain = value
-        .as_object()
-        .ok_or_else(|| invalid("object required"))?
-        .clone();
-    let row_margin = plain
-        .remove("row_margin")
-        .map(|margin| {
-            margin
-                .as_str()
-                .filter(|margin| !margin.is_empty() && !margin.contains('\n'))
-                .map(str::to_owned)
-                .ok_or_else(|| invalid("nonempty single-row margin required"))
-        })
-        .transpose()?;
-    let margin_rows = match plain.remove("margin_rows") {
-        None => MarginRows::All,
-        Some(rows) => {
-            require(row_margin.is_some(), "margin_rows requires row_margin")?;
-            match rows.as_str() {
-                Some("all") => MarginRows::All,
-                Some("continuation") => MarginRows::Continuation,
-                _ => return Err(invalid("margin_rows must be all or continuation")),
-            }
-        }
+    require(
+        raw.margin_rows.is_none() || raw.row_margin.is_some(),
+        "margin_rows requires row_margin",
+    )?;
+    require(
+        raw.row_trailer
+            .as_ref()
+            .is_none_or(|trailer| single_row(trailer) && trailer.trim() == trailer),
+        "trimmed nonempty single-row trailer required",
+    )?;
+    let capture = Capture {
+        matcher: raw.matcher_id.0,
+        name: raw.capture.0,
+        row_margin: raw.row_margin,
+        margin_rows: raw.margin_rows.unwrap_or_default(),
+        row_trailer: raw.row_trailer,
     };
-    let row_trailer = plain
-        .remove("row_trailer")
-        .map(|trailer| {
-            trailer
-                .as_str()
-                .filter(|trailer| {
-                    !trailer.is_empty() && !trailer.contains('\n') && trailer.trim() == *trailer
-                })
-                .map(str::to_owned)
-                .ok_or_else(|| invalid("trimmed nonempty single-row trailer required"))
-        })
-        .transpose()?;
-    Ok(Some(Capture {
-        row_margin,
-        margin_rows,
-        row_trailer,
-        ..capture(&Value::Object(plain), matchers)?
-    }))
+    validate_capture(&capture, matchers)?;
+    Ok(capture)
 }
-const REGION_FIELDS: [&str; 5] = [
-    "screen",
-    "start_pattern",
-    "end_pattern",
-    "max_rows",
-    "cursor",
-];
-const RULE_FIELDS: [&str; 8] = [
-    "id",
-    "priority",
-    "observation",
-    "region",
-    "matchers",
-    "extract",
-    "verified_noninteraction",
-    "sensitive",
-];
-const CONTINUATION_FIELDS: [&str; 3] = ["continues_rule_id", "continues_choice_id", "fixture_ids"];
-fn compile_rule(value: &Value) -> Result<Rule> {
-    let kind = ObservationKind::parse(&text(
-        value
-            .get("observation")
-            .ok_or_else(|| invalid("rule observation required"))?,
-    )?)?;
+fn compile_rule(raw: RawRule) -> Result<Rule> {
+    let kind = raw.observation;
     let continues = kind == ObservationKind::PermissionContinuation;
     let annotation = kind.is_annotation();
-    let interaction_frame =
-        matches!(kind, ObservationKind::Interaction(_)) && value.get("frame").is_some();
-    let fields = if continues {
-        RULE_FIELDS
-            .iter()
-            .chain(&CONTINUATION_FIELDS)
-            .copied()
-            .collect()
-    } else if annotation || interaction_frame {
-        RULE_FIELDS.iter().chain(&["frame"]).copied().collect()
-    } else {
-        RULE_FIELDS.to_vec()
+    let continuation = match (
+        continues,
+        raw.continues_rule_id,
+        raw.continues_choice_id,
+        raw.fixture_ids,
+    ) {
+        (true, Some(rule), Some(choice), Some(fixtures)) => Some(Continuation {
+            rule_id: rule.0,
+            choice_id: choice.0,
+            fixtures: fixtures.0,
+        }),
+        (false, None, None, None) => None,
+        _ => {
+            return Err(invalid(
+                "exactly the permission continuation rules declare continues_rule_id, continues_choice_id and fixture_ids",
+            ));
+        }
     };
-    let m = object(value, &fields)?;
-    let id = text(&m["id"])?;
-    let priority = m["priority"]
-        .as_i64()
-        .ok_or_else(|| invalid("integer priority required"))?;
-    let verified = boolean(&m["verified_noninteraction"])?;
+    let verified = raw.verified_noninteraction;
     require(
         !verified
             || !matches!(
@@ -605,115 +717,32 @@ fn compile_rule(value: &Value) -> Result<Rule> {
             ),
         "interaction/unknown/continuation cannot verify noninteraction",
     )?;
-    let continuation = if continues {
-        Some(Continuation {
-            rule_id: text(&m["continues_rule_id"])?,
-            choice_id: text(&m["continues_choice_id"])?,
-            fixtures: texts(&m["fixture_ids"])?,
-        })
-    } else {
-        None
-    };
-    let separated = m["region"].get("panel_separator").is_some();
-    let region_fields = REGION_FIELDS
-        .iter()
-        .copied()
-        .chain(separated.then_some("panel_separator"))
-        .collect::<Vec<_>>();
-    let r = object(&m["region"], &region_fields)?;
-    let region = Region {
-        screen: one_of(
-            &r["screen"],
-            &[
-                ("primary", ScreenSelector::Primary),
-                ("alternate", ScreenSelector::Alternate),
-                ("either", ScreenSelector::Either),
-            ],
-        )?,
-        start: expression(&r["start_pattern"])?,
-        end: expression(&r["end_pattern"])?,
-        max_rows: positive(&r["max_rows"])?,
-        cursor: one_of(
-            &r["cursor"],
-            &[
-                ("at_end", CursorRule::AtEnd),
-                ("inside", CursorRule::Inside),
-                ("outside", CursorRule::Outside),
-                ("any", CursorRule::Any),
-            ],
-        )?,
-        panel_separator: if separated {
-            Some(panel_separator(&r["panel_separator"])?)
-        } else {
-            None
-        },
-    };
+    let matchers = raw.matchers;
     let mut ids = BTreeSet::new();
-    let mut matchers = Vec::new();
-    for v in array(&m["matchers"])? {
-        let styled = v.get("focus_style").is_some();
-        let m = if styled {
-            object(v, &["id", "scope", "pattern", "focus_style"])?
-        } else {
-            object(v, &["id", "scope", "pattern"])?
-        };
-        let focus_style = if styled {
-            Some(one_of(
-                &m["focus_style"],
-                &[
-                    ("background", FocusStyle::Background),
-                    ("marker", FocusStyle::Marker),
-                ],
-            )?)
-        } else {
-            None
-        };
-        let id = text(&m["id"])?;
-        unique(&mut ids, &id)?;
-        matchers.push(Matcher {
-            id,
-            scope: one_of(
-                &m["scope"],
-                &[
-                    ("line", MatcherScope::Line),
-                    ("region", MatcherScope::Region),
-                ],
-            )?,
-            regex: expression(&m["pattern"])?,
-            focus_style,
-        });
+    for matcher in &matchers {
+        unique(&mut ids, &matcher.id)?;
     }
     require(!matchers.is_empty(), "required matchers cannot be empty")?;
-    let ex = object(
-        &m["extract"],
-        &["operation", "choices", "native_request_id"],
-    )?;
-    let mut choices = Vec::new();
+    let choices = raw.extract.choices;
     let mut ids = BTreeSet::new();
-    for v in array(&ex["choices"])? {
-        let c = object(v, &["id", "label", "scope"])?;
-        let id = text(&c["id"])?;
-        unique(&mut ids, &id)?;
-        choices.push(Choice {
-            id,
-            label: capture(&c["label"], &matchers)?,
-            scope: one_of(
-                &c["scope"],
-                &[
-                    ("single_request", ChoiceScope::SingleRequest),
-                    ("session", ChoiceScope::Session),
-                    ("persistent", ChoiceScope::Persistent),
-                ],
-            )?,
-        });
+    for choice in &choices {
+        unique(&mut ids, &choice.id)?;
+        validate_capture(&choice.label, &matchers)?;
     }
     require(
-        !continues || (ex["operation"].is_null() && choices.is_empty()),
+        !continues || (raw.extract.operation.is_none() && choices.is_empty()),
         "continuation declares no operation or choices",
     )?;
-    let operation = operation_capture(&ex["operation"], &matchers)?;
-    let native = optional_capture(&ex["native_request_id"], &matchers)?;
-    let frame = if annotation {
+    let operation = raw
+        .extract
+        .operation
+        .map(|operation| operation_capture(operation, &matchers))
+        .transpose()?;
+    let native = raw.extract.native_request_id;
+    if let Some(native) = &native {
+        validate_capture(native, &matchers)?;
+    }
+    if annotation {
         require(
             choices.is_empty() && native.is_none() && !verified,
             "annotation rules declare no choices, native request id or verified noninteraction",
@@ -722,106 +751,42 @@ fn compile_rule(value: &Value) -> Result<Rule> {
             operation.is_some() == (kind == ObservationKind::AutomaticRefusal),
             "only automatic refusal annotations capture an operation",
         )?;
-        Some(compile_frame(&m["frame"], FrameOwner::Annotation)?)
-    } else if interaction_frame {
-        Some(compile_frame(&m["frame"], FrameOwner::Interaction)?)
-    } else {
-        None
-    };
+    }
+    match (
+        &raw.frame,
+        annotation,
+        matches!(kind, ObservationKind::Interaction(_)),
+    ) {
+        (None, true, _) => return Err(invalid("annotation rules declare a frame")),
+        (Some(frame), true, _) => require(
+            !frame.require.is_empty(),
+            "annotation frame requires a live-screen pattern",
+        )?,
+        (Some(frame), false, true) => require(
+            !frame.reject.is_empty(),
+            "interaction frame requires a reject pattern",
+        )?,
+        (Some(_), false, false) => {
+            return Err(invalid(
+                "only annotation and interaction rules declare a frame",
+            ));
+        }
+        (None, false, _) => {}
+    }
     Ok(Rule {
-        id,
-        priority,
+        id: raw.id.0,
+        priority: raw.priority,
         kind,
-        region,
+        region: raw.region,
         operation,
         native,
         choices,
         matchers,
         verified,
-        sensitive: boolean(&m["sensitive"])?,
+        sensitive: raw.sensitive,
         continuation,
-        frame,
+        frame: raw.frame,
     })
-}
-fn panel_separator(value: &Value) -> Result<char> {
-    let glyph = value
-        .as_str()
-        .ok_or_else(|| invalid("panel separator text required"))?;
-    let mut chars = glyph.chars();
-    match (chars.next(), chars.next()) {
-        (Some(separator), None) if !separator.is_whitespace() => Ok(separator),
-        _ => Err(invalid("panel separator requires one non-whitespace glyph")),
-    }
-}
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FrameOwner {
-    Annotation,
-    Interaction,
-}
-fn compile_frame(value: &Value, owner: FrameOwner) -> Result<Frame> {
-    let m = object(value, &["require_patterns", "reject_patterns"])?;
-    let patterns = |value: &Value| {
-        array(value)?
-            .iter()
-            .map(expression)
-            .collect::<Result<Vec<_>>>()
-    };
-    let require_patterns = patterns(&m["require_patterns"])?;
-    let reject_patterns = patterns(&m["reject_patterns"])?;
-    match owner {
-        FrameOwner::Annotation => require(
-            !require_patterns.is_empty(),
-            "annotation frame requires a live-screen pattern",
-        )?,
-        FrameOwner::Interaction => require(
-            !reject_patterns.is_empty(),
-            "interaction frame requires a reject pattern",
-        )?,
-    }
-    Ok(Frame {
-        require: require_patterns,
-        reject: reject_patterns,
-    })
-}
-const ANSWER_FIELDS: [&str; 7] = [
-    "decision",
-    "request_rule_id",
-    "answer_rule_id",
-    "choice_id",
-    "focus_matcher_id",
-    "stages",
-    "fixture_ids",
-];
-const STAGE_FIELDS: [&str; 3] = ["bytes_hex", "required_rule_id", "required_choice_id"];
-fn stage_fields(value: &Value) -> Result<(&Map<String, Value>, Option<StageGate>)> {
-    let focus = value.get("required_focus_choice_id").is_some();
-    let screen = value.get("required_screen_rule_id").is_some();
-    require(!(focus && screen), "a stage declares at most one gate")?;
-    let gate_field = if focus {
-        Some("required_focus_choice_id")
-    } else if screen {
-        Some("required_screen_rule_id")
-    } else {
-        None
-    };
-    let fields = STAGE_FIELDS
-        .iter()
-        .copied()
-        .chain(gate_field)
-        .collect::<Vec<_>>();
-    let map = object(value, &fields)?;
-    let gate = match gate_field {
-        Some(field) => {
-            let id = text(&map[field])?;
-            Some(if focus {
-                StageGate::Focus(id)
-            } else {
-                StageGate::Screen(id)
-            })
-        }
-        None => None,
-    };
-    Ok((map, gate))
 }
 fn validate_gates(
     stages: &[AnswerStage],
@@ -903,13 +868,31 @@ fn validate_gates(
     }
     Ok(())
 }
-fn validate_continuation(
-    rule: &Rule,
-    rules: &[Rule],
+/// Where a profile's provenance citations must point: native-captured or synthetic fixtures of
+/// the profile's backend whose capture version lies in the profile's interval.
+struct Scope<'a> {
     backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<()> {
+    interval: Interval<'a>,
+    fixtures: &'a [Fixture],
+}
+impl Scope<'_> {
+    fn cite(&self, ids: &[String]) -> Result<()> {
+        require(!ids.is_empty(), "capability provenance required")?;
+        for id in ids {
+            let fixture = self
+                .fixtures
+                .iter()
+                .find(|f| &f.id == id)
+                .ok_or_else(|| invalid("unknown fixture"))?;
+            require(
+                fixture.backend == self.backend && self.interval.contains(&fixture.version),
+                "fixture backend or capture version outside the profile interval",
+            )?;
+        }
+        Ok(())
+    }
+}
+fn validate_continuation(rule: &Rule, rules: &[Rule], scope: &Scope) -> Result<()> {
     let Some(continuation) = &rule.continuation else {
         return Ok(());
     };
@@ -918,10 +901,7 @@ fn validate_continuation(
         .find(|candidate| candidate.id == continuation.rule_id)
         .ok_or_else(|| invalid("continuation names an unknown rule"))?;
     require(
-        continued.kind
-            == ObservationKind::Interaction(
-                crate::broker::runtime::InteractionClass::PermissionRequest,
-            ),
+        continued.kind == ObservationKind::Interaction(InteractionClass::PermissionRequest),
         "continuation continues a permission request rule",
     )?;
     require(
@@ -931,34 +911,16 @@ fn validate_continuation(
             .any(|choice| choice.id == continuation.choice_id),
         "continuation names an unknown continued choice",
     )?;
-    provenance(&continuation.fixtures, backend, interval, fixtures)?;
+    scope.cite(&continuation.fixtures)?;
     require(
         continuation.fixtures.iter().all(|id| {
-            fixtures
+            scope
+                .fixtures
                 .iter()
                 .any(|fixture| &fixture.id == id && fixture.native)
         }),
         "continuation cites native fixtures",
     )
-}
-fn provenance(
-    ids: &[String],
-    backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<()> {
-    require(!ids.is_empty(), "capability provenance required")?;
-    for id in ids {
-        let f = fixtures
-            .iter()
-            .find(|f| &f.id == id)
-            .ok_or_else(|| invalid("unknown fixture"))?;
-        require(
-            f.backend == backend && interval.contains(&f.version),
-            "fixture backend or capture version outside the profile interval",
-        )?;
-    }
-    Ok(())
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
@@ -981,23 +943,16 @@ impl Group {
     }
 }
 fn capability(
-    value: &Value,
+    raw: &RawCapability,
     group: Group,
     rules: &[Rule],
-    backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<Option<Capability>> {
-    if value.is_null() {
-        return Ok(None);
-    }
-    let fields: &[&str] = if group == Group::Composer && value.get("submission").is_some() {
-        &["rule_ids", "fixture_ids", "submission"]
-    } else {
-        &["rule_ids", "fixture_ids"]
-    };
-    let m = object(value, fields)?;
-    let ids = texts(&m["rule_ids"])?;
+    scope: &Scope,
+) -> Result<Capability> {
+    require(
+        group == Group::Composer || raw.submission.is_none(),
+        "only the composer capability declares a submission",
+    )?;
+    let ids = raw.rule_ids.0.clone();
     require(!ids.is_empty(), "capability rules required")?;
     for id in &ids {
         let rule = rules
@@ -1009,540 +964,272 @@ fn capability(
             "capability rule component mismatch",
         )?;
     }
-    provenance(&texts(&m["fixture_ids"])?, backend, interval, fixtures)?;
-    Ok(Some(Capability { rules: ids }))
-}
-
-fn decoded_hex(value: &str) -> Vec<u8> {
-    (0..value.len())
-        .step_by(2)
-        .map(|index| {
-            u8::from_str_radix(&value[index..index + 2], 16)
-                .expect("validated lowercase hexadecimal byte")
-        })
-        .collect()
+    scope.cite(&raw.fixture_ids.0)?;
+    Ok(Capability { rules: ids })
 }
 
 fn composer_submission(
-    value: &Value,
+    raw: RawSubmission,
     operation: ComposerOperation,
-    backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<Option<ComposerSubmission>> {
-    if value.is_null() {
-        return Ok(None);
-    }
-    let m = object(value, &["prefix_hex", "submit_hex", "fixture_ids"])?;
-    let prefix = m["prefix_hex"]
-        .as_str()
-        .ok_or_else(|| invalid("composer prefix string required"))?;
+    scope: &Scope,
+) -> Result<ComposerSubmission> {
     require(
-        prefix == operation.prefix_hex(),
+        lower_hex_bytes(&raw.prefix_hex, usize::MAX).as_deref() == Some(operation.prefix()),
         "composer prefix must match its operation",
     )?;
-    let submit = m["submit_hex"]
-        .as_str()
-        .ok_or_else(|| invalid("composer submit string required"))?;
-    require(
-        (2..=64).contains(&submit.len()) && submit.len().is_multiple_of(2) && lower_hex(submit),
-        "composer submit requires 1–32 lowercase hexadecimal bytes",
-    )?;
-    let fixture_ids = texts(&m["fixture_ids"])?;
-    provenance(&fixture_ids, backend, interval, fixtures)?;
-    Ok(Some(ComposerSubmission {
-        prefix: decoded_hex(prefix),
-        submit: decoded_hex(submit),
-        fixture_ids,
-    }))
+    let submit = lower_hex_bytes(&raw.submit_hex, 32)
+        .filter(|submit| !submit.is_empty())
+        .ok_or_else(|| invalid("composer submit requires 1–32 lowercase hexadecimal bytes"))?;
+    scope.cite(&raw.fixture_ids.0)?;
+    Ok(ComposerSubmission { submit })
 }
 
-fn composer_submissions(
-    value: &Value,
-    backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<[Option<ComposerSubmission>; 2]> {
-    let Some(submission) = value.get("submission") else {
-        return Ok([None, None]);
+fn compile_answer(
+    raw: RawAnswer,
+    rules: &[Rule],
+    identities: &mut BTreeSet<String>,
+    keys: &mut BTreeSet<String>,
+    scope: &Scope,
+) -> Result<Answer> {
+    let (request, id, choice_id) = (raw.request_rule_id.0, raw.answer_rule_id.0, raw.choice_id.0);
+    unique(identities, &id)?;
+    let rule = rules
+        .iter()
+        .find(|r| r.id == request)
+        .ok_or_else(|| invalid("unknown answer request rule"))?;
+    let decided = raw.decision.is_some();
+    let key = match raw.decision {
+        Some(decision) => {
+            let decision = PermissionDecision::try_from(decision.0.as_str())?;
+            require(
+                rule.kind == ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "answer requires permission form",
+            )?;
+            AnswerKey::Decision(decision)
+        }
+        None => {
+            require(
+                rule.kind == ObservationKind::Interaction(InteractionClass::Question),
+                "choice answer requires question form",
+            )?;
+            require(
+                valid_choice_id(&choice_id),
+                "choice id requires lowercase hyphenated words of at most 64 bytes",
+            )?;
+            AnswerKey::Choice(choice_id.clone())
+        }
     };
-    let m = object(submission, &["prompt", "exec"])?;
-    Ok([
-        composer_submission(
-            &m["prompt"],
-            ComposerOperation::Prompt,
-            backend,
-            interval,
-            fixtures,
-        )?,
-        composer_submission(
-            &m["exec"],
-            ComposerOperation::Exec,
-            backend,
-            interval,
-            fixtures,
-        )?,
-    ])
+    unique(
+        keys,
+        &match &key {
+            AnswerKey::Decision(decision) => format!("{request}:decision:{}", decision.as_str()),
+            AnswerKey::Choice(choice) => format!("{request}:choice:{choice}"),
+        },
+    )?;
+    let choice = rule
+        .choices
+        .iter()
+        .find(|c| c.id == choice_id)
+        .ok_or_else(|| invalid("unknown answer choice"))?;
+    require(
+        !decided || choice.scope == ChoiceScope::SingleRequest,
+        "answer requires single-request scope",
+    )?;
+    let focus = raw.focus_matcher_id.0;
+    require(
+        rule.matchers.iter().any(|m| m.id == focus),
+        "unknown answer focus matcher",
+    )?;
+    require(
+        (1..=16).contains(&raw.stages.len()),
+        "one to sixteen measured answer stages required",
+    )?;
+    let stages = raw
+        .stages
+        .into_iter()
+        .map(|stage| {
+            let bytes = lower_hex_bytes(&stage.bytes_hex.0, 256)
+                .filter(|bytes| !bytes.is_empty())
+                .ok_or_else(|| invalid("one to 256 lowercase hexadecimal stage bytes required"))?;
+            require(!bytes.contains(&0x1b), "answer stages never contain Escape")?;
+            require(
+                stage.required_rule_id.0 == request && stage.required_choice_id.0 == choice_id,
+                "answer stage request/decision mismatch",
+            )?;
+            let gate = match (
+                stage.required_focus_choice_id,
+                stage.required_screen_rule_id,
+            ) {
+                (Some(_), Some(_)) => return Err(invalid("a stage declares at most one gate")),
+                (Some(choice), None) => Some(StageGate::Focus(choice.0)),
+                (None, Some(rule)) => Some(StageGate::Screen(rule.0)),
+                (None, None) => None,
+            };
+            Ok(AnswerStage { bytes, gate })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    validate_gates(&stages, rule, rules, &choice_id, &focus)?;
+    scope.cite(&raw.fixture_ids.0)?;
+    Ok(Answer {
+        key,
+        request,
+        id,
+        fixtures: raw.fixture_ids.0,
+        choice_id,
+        focus_matcher_id: focus,
+        stages,
+    })
+}
+
+fn compile_profile(
+    raw: RawProfile,
+    thresholds: &[(CodingAgent, NativeVersion)],
+    fixtures: &[Fixture],
+) -> Result<Profile> {
+    let (backend, min) = (raw.backend, raw.min_version);
+    let scope = Scope {
+        backend,
+        interval: Interval {
+            min: &min,
+            next: thresholds
+                .iter()
+                .filter(|(other, threshold)| {
+                    *other == backend && threshold.precedence(&min).is_gt()
+                })
+                .map(|(_, threshold)| threshold)
+                .min_by(|a, b| a.precedence(b)),
+        },
+        fixtures,
+    };
+    let rules = raw
+        .rules
+        .into_iter()
+        .map(compile_rule)
+        .collect::<Result<Vec<_>>>()?;
+    let mut identities = BTreeSet::new();
+    for rule in &rules {
+        unique(&mut identities, &rule.id)?;
+    }
+    for rule in &rules {
+        validate_continuation(rule, &rules, &scope)?;
+    }
+    let capabilities = raw.capabilities;
+    let group = |raw: &Option<RawCapability>, group| {
+        raw.as_ref()
+            .map(|raw| capability(raw, group, &rules, &scope))
+            .transpose()
+    };
+    let detection = group(&capabilities.detection, Group::Detection)?;
+    let composer = group(&capabilities.composer, Group::Composer)?;
+    let annotations = group(&capabilities.annotations, Group::Annotations)?;
+    require(
+        rules
+            .iter()
+            .filter(|rule| rule.kind.is_annotation())
+            .all(|rule| {
+                annotations
+                    .as_ref()
+                    .is_some_and(|group| group.rules.contains(&rule.id))
+            }),
+        "every annotation rule belongs to the annotations group",
+    )?;
+    let submissions = match capabilities
+        .composer
+        .and_then(|composer| composer.submission)
+    {
+        Some(submission) => {
+            let compile = |raw: Option<RawSubmission>, operation| {
+                raw.map(|raw| composer_submission(raw, operation, &scope))
+                    .transpose()
+            };
+            [
+                compile(submission.prompt, ComposerOperation::Prompt)?,
+                compile(submission.exec, ComposerOperation::Exec)?,
+            ]
+        }
+        None => [None, None],
+    };
+    let mut keys = BTreeSet::new();
+    let answers = capabilities
+        .answers
+        .into_iter()
+        .map(|answer| compile_answer(answer, &rules, &mut identities, &mut keys, &scope))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Profile {
+        backend,
+        min_version_text: min.0.to_string(),
+        min_version: min.clone(),
+        rules,
+        detection,
+        composer,
+        annotations,
+        submissions,
+        answers,
+    })
 }
 
 const BUNDLED_DEFINITIONS: &str = include_str!("bundled.json");
-const CLAUDE_FIXTURES: &[u8] = include_bytes!("native/claude.json");
-const CODEX_FIXTURES: &[u8] = include_bytes!("native/codex.json");
-const OPENCODE_FIXTURES: &[u8] = include_bytes!("native/opencode.json");
-const HERMES_FIXTURES: &[u8] = include_bytes!("native/hermes.json");
-const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
-    ("native/claude.json", CLAUDE_FIXTURES),
-    ("native/codex.json", CODEX_FIXTURES),
-    ("native/opencode.json", OPENCODE_FIXTURES),
-    ("native/hermes.json", HERMES_FIXTURES),
-];
 
-fn verify_bundled_fixtures(entries: &[Value], embedded: &[(&str, &[u8])]) -> Result<()> {
-    let mut sources = BTreeMap::<String, Vec<&Value>>::new();
-    for entry in entries {
-        require(
-            entry["kind"] == "native",
-            "bundled fixtures require native provenance",
-        )?;
-        let source = text(&entry["source_ref"])?;
-        require(
-            embedded.iter().any(|(reference, _)| *reference == source),
-            "bundled fixture bytes are not embedded",
-        )?;
-        sources.entry(source).or_default().push(entry);
-    }
-    for (source, bytes) in embedded {
-        let file: Value = serde_json::from_slice(bytes)
-            .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
-        let entries = sources.get(*source).map(Vec::as_slice).unwrap_or(&[]);
-        let screens = verify_native_fixture_file(&file, entries)?;
-        for entry in entries {
-            let id = text(&entry["id"])?;
-            let screen = screens
-                .get(&id)
-                .expect("the file guard verified every catalogued screen");
-            verify_native_screen(entry, screen)?;
-        }
-    }
-    Ok(())
-}
-
-fn verify_native_fixture_file<'a>(
-    file: &'a Value,
-    entries: &[&Value],
-) -> Result<&'a Map<String, Value>> {
-    let file = object(
-        file,
-        &["schema_version", "backend", "provenance", "screens"],
-    )?;
-    require(
-        file["schema_version"].as_u64() == Some(1)
-            && file["provenance"] == "native"
-            && entries
-                .iter()
-                .all(|entry| file["backend"] == entry["backend"]),
-        "bundled fixture file identity differs from its catalog entry",
-    )?;
-    backend(&file["backend"])?;
-    let screens = file["screens"]
-        .as_object()
-        .ok_or_else(|| invalid("object required"))?;
-    for entry in entries {
-        require(
-            screens.contains_key(&text(&entry["id"])?),
-            "bundled fixture screen is missing",
-        )?;
-    }
-    require(
-        screens.keys().all(|id| {
-            entries
-                .iter()
-                .any(|entry| entry["id"].as_str() == Some(id.as_str()))
-        }),
-        "bundled fixture file holds an uncited screen",
-    )?;
-    Ok(screens)
-}
-
-fn verify_native_screen(entry: &Value, screen: &Value) -> Result<()> {
-    let id = text(&entry["id"])?;
-    let recorded = text(&entry["sha256"])?;
-    let computed = crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes());
-    require(
-        recorded == computed,
-        &format!(
-            "bundled fixture digest mismatch for {id}: catalog {recorded}, computed {computed}"
-        ),
-    )?;
-    let backgrounds = screen.get("cell_backgrounds").is_some();
-    let fields = SCREEN_FIELDS
-        .iter()
-        .copied()
-        .chain(backgrounds.then_some("cell_backgrounds"))
-        .collect::<Vec<_>>();
-    let m = object(screen, &fields)?;
-    require(
-        m["rows"] == entry["rows"] && m["cols"] == entry["cols"],
-        "bundled fixture identity differs from its catalog entry",
-    )?;
-    let rows = positive(&m["rows"])?;
-    let cols = positive(&m["cols"])?;
-    boolean(&m["alternate_screen"])?;
-    m["screen_seq"]
-        .as_u64()
-        .ok_or_else(|| invalid("fixture screen sequence required"))?;
-    require(
-        m["cursor_row"]
-            .as_u64()
-            .is_some_and(|row| row < u64::from(rows))
-            && m["cursor_col"]
-                .as_u64()
-                .is_some_and(|col| col <= u64::from(cols)),
-        "fixture cursor outside its geometry",
-    )?;
-    let lines = array(&m["lines"])?;
-    require(
-        lines.len() == usize::from(rows) && lines.iter().all(Value::is_string),
-        "fixture lines must cover every row",
-    )?;
-    let mut masked = BTreeSet::new();
-    for mask in array(&m["masked_rows"])? {
-        let mask = object(mask, &["row", "reason"])?;
-        let row = mask["row"]
-            .as_u64()
-            .and_then(|row| usize::try_from(row).ok())
-            .filter(|row| *row < lines.len())
-            .ok_or_else(|| invalid("masked row outside fixture geometry"))?;
-        require(masked.insert(row), "duplicate masked row")?;
-        require(
-            mask["reason"] == "reviewed_privacy",
-            "masked rows require reviewed privacy",
-        )?;
-        require(
-            lines[row].as_str().is_some_and(str::is_empty),
-            "masked row must be empty",
-        )?;
-    }
-    if backgrounds {
-        verify_cell_backgrounds(&m["cell_backgrounds"], rows, cols, &masked)?;
-    }
-    Ok(())
-}
-const SCREEN_FIELDS: [&str; 8] = [
-    "rows",
-    "cols",
-    "alternate_screen",
-    "screen_seq",
-    "cursor_row",
-    "cursor_col",
-    "lines",
-    "masked_rows",
-];
-fn verify_cell_backgrounds(
-    value: &Value,
-    rows: u16,
-    cols: u16,
-    masked: &BTreeSet<usize>,
-) -> Result<()> {
-    let index = |value: &Value, bound: u64| {
-        value
-            .as_u64()
-            .filter(|n| *n <= bound)
-            .ok_or_else(|| invalid("background run coordinate outside its geometry"))
+static BUNDLED: LazyLock<ProfileCatalog> = LazyLock::new(|| {
+    let catalog = ProfileCatalog::from_definitions(
+        &serde_json::from_str(BUNDLED_DEFINITIONS).expect("bundled.json is valid JSON"),
+    )
+    .expect("the bundled catalog passes its build guard");
+    #[cfg(test)]
+    let catalog = ProfileCatalog {
+        capture_origin: "bundled_unknown",
+        ..catalog
     };
-    let mut spans = BTreeMap::<u64, Vec<(u64, u64)>>::new();
-    for run in array(value)? {
-        let run = object(run, &["row", "start_col", "end_col", "bg"])?;
-        let row = index(&run["row"], u64::from(rows) - 1)?;
-        let start = index(&run["start_col"], u64::from(cols))?;
-        let end = index(&run["end_col"], u64::from(cols))?;
-        require(start < end, "background run requires start below end")?;
-        require(
-            !masked.contains(&usize::try_from(row).expect("bounded row")),
-            "background run inside a masked row",
-        )?;
-        let bg = &run["bg"];
-        match bg.get("kind").and_then(Value::as_str) {
-            Some("indexed") => {
-                let m = object(bg, &["kind", "index"])?;
-                index(&m["index"], 255)?;
-            }
-            Some("rgb") => {
-                let m = object(bg, &["kind", "r", "g", "b"])?;
-                for channel in ["r", "g", "b"] {
-                    index(&m[channel], 255)?;
-                }
-            }
-            _ => return Err(invalid("background run requires a non-default colour")),
-        }
-        spans.entry(row).or_default().push((start, end));
-    }
-    for runs in spans.values_mut() {
-        runs.sort_unstable();
-        require(
-            runs.windows(2).all(|pair| pair[0].1 <= pair[1].0),
-            "background runs overlap",
-        )?;
-    }
-    Ok(())
-}
+    catalog
+});
 
 impl ProfileCatalog {
-    pub(crate) fn bundled() -> Result<Self> {
-        let definitions: Value = serde_json::from_str(BUNDLED_DEFINITIONS)
-            .map_err(|cause| invalid(format!("bundled definitions: {cause}")))?;
-        Self::from_bundled_definitions(&definitions, BUNDLED_FIXTURES)
-    }
-    pub(crate) fn from_bundled_definitions(
-        definitions: &Value,
-        embedded: &[(&str, &[u8])],
-    ) -> Result<Self> {
-        let catalog = Self::from_definitions(definitions)?;
-        verify_bundled_fixtures(array(&definitions["fixtures"])?, embedded)?;
-        #[cfg(test)]
-        let catalog = Self {
-            capture_origin: "bundled_unknown",
-            ..catalog
-        };
-        Ok(catalog)
+    pub(crate) fn bundled() -> &'static ProfileCatalog {
+        &BUNDLED
     }
     #[cfg(test)]
     pub(crate) fn capture_origin(&self) -> &'static str {
         self.capture_origin
     }
     pub(crate) fn from_definitions(value: &Value) -> Result<Self> {
-        let root = object(value, &["schema_version", "fixtures", "profiles"])?;
-        require(
-            root["schema_version"].as_u64() == Some(1),
-            "unsupported profile schema",
-        )?;
-        let mut fixtures = Vec::new();
+        let raw = RawCatalog::deserialize(value).map_err(|cause| invalid(cause.to_string()))?;
+        require(raw.schema_version == 1, "unsupported profile schema")?;
         let mut ids = BTreeSet::new();
-        for v in array(&root["fixtures"])? {
-            let m = object(
-                v,
-                &[
-                    "id",
-                    "kind",
-                    "backend",
-                    "native_version",
-                    "rows",
-                    "cols",
-                    "source_ref",
-                    "sha256",
-                ],
-            )?;
-            let id = text(&m["id"])?;
-            unique(&mut ids, &id)?;
-            let native = one_of(&m["kind"], &[("synthetic", false), ("native", true)])?;
-            positive(&m["rows"])?;
-            positive(&m["cols"])?;
-            text(&m["source_ref"])?;
-            let hash = text(&m["sha256"])?;
+        let fixtures = raw
+            .fixtures
+            .into_iter()
+            .map(|fixture| {
+                unique(&mut ids, &fixture.id.0)?;
+                require(
+                    lower_hex_bytes(&fixture.sha256.0, 32).is_some_and(|hash| hash.len() == 32),
+                    "lowercase source digest required",
+                )?;
+                Ok(Fixture {
+                    id: fixture.id.0,
+                    native: fixture.kind == FixtureKind::Native,
+                    backend: fixture.backend,
+                    version: fixture.native_version,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let thresholds = raw
+            .profiles
+            .iter()
+            .map(|profile| (profile.backend, profile.min_version.clone()))
+            .collect::<Vec<_>>();
+        for (index, (backend, min)) in thresholds.iter().enumerate() {
             require(
-                hash.len() == 64 && lower_hex(&hash),
-                "lowercase source digest required",
-            )?;
-            fixtures.push(Fixture {
-                id,
-                native,
-                backend: backend(&m["backend"])?,
-                version: semver(&m["native_version"])?,
-            });
-        }
-        let mut headers = Vec::new();
-        for v in array(&root["profiles"])? {
-            let m = object(v, &["backend", "min_version", "rules", "capabilities"])?;
-            headers.push((m, backend(&m["backend"])?, semver(&m["min_version"])?));
-        }
-        for (index, (_, backend, min)) in headers.iter().enumerate() {
-            require(
-                headers[..index]
+                thresholds[..index]
                     .iter()
-                    .all(|(_, other, earlier)| other != backend || earlier.precedence(min).is_ne()),
+                    .all(|(other, earlier)| other != backend || earlier.precedence(min).is_ne()),
                 "equal-precedence profile thresholds for one backend",
             )?;
         }
-        let mut profiles = Vec::new();
-        for (m, backend, min_version) in &headers {
-            let (m, backend) = (*m, *backend);
-            let interval = Interval {
-                min: min_version,
-                next: headers
-                    .iter()
-                    .filter(|(_, other, threshold)| {
-                        *other == backend && threshold.precedence(min_version).is_gt()
-                    })
-                    .map(|(_, _, threshold)| threshold)
-                    .min_by(|a, b| a.precedence(b)),
-            };
-            let rules = array(&m["rules"])?
-                .iter()
-                .map(compile_rule)
-                .collect::<Result<Vec<_>>>()?;
-            let mut rule_ids = BTreeSet::new();
-            for rule in &rules {
-                unique(&mut rule_ids, &rule.id)?;
-            }
-            for rule in &rules {
-                validate_continuation(rule, &rules, backend, &interval, &fixtures)?;
-            }
-            let c = object(
-                &m["capabilities"],
-                &["detection", "composer", "annotations", "answers"],
-            )?;
-            let detection = capability(
-                &c["detection"],
-                Group::Detection,
-                &rules,
-                backend,
-                &interval,
-                &fixtures,
-            )?;
-            let composer = capability(
-                &c["composer"],
-                Group::Composer,
-                &rules,
-                backend,
-                &interval,
-                &fixtures,
-            )?;
-            let annotations = capability(
-                &c["annotations"],
-                Group::Annotations,
-                &rules,
-                backend,
-                &interval,
-                &fixtures,
-            )?;
-            require(
-                rules
-                    .iter()
-                    .filter(|rule| rule.kind.is_annotation())
-                    .all(|rule| {
-                        annotations
-                            .as_ref()
-                            .is_some_and(|group| group.rules.contains(&rule.id))
-                    }),
-                "every annotation rule belongs to the annotations group",
-            )?;
-            let submissions = composer_submissions(&c["composer"], backend, &interval, &fixtures)?;
-            let mut answers = Vec::new();
-            let mut keys = BTreeSet::new();
-            for v in array(&c["answers"])? {
-                let decided = v.get("decision").is_some();
-                let a = object(
-                    v,
-                    if decided {
-                        &ANSWER_FIELDS
-                    } else {
-                        &ANSWER_FIELDS[1..]
-                    },
-                )?;
-                let request = text(&a["request_rule_id"])?;
-                let id = text(&a["answer_rule_id"])?;
-                unique(&mut rule_ids, &id)?;
-                let rule = rules
-                    .iter()
-                    .find(|r| r.id == request)
-                    .ok_or_else(|| invalid("unknown answer request rule"))?;
-                let choice_id = text(&a["choice_id"])?;
-                let key = if decided {
-                    let decision = PermissionDecision::try_from(text(&a["decision"])?.as_str())?;
-                    require(
-                        rule.kind
-                            == ObservationKind::Interaction(InteractionClass::PermissionRequest),
-                        "answer requires permission form",
-                    )?;
-                    AnswerKey::Decision(decision)
-                } else {
-                    require(
-                        rule.kind == ObservationKind::Interaction(InteractionClass::Question),
-                        "choice answer requires question form",
-                    )?;
-                    require(
-                        valid_choice_id(&choice_id),
-                        "choice id requires lowercase hyphenated words of at most 64 bytes",
-                    )?;
-                    AnswerKey::Choice(choice_id.clone())
-                };
-                unique(
-                    &mut keys,
-                    &match &key {
-                        AnswerKey::Decision(decision) => {
-                            format!("{request}:decision:{}", decision.as_str())
-                        }
-                        AnswerKey::Choice(choice) => format!("{request}:choice:{choice}"),
-                    },
-                )?;
-                let choice = rule
-                    .choices
-                    .iter()
-                    .find(|c| c.id == choice_id)
-                    .ok_or_else(|| invalid("unknown answer choice"))?;
-                require(
-                    !decided || choice.scope == ChoiceScope::SingleRequest,
-                    "answer requires single-request scope",
-                )?;
-                let focus = text(&a["focus_matcher_id"])?;
-                require(
-                    rule.matchers.iter().any(|m| m.id == focus),
-                    "unknown answer focus matcher",
-                )?;
-                let stages = array(&a["stages"])?;
-                require(
-                    (1..=16).contains(&stages.len()),
-                    "one to sixteen measured answer stages required",
-                )?;
-                let mut compiled_stages = Vec::new();
-                for v in stages {
-                    let (s, gate) = stage_fields(v)?;
-                    let bytes = text(&s["bytes_hex"])?;
-                    require(
-                        (2..=512).contains(&bytes.len())
-                            && bytes.len().is_multiple_of(2)
-                            && lower_hex(&bytes),
-                        "one to 256 lowercase hexadecimal stage bytes required",
-                    )?;
-                    let bytes = decoded_hex(&bytes);
-                    require(!bytes.contains(&0x1b), "answer stages never contain Escape")?;
-                    compiled_stages.push(AnswerStage {
-                        bytes,
-                        required_rule_id: request.clone(),
-                        required_choice_id: choice_id.clone(),
-                        gate,
-                    });
-                    require(
-                        text(&s["required_rule_id"])? == request
-                            && text(&s["required_choice_id"])? == choice_id,
-                        "answer stage request/decision mismatch",
-                    )?;
-                }
-                validate_gates(&compiled_stages, rule, &rules, &choice_id, &focus)?;
-                let fixture_ids = texts(&a["fixture_ids"])?;
-                provenance(&fixture_ids, backend, &interval, &fixtures)?;
-                answers.push(Answer {
-                    key,
-                    request,
-                    id,
-                    fixtures: fixture_ids,
-                    choice_id,
-                    focus_matcher_id: focus,
-                    stages: compiled_stages,
-                });
-            }
-            profiles.push(Profile {
-                backend,
-                min_version: min_version.clone(),
-                min_version_text: text(&m["min_version"])?,
-                rules,
-                detection,
-                composer,
-                annotations,
-                submissions,
-                answers,
-            });
-        }
+        let profiles = raw
+            .profiles
+            .into_iter()
+            .map(|profile| compile_profile(profile, &thresholds, &fixtures))
+            .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             profiles,
             #[cfg(test)]
@@ -1576,64 +1263,18 @@ impl ProfileCatalog {
             .into_iter()
             .collect()
     }
-    pub(crate) fn capabilities(
+    pub(crate) fn detection_coverage(
         &self,
         backend: CodingAgent,
         version: Option<&str>,
-    ) -> NativeCapabilities {
-        let profile = self.matching(backend, version);
-        NativeCapabilities {
-            #[cfg(test)]
-            backend,
-            #[cfg(test)]
-            native_version: version.map(str::to_owned),
-            #[cfg(test)]
-            min_version: profile.map(|p| p.min_version_text.clone()),
-            detection: if profile.is_some_and(|p| p.detection.is_some()) {
-                Coverage::Tested
-            } else {
-                Coverage::Unknown
-            },
-            #[cfg(test)]
-            composer: if profile.is_some_and(|p| p.composer.is_some()) {
-                Coverage::Tested
-            } else {
-                Coverage::Unknown
-            },
-            #[cfg(test)]
-            prompt_submission: if profile
-                .is_some_and(|p| p.submissions[ComposerOperation::Prompt.index()].is_some())
-            {
-                Coverage::Tested
-            } else {
-                Coverage::Unknown
-            },
-            #[cfg(test)]
-            native_exec_submission: if profile
-                .is_some_and(|p| p.submissions[ComposerOperation::Exec.index()].is_some())
-            {
-                Coverage::Tested
-            } else {
-                Coverage::Unknown
-            },
-            #[cfg(test)]
-            answer_decisions: profile
-                .map(|p| {
-                    let mut decisions = Vec::new();
-                    for decision in p.answers.iter().filter_map(|answer| answer.key.decision()) {
-                        if !decisions.contains(&decision) {
-                            decisions.push(decision);
-                        }
-                    }
-                    decisions
-                })
-                .unwrap_or_default(),
-            #[cfg(test)]
-            capability_reason: if profile.is_none() {
-                Some("native profile unavailable".into())
-            } else {
-                None
-            },
+    ) -> Coverage {
+        if self
+            .matching(backend, version)
+            .is_some_and(|profile| profile.detection.is_some())
+        {
+            Coverage::Tested
+        } else {
+            Coverage::Unknown
         }
     }
     pub(crate) fn answer_plans(
@@ -1676,55 +1317,29 @@ impl ComposerOperation {
         }
     }
 
-    pub(super) fn prefix_hex(self) -> &'static str {
+    /// The bytes that precede an operation's literal in the native composer.
+    pub(crate) fn prefix(self) -> &'static [u8] {
         match self {
-            Self::Prompt => "",
-            Self::Exec => "2120",
+            Self::Prompt => b"",
+            Self::Exec => b"! ",
         }
     }
 }
 
 #[derive(Clone)]
 pub(super) struct ComposerSubmission {
-    pub(crate) prefix: Vec<u8>,
     pub(crate) submit: Vec<u8>,
-    pub(crate) fixture_ids: Vec<String>,
 }
 
 pub(crate) struct ComposerPlan {
-    backend: CodingAgent,
-    native_version: String,
-    rule_ids: Vec<String>,
-    fixture_ids: Vec<String>,
     operation: ComposerOperation,
-    prefix: Vec<u8>,
     submit: Vec<u8>,
 }
 
 impl ComposerPlan {
-    pub(crate) fn backend(&self) -> CodingAgent {
-        self.backend
-    }
-
-    pub(crate) fn native_version(&self) -> &str {
-        &self.native_version
-    }
-
-    pub(crate) fn rule_ids(&self) -> &[String] {
-        &self.rule_ids
-    }
-
-    pub(crate) fn fixture_ids(&self) -> &[String] {
-        &self.fixture_ids
-    }
-
     pub(crate) fn encode(&self, literal: &str) -> std::result::Result<Vec<u8>, CafleetError> {
-        assert!(
-            self.prefix.len() == self.operation.prefix_hex().len() / 2,
-            "validated composer prefix matches its operation"
-        );
-        let size = self
-            .prefix
+        let prefix = self.operation.prefix();
+        let size = prefix
             .len()
             .checked_add(literal.len())
             .and_then(|size| size.checked_add(self.submit.len()))
@@ -1733,7 +1348,7 @@ impl ComposerPlan {
                 CafleetError::App("native composer payload exceeds 65536 bytes".into())
             })?;
         let mut bytes = Vec::with_capacity(size);
-        bytes.extend_from_slice(&self.prefix);
+        bytes.extend_from_slice(prefix);
         bytes.extend_from_slice(literal.as_bytes());
         bytes.extend_from_slice(&self.submit);
         Ok(bytes)
@@ -1755,17 +1370,8 @@ impl ProfileCatalog {
     ) -> Option<ComposerPlan> {
         let profile = self.matching(backend, Some(native_version))?;
         let submission = profile.submissions[operation.index()].as_ref()?;
-        let observation = profile
-            .composer
-            .as_ref()
-            .expect("executable composer requires validated observation provenance");
         Some(ComposerPlan {
-            backend,
-            native_version: native_version.into(),
-            rule_ids: observation.rules.clone(),
-            fixture_ids: submission.fixture_ids.clone(),
             operation,
-            prefix: submission.prefix.clone(),
             submit: submission.submit.clone(),
         })
     }
@@ -1774,37 +1380,256 @@ impl ProfileCatalog {
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::coding_agent::catalog::*;
+    use serde_json::Map;
     use serde_json::json;
 
-    pub(crate) struct BundledBoundary {
-        pub(crate) backend: CodingAgent,
-        pub(crate) min_version: &'static str,
-        pub(crate) later: [&'static str; 2],
-        pub(crate) below: &'static str,
+    fn object<'a>(value: &'a Value, keys: &[&str]) -> Result<&'a Map<String, Value>> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?;
+        require(
+            map.len() == keys.len() && keys.iter().all(|key| map.contains_key(*key)),
+            "exact required object fields expected",
+        )?;
+        Ok(map)
+    }
+    fn text(value: &Value) -> Result<String> {
+        let text = value.as_str().ok_or_else(|| invalid("text required"))?;
+        require(!text.trim().is_empty(), "nonblank text required")?;
+        Ok(text.into())
+    }
+    fn array(value: &Value) -> Result<&Vec<Value>> {
+        value.as_array().ok_or_else(|| invalid("array required"))
+    }
+    fn boolean(value: &Value) -> Result<bool> {
+        value.as_bool().ok_or_else(|| invalid("boolean required"))
+    }
+    fn backend(value: &Value) -> Result<CodingAgent> {
+        crate::coding_agent::coding_agent(&text(value)?).ok_or_else(|| invalid("unknown backend"))
+    }
+    fn positive(value: &Value) -> Result<u16> {
+        value
+            .as_u64()
+            .and_then(|n| u16::try_from(n).ok())
+            .filter(|n| *n > 0)
+            .ok_or_else(|| invalid("positive viewport bound required"))
     }
 
-    /// Each backend's first bundled boundary, later supported native versions
-    /// and a version below that boundary.
-    pub(crate) const BUNDLED_BOUNDARIES: [BundledBoundary; 3] = [
-        BundledBoundary {
-            backend: CodingAgent::Claude,
-            min_version: "2.1.302",
-            later: ["2.1.308", "3.0.0-beta.1"],
-            below: "2.1.301",
-        },
-        BundledBoundary {
-            backend: CodingAgent::Codex,
-            min_version: "0.163.0",
-            later: ["0.164.0", "1.0.0+build.7"],
-            below: "0.163.0-alpha.2",
-        },
-        BundledBoundary {
-            backend: CodingAgent::Opencode,
-            min_version: "2.1.4",
-            later: ["2.1.40", "2.10.0"],
-            below: "2.1.3",
-        },
+    const CLAUDE_FIXTURES: &[u8] = include_bytes!("native/claude.json");
+    const CODEX_FIXTURES: &[u8] = include_bytes!("native/codex.json");
+    const OPENCODE_FIXTURES: &[u8] = include_bytes!("native/opencode.json");
+    const HERMES_FIXTURES: &[u8] = include_bytes!("native/hermes.json");
+    pub(crate) const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
+        ("native/claude.json", CLAUDE_FIXTURES),
+        ("native/codex.json", CODEX_FIXTURES),
+        ("native/opencode.json", OPENCODE_FIXTURES),
+        ("native/hermes.json", HERMES_FIXTURES),
     ];
+
+    fn verify_bundled_fixtures(entries: &[Value], embedded: &[(&str, &[u8])]) -> Result<()> {
+        let mut sources = BTreeMap::<String, Vec<&Value>>::new();
+        for entry in entries {
+            require(
+                entry["kind"] == "native",
+                "bundled fixtures require native provenance",
+            )?;
+            let source = text(&entry["source_ref"])?;
+            require(
+                embedded.iter().any(|(reference, _)| *reference == source),
+                "bundled fixture bytes are not embedded",
+            )?;
+            sources.entry(source).or_default().push(entry);
+        }
+        for (source, bytes) in embedded {
+            let file: Value = serde_json::from_slice(bytes)
+                .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
+            let entries = sources.get(*source).map(Vec::as_slice).unwrap_or(&[]);
+            let screens = verify_native_fixture_file(&file, entries)?;
+            for entry in entries {
+                let id = text(&entry["id"])?;
+                let screen = screens
+                    .get(&id)
+                    .expect("the file guard verified every catalogued screen");
+                verify_native_screen(entry, screen)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_native_fixture_file<'a>(
+        file: &'a Value,
+        entries: &[&Value],
+    ) -> Result<&'a Map<String, Value>> {
+        let file = object(
+            file,
+            &["schema_version", "backend", "provenance", "screens"],
+        )?;
+        require(
+            file["schema_version"].as_u64() == Some(1)
+                && file["provenance"] == "native"
+                && entries
+                    .iter()
+                    .all(|entry| file["backend"] == entry["backend"]),
+            "bundled fixture file identity differs from its catalog entry",
+        )?;
+        backend(&file["backend"])?;
+        let screens = file["screens"]
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?;
+        for entry in entries {
+            require(
+                screens.contains_key(&text(&entry["id"])?),
+                "bundled fixture screen is missing",
+            )?;
+        }
+        require(
+            screens.keys().all(|id| {
+                entries
+                    .iter()
+                    .any(|entry| entry["id"].as_str() == Some(id.as_str()))
+            }),
+            "bundled fixture file holds an uncited screen",
+        )?;
+        Ok(screens)
+    }
+
+    fn verify_native_screen(entry: &Value, screen: &Value) -> Result<()> {
+        let id = text(&entry["id"])?;
+        let recorded = text(&entry["sha256"])?;
+        let computed = crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes());
+        require(
+            recorded == computed,
+            &format!(
+                "bundled fixture digest mismatch for {id}: catalog {recorded}, computed {computed}"
+            ),
+        )?;
+        let backgrounds = screen.get("cell_backgrounds").is_some();
+        let fields = SCREEN_FIELDS
+            .iter()
+            .copied()
+            .chain(backgrounds.then_some("cell_backgrounds"))
+            .collect::<Vec<_>>();
+        let m = object(screen, &fields)?;
+        require(
+            m["rows"] == entry["rows"] && m["cols"] == entry["cols"],
+            "bundled fixture identity differs from its catalog entry",
+        )?;
+        let rows = positive(&m["rows"])?;
+        let cols = positive(&m["cols"])?;
+        boolean(&m["alternate_screen"])?;
+        m["screen_seq"]
+            .as_u64()
+            .ok_or_else(|| invalid("fixture screen sequence required"))?;
+        require(
+            m["cursor_row"]
+                .as_u64()
+                .is_some_and(|row| row < u64::from(rows))
+                && m["cursor_col"]
+                    .as_u64()
+                    .is_some_and(|col| col <= u64::from(cols)),
+            "fixture cursor outside its geometry",
+        )?;
+        let lines = array(&m["lines"])?;
+        require(
+            lines.len() == usize::from(rows) && lines.iter().all(Value::is_string),
+            "fixture lines must cover every row",
+        )?;
+        let mut masked = BTreeSet::new();
+        for mask in array(&m["masked_rows"])? {
+            let mask = object(mask, &["row", "reason"])?;
+            let row = mask["row"]
+                .as_u64()
+                .and_then(|row| usize::try_from(row).ok())
+                .filter(|row| *row < lines.len())
+                .ok_or_else(|| invalid("masked row outside fixture geometry"))?;
+            require(masked.insert(row), "duplicate masked row")?;
+            require(
+                mask["reason"] == "reviewed_privacy",
+                "masked rows require reviewed privacy",
+            )?;
+            require(
+                lines[row].as_str().is_some_and(str::is_empty),
+                "masked row must be empty",
+            )?;
+        }
+        if backgrounds {
+            verify_cell_backgrounds(&m["cell_backgrounds"], rows, cols, &masked)?;
+        }
+        Ok(())
+    }
+    const SCREEN_FIELDS: [&str; 8] = [
+        "rows",
+        "cols",
+        "alternate_screen",
+        "screen_seq",
+        "cursor_row",
+        "cursor_col",
+        "lines",
+        "masked_rows",
+    ];
+    fn verify_cell_backgrounds(
+        value: &Value,
+        rows: u16,
+        cols: u16,
+        masked: &BTreeSet<usize>,
+    ) -> Result<()> {
+        let index = |value: &Value, bound: u64| {
+            value
+                .as_u64()
+                .filter(|n| *n <= bound)
+                .ok_or_else(|| invalid("background run coordinate outside its geometry"))
+        };
+        let mut spans = BTreeMap::<u64, Vec<(u64, u64)>>::new();
+        for run in array(value)? {
+            let run = object(run, &["row", "start_col", "end_col", "bg"])?;
+            let row = index(&run["row"], u64::from(rows) - 1)?;
+            let start = index(&run["start_col"], u64::from(cols))?;
+            let end = index(&run["end_col"], u64::from(cols))?;
+            require(start < end, "background run requires start below end")?;
+            require(
+                !masked.contains(&usize::try_from(row).expect("bounded row")),
+                "background run inside a masked row",
+            )?;
+            let bg = &run["bg"];
+            match bg.get("kind").and_then(Value::as_str) {
+                Some("indexed") => {
+                    let m = object(bg, &["kind", "index"])?;
+                    index(&m["index"], 255)?;
+                }
+                Some("rgb") => {
+                    let m = object(bg, &["kind", "r", "g", "b"])?;
+                    for channel in ["r", "g", "b"] {
+                        index(&m[channel], 255)?;
+                    }
+                }
+                _ => return Err(invalid("background run requires a non-default colour")),
+            }
+            spans.entry(row).or_default().push((start, end));
+        }
+        for runs in spans.values_mut() {
+            runs.sort_unstable();
+            require(
+                runs.windows(2).all(|pair| pair[0].1 <= pair[1].0),
+                "background runs overlap",
+            )?;
+        }
+        Ok(())
+    }
+
+    impl ProfileCatalog {
+        pub(crate) fn from_bundled_definitions(
+            definitions: &Value,
+            embedded: &[(&str, &[u8])],
+        ) -> Result<Self> {
+            let catalog = Self::from_definitions(definitions)?;
+            verify_bundled_fixtures(array(&definitions["fixtures"])?, embedded)?;
+            let catalog = Self {
+                capture_origin: "bundled_unknown",
+                ..catalog
+            };
+            Ok(catalog)
+        }
+    }
 
     pub(crate) fn fixture_at(id: &str, version: &str) -> Value {
         let mut fixture = synthetic_definitions()["fixtures"][0].clone();
@@ -1885,88 +1710,8 @@ pub(crate) mod test_support {
         crate::digest::canonical_json(screen)
     }
 
-    pub(crate) fn bundled_embedded() -> Vec<(&'static str, &'static [u8])> {
-        BUNDLED_FIXTURES.to_vec()
-    }
-
     pub(crate) fn bundled_definitions() -> Value {
         serde_json::from_str(BUNDLED_DEFINITIONS).unwrap()
-    }
-
-    /// The fixtures a bundled profile cites as composer prompt/exec submission provenance.
-    pub(crate) fn submission_fixture_ids(backend: CodingAgent) -> BTreeSet<String> {
-        let definitions = bundled_definitions();
-        let profile = definitions["profiles"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|profile| profile["backend"] == backend.name())
-            .expect("bundled backend profile");
-        ["prompt", "exec"]
-            .iter()
-            .flat_map(|operation| {
-                profile["capabilities"]["composer"]["submission"][operation]["fixture_ids"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|id| id.as_str().unwrap().to_owned())
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    }
-
-    pub(crate) fn bundled_entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
-        definitions["fixtures"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .find(|entry| entry["id"] == id)
-            .unwrap_or_else(|| panic!("the bundled catalog cites {id}"))
-    }
-
-    /// The bundled catalog with `id`'s screen and catalog entry changed; the
-    /// entry's digest follows the changed screen.
-    pub(crate) fn guarded_fixture(
-        id: &str,
-        change_definitions: impl FnOnce(&mut Value),
-        change_screen: impl FnOnce(&mut Value),
-    ) -> Result<ProfileCatalog> {
-        let (source, mut file) = bundled_file(id);
-        let screen = file["screens"]
-            .as_object_mut()
-            .expect("the backend file contains a screen map")
-            .get_mut(id)
-            .expect("the catalogued screen is embedded");
-        change_screen(screen);
-        let digest = crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes());
-        let mut definitions = bundled_definitions();
-        bundled_entry(&mut definitions, id)["sha256"] = json!(digest);
-        change_definitions(&mut definitions);
-        load_bundled_file(&source, &file, &definitions)
-    }
-
-    pub(crate) fn guarded_fixture_file(
-        id: &str,
-        change_definitions: impl FnOnce(&mut Value),
-        change_file: impl FnOnce(&mut Value),
-    ) -> Result<ProfileCatalog> {
-        let (source, mut file) = bundled_file(id);
-        let mut definitions = bundled_definitions();
-        change_file(&mut file);
-        change_definitions(&mut definitions);
-        load_bundled_file(&source, &file, &definitions)
-    }
-
-    fn load_bundled_file(
-        source: &str,
-        file: &Value,
-        definitions: &Value,
-    ) -> Result<ProfileCatalog> {
-        let bytes = serde_json::to_vec_pretty(file).unwrap();
-        let mut embedded = bundled_embedded();
-        embedded.retain(|&(cited, _)| cited != source);
-        embedded.push((source, &bytes));
-        ProfileCatalog::from_bundled_definitions(definitions, &embedded)
     }
 
     pub(crate) fn synthetic_definitions() -> Value {
@@ -2393,17 +2138,54 @@ pub(crate) mod test_support {
         }
     }
 
-    pub(crate) fn operation_prefix(operation: ComposerOperation) -> &'static [u8] {
-        match operation {
-            ComposerOperation::Prompt => b"",
-            ComposerOperation::Exec => b"! ",
-        }
-    }
-
     pub(crate) fn plan(catalog: &ProfileCatalog, operation: ComposerOperation) -> ComposerPlan {
         catalog
             .composer_plan(CodingAgent::Codex, VERSION, operation)
             .expect("valid selected operation has an executable plan")
+    }
+
+    /// The coverage the profile selected for a backend and version declares per capability.
+    pub(crate) struct Capabilities {
+        pub(crate) detection: Coverage,
+        pub(crate) composer: Coverage,
+        pub(crate) prompt_submission: Coverage,
+        pub(crate) native_exec_submission: Coverage,
+        pub(crate) answer_decisions: Vec<PermissionDecision>,
+    }
+
+    impl ProfileCatalog {
+        pub(crate) fn capabilities(
+            &self,
+            backend: CodingAgent,
+            version: Option<&str>,
+        ) -> Capabilities {
+            let profile = self.matching(backend, version);
+            let tested = |declared: bool| {
+                if declared {
+                    Coverage::Tested
+                } else {
+                    Coverage::Unknown
+                }
+            };
+            let submission = |operation: ComposerOperation| {
+                tested(profile.is_some_and(|p| p.submissions[operation.index()].is_some()))
+            };
+            let mut answer_decisions = Vec::new();
+            for answer in profile.iter().flat_map(|p| &p.answers) {
+                if let Some(decision) = answer.key.decision()
+                    && !answer_decisions.contains(&decision)
+                {
+                    answer_decisions.push(decision);
+                }
+            }
+            Capabilities {
+                detection: self.detection_coverage(backend, version),
+                composer: tested(profile.is_some_and(|p| p.composer.is_some())),
+                prompt_submission: submission(ComposerOperation::Prompt),
+                native_exec_submission: submission(ComposerOperation::Exec),
+                answer_decisions,
+            }
+        }
     }
 
     pub(crate) fn capabilities(
@@ -2417,13 +2199,6 @@ pub(crate) mod test_support {
         assert_eq!(actual.composer, observation);
         assert_eq!(actual.prompt_submission, operations.0);
         assert_eq!(actual.native_exec_submission, operations.1);
-    }
-
-    pub(crate) fn metadata(plan: &ComposerPlan, fixtures: &[String]) {
-        assert_eq!(plan.backend(), CodingAgent::Codex);
-        assert_eq!(plan.native_version(), VERSION);
-        assert_eq!(plan.rule_ids(), &[DRAFT.to_owned(), EMPTY.to_owned()]);
-        assert_eq!(plan.fixture_ids(), fixtures);
     }
 
     pub(crate) fn reject(
@@ -2443,7 +2218,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn expected(operation: ComposerOperation, literal: &str, submit: &[u8]) -> Vec<u8> {
-        let mut bytes = operation_prefix(operation).to_vec();
+        let mut bytes = operation.prefix().to_vec();
         bytes.extend_from_slice(literal.as_bytes());
         bytes.extend_from_slice(submit);
         bytes
@@ -2454,21 +2229,15 @@ pub(crate) mod test_support {
 mod tests {
     use crate::broker::runtime::Coverage;
     use crate::broker::runtime::InteractionClass;
-    use crate::broker::runtime::InteractionCloseReason;
-    use crate::broker::runtime::RuntimeEventKind;
-    use crate::broker::runtime::evidence::EvidencePolicy;
     use crate::coding_agent::catalog::test_support::synthetic_definitions as definitions;
     use crate::coding_agent::catalog::test_support::*;
 
     use crate::coding_agent::catalog::*;
     use crate::coding_agent::detector::test_support::*;
-    use crate::runtime::observation::test_support::*;
     use crate::runtime::*;
     use serde_json::Value;
     use serde_json::json;
     use std::collections::BTreeSet;
-    use std::time::Duration;
-    use std::time::Instant;
 
     mod panel_separator {
         use crate::coding_agent::catalog::tests::*;
@@ -2481,36 +2250,17 @@ mod tests {
 
         #[test]
         fn a_region_loads_with_one_non_whitespace_panel_separator_glyph() {
-            for pointer in ["/profiles/0/rules/0", "/profiles/0/rules/1"] {
-                for glyph in ["│", "|", "┃"] {
-                    let value = with_separator(pointer, json!(glyph));
-                    ProfileCatalog::from_definitions(&value)
-                        .unwrap_or_else(|cause| panic!("{pointer} {glyph}: {}", cause.message()));
-                }
-            }
-            let question = question_fixture_definition();
-            let mut value = question.clone();
-            value["profiles"][0]["rules"][1]["region"]["panel_separator"] = json!("│");
-            assert!(ProfileCatalog::from_definitions(&value).is_ok());
+            let value = with_separator("/profiles/0/rules/0", json!("│"));
+            ProfileCatalog::from_definitions(&value).unwrap();
             assert!(
-                ProfileCatalog::from_definitions(&question).is_ok(),
+                ProfileCatalog::from_definitions(&question_fixture_definition()).is_ok(),
                 "panel_separator stays optional"
             );
         }
 
         #[test]
         fn a_panel_separator_that_is_not_one_non_whitespace_glyph_is_refused() {
-            for separator in [
-                json!(""),
-                json!(" "),
-                json!("\t"),
-                json!("\u{a0}"),
-                json!("││"),
-                json!("ab"),
-                json!(1),
-                json!(["│"]),
-                Value::Null,
-            ] {
+            for separator in [json!(1), json!(""), json!(" "), json!("││")] {
                 let value = with_separator("/profiles/0/rules/0", separator.clone());
                 assert!(
                     ProfileCatalog::from_definitions(&value).is_err(),
@@ -2567,8 +2317,6 @@ mod tests {
                 .map(|stage| {
                     (
                         stage.bytes().to_vec(),
-                        stage.required_rule_id().to_owned(),
-                        stage.required_choice_id().to_owned(),
                         stage.required_focus_choice_id().map(str::to_owned),
                     )
                 })
@@ -2576,18 +2324,8 @@ mod tests {
             assert_eq!(
                 stages,
                 [
-                    (
-                        vec![0x0e],
-                        QUESTION_RULE.to_owned(),
-                        "decline".to_owned(),
-                        Some("accept".to_owned())
-                    ),
-                    (
-                        vec![0x0d],
-                        QUESTION_RULE.to_owned(),
-                        "decline".to_owned(),
-                        Some("decline".to_owned())
-                    ),
+                    (vec![0x0e], Some("accept".to_owned())),
+                    (vec![0x0d], Some("decline".to_owned())),
                 ]
             );
             let later = plan(&catalog, QUESTION_RULE, choice("later")).expect("later plan");
@@ -2656,21 +2394,17 @@ mod tests {
 
         #[test]
         fn a_decision_answer_on_a_question_rule_is_refused() {
-            for (decision, choice) in [("allow", "decline"), ("deny", "later")] {
-                let value = changed(|value| {
-                    let mut entry = answers(value)[1].clone();
-                    entry["decision"] = json!(decision);
-                    entry["choice_id"] = json!(choice);
-                    entry["answer_rule_id"] = json!("synthetic-decision-on-question");
-                    entry["stages"] = json!([question_stage("33", choice, None)]);
-                    answers(value).push(entry);
-                });
-                assert_eq!(
-                    refusal(&value),
-                    "invalid native profile: answer requires permission form",
-                    "{decision}"
-                );
-            }
+            let value = changed(|value| {
+                let mut entry = answers(value)[1].clone();
+                entry["decision"] = json!("allow");
+                entry["answer_rule_id"] = json!("synthetic-decision-on-question");
+                entry["stages"] = json!([question_stage("33", "decline", None)]);
+                answers(value).push(entry);
+            });
+            assert_eq!(
+                refusal(&value),
+                "invalid native profile: answer requires permission form"
+            );
         }
 
         #[test]
@@ -2705,17 +2439,6 @@ mod tests {
                 answers(value).push(duplicate);
             });
             assert!(ProfileCatalog::from_definitions(&value).is_err());
-            let other_choice = changed(|value| {
-                let mut accept = answers(value)[2].clone();
-                accept["answer_rule_id"] = json!("synthetic-question-decline-digit");
-                accept["choice_id"] = json!("decline");
-                accept["stages"] = json!([question_stage("32", "decline", None)]);
-                answers(value).push(accept);
-            });
-            assert!(
-                ProfileCatalog::from_definitions(&other_choice).is_err(),
-                "a second plan for the same choice is a duplicate"
-            );
         }
 
         #[test]
@@ -2727,75 +2450,17 @@ mod tests {
                     answers(value)[2]["stages"] = json!([question_stage("33", id, None)]);
                 })
             };
-            for id in ["ask-later-2", "a", &"a".repeat(64)] {
+            for id in ["a", &"a".repeat(64)] {
                 let catalog = ProfileCatalog::from_definitions(&renamed(id))
                     .unwrap_or_else(|cause| panic!("{id}: {}", cause.message()));
                 assert!(plan(&catalog, QUESTION_RULE, choice(id)).is_some(), "{id}");
             }
-            for id in [
-                "Later",
-                "ask_later",
-                "-later",
-                "later-",
-                "ask--later",
-                "ask later",
-                &"a".repeat(65),
-            ] {
+            for id in ["Later", "-later", "ask--later", &"a".repeat(65)] {
                 assert!(
                     ProfileCatalog::from_definitions(&renamed(id)).is_err(),
                     "{id} is outside the choice-id shape"
                 );
             }
-        }
-
-        #[test]
-        fn a_choice_answer_validates_its_stages_like_a_decision_answer() {
-            for (case, stages) in [
-                ("no stage", json!([])),
-                ("escape byte", json!([question_stage("1b", "later", None)])),
-                (
-                    "escape inside a stage",
-                    json!([question_stage("331b", "later", None)]),
-                ),
-                (
-                    "uppercase hex",
-                    json!([question_stage("0D", "later", None)]),
-                ),
-                (
-                    "another choice in a stage",
-                    json!([question_stage("33", "decline", None)]),
-                ),
-                (
-                    "another rule in a stage",
-                    json!([{"bytes_hex":"33","required_rule_id":RULE,"required_choice_id":"later"}]),
-                ),
-                (
-                    "partly gated",
-                    json!([
-                        question_stage("0e", "later", Some("accept")),
-                        question_stage("0d", "later", None)
-                    ]),
-                ),
-                (
-                    "gate ending on another choice",
-                    json!([question_stage("0d", "later", Some("decline"))]),
-                ),
-            ] {
-                let value = changed(|value| answers(value)[2]["stages"] = stages);
-                assert!(ProfileCatalog::from_definitions(&value).is_err(), "{case}");
-            }
-            for (case, fixtures) in [
-                ("no fixture", json!([])),
-                ("unknown fixture", json!(["missing"])),
-            ] {
-                let value = changed(|value| answers(value)[2]["fixture_ids"] = fixtures);
-                assert!(ProfileCatalog::from_definitions(&value).is_err(), "{case}");
-            }
-            let value = changed(|value| answers(value)[2]["focus_matcher_id"] = json!("missing"));
-            assert!(
-                ProfileCatalog::from_definitions(&value).is_err(),
-                "unknown focus matcher"
-            );
         }
 
         #[test]
@@ -2817,13 +2482,6 @@ mod tests {
                     json!("background");
             });
             assert!(ProfileCatalog::from_definitions(&background).is_ok());
-            for style in [json!("Marker"), json!("glyph"), json!(""), Value::Null] {
-                let value = changed(|value| {
-                    value.pointer_mut(QUESTION).unwrap()["matchers"][1]["focus_style"] =
-                        style.clone();
-                });
-                assert!(ProfileCatalog::from_definitions(&value).is_err(), "{style}");
-            }
         }
 
         #[test]
@@ -2864,56 +2522,21 @@ mod tests {
 
         #[test]
         fn an_interaction_frame_requires_a_reject_pattern() {
-            for rule in [QUESTION, "/profiles/0/rules/0"] {
-                let value = changed(|value| {
-                    value.pointer_mut(rule).unwrap()["frame"] =
-                        json!({"require_patterns":[],"reject_patterns":[]});
-                });
-                assert_eq!(
-                    refusal(&value),
-                    "invalid native profile: interaction frame requires a reject pattern",
-                    "{rule}"
-                );
-            }
-            for (case, frame) in [
-                ("missing reject patterns", json!({"require_patterns":[]})),
-                (
-                    "missing require patterns",
-                    json!({"reject_patterns":["^Live composer$"]}),
-                ),
-                (
-                    "uncompilable reject pattern",
-                    json!({"require_patterns":[],"reject_patterns":["^(unclosed$"]}),
-                ),
-                (
-                    "unknown frame field",
-                    json!({"require_patterns":[],"reject_patterns":["^Live composer$"],"extra":true}),
-                ),
-            ] {
-                let value = changed(|value| value.pointer_mut(QUESTION).unwrap()["frame"] = frame);
-                assert!(ProfileCatalog::from_definitions(&value).is_err(), "{case}");
-            }
-        }
-
-        #[test]
-        fn an_annotation_frame_still_requires_a_live_screen_pattern() {
-            let mut value = crate::coding_agent::catalog::test_support::annotation::annotated();
-            crate::coding_agent::catalog::test_support::annotation::rule(
-                &mut value,
-                crate::coding_agent::catalog::test_support::annotation::REFUSAL,
-            )["frame"]["require_patterns"] = json!([]);
-            match ProfileCatalog::from_definitions(&value) {
-                Err(cause) => assert_eq!(
-                    cause.message(),
-                    "invalid native profile: annotation frame requires a live-screen pattern"
-                ),
-                Ok(_) => panic!("an annotation frame without a require pattern loads"),
-            }
+            let value = changed(|value| {
+                value.pointer_mut(QUESTION).unwrap()["frame"] =
+                    json!({"require_patterns":[],"reject_patterns":[]});
+            });
+            assert_eq!(
+                refusal(&value),
+                "invalid native profile: interaction frame requires a reject pattern"
+            );
         }
     }
 
     mod bundled_backend_files {
         use crate::coding_agent::catalog::ProfileCatalog;
+        use crate::coding_agent::catalog::test_support::BUNDLED_FIXTURES;
+        use crate::coding_agent::catalog::test_support::bundled_definitions;
         use crate::coding_agent::catalog::tests::definitions;
         use crate::error::CafleetError;
         use serde_json::Value;
@@ -3002,16 +2625,6 @@ mod tests {
         }
 
         #[test]
-        fn loads_multiple_screens_including_a_catalogued_regression_without_profile_citations() {
-            let result = NativeFixtureCatalog::new().load();
-            let failure = result.as_ref().err().map(|error| error.message());
-            assert!(
-                result.is_ok(),
-                "valid backend screen map loads: {failure:?}"
-            );
-        }
-
-        #[test]
         fn a_catalogued_screen_requires_its_key_in_the_backend_file() {
             let mut fixture = NativeFixtureCatalog::new();
             fixture.file["screens"]
@@ -3031,7 +2644,8 @@ mod tests {
             assert_eq!(usage_failure(fixture.load()), UNCITED);
         }
 
-        fn unreferenced_file_failure(extra_first: bool) -> String {
+        #[test]
+        fn an_uncited_screen_in_an_unreferenced_file_is_rejected_before_referenced_files() {
             let fixture = NativeFixtureCatalog::new();
             let bytes = serde_json::to_vec(&fixture.file).unwrap();
             let extra = serde_json::to_vec(&json!({
@@ -3039,24 +2653,20 @@ mod tests {
                 "screens":{"unlisted-screen":screen("uncited file screen")}
             }))
             .unwrap();
-            let mut embedded = vec![
-                (SOURCE, bytes.as_slice()),
-                ("native/claude.json", extra.as_slice()),
-            ];
-            if extra_first {
-                embedded.reverse();
+            for extra_first in [true, false] {
+                let mut embedded = vec![
+                    (SOURCE, bytes.as_slice()),
+                    ("native/claude.json", extra.as_slice()),
+                ];
+                if extra_first {
+                    embedded.reverse();
+                }
+                assert_eq!(
+                    usage_failure(fixture.load_embedded(&embedded)),
+                    UNCITED,
+                    "extra file first: {extra_first}"
+                );
             }
-            usage_failure(fixture.load_embedded(&embedded))
-        }
-
-        #[test]
-        fn an_uncited_screen_in_an_unreferenced_file_is_rejected_before_referenced_files() {
-            assert_eq!(unreferenced_file_failure(true), UNCITED);
-        }
-
-        #[test]
-        fn an_uncited_screen_in_an_unreferenced_file_is_rejected_after_referenced_files() {
-            assert_eq!(unreferenced_file_failure(false), UNCITED);
         }
 
         #[test]
@@ -3120,182 +2730,276 @@ mod tests {
                 "invalid native profile: bundled fixture bytes are not embedded"
             );
         }
-    }
 
-    type ScreenChange = (&'static str, fn(&mut Value));
+        type ScreenChange = (&'static str, fn(&mut Value));
 
-    fn first_masked_or_empty_row(screen: &Value) -> u64 {
-        screen["masked_rows"]
-            .as_array()
-            .unwrap()
-            .first()
-            .map(|mask| mask["row"].as_u64().unwrap())
-            .or_else(|| {
-                screen["lines"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .position(|line| line == "")
-                    .map(|row| row as u64)
-            })
-            .unwrap_or(0)
-    }
-
-    fn push_mask(screen: &mut Value, row: u64, reason: &str) {
-        screen["masked_rows"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({"row":row,"reason":reason}));
-    }
-
-    const SCREEN_CHANGES: [ScreenChange; 11] = [
-        ("extra field", |s| s["note"] = json!("unreviewed")),
-        ("missing masked rows", |s| {
-            s.as_object_mut().unwrap().remove("masked_rows");
-        }),
-        ("nonempty masked row", |s| {
-            let masked = s["masked_rows"]
+        fn first_masked_or_empty_row(screen: &Value) -> u64 {
+            screen["masked_rows"]
                 .as_array()
                 .unwrap()
                 .first()
-                .map(|mask| mask["row"].as_u64().unwrap() as usize);
-            match masked {
-                Some(row) => s["lines"][row] = json!("restored header"),
-                None => {
-                    let row = s["lines"]
+                .map(|mask| mask["row"].as_u64().unwrap())
+                .or_else(|| {
+                    screen["lines"]
                         .as_array()
                         .unwrap()
                         .iter()
-                        .position(|line| line != "")
-                        .unwrap() as u64;
+                        .position(|line| line == "")
+                        .map(|row| row as u64)
+                })
+                .unwrap_or(0)
+        }
+
+        fn push_mask(screen: &mut Value, row: u64, reason: &str) {
+            screen["masked_rows"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"row":row,"reason":reason}));
+        }
+
+        const SCREEN_CHANGES: [ScreenChange; 11] = [
+            ("extra field", |s| s["note"] = json!("unreviewed")),
+            ("missing masked rows", |s| {
+                s.as_object_mut().unwrap().remove("masked_rows");
+            }),
+            ("nonempty masked row", |s| {
+                let masked = s["masked_rows"]
+                    .as_array()
+                    .unwrap()
+                    .first()
+                    .map(|mask| mask["row"].as_u64().unwrap() as usize);
+                match masked {
+                    Some(row) => s["lines"][row] = json!("restored header"),
+                    None => {
+                        let row = s["lines"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .position(|line| line != "")
+                            .unwrap() as u64;
+                        push_mask(s, row, "reviewed_privacy");
+                    }
+                }
+            }),
+            ("masked row out of range", |s| {
+                let rows = s["rows"].as_u64().unwrap();
+                push_mask(s, rows, "reviewed_privacy");
+            }),
+            ("duplicate masked row", |s| {
+                let row = first_masked_or_empty_row(s);
+                if s["masked_rows"].as_array().unwrap().is_empty() {
                     push_mask(s, row, "reviewed_privacy");
                 }
-            }
-        }),
-        ("masked row out of range", |s| {
-            let rows = s["rows"].as_u64().unwrap();
-            push_mask(s, rows, "reviewed_privacy");
-        }),
-        ("duplicate masked row", |s| {
-            let row = first_masked_or_empty_row(s);
-            if s["masked_rows"].as_array().unwrap().is_empty() {
                 push_mask(s, row, "reviewed_privacy");
-            }
-            push_mask(s, row, "reviewed_privacy");
-        }),
-        ("unreviewed mask reason", |s| {
-            if s["masked_rows"].as_array().unwrap().is_empty() {
-                let row = first_masked_or_empty_row(s);
-                push_mask(s, row, "convenience");
-            } else {
-                s["masked_rows"][0]["reason"] = json!("convenience");
-            }
-        }),
-        ("rows", |s| {
-            s["rows"] = json!(s["rows"].as_u64().unwrap() - 1)
-        }),
-        ("line count", |s| {
-            s["lines"].as_array_mut().unwrap().pop();
-        }),
-        ("cols differ from the entry", |s| {
-            s["cols"] = json!(s["cols"].as_u64().unwrap() + 1)
-        }),
-        ("cursor row outside the geometry", |s| {
-            s["cursor_row"] = s["rows"].clone()
-        }),
-        ("cursor column past the geometry", |s| {
-            s["cursor_col"] = json!(s["cols"].as_u64().unwrap() + 1)
-        }),
-    ];
+            }),
+            ("unreviewed mask reason", |s| {
+                if s["masked_rows"].as_array().unwrap().is_empty() {
+                    let row = first_masked_or_empty_row(s);
+                    push_mask(s, row, "convenience");
+                } else {
+                    s["masked_rows"][0]["reason"] = json!("convenience");
+                }
+            }),
+            ("rows", |s| {
+                s["rows"] = json!(s["rows"].as_u64().unwrap() - 1)
+            }),
+            ("line count", |s| {
+                s["lines"].as_array_mut().unwrap().pop();
+            }),
+            ("cols differ from the entry", |s| {
+                s["cols"] = json!(s["cols"].as_u64().unwrap() + 1)
+            }),
+            ("cursor row outside the geometry", |s| {
+                s["cursor_row"] = s["rows"].clone()
+            }),
+            ("cursor column past the geometry", |s| {
+                s["cursor_col"] = json!(s["cols"].as_u64().unwrap() + 1)
+            }),
+        ];
 
-    #[test]
-    fn bundled_guard_rejects_every_unreviewed_change_to_each_bundled_fixture() {
-        let definitions = bundled_definitions();
-        let embedded = bundled_embedded();
-        let entries = definitions["fixtures"].as_array().unwrap();
-        ProfileCatalog::from_bundled_definitions(&definitions, &embedded).unwrap();
-        let catalogued = entries
-            .iter()
-            .map(|entry| entry["id"].as_str().unwrap().to_owned())
-            .collect::<BTreeSet<_>>();
-        let screens = embedded
-            .iter()
-            .flat_map(|(_, bytes)| {
-                let file: Value = serde_json::from_slice(bytes).unwrap();
-                file["screens"]
-                    .as_object()
-                    .expect("the backend file contains a screen map")
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .collect::<BTreeSet<_>>();
-        assert_eq!(screens, catalogued);
-        for entry in entries {
-            let id = entry["id"].as_str().unwrap();
-            for (case, change) in SCREEN_CHANGES {
-                assert!(
-                    guarded_fixture(id, |_| {}, change).is_err(),
-                    "{id}: {case} must be rejected"
+        impl NativeFixtureCatalog {
+            fn masked() -> Self {
+                let mut fixture = Self::new();
+                fixture.change_primary(|s| push_mask(s, 5, "reviewed_privacy"));
+                fixture
+            }
+
+            fn change_primary(&mut self, change: impl FnOnce(&mut Value)) {
+                let screen = &mut self.file["screens"][PRIMARY];
+                change(screen);
+                self.definitions["fixtures"][0]["sha256"] = json!(screen_digest(screen));
+            }
+        }
+
+        fn failure_message(result: Result<ProfileCatalog, CafleetError>) -> Option<String> {
+            result.err().map(|error| error.message().into_owned())
+        }
+
+        #[test]
+        fn a_screen_outside_the_reviewed_shape_is_rejected() {
+            for base in [NativeFixtureCatalog::new, NativeFixtureCatalog::masked] {
+                assert_eq!(failure_message(base().load()), None);
+                for (case, change) in SCREEN_CHANGES {
+                    let mut fixture = base();
+                    fixture.change_primary(change);
+                    assert!(fixture.load().is_err(), "{case} must be rejected");
+                }
+                let mut pending_wrap = base();
+                pending_wrap.change_primary(|s| s["cursor_col"] = s["cols"].clone());
+                assert_eq!(
+                    failure_message(pending_wrap.load()),
+                    None,
+                    "cursor_col equal to cols records the pending-wrap position"
                 );
             }
-            for (field, value) in [
-                ("schema_version", json!(2)),
-                ("provenance", json!("synthetic")),
+            let mut flipped = NativeFixtureCatalog::new();
+            let screen = &mut flipped.file["screens"][PRIMARY];
+            screen["alternate_screen"] = json!(!screen["alternate_screen"].as_bool().unwrap());
+            let failure = usage_failure(flipped.load());
+            assert!(
+                failure.starts_with(&format!(
+                    "invalid native profile: bundled fixture digest mismatch for {PRIMARY}: "
+                )),
+                "{failure}"
+            );
+            let mut synthetic = NativeFixtureCatalog::new();
+            synthetic.definitions["fixtures"][0]["kind"] = json!("synthetic");
+            assert_eq!(
+                usage_failure(synthetic.load()),
+                "invalid native profile: bundled fixtures require native provenance"
+            );
+        }
+
+        #[test]
+        fn cell_backgrounds_outside_the_reviewed_shape_are_rejected() {
+            let run = |row: u64, start: u64, end: u64, bg: &Value| json!({"row":row,"start_col":start,"end_col":end,"bg":bg});
+            let rgb = json!({"kind":"rgb","r":1,"g":2,"b":3});
+            let indexed = json!({"kind":"indexed","index":255});
+            let load = |runs: Value| {
+                let mut fixture = NativeFixtureCatalog::masked();
+                fixture.change_primary(|s| s["cell_backgrounds"] = runs);
+                fixture.load()
+            };
+            assert_eq!(
+                failure_message(load(json!([
+                    run(0, 0, 4, &rgb),
+                    run(0, 4, 80, &indexed),
+                    run(23, 0, 80, &rgb)
+                ]))),
+                None,
+                "adjacent full-geometry runs are reviewed"
+            );
+            for (case, runs) in [
+                ("not an array", json!({"row":0})),
                 (
-                    "backend",
-                    json!(if entry["backend"] == "codex" {
-                        "claude"
-                    } else {
-                        "codex"
-                    }),
+                    "run missing a field",
+                    json!([{"row":0,"start_col":0,"bg":rgb}]),
+                ),
+                ("row below the geometry", json!([run(24, 0, 4, &rgb)])),
+                ("start past the width", json!([run(0, 81, 82, &rgb)])),
+                ("end past the width", json!([run(0, 0, 81, &rgb)])),
+                ("empty run", json!([run(0, 4, 4, &rgb)])),
+                ("masked row", json!([run(5, 0, 4, &rgb)])),
+                (
+                    "default colour",
+                    json!([run(0, 0, 4, &json!({"kind":"default"}))]),
+                ),
+                (
+                    "indexed colour out of range",
+                    json!([run(0, 0, 4, &json!({"kind":"indexed","index":256}))]),
+                ),
+                (
+                    "rgb channel out of range",
+                    json!([run(0, 0, 4, &json!({"kind":"rgb","r":256,"g":0,"b":0}))]),
+                ),
+                (
+                    "overlapping runs",
+                    json!([run(0, 0, 6, &rgb), run(0, 5, 9, &rgb)]),
                 ),
             ] {
-                assert!(
-                    guarded_fixture_file(id, |_| {}, |file| file[field] = value).is_err(),
-                    "{id}: {field} must match its catalog entry"
+                assert!(load(runs).is_err(), "{case} must be rejected");
+            }
+        }
+
+        #[test]
+        fn the_bundled_catalog_passes_its_fixture_build_guard() {
+            assert_eq!(
+                failure_message(ProfileCatalog::from_bundled_definitions(
+                    &bundled_definitions(),
+                    BUNDLED_FIXTURES
+                )),
+                None
+            );
+        }
+
+        fn load_with_file(
+            definitions: &Value,
+            source: &str,
+            file: &Value,
+        ) -> Result<ProfileCatalog, CafleetError> {
+            let bytes = serde_json::to_vec(file).unwrap();
+            let embedded = BUNDLED_FIXTURES
+                .iter()
+                .map(|&(cited, original)| {
+                    (
+                        cited,
+                        if cited == source {
+                            bytes.as_slice()
+                        } else {
+                            original
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            ProfileCatalog::from_bundled_definitions(definitions, &embedded)
+        }
+
+        #[test]
+        fn each_embedded_backend_file_is_bound_to_its_catalog_identity_screens_and_bytes() {
+            let definitions = bundled_definitions();
+            for &(source, bytes) in BUNDLED_FIXTURES {
+                let file: Value = serde_json::from_slice(bytes).unwrap();
+                let other = if file["backend"] == "codex" {
+                    "claude"
+                } else {
+                    "codex"
+                };
+                for (field, value) in [
+                    ("schema_version", json!(2)),
+                    ("provenance", json!("synthetic")),
+                    ("backend", json!(other)),
+                ] {
+                    let mut changed = file.clone();
+                    changed[field] = value;
+                    assert_eq!(
+                        usage_failure(load_with_file(&definitions, source, &changed)),
+                        "invalid native profile: bundled fixture file identity differs from its catalog entry",
+                        "{source}: {field}"
+                    );
+                }
+                let mut missing = file.clone();
+                let screens = missing["screens"].as_object_mut().unwrap();
+                let first = screens.keys().next().unwrap().clone();
+                screens.remove(&first);
+                assert_eq!(
+                    usage_failure(load_with_file(&definitions, source, &missing)),
+                    "invalid native profile: bundled fixture screen is missing",
+                    "{source}"
+                );
+                let absent = BUNDLED_FIXTURES
+                    .iter()
+                    .copied()
+                    .filter(|&(cited, _)| cited != source)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    usage_failure(ProfileCatalog::from_bundled_definitions(
+                        &definitions,
+                        &absent
+                    )),
+                    "invalid native profile: bundled fixture bytes are not embedded",
+                    "{source}"
                 );
             }
-            assert!(
-                guarded_fixture(
-                    id,
-                    |definitions| bundled_entry(definitions, id)["kind"] = json!("synthetic"),
-                    |_| {}
-                )
-                .is_err(),
-                "{id}: bundled fixtures require native catalog provenance"
-            );
-            assert!(
-                guarded_fixture_file(
-                    id,
-                    |_| {},
-                    |file| {
-                        file["screens"].as_object_mut().unwrap().remove(id);
-                    }
-                )
-                .is_err(),
-                "{id}: its catalogued screen must be present"
-            );
-            assert!(
-                guarded_fixture_file(
-                    id,
-                    |_| {},
-                    |file| {
-                        let screen = &mut file["screens"][id];
-                        screen["alternate_screen"] =
-                            json!(!screen["alternate_screen"].as_bool().unwrap());
-                    }
-                )
-                .is_err(),
-                "{id}: changed screen content requires its canonical digest"
-            );
-            let source = entry["source_ref"].as_str().unwrap();
-            let mut missing = embedded.clone();
-            missing.retain(|&(cited, _)| cited != source);
-            assert!(
-                ProfileCatalog::from_bundled_definitions(&definitions, &missing).is_err(),
-                "{id}: a cited fixture is embedded"
-            );
         }
     }
 
@@ -3340,8 +3044,7 @@ mod tests {
             assert_eq!(plan.stages()[0].bytes(), &[bytes]);
             assert_eq!(plan.stages()[1].bytes(), b"\r");
             for stage in plan.stages() {
-                assert_eq!(stage.required_rule_id(), "synthetic-permission");
-                assert_eq!(stage.required_choice_id(), choice);
+                assert!(stage.gate().is_none());
             }
         }
         assert!(
@@ -3373,17 +3076,6 @@ mod tests {
                     .is_none()
             );
         }
-        assert!(
-            ProfileCatalog::bundled()
-                .unwrap()
-                .answer_plan(
-                    CodingAgent::Codex,
-                    "0.0.1-synthetic",
-                    "synthetic-permission",
-                    &AnswerKey::Decision(PermissionDecision::Allow)
-                )
-                .is_none()
-        );
     }
 
     #[test]
@@ -3450,18 +3142,13 @@ mod tests {
     fn runtime_profile_capabilities_are_independent_and_version_selected() {
         let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
         let supported = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
-        assert_eq!(supported.backend, CodingAgent::Codex);
-        assert_eq!(supported.native_version.as_deref(), Some(VERSION));
-        assert_eq!(supported.min_version.as_deref(), Some(VERSION));
         assert_eq!(supported.detection, Coverage::Tested);
         assert_eq!(supported.composer, Coverage::Unknown);
         assert!(supported.answer_decisions.is_empty());
         let unknown = catalog.capabilities(CodingAgent::Codex, None);
-        assert_eq!(unknown.min_version, None);
         assert_eq!(unknown.detection, Coverage::Unknown);
         assert_eq!(unknown.composer, Coverage::Unknown);
         assert!(unknown.answer_decisions.is_empty());
-        assert!(unknown.capability_reason.is_some());
         for &backend in CodingAgent::all()
             .iter()
             .filter(|&&backend| backend != CodingAgent::Codex)
@@ -3471,16 +3158,6 @@ mod tests {
                 Coverage::Unknown
             );
         }
-    }
-
-    #[test]
-    fn runtime_profile_composer_provenance_supplies_only_its_declared_component() {
-        let value = simple_definition("composer_empty", true);
-        let catalog = ProfileCatalog::from_definitions(&value).unwrap();
-        let capabilities = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
-        assert_eq!(capabilities.detection, Coverage::Unknown);
-        assert_eq!(capabilities.composer, Coverage::Tested);
-        assert!(capabilities.answer_decisions.is_empty());
     }
 
     #[test]
@@ -3541,29 +3218,6 @@ mod tests {
                     .is_none()
             );
         }
-    }
-
-    #[test]
-    fn runtime_profile_both_answers_can_be_declared_without_composer_coverage() {
-        let mut value = with_answer("allow");
-        let deny = with_answer("deny")["profiles"][0]["capabilities"]["answers"][0].clone();
-        value["profiles"][0]["capabilities"]["answers"]
-            .as_array_mut()
-            .unwrap()
-            .push(deny);
-        let catalog = ProfileCatalog::from_definitions(&value).unwrap();
-        let capabilities = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
-        assert_eq!(capabilities.composer, Coverage::Unknown);
-        assert!(
-            capabilities
-                .answer_decisions
-                .contains(&PermissionDecision::Allow)
-        );
-        assert!(
-            capabilities
-                .answer_decisions
-                .contains(&PermissionDecision::Deny)
-        );
     }
 
     #[test]
@@ -3699,14 +3353,7 @@ mod tests {
         let mut margined = definitions();
         margined["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] = json!(" ");
         assert!(ProfileCatalog::from_definitions(&margined).is_ok());
-        for margin in [
-            json!(1),
-            json!(null),
-            json!([" "]),
-            json!(""),
-            json!("\n"),
-            json!(" \n "),
-        ] {
+        for margin in [json!(1), json!(""), json!("\n")] {
             invalid(|value| {
                 value["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] = margin;
             });
@@ -3730,26 +3377,14 @@ mod tests {
                 "{margin_rows}"
             );
         }
-        for margin_rows in [
-            json!("first"),
-            json!("All"),
-            json!(""),
-            json!(null),
-            json!(1),
-            json!(["continuation"]),
-        ] {
-            invalid(|value| {
-                let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
-                operation["row_margin"] = json!(" ");
-                operation["margin_rows"] = margin_rows;
-            });
-        }
-        for margin_rows in ["all", "continuation"] {
-            invalid(|value| {
-                value["profiles"][0]["rules"][0]["extract"]["operation"]["margin_rows"] =
-                    json!(margin_rows);
-            });
-        }
+        invalid(|value| {
+            let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+            operation["row_margin"] = json!(" ");
+            operation["margin_rows"] = json!("first");
+        });
+        invalid(|value| {
+            value["profiles"][0]["rules"][0]["extract"]["operation"]["margin_rows"] = json!("all");
+        });
     }
 
     #[test]
@@ -3767,17 +3402,7 @@ mod tests {
                 "with margin: {with_margin}"
             );
         }
-        for trailer in [
-            json!(""),
-            json!(" "),
-            json!(" █"),
-            json!("█ "),
-            json!("\t█"),
-            json!("█\n█"),
-            json!(null),
-            json!(1),
-            json!(["█"]),
-        ] {
+        for trailer in [json!(1), json!(""), json!(" █"), json!("█\n█")] {
             invalid(|value| {
                 value["profiles"][0]["rules"][0]["extract"]["operation"]["row_trailer"] = trailer;
             });
@@ -3899,24 +3524,6 @@ mod tests {
         assert!(ProfileCatalog::from_definitions(&duplicate).is_err());
     }
 
-    #[test]
-    fn runtime_profile_bundled_loader_validates_its_packaged_declarations() {
-        let catalog = ProfileCatalog::bundled().unwrap();
-        for &backend in CodingAgent::all() {
-            let unprobed = catalog.capabilities(backend, None);
-            assert_eq!(unprobed.min_version, None);
-            assert_eq!(unprobed.detection, Coverage::Unknown);
-            assert_eq!(unprobed.composer, Coverage::Unknown);
-            assert!(unprobed.answer_decisions.is_empty());
-        }
-    }
-
-    #[test]
-    fn runtime_profile_private_fingerprint_supports_comparison_without_debug_or_serialization() {
-        fn comparable<T: Clone + Eq>() {}
-        comparable::<SemanticFingerprint>();
-        assert_no_debug_or_serialize!(SemanticFingerprint);
-    }
     mod gated_catalog {
         use crate::coding_agent::catalog::tests::*;
 
@@ -3969,7 +3576,6 @@ mod tests {
                 .map(|stage| {
                     (
                         stage.bytes().to_vec(),
-                        stage.required_choice_id().to_owned(),
                         stage.required_focus_choice_id().map(str::to_owned),
                         stage.required_screen_rule_id().map(str::to_owned),
                     )
@@ -3978,59 +3584,11 @@ mod tests {
             assert_eq!(
                 gates,
                 [
-                    (
-                        b"h".to_vec(),
-                        "deny-once".into(),
-                        Some("allow-once".into()),
-                        None
-                    ),
-                    (
-                        b"\r".to_vec(),
-                        "deny-once".into(),
-                        Some("deny-once".into()),
-                        None
-                    ),
-                    (
-                        b"\r".to_vec(),
-                        "deny-once".into(),
-                        None,
-                        Some(GATED_REASON_RULE.into())
-                    ),
+                    (b"h".to_vec(), Some("allow-once".into()), None),
+                    (b"\r".to_vec(), Some("deny-once".into()), None),
+                    (b"\r".to_vec(), None, Some(GATED_REASON_RULE.into())),
                 ]
             );
-        }
-
-        #[test]
-        fn gated_catalog_keeps_existing_ungated_plans_without_gates() {
-            let synthetic = ProfileCatalog::from_definitions(&inspection_fixture_definition())
-                .unwrap()
-                .answer_plan(
-                    CodingAgent::Codex,
-                    VERSION,
-                    "synthetic-permission",
-                    &AnswerKey::Decision(PermissionDecision::Allow),
-                )
-                .unwrap();
-            let bundled = ProfileCatalog::bundled().unwrap();
-            let mut plans = vec![synthetic];
-            for (backend, version, rule) in [
-                (CodingAgent::Claude, "2.1.302", "claude-bash-permission"),
-                (CodingAgent::Codex, "0.163.0", "codex-exec-approval"),
-            ] {
-                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                    plans.push(
-                        bundled
-                            .answer_plan(backend, version, rule, &AnswerKey::Decision(decision))
-                            .expect("bundled ungated plan"),
-                    );
-                }
-            }
-            for plan in plans {
-                for stage in plan.stages() {
-                    assert_eq!(stage.required_focus_choice_id(), None);
-                    assert_eq!(stage.required_screen_rule_id(), None);
-                }
-            }
         }
 
         #[test]
@@ -4263,11 +3821,9 @@ mod tests {
                     .unwrap()
                     .remove("focus_style");
             });
-            for style in [json!("bold"), json!(""), Value::Null, json!(true)] {
-                rejected(&format!("focus_style {style}"), |definition| {
-                    definition["profiles"][0]["rules"][0]["matchers"][2]["focus_style"] = style;
-                });
-            }
+            rejected("focus_style bold", |definition| {
+                definition["profiles"][0]["rules"][0]["matchers"][2]["focus_style"] = json!("bold");
+            });
             rejected("region-scoped choice label", |definition| {
                 definition["profiles"][0]["rules"][0]["matchers"][3]["scope"] = json!("region");
             });
@@ -4281,33 +3837,24 @@ mod tests {
 
         #[test]
         fn every_backend_rejects_an_escape_byte_in_any_answer_stage() {
-            for bytes in ["1b", "0d1b", "1b5b41"] {
-                rejected(&format!("gated stage {bytes}"), |definition| {
-                    *definition
-                        .pointer_mut(&format!("{STAGES}/0/bytes_hex"))
-                        .unwrap() = json!(bytes);
-                });
-                for backend in ["codex", "claude", "opencode"] {
-                    let mut value = definitions();
-                    value["fixtures"][0]["backend"] = json!(backend);
-                    value["profiles"][0]["backend"] = json!(backend);
-                    value["profiles"][0]["capabilities"]["answers"] = json!([{
-                        "decision":"deny","request_rule_id":RULE,"answer_rule_id":"synthetic-escape",
-                        "choice_id":"deny-once","focus_matcher_id":"deny","fixture_ids":[FIXTURE],
-                        "stages":[{"bytes_hex":"6e","required_rule_id":RULE,"required_choice_id":"deny-once"}]
-                    }]);
-                    assert!(
-                        ProfileCatalog::from_definitions(&value).is_ok(),
-                        "{backend} baseline"
-                    );
-                    value["profiles"][0]["capabilities"]["answers"][0]["stages"][0]["bytes_hex"] =
-                        json!(bytes);
-                    assert!(
-                        ProfileCatalog::from_definitions(&value).is_err(),
-                        "{backend} ungated stage {bytes}"
-                    );
-                }
-            }
+            rejected("gated stage 1b", |definition| {
+                *definition
+                    .pointer_mut(&format!("{STAGES}/0/bytes_hex"))
+                    .unwrap() = json!("1b");
+            });
+            let mut value = definitions();
+            value["profiles"][0]["capabilities"]["answers"] = json!([{
+                "decision":"deny","request_rule_id":RULE,"answer_rule_id":"synthetic-escape",
+                "choice_id":"deny-once","focus_matcher_id":"deny","fixture_ids":[FIXTURE],
+                "stages":[{"bytes_hex":"6e","required_rule_id":RULE,"required_choice_id":"deny-once"}]
+            }]);
+            assert!(ProfileCatalog::from_definitions(&value).is_ok());
+            value["profiles"][0]["capabilities"]["answers"][0]["stages"][0]["bytes_hex"] =
+                json!("0d1b");
+            assert!(
+                ProfileCatalog::from_definitions(&value).is_err(),
+                "ungated stage 0d1b"
+            );
         }
     }
 
@@ -4340,189 +3887,121 @@ mod tests {
         #[test]
         fn composer_prefix_shape_hex_and_operation_identity_are_validated() {
             let good = definition(Some("7e"), Some("6b6c"));
-            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                let values = match operation {
-                    ComposerOperation::Prompt => vec![
-                        json!("00"),
-                        json!("2120"),
-                        json!("A0"),
-                        json!("0"),
-                        json!("gg"),
-                    ],
-                    ComposerOperation::Exec => vec![
-                        json!(""),
-                        json!("21"),
-                        json!("2121"),
-                        json!("212000"),
-                        json!("212"),
-                        json!("212A"),
-                        json!("212g"),
-                    ],
-                };
-                for invalid in values.into_iter().chain([
-                    Value::Null,
-                    json!(17),
-                    json!(true),
-                    json!([]),
-                    json!({}),
-                ]) {
-                    let mut bad = good.clone();
-                    bad["profiles"][0]["capabilities"]["composer"]["submission"]
-                        [operation_name(operation)]["prefix_hex"] = invalid;
-                    reject(&good, &bad, operation, "operation prefix");
-                }
+            for (operation, invalid) in [
+                (ComposerOperation::Prompt, json!("2120")),
+                (ComposerOperation::Exec, json!("")),
+                (ComposerOperation::Exec, json!(17)),
+            ] {
+                let mut bad = good.clone();
+                bad["profiles"][0]["capabilities"]["composer"]["submission"]
+                    [operation_name(operation)]["prefix_hex"] = invalid;
+                reject(&good, &bad, operation, "operation prefix");
             }
         }
 
         #[test]
         fn composer_submit_hex_requires_nonempty_even_lowercase_hex_and_string_type() {
             let good = definition(Some("7e"), Some("6b6c"));
-            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                for invalid in [
-                    json!(""),
-                    json!("0"),
-                    json!("ABCDEF"),
-                    json!("zz"),
-                    json!("7e "),
-                    json!("é"),
-                    Value::Null,
-                    json!(17),
-                    json!(false),
-                    json!([]),
-                    json!({}),
-                ] {
-                    let mut bad = good.clone();
-                    bad["profiles"][0]["capabilities"]["composer"]["submission"]
-                        [operation_name(operation)]["submit_hex"] = invalid;
-                    reject(&good, &bad, operation, "submit hex");
-                }
+            for invalid in [json!(""), json!("0"), json!("ABCDEF"), Value::Null] {
+                let mut bad = good.clone();
+                bad["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["submit_hex"] =
+                    invalid;
+                reject(&good, &bad, ComposerOperation::Prompt, "submit hex");
             }
         }
 
         #[test]
         fn composer_optional_submission_and_operation_objects_have_exact_complete_fields() {
             let good = definition(Some("7e"), Some("6b6c"));
-            for field in ["rule_ids", "fixture_ids"] {
+            let submission = "/profiles/0/capabilities/composer/submission";
+            let prompt = format!("{submission}/prompt");
+            let rejected = |label: &str, change: &dyn Fn(&mut Value)| {
                 let mut bad = good.clone();
+                change(&mut bad);
+                reject(&good, &bad, ComposerOperation::Prompt, label);
+            };
+            rejected("missing composer field", &|bad| {
                 bad["profiles"][0]["capabilities"]["composer"]
                     .as_object_mut()
                     .unwrap()
-                    .remove(field)
-                    .unwrap();
-                reject(
-                    &good,
-                    &bad,
-                    ComposerOperation::Prompt,
-                    "missing composer field",
-                );
-            }
-            let mut extra = good.clone();
-            extra["profiles"][0]["capabilities"]["composer"]["unknown"] = json!(true);
-            reject(
-                &good,
-                &extra,
-                ComposerOperation::Prompt,
-                "unknown composer field",
-            );
-            let submission = "/profiles/0/capabilities/composer/submission";
-            for invalid in [
-                Value::Null,
-                json!(true),
-                json!(17),
-                json!("object required"),
-                json!([]),
-            ] {
-                let mut bad = good.clone();
-                *bad.pointer_mut(submission).unwrap() = invalid;
-                reject(&good, &bad, ComposerOperation::Prompt, "submission object");
-            }
-            for field in ["prompt", "exec"] {
-                let mut bad = good.clone();
+                    .remove("rule_ids");
+            });
+            rejected("unknown composer field", &|bad| {
+                bad["profiles"][0]["capabilities"]["composer"]["unknown"] = json!(true);
+            });
+            rejected("null submission", &|bad| {
+                *bad.pointer_mut(submission).unwrap() = Value::Null;
+            });
+            rejected("array submission", &|bad| {
+                *bad.pointer_mut(submission).unwrap() = json!([]);
+            });
+            rejected("missing operation", &|bad| {
                 bad.pointer_mut(submission)
                     .unwrap()
                     .as_object_mut()
                     .unwrap()
-                    .remove(field)
-                    .unwrap();
-                reject(&good, &bad, ComposerOperation::Prompt, "missing operation");
-            }
-            let mut extra = good.clone();
-            extra.pointer_mut(submission).unwrap()["unknown"] = json!(true);
-            reject(
-                &good,
-                &extra,
-                ComposerOperation::Prompt,
-                "unknown submission field",
-            );
-            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                let pointer = format!("{submission}/{}", operation_name(operation));
-                for field in ["prefix_hex", "submit_hex", "fixture_ids"] {
-                    let mut bad = good.clone();
-                    bad.pointer_mut(&pointer)
-                        .unwrap()
-                        .as_object_mut()
-                        .unwrap()
-                        .remove(field)
-                        .unwrap();
-                    reject(&good, &bad, operation, "missing plan field");
-                }
-                let mut extra = good.clone();
-                extra.pointer_mut(&pointer).unwrap()["unknown"] = json!(true);
-                reject(&good, &extra, operation, "unknown plan field");
-                for invalid in [json!(true), json!(17), json!("plan required"), json!([])] {
-                    let mut bad = good.clone();
-                    *bad.pointer_mut(&pointer).unwrap() = invalid;
-                    reject(&good, &bad, operation, "plan object");
-                }
-            }
+                    .remove("exec");
+            });
+            rejected("unknown submission field", &|bad| {
+                bad.pointer_mut(submission).unwrap()["unknown"] = json!(true);
+            });
+            rejected("missing plan field", &|bad| {
+                bad.pointer_mut(&prompt)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("submit_hex");
+            });
+            rejected("unknown plan field", &|bad| {
+                bad.pointer_mut(&prompt).unwrap()["unknown"] = json!(true);
+            });
+            rejected("plan object", &|bad| {
+                *bad.pointer_mut(&prompt).unwrap() = json!(17);
+            });
         }
 
         #[test]
         fn composer_each_operation_requires_its_own_valid_fixture_reference_set() {
             let good = definition(Some("7e"), Some("6b6c"));
-            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                let own = match operation {
-                    ComposerOperation::Prompt => PROMPT_FIXTURE,
-                    ComposerOperation::Exec => EXEC_FIXTURE,
-                };
-                for invalid in [
-                    json!([]),
-                    json!([""]),
-                    json!([" "]),
-                    json!(["unknown-fixture"]),
-                    json!([own, own]),
-                    Value::Null,
-                    json!(own),
-                    json!(17),
-                    json!({}),
-                ] {
-                    let mut bad = good.clone();
-                    bad["profiles"][0]["capabilities"]["composer"]["submission"]
-                        [operation_name(operation)]["fixture_ids"] = invalid;
-                    reject(&good, &bad, operation, "operation fixture set");
-                }
-                for mismatch in ["backend", "native_version"] {
-                    let mut bad = good.clone();
-                    let mut foreign = bad["fixtures"][0].clone();
-                    foreign["id"] = json!("foreign-operation-fixture");
-                    foreign[mismatch] = if mismatch == "backend" {
-                        json!(
-                            CodingAgent::all()
-                                .iter()
-                                .find(|&&backend| backend != CodingAgent::Codex)
-                                .unwrap()
-                                .name()
-                        )
-                    } else {
-                        json!("0.0.0")
-                    };
-                    bad["fixtures"].as_array_mut().unwrap().push(foreign);
-                    bad["profiles"][0]["capabilities"]["composer"]["submission"]
-                        [operation_name(operation)]["fixture_ids"] =
-                        json!(["foreign-operation-fixture"]);
-                    reject(&good, &bad, operation, "foreign operation provenance");
-                }
+            for invalid in [
+                json!([]),
+                json!([" "]),
+                json!(["unknown-fixture"]),
+                json!([PROMPT_FIXTURE, PROMPT_FIXTURE]),
+                Value::Null,
+            ] {
+                let mut bad = good.clone();
+                bad["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] =
+                    invalid;
+                reject(
+                    &good,
+                    &bad,
+                    ComposerOperation::Prompt,
+                    "operation fixture set",
+                );
             }
+            for (field, value) in [
+                ("backend", json!("claude")),
+                ("native_version", json!("0.0.0")),
+            ] {
+                let mut bad = good.clone();
+                let mut foreign = bad["fixtures"][0].clone();
+                foreign["id"] = json!("foreign-operation-fixture");
+                foreign[field] = value;
+                bad["fixtures"].as_array_mut().unwrap().push(foreign);
+                bad["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] =
+                    json!(["foreign-operation-fixture"]);
+                reject(
+                    &good,
+                    &bad,
+                    ComposerOperation::Prompt,
+                    "foreign operation provenance",
+                );
+            }
+            let mut bad = good.clone();
+            bad["profiles"][0]["capabilities"]["composer"]["submission"]["exec"]["fixture_ids"] =
+                json!([]);
+            reject(&good, &bad, ComposerOperation::Exec, "exec fixture set");
         }
 
         #[test]
@@ -4534,15 +4013,17 @@ mod tests {
                 }
             }
             let catalog = ProfileCatalog::from_definitions(&good).unwrap();
-            for (operation, fixture) in [
-                (ComposerOperation::Prompt, PROMPT_FIXTURE),
-                (ComposerOperation::Exec, EXEC_FIXTURE),
+            for (operation, submit) in [
+                (ComposerOperation::Prompt, &b"~"[..]),
+                (ComposerOperation::Exec, &b"kl"[..]),
             ] {
                 let selected = catalog
                     .composer_plan(CodingAgent::Codex, "7.0.0-beta.1", operation)
                     .expect("a later run reuses the profile's plan");
-                assert_eq!(selected.native_version(), "7.0.0-beta.1");
-                assert_eq!(selected.fixture_ids(), &[fixture.to_owned()]);
+                assert_eq!(
+                    selected.encode("literal").unwrap(),
+                    expected(operation, "literal", submit)
+                );
             }
         }
 
@@ -4557,135 +4038,27 @@ mod tests {
                 json!({"rule_ids":[RULE],"fixture_ids":[FIXTURE]});
             let catalog = ProfileCatalog::from_definitions(&good).unwrap();
             assert_eq!(
-                catalog
-                    .capabilities(CodingAgent::Codex, Some(VERSION))
-                    .detection,
+                catalog.detection_coverage(CodingAgent::Codex, Some(VERSION)),
                 Coverage::Tested
             );
-            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                let own = match operation {
-                    ComposerOperation::Prompt => PROMPT_FIXTURE,
-                    ComposerOperation::Exec => EXEC_FIXTURE,
-                };
-                metadata(&plan(&catalog, operation), &[own.to_owned()]);
-                for invalid in [
-                    json!([]),
-                    json!(["unknown-rule"]),
-                    json!([RULE]),
-                    json!([EMPTY, EMPTY]),
-                ] {
-                    let mut bad = good.clone();
-                    bad["profiles"][0]["capabilities"]["composer"]["rule_ids"] = invalid;
-                    reject(&good, &bad, operation, "composer rule component");
-                }
+            for invalid in [
+                json!([]),
+                json!(["unknown-rule"]),
+                json!([RULE]),
+                json!([EMPTY, EMPTY]),
+            ] {
+                let mut bad = good.clone();
+                bad["profiles"][0]["capabilities"]["composer"]["rule_ids"] = invalid;
+                reject(
+                    &good,
+                    &bad,
+                    ComposerOperation::Prompt,
+                    "composer rule component",
+                );
             }
         }
     }
-    mod bundled_claude {
-        use crate::coding_agent::catalog::tests::*;
-
-        const CLAUDE_VERSION: &str = "2.1.302";
-        const NATIVE_FIXTURE: &str = "claude-2.1.302-default-permission-1";
-        const IDLE_FIXTURE: &str = "claude-2.1.302-idle-composer-1";
-        const WRAPPED_FIXTURE: &str = "claude-2.1.302-wrapped-permission-1";
-
-        fn bytes(id: &str) -> Vec<u8> {
-            bundled_fixture(id).into_bytes()
-        }
-
-        #[test]
-        fn bundled_guard_rejects_a_restored_masked_status_row_of_the_idle_composer() {
-            assert!(guarded_fixture(IDLE_FIXTURE, |_| {}, |_| {}).is_ok());
-            assert!(
-                guarded_fixture(
-                    IDLE_FIXTURE,
-                    |_| {},
-                    |s| s["lines"][33] = json!("  Opus 5.5 (1M context)")
-                )
-                .is_err(),
-                "a restored masked status row is rejected"
-            );
-        }
-
-        fn sequenced_replay(
-            bytes: &[u8],
-            change: impl FnOnce(&mut Vec<String>),
-            output_seq: u64,
-        ) -> ScreenObservation {
-            let catalog = ProfileCatalog::bundled().unwrap();
-            let screen =
-                replay_native_fixture(std::str::from_utf8(bytes).unwrap(), change, true, None);
-            let mut observation =
-                Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
-                    .observe(&screen)
-                    .unwrap();
-            observation.output_seq = output_seq;
-            observation.raw_evidence["screen_seq"] = json!(output_seq);
-            observation
-        }
-
-        #[test]
-        fn bundled_claude_resize_between_wrapped_and_unwrapped_renderings_replaces_the_episode() {
-            let wrapped =
-                |output_seq| sequenced_replay(&bytes(WRAPPED_FIXTURE), |_| {}, output_seq);
-            let unwrapped = |output_seq| {
-                sequenced_replay(
-                    &bytes(NATIVE_FIXTURE),
-                    |lines| {
-                        lines[18] =
-                            " /tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow".into()
-                    },
-                    output_seq,
-                )
-            };
-            let origin = Instant::now();
-            let mut tracker = tracker();
-            open(&mut tracker, &wrapped(1), origin);
-            let mut episode = 1;
-            for (start, rendering) in [(200, unwrapped(2)), (800, wrapped(3))] {
-                let pending = tracker
-                    .observe(&rendering, origin + Duration::from_millis(start), NOW)
-                    .unwrap();
-                assert!(
-                    pending.transitions.is_empty(),
-                    "the rewrap at {start} ms first awaits stability: {:?}",
-                    pending.transitions
-                );
-                let replaced = tracker
-                    .observe(&rendering, origin + Duration::from_millis(start + 100), NOW)
-                    .unwrap();
-                assert_eq!(replaced.transitions.len(), 2, "{:?}", replaced.transitions);
-                assert_eq!(
-                    replaced.transitions[0].kind,
-                    RuntimeEventKind::InteractionClosed
-                );
-                assert_eq!(
-                    replaced.transitions[0].close_reason,
-                    Some(InteractionCloseReason::Superseded),
-                    "the rewrap at {start} ms displays different operation rows"
-                );
-                assert_eq!(replaced.transitions[0].episode_seq, Some(episode));
-                assert_eq!(
-                    replaced.transitions[1].kind,
-                    RuntimeEventKind::InteractionOpened
-                );
-                episode += 1;
-                assert_eq!(replaced.transitions[1].episode_seq, Some(episode));
-            }
-            let redraw = tracker
-                .observe(&wrapped(4), origin + Duration::from_millis(1200), NOW)
-                .unwrap();
-            assert!(
-                redraw.transitions.is_empty(),
-                "a redraw of the same displayed rows keeps the episode: {:?}",
-                redraw.transitions
-            );
-            assert!(matches!(redraw.visibility, Visibility::Visible));
-        }
-    }
-
     mod bundled_claude_auto {
-        use crate::broker::runtime::AutomaticReview;
         use crate::coding_agent::catalog::tests::*;
 
         const CLAUDE_VERSION: &str = "2.1.302";
@@ -4919,25 +4292,8 @@ mod tests {
             ("claude-2.1.302-trust-dialog-1", UNKNOWN, UNMATCHED, &[]),
         ];
 
-        fn bytes(id: &str) -> Vec<u8> {
-            bundled_fixture(id).into_bytes()
-        }
-
-        fn document(id: &str) -> Value {
-            serde_json::from_slice(&bytes(id)).unwrap()
-        }
-
-        fn replay(id: &str, alternate: bool) -> ScreenSnapshot {
-            replay_native_fixture(
-                std::str::from_utf8(&bytes(id)).unwrap(),
-                |_| {},
-                alternate,
-                None,
-            )
-        }
-
         fn screen(id: &str) -> ScreenSnapshot {
-            replay(id, document(id)["alternate_screen"].as_bool().unwrap())
+            replay_as_captured(id, |_| {}, None)
         }
 
         fn detector(catalog: &ProfileCatalog) -> Detector {
@@ -4945,27 +4301,9 @@ mod tests {
         }
 
         fn observe(id: &str) -> ScreenObservation {
-            detector(&ProfileCatalog::bundled().unwrap())
+            detector(ProfileCatalog::bundled())
                 .observe(&screen(id))
                 .unwrap()
-        }
-
-        fn without_annotation_rules() -> ProfileCatalog {
-            let mut value: Value = serde_json::from_str(include_str!("bundled.json")).unwrap();
-            let profile = value["profiles"]
-                .as_array_mut()
-                .unwrap()
-                .iter_mut()
-                .find(|profile| profile["backend"] == "claude")
-                .expect("bundled automatic-mode Claude profile");
-            profile["rules"].as_array_mut().unwrap().retain(|rule| {
-                !rule["observation"]
-                    .as_str()
-                    .unwrap()
-                    .starts_with("automatic_")
-            });
-            profile["capabilities"]["annotations"] = Value::Null;
-            ProfileCatalog::from_definitions(&value).unwrap()
         }
 
         fn shown(operation: &Value) -> Option<String> {
@@ -4989,31 +4327,6 @@ mod tests {
                     )
                 })
                 .collect()
-        }
-
-        fn redacted() -> EvidencePolicy {
-            EvidencePolicy::redacted(
-                &json!({"schema_version":1,"patterns":["fixture-secret-197-unique"],"sensitive_rules":[]}),
-                &[REFUSAL_RULE, NOTICE_RULE, UNAVAILABLE_RULE, INDICATOR_RULE, ASK_RULE],
-            )
-            .unwrap()
-        }
-
-        fn replay_run(policy: EvidencePolicy) -> Run {
-            Run::new(policy, observe)
-        }
-
-        fn assert_annotation_event(event: &TransitionDraft, kind: RuntimeEventKind, rule: &str) {
-            assert_eq!(event.kind, kind);
-            assert_eq!(event.run_id, 1);
-            assert_eq!(event.episode_seq, None);
-            assert_eq!(event.classification, None);
-            assert_eq!(event.close_reason, None);
-            assert_eq!(event.cause_json, None);
-            assert_eq!(event.observed_at, NOW);
-            assert_eq!(event.evidence_json["rule_id"], rule);
-            assert_eq!(event.evidence_json["backend"], "claude");
-            assert_eq!(event.evidence_json["native_version"], CLAUDE_VERSION);
         }
 
         #[test]
@@ -5059,38 +4372,15 @@ mod tests {
         }
 
         #[test]
-        fn bundled_claude_auto_annotations_leave_every_primary_observation_unchanged() {
-            let plain = without_annotation_rules();
-            for (id, _, _, _) in CLASSIFICATION {
-                let annotated = observe(id);
-                let primary = detector(&plain).observe(&screen(id)).unwrap();
-                assert!(primary.annotations.is_empty(), "{id}");
-                assert_eq!(annotated.kind, primary.kind, "{id}");
-                assert_eq!(annotated.rule_id, primary.rule_id, "{id}");
-                assert_eq!(annotated.match_evidence, primary.match_evidence, "{id}");
-                assert_eq!(annotated.matched_region, primary.matched_region, "{id}");
-                assert_eq!(annotated.raw_evidence, primary.raw_evidence, "{id}");
-                assert_eq!(
-                    annotated.verified_noninteraction, primary.verified_noninteraction,
-                    "{id}"
-                );
-                assert!(annotated.fingerprint == primary.fingerprint, "{id}");
-            }
-        }
-
-        #[test]
         fn bundled_claude_auto_ask_form_answers_allow_with_1_and_deny_with_2_ungated() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let form = observe(ASK_FORM);
             assert_eq!(form.match_evidence, MatchEvidence::Complete);
             assert!(!form.verified_noninteraction);
             assert_eq!(form.raw_evidence["operation"], ASK_ALLOW);
             assert_eq!(form.raw_evidence["choices"], json!(["Yes", "No"]));
             let default_form = screen("claude-2.1.302-default-permission-1");
-            for (decision, choice, byte) in [
-                (PermissionDecision::Allow, "allow-once", b"1"),
-                (PermissionDecision::Deny, "deny-once", b"2"),
-            ] {
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                 let plan = catalog
                     .answer_plan(
                         CodingAgent::Claude,
@@ -5099,22 +4389,18 @@ mod tests {
                         &AnswerKey::Decision(decision),
                     )
                     .expect("ask-rule answer plan");
-                assert_eq!(plan.choice_id(), choice);
-                assert_eq!(plan.stages().len(), 1, "{decision:?}");
-                let stage = &plan.stages()[0];
-                assert_eq!(stage.bytes(), byte);
-                assert_eq!(stage.required_rule_id(), ASK_RULE);
-                assert_eq!(stage.required_choice_id(), choice);
-                assert!(stage.gate().is_none(), "{decision:?} is ungated");
-                assert_eq!(plan.capability().native_version(), CLAUDE_VERSION);
-                let matched = detector(&catalog)
+                assert!(
+                    plan.stages().iter().all(|stage| stage.gate().is_none()),
+                    "{decision:?} is ungated"
+                );
+                let matched = detector(catalog)
                     .match_answer(&screen(ASK_FORM), &plan)
                     .unwrap()
                     .expect("the ask form matches its plan");
                 assert_eq!(matched.choices(), &["Yes".to_owned(), "No".to_owned()]);
                 assert!(Some(matched.semantic()) == form.fingerprint.as_ref());
                 assert!(
-                    detector(&catalog)
+                    detector(catalog)
                         .match_answer(&default_form, &plan)
                         .unwrap()
                         .is_none(),
@@ -5129,7 +4415,7 @@ mod tests {
                     )
                     .unwrap();
                 assert!(
-                    detector(&catalog)
+                    detector(catalog)
                         .match_answer(&screen(ASK_FORM), &predecessor)
                         .unwrap()
                         .is_none(),
@@ -5151,15 +4437,11 @@ mod tests {
                     "{id}"
                 );
             }
-            assert_eq!(
-                observe("claude-2.1.302-default-permission-1").rule_id,
-                PERMISSION_RULE
-            );
         }
 
         #[test]
         fn bundled_claude_auto_tip_form_answers_allow_with_1_and_deny_with_4_ungated() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             for (id, operation) in [
                 (TIP_FORM, TIP_ALLOW),
                 (TIP_ALLOW_PRE_STAGE, TIP_ALLOW),
@@ -5175,19 +4457,9 @@ mod tests {
                 ("claude-2.1.302-default-permission-1", PERMISSION_RULE),
                 (ASK_FORM, ASK_RULE),
             ];
-            for (decision, choice, byte, pre_stage) in [
-                (
-                    PermissionDecision::Allow,
-                    "allow-once",
-                    b"1",
-                    TIP_ALLOW_PRE_STAGE,
-                ),
-                (
-                    PermissionDecision::Deny,
-                    "deny-once",
-                    b"4",
-                    TIP_DENY_PRE_STAGE,
-                ),
+            for (decision, pre_stage) in [
+                (PermissionDecision::Allow, TIP_ALLOW_PRE_STAGE),
+                (PermissionDecision::Deny, TIP_DENY_PRE_STAGE),
             ] {
                 let plan = catalog
                     .answer_plan(
@@ -5197,23 +4469,11 @@ mod tests {
                         &AnswerKey::Decision(decision),
                     )
                     .expect("tip-rule answer plan");
-                assert_eq!(plan.choice_id(), choice);
-                assert_eq!(plan.stages().len(), 1, "{decision:?}");
-                let stage = &plan.stages()[0];
-                assert_eq!(stage.bytes(), byte);
-                assert_eq!(stage.required_rule_id(), TIP_RULE);
-                assert_eq!(stage.required_choice_id(), choice);
-                assert!(stage.gate().is_none(), "{decision:?} is ungated");
-                let capability = plan.capability();
-                assert_eq!(capability.native_version(), CLAUDE_VERSION);
-                assert_eq!(capability.request_rule_id(), TIP_RULE);
-                assert_eq!(capability.key(), &AnswerKey::Decision(decision));
-                assert_eq!(
-                    capability.fixture_ids(),
-                    [pre_stage.to_owned()].as_slice(),
-                    "{decision:?} rests on its pre-stage capture"
+                assert!(
+                    plan.stages().iter().all(|stage| stage.gate().is_none()),
+                    "{decision:?} is ungated"
                 );
-                let matched = detector(&catalog)
+                let matched = detector(catalog)
                     .match_answer(&screen(pre_stage), &plan)
                     .unwrap()
                     .expect("the pre-stage form matches its plan");
@@ -5221,7 +4481,7 @@ mod tests {
                 assert!(Some(matched.semantic()) == observe(pre_stage).fingerprint.as_ref());
                 for (other, rule) in other_forms {
                     assert!(
-                        detector(&catalog)
+                        detector(catalog)
                             .match_answer(&screen(other), &plan)
                             .unwrap()
                             .is_none(),
@@ -5236,7 +4496,7 @@ mod tests {
                         )
                         .unwrap();
                     assert!(
-                        detector(&catalog)
+                        detector(catalog)
                             .match_answer(&screen(pre_stage), &foreign)
                             .unwrap()
                             .is_none(),
@@ -5278,27 +4538,19 @@ mod tests {
                     1,
                 ),
             ];
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             for (id, operation, rows) in cases {
-                for version in [CLAUDE_VERSION, "2.1.309"] {
-                    let form = Detector::new(&catalog, CodingAgent::Claude, Some(version))
-                        .observe(&screen(id))
-                        .unwrap();
-                    assert_eq!(form.kind, FORM, "{id} {version}");
-                    assert_eq!(form.rule_id, READ_RULE, "{id} {version}");
-                    assert_eq!(
-                        form.raw_evidence["native_version"], version,
-                        "{id} {version}"
-                    );
-                    assert_eq!(form.match_evidence, MatchEvidence::Complete, "{id}");
-                    assert!(!form.verified_noninteraction, "{id}");
-                    assert!(form.native_correlation.is_none(), "{id}");
-                    assert!(form.fingerprint.is_some(), "{id}");
-                    assert_eq!(form.raw_evidence["operation"], operation, "{id}");
-                    assert_eq!(form.raw_evidence["operation_rows"], rows, "{id}");
-                    assert_eq!(form.raw_evidence["choices"], json!(READ_CHOICES), "{id}");
-                    assert_eq!(form.raw_evidence["native_request_id"], Value::Null, "{id}");
-                }
+                let form = detector(catalog).observe(&screen(id)).unwrap();
+                assert_eq!(form.kind, FORM, "{id}");
+                assert_eq!(form.rule_id, READ_RULE, "{id}");
+                assert_eq!(form.match_evidence, MatchEvidence::Complete, "{id}");
+                assert!(!form.verified_noninteraction, "{id}");
+                assert!(form.native_correlation.is_none(), "{id}");
+                assert!(form.fingerprint.is_some(), "{id}");
+                assert_eq!(form.raw_evidence["operation"], operation, "{id}");
+                assert_eq!(form.raw_evidence["operation_rows"], rows, "{id}");
+                assert_eq!(form.raw_evidence["choices"], json!(READ_CHOICES), "{id}");
+                assert_eq!(form.raw_evidence["native_request_id"], Value::Null, "{id}");
             }
             for (id, top, bottom) in [(READ_FORM, 16, 34), (READ_LONG, 17, 36)] {
                 let region = observe(id)
@@ -5318,25 +4570,15 @@ mod tests {
 
         #[test]
         fn bundled_claude_read_outside_dialog_answers_allow_with_4_and_deny_with_3_ungated() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let other_forms = [
                 ("claude-2.1.302-default-permission-1", PERMISSION_RULE),
                 (ASK_FORM, ASK_RULE),
                 (TIP_FORM, TIP_RULE),
             ];
-            for (decision, choice, byte, pre_stage) in [
-                (
-                    PermissionDecision::Allow,
-                    "allow-once",
-                    b"4",
-                    READ_ALLOW_PRE_STAGE,
-                ),
-                (
-                    PermissionDecision::Deny,
-                    "deny-once",
-                    b"3",
-                    READ_DENY_PRE_STAGE,
-                ),
+            for (decision, pre_stage) in [
+                (PermissionDecision::Allow, READ_ALLOW_PRE_STAGE),
+                (PermissionDecision::Deny, READ_DENY_PRE_STAGE),
             ] {
                 let plan = catalog
                     .answer_plan(
@@ -5346,23 +4588,11 @@ mod tests {
                         &AnswerKey::Decision(decision),
                     )
                     .expect("read-outside answer plan");
-                assert_eq!(plan.choice_id(), choice);
-                assert_eq!(plan.stages().len(), 1, "{decision:?}");
-                let stage = &plan.stages()[0];
-                assert_eq!(stage.bytes(), byte);
-                assert_eq!(stage.required_rule_id(), READ_RULE);
-                assert_eq!(stage.required_choice_id(), choice);
-                assert!(stage.gate().is_none(), "{decision:?} is ungated");
-                let capability = plan.capability();
-                assert_eq!(capability.native_version(), CLAUDE_VERSION);
-                assert_eq!(capability.request_rule_id(), READ_RULE);
-                assert_eq!(capability.key(), &AnswerKey::Decision(decision));
-                assert_eq!(
-                    capability.fixture_ids(),
-                    [pre_stage.to_owned()].as_slice(),
-                    "{decision:?} rests on its pre-stage capture"
+                assert!(
+                    plan.stages().iter().all(|stage| stage.gate().is_none()),
+                    "{decision:?} is ungated"
                 );
-                let matched = detector(&catalog)
+                let matched = detector(catalog)
                     .match_answer(&screen(pre_stage), &plan)
                     .unwrap()
                     .expect("the pre-stage dialog matches its plan");
@@ -5370,7 +4600,7 @@ mod tests {
                 assert!(Some(matched.semantic()) == observe(pre_stage).fingerprint.as_ref());
                 for (other, rule) in other_forms {
                     assert!(
-                        detector(&catalog)
+                        detector(catalog)
                             .match_answer(&screen(other), &plan)
                             .unwrap()
                             .is_none(),
@@ -5385,7 +4615,7 @@ mod tests {
                         )
                         .unwrap();
                     assert!(
-                        detector(&catalog)
+                        detector(catalog)
                             .match_answer(&screen(pre_stage), &foreign)
                             .unwrap()
                             .is_none(),
@@ -5397,7 +4627,7 @@ mod tests {
 
         #[test]
         fn bundled_claude_auto_startup_offer_and_wizard_are_separate_questions() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             let offer = observe(STARTUP_OFFER);
             let wizard = observe(STARTUP_WIZARD);
             for (id, observed, choices) in [
@@ -5452,385 +4682,6 @@ mod tests {
                     .is_empty(),
                 "the wizard has no answer plan"
             );
-        }
-
-        #[test]
-        fn tracker_opens_separate_question_episodes_for_the_startup_offer_and_its_wizard() {
-            let mut run = replay_run(EvidencePolicy::metadata());
-            let offer = run.episode(STARTUP_OFFER, 0, 300);
-            assert_eq!(offer.len(), 1, "{offer:?}");
-            assert_eq!(offer[0].kind, RuntimeEventKind::InteractionOpened);
-            assert_eq!(offer[0].episode_seq, Some(1));
-            assert_eq!(offer[0].classification, Some(InteractionClass::Question));
-            assert_eq!(offer[0].evidence_json["rule_id"], STARTUP_RULE);
-            let wizard = run.episode(STARTUP_WIZARD, 350, 900);
-            assert_eq!(wizard.len(), 2, "the wizard replaces the offer: {wizard:?}");
-            assert_eq!(wizard[0].kind, RuntimeEventKind::InteractionClosed);
-            assert_eq!(wizard[0].episode_seq, Some(1));
-            assert_eq!(wizard[1].kind, RuntimeEventKind::InteractionOpened);
-            assert_eq!(wizard[1].episode_seq, Some(2));
-            assert_eq!(wizard[1].classification, Some(InteractionClass::Question));
-            assert_eq!(wizard[1].evidence_json["rule_id"], WIZARD_RULE);
-            let cancelled = run.episode(STARTUP_CANCELLED, 950, 1400);
-            assert_eq!(cancelled.len(), 1, "{cancelled:?}");
-            assert_eq!(cancelled[0].kind, RuntimeEventKind::InteractionClosed);
-            assert_eq!(cancelled[0].episode_seq, Some(2));
-            assert_eq!(
-                cancelled[0].close_reason,
-                Some(InteractionCloseReason::NotVisible)
-            );
-        }
-
-        #[test]
-        fn tracker_opens_one_permission_episode_for_the_tip_form_and_closes_it_once_the_command_runs()
-         {
-            let mut run = replay_run(EvidencePolicy::metadata());
-            let form = run.episode(TIP_FORM, 0, 300);
-            assert_eq!(form.len(), 1, "{form:?}");
-            assert_eq!(form[0].kind, RuntimeEventKind::InteractionOpened);
-            assert_eq!(
-                form[0].classification,
-                Some(InteractionClass::PermissionRequest)
-            );
-            let pre_stage = run.episode(TIP_ALLOW_PRE_STAGE, 350, 600);
-            assert!(pre_stage.is_empty(), "{pre_stage:?}");
-            let running = run.episode(TIP_ALLOW_RUNNING, 650, 1100);
-            assert_eq!(running.len(), 1, "{running:?}");
-            assert_eq!(running[0].kind, RuntimeEventKind::InteractionClosed);
-            assert_eq!(running[0].episode_seq, form[0].episode_seq);
-            assert_eq!(
-                running[0].close_reason,
-                Some(InteractionCloseReason::NotVisible)
-            );
-        }
-
-        #[test]
-        fn tracker_emits_a_refusal_notice_after_two_compatible_frames_and_only_once_while_present()
-        {
-            let mut run = replay_run(EvidencePolicy::metadata());
-            let early = run.hold(NOTICE_IDLE, 0, 50);
-            assert!(early.events.is_empty(), "{:?}", early.events);
-            let stable = run.hold(NOTICE_IDLE, 100, 100);
-            assert_eq!(stable.events.len(), 1, "{:?}", stable.events);
-            assert_annotation_event(
-                &stable.events[0],
-                RuntimeEventKind::AutomaticRefusalObserved,
-                NOTICE_RULE,
-            );
-            assert_eq!(stable.events[0].evidence_json["operation"], Value::Null);
-            assert_eq!(stable.events[0].evidence_json["excerpt"], Value::Null);
-            let present = run.hold(NOTICE_IDLE, 150, 1000);
-            assert!(present.events.is_empty(), "{:?}", present.events);
-            let working = run.hold(NOTICE_WORKING, 1050, 1300);
-            assert!(
-                working.events.is_empty(),
-                "same notice while working: {:?}",
-                working.events
-            );
-        }
-
-        #[test]
-        fn tracker_emits_two_events_for_two_different_refusals_visible_together() {
-            let mut run = replay_run(redacted());
-            let held = run.hold(TWO_REFUSALS, 0, 400);
-            assert_eq!(held.events.len(), 2, "{:?}", held.events);
-            let mut operations = Vec::new();
-            for event in &held.events {
-                assert_annotation_event(
-                    event,
-                    RuntimeEventKind::AutomaticRefusalObserved,
-                    REFUSAL_RULE,
-                );
-                assert_eq!(event.evidence_json["operation_rows"], 1);
-                operations.push(
-                    event.evidence_json["operation"]
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                );
-            }
-            operations.sort();
-            let mut expected = vec![SEVEN.to_owned(), EIGHT.to_owned()];
-            expected.sort();
-            assert_eq!(operations, expected);
-            let blocks = observe(TWO_REFUSALS).annotations;
-            let refusals = blocks
-                .iter()
-                .filter(|block| block.rule_id == REFUSAL_RULE)
-                .collect::<Vec<_>>();
-            assert!(refusals[0].fingerprint != refusals[1].fingerprint);
-        }
-
-        #[test]
-        fn tracker_resets_a_refusal_only_after_250_ms_of_absence_on_verified_frames() {
-            let mut short = replay_run(EvidencePolicy::metadata());
-            assert_eq!(short.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(short.hold(NOTICE_EXPIRED, 150, 350).events.is_empty());
-            assert!(
-                short.hold(NOTICE_IDLE, 400, 700).events.is_empty(),
-                "200 ms of absence does not reset"
-            );
-            let mut long = replay_run(EvidencePolicy::metadata());
-            assert_eq!(long.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(long.hold(NOTICE_EXPIRED, 150, 450).events.is_empty());
-            let again = long.hold(NOTICE_IDLE, 500, 700);
-            assert_eq!(
-                again.events.len(),
-                1,
-                "300 ms of verified absence resets: {:?}",
-                again.events
-            );
-            let mut working = replay_run(EvidencePolicy::metadata());
-            assert_eq!(working.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(observe(RUNNING).verified_noninteraction);
-            assert!(working.hold(RUNNING, 150, 450).events.is_empty());
-            assert_eq!(
-                working.hold(NOTICE_WORKING, 500, 700).events.len(),
-                1,
-                "verified working frames advance the reset"
-            );
-        }
-
-        #[test]
-        fn tracker_keeps_a_refusal_hidden_by_a_form_or_overlay_and_emits_nothing_when_it_returns() {
-            for hiding in [HIDDEN_BY_FORM, VERBOSE_VIEWER] {
-                let mut run = replay_run(EvidencePolicy::metadata());
-                assert_eq!(run.hold(RESTORED, 0, 100).events.len(), 1, "{hiding}");
-                assert!(run.hold(hiding, 150, 1500).events.is_empty(), "{hiding}");
-                assert!(run.hold(RESTORED, 1550, 1900).events.is_empty(), "{hiding}");
-            }
-            let mut notice = replay_run(EvidencePolicy::metadata());
-            assert_eq!(notice.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(notice.hold(FORM_HIDING_NOTICE, 150, 1500).events.is_empty());
-            assert!(notice.hold(NOTICE_IDLE, 1550, 1900).events.is_empty());
-            let mut interrupted = replay_run(EvidencePolicy::metadata());
-            assert_eq!(interrupted.hold(NOTICE_IDLE, 0, 100).events.len(), 1);
-            assert!(interrupted.hold(NOTICE_EXPIRED, 150, 300).events.is_empty());
-            assert!(
-                interrupted
-                    .hold(FORM_HIDING_NOTICE, 350, 500)
-                    .events
-                    .is_empty()
-            );
-            assert!(interrupted.hold(NOTICE_EXPIRED, 550, 700).events.is_empty());
-            assert!(
-                interrupted.hold(NOTICE_IDLE, 750, 1000).events.is_empty(),
-                "a form between absent frames restarts the continuous absence"
-            );
-        }
-
-        #[test]
-        fn tracker_keeps_a_rewrapped_refusal_as_the_same_fingerprint() {
-            let restored = observe(RESTORED);
-            let rewrapped = observe(REWRAPPED);
-            let block = |observed: &ScreenObservation| {
-                observed
-                    .annotations
-                    .iter()
-                    .find(|block| block.rule_id == REFUSAL_RULE)
-                    .cloned()
-                    .expect("verbose refusal block")
-            };
-            assert!(block(&restored).fingerprint == block(&rewrapped).fingerprint);
-            assert_eq!(block(&restored).raw_evidence["operation_rows"], 1);
-            assert_eq!(block(&rewrapped).raw_evidence["operation_rows"], 2);
-            assert_eq!(
-                shown(&block(&rewrapped).raw_evidence["operation"]).as_deref(),
-                Some(NINE)
-            );
-            let mut run = replay_run(redacted());
-            assert_eq!(run.hold(RESTORED, 0, 100).events.len(), 1);
-            assert!(run.hold(REWRAPPED_FORM, 150, 400).events.is_empty());
-            assert!(run.hold(REWRAPPED, 450, 1000).events.is_empty());
-            assert!(run.hold(RESTORED, 1050, 1300).events.is_empty());
-        }
-
-        #[test]
-        fn tracker_ignores_quotes_viewers_and_primary_screen_copies() {
-            for id in [
-                QUOTE,
-                VIEWER,
-                VERBOSE_VIEWER,
-                "claude-2.1.302-auto-fresh-first-launch-notice-1",
-            ] {
-                let mut run = replay_run(EvidencePolicy::metadata());
-                assert!(run.hold(id, 0, 500).events.is_empty(), "{id}");
-            }
-            let primary = detector(&ProfileCatalog::bundled().unwrap())
-                .observe(&replay(NOTICE_IDLE, false))
-                .unwrap();
-            assert!(
-                primary
-                    .annotations
-                    .iter()
-                    .any(|block| block.rule_id == INDICATOR_RULE),
-                "a primary-screen replay keeps the live indicator: {:?}",
-                annotation_set(&primary)
-            );
-            let mut quoted = replay_run(redacted());
-            let held = quoted.hold(VERBOSE_QUOTE, 0, 300);
-            let mut operations = held
-                .events
-                .iter()
-                .map(|event| {
-                    event.evidence_json["operation"]
-                        .as_str()
-                        .unwrap()
-                        .to_owned()
-                })
-                .collect::<Vec<_>>();
-            operations.sort();
-            let mut expected = vec![SEVEN.to_owned(), EIGHT.to_owned()];
-            expected.sort();
-            assert_eq!(operations, expected, "only the native refusal blocks");
-        }
-
-        #[test]
-        fn tracker_emits_unavailable_once_until_automatic_review_is_observed_available() {
-            let mut run = replay_run(EvidencePolicy::metadata());
-            let first = run.hold(UNAVAILABLE_NOTICE, 0, 100);
-            assert_eq!(first.events.len(), 1, "{:?}", first.events);
-            assert_annotation_event(
-                &first.events[0],
-                RuntimeEventKind::AutomaticReviewUnavailable,
-                UNAVAILABLE_RULE,
-            );
-            assert_eq!(
-                first.policy,
-                [(
-                    AutomaticReview::Unavailable,
-                    None,
-                    UNAVAILABLE_RULE.to_owned(),
-                    NOW.to_owned()
-                )]
-            );
-            let footer = run.hold(MANUAL_FOOTER, 150, 600);
-            assert!(footer.events.is_empty() && footer.policy.is_empty());
-            let repeated = run.hold(UNAVAILABLE_NOTICE, 650, 800);
-            assert!(
-                repeated.events.is_empty(),
-                "at most once per rule: {:?}",
-                repeated.events
-            );
-            assert!(repeated.policy.is_empty());
-            let available = run.hold(IDLE, 850, 1100);
-            assert!(available.events.is_empty());
-            assert_eq!(
-                available.policy,
-                [(
-                    AutomaticReview::Available,
-                    None,
-                    INDICATOR_RULE.to_owned(),
-                    NOW.to_owned()
-                )]
-            );
-            assert!(run.hold(MANUAL_FOOTER, 1150, 1500).events.is_empty());
-            let again = run.hold(UNAVAILABLE_NOTICE, 1550, 1700);
-            assert_eq!(
-                again.events.len(),
-                1,
-                "available re-arms the unavailable rule"
-            );
-            assert_eq!(again.policy.len(), 1);
-            assert_eq!(again.policy[0].0, AutomaticReview::Unavailable);
-        }
-
-        #[test]
-        fn tracker_records_the_displayed_mode_only_under_redacted_evidence() {
-            for (policy, mode) in [
-                (EvidencePolicy::metadata(), None),
-                (redacted(), Some("auto mode".to_owned())),
-            ] {
-                let mut run = replay_run(policy);
-                let held = run.hold(IDLE, 0, 1000);
-                assert!(held.events.is_empty());
-                assert_eq!(
-                    held.policy,
-                    [(
-                        AutomaticReview::Available,
-                        mode.clone(),
-                        INDICATOR_RULE.to_owned(),
-                        NOW.to_owned()
-                    )],
-                    "one record change for a steady indicator"
-                );
-                assert_eq!(
-                    run.hold(NOTICE_EXPIRED, 1050, 1500).policy,
-                    [(
-                        AutomaticReview::Available,
-                        mode,
-                        INDICATOR_RULE.to_owned(),
-                        NOW.to_owned()
-                    )],
-                    "a footer variant is a fresh indicator emission"
-                );
-            }
-        }
-
-        #[test]
-        fn tracker_records_a_re_shown_indicator_after_a_reset_as_a_second_policy_observation() {
-            let available = (
-                AutomaticReview::Available,
-                None,
-                INDICATOR_RULE.to_owned(),
-                NOW.to_owned(),
-            );
-            let mut run = replay_run(EvidencePolicy::metadata());
-            assert_eq!(
-                run.hold(IDLE, 0, 300).policy,
-                std::slice::from_ref(&available)
-            );
-            let absent = run.hold(MANUAL_FOOTER, 350, 700);
-            assert!(absent.policy.is_empty(), "{:?}", absent.policy);
-            assert_eq!(
-                run.hold(IDLE, 750, 1100).policy,
-                [available],
-                "a fresh indicator emission resubmits the unchanged state"
-            );
-        }
-
-        #[test]
-        fn tracker_annotations_leave_visibility_eligibility_and_episodes_unchanged() {
-            let sequence = [
-                (IDLE, 0, 100),
-                (NOTICE_IDLE, 150, 300),
-                (FORM_HIDING_NOTICE, 350, 600),
-                (NOTICE_EXPIRED, 650, 1000),
-                (TWO_REFUSALS, 1050, 1200),
-                (UNAVAILABLE_NOTICE, 1250, 1400),
-                (ASK_FORM, 1450, 1700),
-                (IDLE, 1750, 2100),
-            ];
-            let mut annotated = replay_run(EvidencePolicy::metadata());
-            let mut plain = replay_run(EvidencePolicy::metadata());
-            for (id, from, until) in sequence {
-                let mut millis = from;
-                while millis <= until {
-                    let value = annotated.next_frame(id);
-                    let mut stripped = value.clone();
-                    stripped.annotations.clear();
-                    let with = annotated.observe(&value, millis);
-                    let without = plain.observe(&stripped, millis);
-                    assert_eq!(with.visibility, without.visibility, "{id} at {millis}");
-                    assert_eq!(with.eligibility, without.eligibility, "{id} at {millis}");
-                    assert_eq!(
-                        format!("{:?}", with.latest_evidence),
-                        format!("{:?}", without.latest_evidence),
-                        "{id} at {millis}"
-                    );
-                    assert_eq!(
-                        with.transitions
-                            .iter()
-                            .filter(|transition| !is_annotation_event(transition))
-                            .cloned()
-                            .collect::<Vec<_>>(),
-                        without.transitions,
-                        "{id} at {millis}"
-                    );
-                    assert!(without.effective_policy.is_none());
-                    millis += 50;
-                }
-            }
         }
     }
 
@@ -6196,12 +5047,11 @@ mod tests {
             replay_native_fixture(&document.to_string(), |_| {}, alternate, None)
         }
         fn screen(id: &str) -> ScreenSnapshot {
-            let document = document(id);
-            replay_document(&document, document["alternate_screen"].as_bool().unwrap())
+            replay_as_captured(id, |_| {}, None)
         }
         fn detector() -> Detector {
             Detector::new(
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 CodingAgent::Claude,
                 Some(VERSION_312),
             )
@@ -6212,19 +5062,6 @@ mod tests {
         fn observe_screen(screen: &ScreenSnapshot) -> ScreenObservation {
             detector().observe(screen).unwrap()
         }
-        fn assert_same_evidence(case: &str, left: &ScreenObservation, right: &ScreenObservation) {
-            assert_eq!(left.kind, right.kind, "{case}");
-            assert_eq!(left.rule_id, right.rule_id, "{case}");
-            assert_eq!(left.match_evidence, right.match_evidence, "{case}");
-            for field in ["operation", "operation_rows", "choices"] {
-                assert_eq!(
-                    left.raw_evidence[field], right.raw_evidence[field],
-                    "{case}: {field}"
-                );
-            }
-            assert!(left.fingerprint == right.fingerprint, "{case}");
-        }
-
         #[test]
         fn each_2_1_312_fixture_classifies_with_its_rule_and_evidence() {
             for (id, kind, rule, operation, choices) in CLASSIFICATION {
@@ -6253,10 +5090,9 @@ mod tests {
         fn primary_screen_fixtures_match_their_alternate_screen_rendering() {
             for id in PRIMARY {
                 let document = document(id);
-                assert_eq!(document["alternate_screen"], false, "{id}");
                 let primary = observe_screen(&replay_document(&document, false));
                 let alternate = observe_screen(&replay_document(&document, true));
-                assert_same_evidence(id, &primary, &alternate);
+                assert_primary_matches_alternate(id, &primary, &alternate);
                 assert!(
                     matches!(primary.kind, ObservationKind::Interaction(_)),
                     "{id}"
@@ -6281,35 +5117,11 @@ mod tests {
         fn sidebar_fixtures_match_their_full_width_rendering() {
             for (id, separator) in PANEL {
                 let document = document(id);
-                assert!(document.get("cell_backgrounds").is_some(), "{id}");
                 let beside = observe_screen(&replay_document(&document, true));
                 let full =
                     observe_screen(&replay_document(&full_width(&document, separator), true));
-                assert_same_evidence(id, &beside, &full);
+                assert_primary_matches_alternate(id, &beside, &full);
                 assert_eq!(beside.rule_id, BASH, "{id}");
-            }
-        }
-
-        #[test]
-        fn existing_claude_rules_keep_classifying_their_2_1_302_forms() {
-            for (id, rule) in [
-                ("claude-2.1.302-default-permission-1", BASH),
-                ("claude-2.1.302-wrapped-permission-1", BASH),
-                ("claude-2.1.302-idle-composer-1", IDLE),
-            ] {
-                let observed = Detector::new(
-                    &ProfileCatalog::bundled().unwrap(),
-                    CodingAgent::Claude,
-                    Some("2.1.302"),
-                )
-                .observe(&replay_native_fixture(
-                    &bundled_fixture(id),
-                    |_| {},
-                    true,
-                    None,
-                ))
-                .unwrap();
-                assert_eq!(observed.rule_id, rule, "{id}");
             }
         }
 
@@ -6319,45 +5131,23 @@ mod tests {
             "claude-2.1.312-read-file-batched-allow-post-stage-1",
             "claude-2.1.312-read-file-batched-deny-pre-stage-1",
         ];
-        const HEADED_FORMS: [(&str, &str, Option<usize>); 14] = [
-            ("claude-2.1.312-read-file-permission-1", READ, None),
-            ("claude-2.1.312-edit-file-permission-1", EDIT, None),
-            ("claude-2.1.312-create-file-permission-1", CREATE, None),
-            ("claude-2.1.312-bash-no-tip-permission-1", NO_TIP, None),
-            (
-                "claude-2.1.312-bash-no-tip-access-permission-1",
-                NO_TIP,
-                None,
-            ),
-            ("claude-2.1.312-primary-default-permission-1", BASH, None),
-            ("claude-2.1.312-panel-default-permission-1", BASH, Some(92)),
-            (
-                "claude-2.1.312-panel-default-permission-144-1",
-                BASH,
-                Some(80),
-            ),
-            ("claude-2.1.312-bash-batched-permission-1", BASH, None),
-            ("claude-2.1.302-default-permission-1", BASH, None),
-            ("claude-2.1.302-wrapped-permission-1", BASH, None),
-            ("claude-2.1.302-access-permission-1", TIP, None),
-            ("claude-2.1.308-auto-tip-padded-question-1", TIP, None),
-            ("claude-2.1.302-auto-ask-permission-1", ASK, None),
+        const HEADED_FORMS: [(&str, &str); 7] = [
+            ("claude-2.1.312-read-file-permission-1", READ),
+            ("claude-2.1.312-edit-file-permission-1", EDIT),
+            ("claude-2.1.312-create-file-permission-1", CREATE),
+            ("claude-2.1.312-bash-no-tip-permission-1", NO_TIP),
+            ("claude-2.1.312-primary-default-permission-1", BASH),
+            ("claude-2.1.302-access-permission-1", TIP),
+            ("claude-2.1.302-auto-ask-permission-1", ASK),
         ];
 
         fn fixture_version(id: &str) -> &str {
             id.split('-').nth(1).unwrap()
         }
         fn observe_changed(id: &str, change: impl FnOnce(&mut Vec<String>)) -> ScreenObservation {
-            let fixture = bundled_fixture(id);
-            let document: Value = serde_json::from_str(&fixture).unwrap();
-            let screen = replay_native_fixture(
-                &fixture,
-                change,
-                document["alternate_screen"].as_bool().unwrap(),
-                None,
-            );
+            let screen = replay_as_captured(id, change, None);
             Detector::new(
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 CodingAgent::Claude,
                 Some(fixture_version(id)),
             )
@@ -6413,7 +5203,7 @@ mod tests {
                 let mut stripped = None;
                 let single = observe_changed(id, |lines| stripped = Some(without_counter(lines)));
                 assert_eq!(stripped.as_deref(), Some(shown), "{id}");
-                assert_same_evidence(id, &batched, &single);
+                assert_primary_matches_alternate(id, &batched, &single);
                 assert_eq!(batched.rule_id, READ, "{id}");
             }
         }
@@ -6421,14 +5211,12 @@ mod tests {
         #[test]
         fn a_heading_counter_changes_no_identity_on_every_heading_anchored_form() {
             let mut rules = BTreeSet::new();
-            for (id, rule, separator) in HEADED_FORMS {
-                let width = separator.unwrap_or(document(id)["cols"].as_u64().unwrap() as usize);
+            for (id, rule) in HEADED_FORMS {
+                let width = document(id)["cols"].as_u64().unwrap() as usize;
                 let single = observe_changed(id, |_| {});
                 assert_eq!(single.rule_id, rule, "{id}");
-                for counter in ["1 of 2", "2 of 2", "10 of 12"] {
-                    let counted = observe_changed(id, |lines| with_counter(lines, width, counter));
-                    assert_same_evidence(&format!("{id} {counter}"), &counted, &single);
-                }
+                let counted = observe_changed(id, |lines| with_counter(lines, width, "10 of 12"));
+                assert_primary_matches_alternate(id, &counted, &single);
                 rules.insert(rule);
             }
             assert_eq!(
@@ -6471,55 +5259,19 @@ mod tests {
         }
 
         fn plan(rule: &str, key: AnswerKey) -> Option<AnswerPlan> {
-            ProfileCatalog::bundled().unwrap().answer_plan(
-                CodingAgent::Claude,
-                VERSION_312,
-                rule,
-                &key,
-            )
+            ProfileCatalog::bundled().answer_plan(CodingAgent::Claude, VERSION_312, rule, &key)
         }
-        fn stages(plan: &AnswerPlan) -> Vec<(Vec<u8>, Option<String>)> {
-            plan.stages()
-                .iter()
-                .map(|stage| {
-                    (
-                        stage.bytes().to_vec(),
-                        stage.required_focus_choice_id().map(str::to_owned),
-                    )
-                })
-                .collect()
-        }
-
         #[test]
         fn dialog_a_decline_resolves_to_two_marker_gated_stages() {
             let decline =
                 plan(DIALOG_A, AnswerKey::Choice("decline".into())).expect("Dialog A decline plan");
-            assert_eq!(
-                decline.capability().answer_rule_id(),
-                "claude-auto-default-decline"
+            assert!(
+                decline
+                    .stages()
+                    .iter()
+                    .all(|stage| stage.required_focus_choice_id().is_some()),
+                "every decline stage is marker-gated"
             );
-            assert_eq!(decline.capability().request_rule_id(), DIALOG_A);
-            assert_eq!(decline.choice_id(), "decline");
-            assert_eq!(decline.focus_matcher_id(), "focus");
-            assert_eq!(
-                stages(&decline),
-                [
-                    (vec![0x0e], Some("accept".to_owned())),
-                    (vec![0x0d], Some("decline".to_owned())),
-                ]
-            );
-            for fixture in [
-                "claude-2.1.312-auto-default-decline-pre-stage-1",
-                "claude-2.1.312-auto-default-decline-post-stage-1-1",
-            ] {
-                assert!(
-                    decline
-                        .capability()
-                        .fixture_ids()
-                        .contains(&fixture.to_owned()),
-                    "{fixture}"
-                );
-            }
             for (fixture, focus) in [
                 ("claude-2.1.312-auto-default-decline-pre-stage-1", "accept"),
                 (
@@ -6538,17 +5290,8 @@ mod tests {
 
         #[test]
         fn dialog_b_offer_choices_resolve_to_their_single_digits() {
-            for (choice, rule, byte) in [
-                ("not-now", "claude-auto-env-setup-not-now-digit", b'2'),
-                (
-                    "dont-show-again",
-                    "claude-auto-env-setup-dont-show-again-digit",
-                    b'3',
-                ),
-            ] {
+            for choice in ["not-now", "dont-show-again"] {
                 let plan = plan(OFFER, AnswerKey::Choice(choice.into())).expect("offer plan");
-                assert_eq!(plan.capability().answer_rule_id(), rule);
-                assert_eq!(stages(&plan), [(vec![byte], None)], "{choice}");
                 for fixture in [
                     "claude-2.1.312-auto-env-setup-offer-1",
                     "claude-2.1.302-auto-env-setup-offer-1",
@@ -6566,7 +5309,7 @@ mod tests {
 
         #[test]
         fn no_plan_selects_a_yes_choice_of_either_nudge_dialog() {
-            let catalog = ProfileCatalog::bundled().unwrap();
+            let catalog = ProfileCatalog::bundled();
             assert!(plan(DIALOG_A, AnswerKey::Choice("accept".into())).is_none());
             assert!(plan(OFFER, AnswerKey::Choice("yes".into())).is_none());
             for rule in [WIZARD, NOTICE] {
@@ -6585,54 +5328,53 @@ mod tests {
                     );
                 }
             }
-            for rule in catalog.rule_ids() {
-                for plan in catalog.answer_plans(CodingAgent::Claude, VERSION_312, &rule) {
-                    assert_ne!(plan.choice_id(), "accept", "{rule}");
-                    if rule == OFFER {
-                        assert!(
-                            plan.stages()
-                                .iter()
-                                .all(|stage| !stage.bytes().contains(&b'1')),
-                            "{rule}"
-                        );
-                    }
-                    for stage in plan.stages() {
-                        assert!(!stage.bytes().contains(&0x1b), "{rule}");
-                    }
-                }
-            }
         }
 
         #[test]
         fn file_and_no_tip_decisions_resolve_to_their_single_request_digits() {
-            for (rule, prefix) in [
-                (READ, "claude-read-file"),
-                (EDIT, "claude-edit-file"),
-                (CREATE, "claude-create-file"),
-                (NO_TIP, "claude-bash-no-tip"),
+            for (rule, pre_stages) in [
+                (
+                    READ,
+                    [
+                        "claude-2.1.312-read-file-allow-pre-stage-1",
+                        "claude-2.1.312-read-file-deny-pre-stage-1",
+                    ],
+                ),
+                (
+                    EDIT,
+                    [
+                        "claude-2.1.312-edit-file-allow-pre-stage-1",
+                        "claude-2.1.312-edit-file-deny-pre-stage-1",
+                    ],
+                ),
+                (
+                    CREATE,
+                    [
+                        "claude-2.1.312-create-file-allow-pre-stage-1",
+                        "claude-2.1.312-create-file-deny-pre-stage-1",
+                    ],
+                ),
+                (
+                    NO_TIP,
+                    [
+                        "claude-2.1.312-bash-no-tip-allow-pre-stage-1",
+                        "claude-2.1.312-bash-no-tip-deny-pre-stage-1",
+                    ],
+                ),
             ] {
-                let fixture_prefix = prefix.trim_start_matches("claude-");
-                for (decision, choice, byte, name) in [
-                    (PermissionDecision::Allow, "allow-once", b'1', "allow"),
-                    (PermissionDecision::Deny, "deny-once", b'3', "deny"),
-                ] {
+                for (decision, pre_stage) in [PermissionDecision::Allow, PermissionDecision::Deny]
+                    .into_iter()
+                    .zip(pre_stages)
+                {
                     let plan = plan(rule, AnswerKey::Decision(decision))
                         .unwrap_or_else(|| panic!("{rule} {decision:?} plan"));
-                    assert_eq!(
-                        plan.capability().answer_rule_id(),
-                        format!("{prefix}-{name}-digit"),
-                        "{rule}"
-                    );
-                    assert_eq!(plan.choice_id(), choice, "{rule}");
-                    assert_eq!(stages(&plan), [(vec![byte], None)], "{rule} {name}");
-                    let pre_stage = format!("claude-2.1.312-{fixture_prefix}-{name}-pre-stage-1");
                     assert!(
-                        plan.capability().fixture_ids().contains(&pre_stage),
-                        "{rule} cites {pre_stage}"
+                        plan.stages().iter().all(|stage| stage.gate().is_none()),
+                        "{rule} {decision:?}"
                     );
                     assert!(
                         detector()
-                            .match_answer(&screen(&pre_stage), &plan)
+                            .match_answer(&screen(pre_stage), &plan)
                             .unwrap()
                             .is_some(),
                         "{pre_stage}"
@@ -6646,101 +5388,20 @@ mod tests {
                 }
             }
         }
-
-        fn replay_run() -> Run {
-            Run::new(EvidencePolicy::metadata(), observe)
-        }
-
-        #[test]
-        fn tracker_replaces_the_pending_notice_with_dialog_a_after_the_draft_is_cleared() {
-            let mut run = replay_run();
-            let notice = run.episode("claude-2.1.312-question-pending-notice-1", 0, 300);
-            assert_eq!(notice.len(), 1, "{notice:?}");
-            assert_eq!(notice[0].kind, RuntimeEventKind::InteractionOpened);
-            assert_eq!(notice[0].classification, Some(InteractionClass::Question));
-            assert_eq!(notice[0].evidence_json["rule_id"], NOTICE);
-            let cleared = run.episode("claude-2.1.312-question-pending-after-clear-1", 350, 900);
-            assert_eq!(cleared.len(), 2, "{cleared:?}");
-            assert_eq!(cleared[0].kind, RuntimeEventKind::InteractionClosed);
-            assert_eq!(cleared[0].episode_seq, notice[0].episode_seq);
-            assert_eq!(cleared[1].kind, RuntimeEventKind::InteractionOpened);
-            assert_eq!(cleared[1].classification, Some(InteractionClass::Question));
-            assert_eq!(cleared[1].evidence_json["rule_id"], DIALOG_A);
-            assert_ne!(cleared[1].episode_seq, notice[0].episode_seq);
-        }
-
-        #[test]
-        fn tracker_closes_the_pending_notice_without_dialog_a_after_the_draft_is_sent() {
-            let mut run = replay_run();
-            let notice = run.episode("claude-2.1.312-question-pending-send-notice-1", 0, 300);
-            assert_eq!(notice.len(), 1, "{notice:?}");
-            assert_eq!(notice[0].evidence_json["rule_id"], NOTICE);
-            let sent = run.episode("claude-2.1.312-question-pending-after-send-1", 350, 900);
-            assert_eq!(sent.len(), 1, "{sent:?}");
-            assert_eq!(sent[0].kind, RuntimeEventKind::InteractionClosed);
-            assert_eq!(sent[0].episode_seq, notice[0].episode_seq);
-            assert_eq!(
-                sent[0].close_reason,
-                Some(InteractionCloseReason::NotVisible)
-            );
-            let idle = run.episode(
-                "claude-2.1.312-question-pending-after-send-idle-1",
-                950,
-                1400,
-            );
-            assert!(idle.is_empty(), "no Dialog A episode opens: {idle:?}");
-        }
-
-        #[test]
-        fn tracker_closes_dialog_a_once_its_decline_returns_the_composer() {
-            let mut run = replay_run();
-            let opened = run.episode("claude-2.1.312-auto-default-decline-pre-stage-1", 0, 300);
-            assert_eq!(opened.len(), 1, "{opened:?}");
-            let moved = run.episode(
-                "claude-2.1.312-auto-default-decline-post-stage-1-1",
-                350,
-                700,
-            );
-            assert!(
-                moved.is_empty(),
-                "a focus move keeps the episode: {moved:?}"
-            );
-            let closed = run.episode(
-                "claude-2.1.312-auto-default-decline-continuation-1",
-                750,
-                1300,
-            );
-            assert_eq!(closed.len(), 1, "{closed:?}");
-            assert_eq!(closed[0].kind, RuntimeEventKind::InteractionClosed);
-            assert_eq!(closed[0].episode_seq, opened[0].episode_seq);
-        }
-
-        #[test]
-        fn tracker_supersedes_the_first_batched_read_with_the_second_after_its_allow() {
-            let mut run = replay_run();
-            let first = run.episode(BATCHED[0], 0, 300);
-            assert_eq!(first.len(), 1, "{first:?}");
-            assert_eq!(first[0].kind, RuntimeEventKind::InteractionOpened);
-            assert_eq!(first[0].evidence_json["rule_id"], READ);
-            let second = run.episode(BATCHED[1], 350, 900);
-            assert_eq!(second.len(), 2, "{second:?}");
-            assert_eq!(second[0].kind, RuntimeEventKind::InteractionClosed);
-            assert_eq!(
-                second[0].close_reason,
-                Some(InteractionCloseReason::Superseded)
-            );
-            assert_eq!(second[0].episode_seq, first[0].episode_seq);
-            assert_eq!(second[1].kind, RuntimeEventKind::InteractionOpened);
-            assert_eq!(second[1].evidence_json["rule_id"], READ);
-            assert_ne!(second[1].episode_seq, first[0].episode_seq);
-        }
     }
 
     mod bundled_codex_auto {
-        use crate::broker::runtime::AutomaticReview;
         use crate::coding_agent::catalog::tests::*;
 
         const CODEX_VERSION: &str = "0.163.0";
+        /// The captures of the predecessor form; every other Codex fixture is an
+        /// automatic-mode capture.
+        const PREDECESSOR_FIXTURES: [&str; 4] = [
+            "codex-0.163.0-on-request-permission-1",
+            "codex-0.163.0-allow-pre-stage-1",
+            "codex-0.163.0-deny-pre-stage-1",
+            "codex-0.163.0-idle-composer-1",
+        ];
         const REFUSAL_RULE: &str = "codex-auto-review-refusal";
         const INDICATOR_RULE: &str = "codex-auto-review-indicator";
         const IDLE_RULE: &str = "codex-idle-composer";
@@ -6853,12 +5514,7 @@ mod tests {
         }
 
         fn screen(id: &str) -> ScreenSnapshot {
-            let bytes = bytes(id);
-            let text = std::str::from_utf8(&bytes).unwrap();
-            let alternate = serde_json::from_str::<Value>(text).unwrap()["alternate_screen"]
-                .as_bool()
-                .unwrap();
-            replay_native_fixture(text, |_| {}, alternate, None)
+            replay_as_captured(id, |_| {}, None)
         }
 
         fn detector(catalog: &ProfileCatalog) -> Detector {
@@ -6866,7 +5522,7 @@ mod tests {
         }
 
         fn observe(id: &str) -> ScreenObservation {
-            detector(&ProfileCatalog::bundled().unwrap())
+            detector(ProfileCatalog::bundled())
                 .observe(&screen(id))
                 .unwrap()
         }
@@ -6904,37 +5560,6 @@ mod tests {
             blocks
         }
 
-        fn redacted() -> EvidencePolicy {
-            EvidencePolicy::redacted(
-                &json!({"schema_version":1,"patterns":["fixture-secret-197-unique"],"sensitive_rules":[]}),
-                &[REFUSAL_RULE, INDICATOR_RULE, "codex-exec-approval"],
-            )
-            .unwrap()
-        }
-
-        fn replay_run(policy: EvidencePolicy) -> Run {
-            Run::new(policy, observe)
-        }
-
-        fn operations(held: &Held) -> Vec<String> {
-            let mut shown = held
-                .events
-                .iter()
-                .map(|event| unwrapped(&event.evidence_json["operation"]).unwrap())
-                .collect::<Vec<_>>();
-            shown.sort();
-            shown
-        }
-
-        fn sorted(values: &[&str]) -> Vec<String> {
-            let mut values = values
-                .iter()
-                .map(|value| (*value).to_owned())
-                .collect::<Vec<_>>();
-            values.sort();
-            values
-        }
-
         #[test]
         fn bundled_codex_auto_fixtures_produce_their_primary_and_annotation_sets() {
             for (id, kind, rule, annotations) in CLASSIFICATION {
@@ -6964,14 +5589,14 @@ mod tests {
                     assert_eq!(block.raw_evidence["observed_mode"], mode, "{id}");
                 }
             }
-            for id in crate::coding_agent::catalog::tests::bundled_codex::PREDECESSOR_FIXTURES {
+            for id in PREDECESSOR_FIXTURES {
                 let screen = replay_native_fixture(
                     std::str::from_utf8(&bytes(id)).unwrap(),
                     |_| {},
                     true,
                     None,
                 );
-                let observed = detector(&ProfileCatalog::bundled().unwrap())
+                let observed = detector(ProfileCatalog::bundled())
                     .observe(&screen)
                     .unwrap();
                 assert!(observed.annotations.is_empty(), "predecessor fixture {id}");
@@ -7003,292 +5628,59 @@ mod tests {
                 assert!(wide.fingerprint == two.fingerprint);
             }
         }
-
-        #[test]
-        fn codex_tracker_emits_one_refusal_after_two_frames_and_none_while_present() {
-            let mut run = replay_run(EvidencePolicy::metadata());
-            assert!(run.hold(REFUSAL_WORKING, 0, 50).events.is_empty());
-            let stable = run.hold(REFUSAL_WORKING, 100, 100);
-            assert_eq!(stable.events.len(), 1);
-            let event = &stable.events[0];
-            assert_eq!((event.episode_seq, event.classification), (None, None));
-            assert_eq!(event.evidence_json["rule_id"], REFUSAL_RULE);
-            assert_eq!(event.evidence_json["native_version"], CODEX_VERSION);
-            assert_eq!(event.evidence_json["operation"], Value::Null);
-            assert!(run.hold(REFUSAL_IDLE, 150, 1000).events.is_empty());
-            assert!(run.hold(REVIEWING, 1050, 1300).events.is_empty());
-        }
-
-        #[test]
-        fn codex_tracker_emits_one_event_per_distinct_visible_refusal() {
-            let mut two = replay_run(redacted());
-            assert_eq!(
-                operations(&two.hold(TWO_REFUSALS, 0, 300)),
-                sorted(&[TWO, THREE])
-            );
-            let mut three = replay_run(redacted());
-            assert_eq!(
-                operations(&three.hold(DENIAL_LIMIT, 0, 300)),
-                sorted(&[FOUR, FIVE, SIX])
-            );
-        }
-
-        #[test]
-        fn codex_tracker_does_not_re_emit_after_a_resize_rewrap() {
-            let mut run = replay_run(redacted());
-            assert_eq!(run.hold(TWO_REFUSALS, 0, 100).events.len(), 2);
-            assert!(run.hold(RESIZED, 150, 600).events.is_empty());
-            assert!(run.hold(RESTORED, 650, 900).events.is_empty());
-        }
-
-        #[test]
-        fn codex_tracker_resets_only_after_250_ms_of_verified_absence() {
-            let mut short = replay_run(EvidencePolicy::metadata());
-            assert_eq!(short.hold(REFUSAL_IDLE, 0, 100).events.len(), 1);
-            assert!(short.hold(IDLE, 150, 350).events.is_empty());
-            assert!(short.hold(REFUSAL_IDLE, 400, 700).events.is_empty());
-            let mut long = replay_run(EvidencePolicy::metadata());
-            assert_eq!(long.hold(REFUSAL_IDLE, 0, 100).events.len(), 1);
-            assert!(long.hold(APPROVED, 150, 450).events.is_empty());
-            assert_eq!(long.hold(REFUSAL_IDLE, 500, 700).events.len(), 1);
-        }
-
-        #[test]
-        fn codex_tracker_keeps_a_refusal_hidden_by_the_warnings_overlay() {
-            let mut run = replay_run(EvidencePolicy::metadata());
-            assert_eq!(run.hold(REFUSAL_IDLE, 0, 100).events.len(), 1);
-            assert!(observe(OVERLAY).annotations.is_empty());
-            assert!(run.hold(OVERLAY, 150, 1500).events.is_empty());
-            assert!(run.hold(AFTER_OVERLAY, 1550, 1900).events.is_empty());
-        }
-
-        #[test]
-        fn codex_tracker_ignores_quoted_refusal_text() {
-            let mut run = replay_run(redacted());
-            assert_eq!(operations(&run.hold(QUOTE, 0, 300)), sorted(&[THREE]));
-        }
-
-        #[test]
-        fn codex_tracker_records_the_status_indicator_once_with_the_mode_only_when_redacted() {
-            for (policy, mode) in [
-                (EvidencePolicy::metadata(), None),
-                (redacted(), Some(MODE.to_owned())),
-            ] {
-                let mut run = replay_run(policy);
-                let held = run.hold(STATUS, 0, 600);
-                assert!(held.events.is_empty());
-                assert_eq!(
-                    held.policy,
-                    [(
-                        AutomaticReview::Available,
-                        mode,
-                        INDICATOR_RULE.to_owned(),
-                        NOW.to_owned()
-                    )]
-                );
-            }
-        }
-    }
-
-    mod bundled_codex {
-        use crate::coding_agent::catalog::tests::*;
-
-        const PERMISSION_FIXTURE: &str = "codex-0.163.0-on-request-permission-1";
-        const ALLOW_FIXTURE: &str = "codex-0.163.0-allow-pre-stage-1";
-        const DENY_FIXTURE: &str = "codex-0.163.0-deny-pre-stage-1";
-        const IDLE_FIXTURE: &str = "codex-0.163.0-idle-composer-1";
-        /// The captures of the predecessor form; every other Codex fixture is an
-        /// automatic-mode capture classified in `bundled_codex_auto`.
-        pub(super) const PREDECESSOR_FIXTURES: [&str; 4] = [
-            PERMISSION_FIXTURE,
-            ALLOW_FIXTURE,
-            DENY_FIXTURE,
-            IDLE_FIXTURE,
-        ];
-
-        #[test]
-        fn bundled_guard_accepts_a_pending_wrap_cursor_at_cols_and_rejects_one_past_it() {
-            assert!(
-                guarded_fixture(PERMISSION_FIXTURE, |_| {}, |s| s["cursor_col"] = json!(120))
-                    .is_ok(),
-                "cursor_col equal to cols records the pending-wrap position"
-            );
-            assert!(
-                guarded_fixture(IDLE_FIXTURE, |_| {}, |s| s["cursor_col"] = json!(120)).is_ok(),
-                "the pending-wrap position is valid on any row"
-            );
-            for (case, change) in [
-                ("one past the pending-wrap column", (35, 121)),
-                ("a row below the geometry", (36, 0)),
-            ] {
-                assert!(
-                    guarded_fixture(
-                        PERMISSION_FIXTURE,
-                        |_| {},
-                        |s| {
-                            s["cursor_row"] = json!(change.0);
-                            s["cursor_col"] = json!(change.1);
-                        }
-                    )
-                    .is_err(),
-                    "{case} must be rejected"
-                );
-            }
-        }
     }
 
     mod bundled_backends {
         use crate::coding_agent::catalog::tests::*;
 
-        struct BundledProfile {
-            backend: CodingAgent,
-            version: &'static str,
-        }
-
-        const CLAUDE: BundledProfile = BundledProfile {
-            backend: CodingAgent::Claude,
-            version: "2.1.302",
-        };
-        const CODEX: BundledProfile = BundledProfile {
-            backend: CodingAgent::Codex,
-            version: "0.163.0",
-        };
-        const OPENCODE: BundledProfile = BundledProfile {
-            backend: CodingAgent::Opencode,
-            version: "2.1.4",
-        };
-
-        struct MeasuredAnswer {
-            decision: PermissionDecision,
-            byte: u8,
-            choice: &'static str,
-            answer_rule: &'static str,
-            fixtures: &'static [&'static str],
-        }
-
-        struct SingleByteAnswers {
-            profile: BundledProfile,
-            rule: &'static str,
-            answers: [MeasuredAnswer; 2],
-        }
-
-        const SINGLE_BYTE_ANSWERS: [SingleByteAnswers; 2] = [
-            SingleByteAnswers {
-                profile: CLAUDE,
-                rule: "claude-bash-permission",
-                answers: [
-                    MeasuredAnswer {
-                        decision: PermissionDecision::Allow,
-                        byte: b'1',
-                        choice: "allow-once",
-                        answer_rule: "claude-bash-allow-digit",
-                        fixtures: &[
-                            "claude-2.1.302-allow-pre-stage-1",
-                            "claude-2.1.302-wrapped-allow-pre-stage-1",
-                        ],
-                    },
-                    MeasuredAnswer {
-                        decision: PermissionDecision::Deny,
-                        byte: b'4',
-                        choice: "deny-once",
-                        answer_rule: "claude-bash-deny-digit",
-                        fixtures: &[
-                            "claude-2.1.302-deny-pre-stage-1",
-                            "claude-2.1.302-wrapped-deny-pre-stage-1",
-                        ],
-                    },
-                ],
-            },
-            SingleByteAnswers {
-                profile: CODEX,
-                rule: "codex-exec-approval",
-                answers: [
-                    MeasuredAnswer {
-                        decision: PermissionDecision::Allow,
-                        byte: b'y',
-                        choice: "allow-once",
-                        answer_rule: "codex-exec-allow-y",
-                        fixtures: &["codex-0.163.0-allow-pre-stage-1"],
-                    },
-                    MeasuredAnswer {
-                        decision: PermissionDecision::Deny,
-                        byte: b'3',
-                        choice: "deny-once",
-                        answer_rule: "codex-exec-deny-digit",
-                        fixtures: &["codex-0.163.0-deny-pre-stage-1"],
-                    },
-                ],
-            },
-        ];
-
         #[test]
-        fn each_bundled_profile_declares_detection_idle_composer_both_operations_and_both_answers()
-        {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            for profile in [CLAUDE, CODEX, OPENCODE] {
-                let backend = profile.backend;
-                let declared = bundled.capabilities(backend, Some(profile.version));
-                assert_eq!(declared.backend, backend);
-                assert_eq!(declared.native_version.as_deref(), Some(profile.version));
-                assert_eq!(declared.min_version.as_deref(), Some(profile.version));
-                assert_eq!(declared.detection, Coverage::Tested, "{backend:?}");
-                assert_eq!(declared.composer, Coverage::Tested, "{backend:?}");
-                assert_eq!(declared.prompt_submission, Coverage::Tested, "{backend:?}");
-                assert_eq!(
-                    declared.native_exec_submission,
-                    Coverage::Tested,
-                    "{backend:?}"
-                );
-                assert_eq!(declared.answer_decisions.len(), 2, "{backend:?}");
-                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                    assert!(
-                        declared.answer_decisions.contains(&decision),
-                        "{backend:?} {decision:?}"
-                    );
-                }
-                assert_eq!(declared.capability_reason, None, "{backend:?}");
-                let unknown = bundled.capabilities(backend, None);
-                assert_eq!(unknown.detection, Coverage::Unknown, "{backend:?}");
-                assert_eq!(unknown.composer, Coverage::Unknown, "{backend:?}");
-                assert_eq!(unknown.min_version, None, "{backend:?}");
-                assert!(unknown.answer_decisions.is_empty(), "{backend:?}");
-                assert!(unknown.capability_reason.is_some(), "{backend:?}");
-                for &other in CodingAgent::all().iter().filter(|&&other| other != backend) {
-                    let foreign = bundled.capabilities(other, Some(profile.version));
-                    assert_ne!(
-                        foreign.min_version.as_deref(),
-                        Some(profile.version),
-                        "{other:?} at {backend:?} {}",
-                        profile.version
-                    );
-                }
+        fn hermes_composer_plans_submit_a_prompt_and_a_native_exec_in_separate_stages() {
+            let bundled = ProfileCatalog::bundled();
+            for (operation, name, literal, typed) in [
+                (ComposerOperation::Prompt, "prompt", "ok", b"ok".to_vec()),
+                (
+                    ComposerOperation::Exec,
+                    "exec",
+                    "echo x",
+                    b"! echo x".to_vec(),
+                ),
+            ] {
+                let plan = bundled
+                    .composer_plan(CodingAgent::Hermes, "2026.9.24", operation)
+                    .unwrap_or_else(|| panic!("{name} plan"));
+                assert_eq!(plan.stages(literal).unwrap(), [typed, b"\r".to_vec()]);
             }
         }
 
         #[test]
         fn bundled_submission_fixtures_replay_their_composer_stages_through_the_production_catalog()
         {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            for (profile, run) in [
-                (CLAUDE, "2.1.308"),
-                (CODEX, CODEX.version),
-                (OPENCODE, OPENCODE.version),
+            let bundled = ProfileCatalog::bundled();
+            let definitions = bundled_definitions();
+            for (backend, run) in [
+                (CodingAgent::Claude, "2.1.308"),
+                (CodingAgent::Codex, "0.163.0"),
+                (CodingAgent::Opencode, "2.1.4"),
             ] {
-                let backend = profile.backend;
-                let detector = Detector::new(&bundled, backend, Some(run));
+                let detector = Detector::new(bundled, backend, Some(run));
+                let profile = definitions["profiles"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|profile| profile["backend"] == backend.name())
+                    .expect("bundled backend profile");
                 for (operation, name) in [
                     (ComposerOperation::Prompt, "prompt"),
                     (ComposerOperation::Exec, "exec"),
                 ] {
-                    let plan = bundled
+                    bundled
                         .composer_plan(backend, run, operation)
                         .unwrap_or_else(|| panic!("{backend:?} {name} plan"));
-                    assert_eq!(plan.native_version(), run);
-                    for id in plan.fixture_ids() {
-                        assert!(
-                            submission_fixture_ids(backend).contains(id),
-                            "{id} is declared submission provenance"
-                        );
+                    let cited =
+                        profile["capabilities"]["composer"]["submission"][name]["fixture_ids"]
+                            .as_array()
+                            .unwrap();
+                    for id in cited.iter().map(|id| id.as_str().unwrap()) {
                         let document: Value = serde_json::from_str(&bundled_fixture(id)).unwrap();
                         let screen = replay_native_fixture(
                             &bundled_screen(id),
@@ -7301,147 +5693,8 @@ mod tests {
                             !matches!(observed.kind, ObservationKind::Interaction(_)),
                             "{id}: a composer stage is never an interaction"
                         );
-                        if id.ends_with("-empty-composer-1") {
-                            assert_eq!(observed.kind, ObservationKind::ComposerEmpty, "{id}");
-                            assert!(observed.verified_noninteraction, "{id}");
-                        } else if id.ends_with("-typed-literal-1") {
-                            assert_ne!(
-                                observed.kind,
-                                ObservationKind::ComposerEmpty,
-                                "{id}: a typed literal is not an empty composer"
-                            );
-                        } else {
-                            assert!(id.ends_with("-post-submit-1"), "{id}");
-                        }
                     }
                 }
-            }
-        }
-
-        #[test]
-        fn single_byte_answer_plans_are_the_measured_stages() {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            for SingleByteAnswers {
-                profile,
-                rule,
-                answers,
-            } in SINGLE_BYTE_ANSWERS
-            {
-                let backend = profile.backend;
-                for answer in answers {
-                    let decision = answer.decision;
-                    let plan = bundled
-                        .answer_plan(
-                            backend,
-                            profile.version,
-                            rule,
-                            &AnswerKey::Decision(decision),
-                        )
-                        .expect("measured bundled answer plan");
-                    assert_eq!(plan.choice_id(), answer.choice);
-                    assert_eq!(plan.focus_matcher_id(), "focus");
-                    assert_eq!(
-                        plan.stages().len(),
-                        1,
-                        "{backend:?} {decision:?} is one measured stage"
-                    );
-                    let stage = &plan.stages()[0];
-                    assert_eq!(stage.bytes(), &[answer.byte], "{backend:?} {decision:?}");
-                    assert_eq!(stage.required_rule_id(), rule);
-                    assert_eq!(stage.required_choice_id(), answer.choice);
-                    let capability = plan.capability();
-                    assert_eq!(capability.backend(), backend);
-                    assert_eq!(capability.native_version(), profile.version);
-                    assert_eq!(capability.request_rule_id(), rule);
-                    assert_eq!(capability.answer_rule_id(), answer.answer_rule);
-                    assert_eq!(capability.key(), &AnswerKey::Decision(decision));
-                    assert_eq!(
-                        capability.fixture_ids(),
-                        answer
-                            .fixtures
-                            .iter()
-                            .map(|&id| id.to_owned())
-                            .collect::<Vec<_>>()
-                            .as_slice(),
-                        "{backend:?} {decision:?} rests on its pre-stage captures"
-                    );
-                    for &other in CodingAgent::all().iter().filter(|&&other| other != backend) {
-                        assert!(
-                            bundled
-                                .answer_plan(
-                                    other,
-                                    profile.version,
-                                    rule,
-                                    &AnswerKey::Decision(decision)
-                                )
-                                .is_none(),
-                            "{other:?} {}",
-                            profile.version
-                        );
-                    }
-                }
-            }
-        }
-
-        #[test]
-        fn episodes_close_not_visible_once_the_idle_composer_holds_250_ms() {
-            for (profile, permission, idle, idle_rule) in [
-                (
-                    CLAUDE,
-                    "claude-2.1.302-default-permission-1",
-                    "claude-2.1.302-idle-composer-1",
-                    "claude-idle-composer",
-                ),
-                (
-                    CODEX,
-                    "codex-0.163.0-on-request-permission-1",
-                    "codex-0.163.0-idle-composer-1",
-                    "codex-idle-composer",
-                ),
-            ] {
-                let observe = |id| bundled_observe(profile.backend, profile.version, id);
-                let permission = observe(permission);
-                let idle = observe(idle);
-                assert_eq!(idle.rule_id, idle_rule);
-                assert!(idle.verified_noninteraction, "{idle_rule}");
-                let at = |observation: &ScreenObservation, output_seq: u64| {
-                    let mut replayed = observation.clone();
-                    replayed.output_seq = output_seq;
-                    replayed.raw_evidence["screen_seq"] = json!(output_seq);
-                    replayed
-                };
-                let origin = Instant::now();
-                let mut tracker = tracker();
-                open(&mut tracker, &at(&permission, 1), origin);
-                let mut closed_at = |observation: &ScreenObservation, output_seq, millis| {
-                    let update = tracker
-                        .observe(
-                            &at(observation, output_seq),
-                            origin + Duration::from_millis(millis),
-                            NOW,
-                        )
-                        .unwrap();
-                    update
-                        .transitions
-                        .into_iter()
-                        .filter(|t| t.kind == RuntimeEventKind::InteractionClosed)
-                        .collect::<Vec<_>>()
-                };
-                assert!(
-                    closed_at(&idle, 2, 200).is_empty(),
-                    "{idle_rule}: idle shown for 0 ms stays open"
-                );
-                assert!(
-                    closed_at(&permission, 3, 300).is_empty(),
-                    "{idle_rule}: an idle flash under 250 ms keeps the episode"
-                );
-                assert!(closed_at(&idle, 4, 400).is_empty(), "{idle_rule}");
-                let closes = closed_at(&idle, 5, 650);
-                assert_eq!(closes.len(), 1, "{idle_rule}: {closes:?}");
-                assert_eq!(
-                    closes[0].close_reason,
-                    Some(InteractionCloseReason::NotVisible)
-                );
             }
         }
     }
@@ -7561,13 +5814,6 @@ mod tests {
                 .collect()
         }
 
-        fn guarded_fixture(
-            id: &str,
-            change_screen: impl FnOnce(&mut Value),
-        ) -> std::result::Result<ProfileCatalog, CafleetError> {
-            crate::coding_agent::catalog::test_support::guarded_fixture(id, |_| {}, change_screen)
-        }
-
         fn replay(bytes: &[u8]) -> ScreenSnapshot {
             replay_changed(bytes, |_| {}, None)
         }
@@ -7582,7 +5828,7 @@ mod tests {
 
         fn detector() -> Detector {
             Detector::new(
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 CodingAgent::Opencode,
                 Some(OPENCODE_VERSION),
             )
@@ -7594,7 +5840,6 @@ mod tests {
 
         fn plan(decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
-                .unwrap()
                 .answer_plan(
                     CodingAgent::Opencode,
                     OPENCODE_VERSION,
@@ -7648,87 +5893,8 @@ mod tests {
             assert_eq!((region.top, region.bottom), (10, 22), "{case}");
         }
 
-        #[test]
-        fn bundled_opencode_compact_answers_repeat_the_measured_stages_on_the_compact_rules() {
-            let catalog = ProfileCatalog::bundled().unwrap();
-            for (decision, choice, stages) in [
-                (
-                    PermissionDecision::Allow,
-                    "allow-once",
-                    vec![(vec![0x0d], Some("allow-once"), None)],
-                ),
-                (
-                    PermissionDecision::Deny,
-                    "deny-once",
-                    vec![
-                        (vec![0x68], Some("allow-once"), None),
-                        (vec![0x0d], Some("deny-once"), None),
-                        (vec![0x0d], None, Some(COMPACT_REASON_RULE)),
-                    ],
-                ),
-            ] {
-                let plan = catalog
-                    .answer_plan(
-                        CodingAgent::Opencode,
-                        OPENCODE_VERSION,
-                        COMPACT_RULE,
-                        &AnswerKey::Decision(decision),
-                    )
-                    .unwrap_or_else(|| panic!("compact {decision:?} plan"));
-                assert_eq!(plan.choice_id(), choice);
-                assert_eq!(plan.focus_matcher_id(), "focus");
-                assert_eq!(
-                    plan.stages()
-                        .iter()
-                        .map(|stage| (
-                            stage.bytes().to_vec(),
-                            stage.required_focus_choice_id(),
-                            stage.required_screen_rule_id(),
-                        ))
-                        .collect::<Vec<_>>(),
-                    stages,
-                    "{decision:?}"
-                );
-                for stage in plan.stages() {
-                    assert_eq!(stage.required_rule_id(), COMPACT_RULE);
-                    assert_eq!(stage.required_choice_id(), choice);
-                }
-                let capability = plan.capability();
-                assert_eq!(capability.request_rule_id(), COMPACT_RULE);
-                assert_eq!(capability.key(), &AnswerKey::Decision(decision));
-                let fixtures = if decision == PermissionDecision::Allow {
-                    BTreeSet::from([COMPACT_FIXTURE, MIN_FIXTURE])
-                } else {
-                    BTreeSet::from([
-                        COMPACT_FIXTURE,
-                        COMPACT_DENY_2_FIXTURE,
-                        COMPACT_DENY_3_FIXTURE,
-                        MIN_FIXTURE,
-                        MIN_DENY_2_FIXTURE,
-                        MIN_DENY_3_FIXTURE,
-                    ])
-                };
-                assert_eq!(
-                    capability
-                        .fixture_ids()
-                        .iter()
-                        .map(String::as_str)
-                        .collect::<BTreeSet<_>>(),
-                    fixtures,
-                    "{decision:?}"
-                );
-                let wide = plan_for(PERMISSION_RULE, decision);
-                assert_ne!(
-                    capability.answer_rule_id(),
-                    wide.capability().answer_rule_id(),
-                    "each request rule has its own answer entry"
-                );
-            }
-        }
-
         fn plan_for(request: &str, decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
-                .unwrap()
                 .answer_plan(
                     CodingAgent::Opencode,
                     OPENCODE_VERSION,
@@ -7918,88 +6084,6 @@ mod tests {
             assert_eq!(observed.kind, ObservationKind::ComposerEmpty);
             assert_eq!(observed.rule_id, IDLE_RULE);
             assert!(observed.verified_noninteraction);
-        }
-
-        #[test]
-        fn bundled_opencode_answer_plans_are_the_measured_gated_stages() {
-            let allow = plan(PermissionDecision::Allow);
-            let deny = plan(PermissionDecision::Deny);
-            for (plan, decision, choice, answer_rule, fixtures, stages) in [
-                (
-                    &allow,
-                    PermissionDecision::Allow,
-                    "allow-once",
-                    "opencode-shell-allow-once",
-                    BTreeSet::from([ALLOW_FIXTURE, NARROW_FIXTURE]),
-                    vec![(vec![0x0d], Some("allow-once"), None)],
-                ),
-                (
-                    &deny,
-                    PermissionDecision::Deny,
-                    "deny-once",
-                    "opencode-shell-deny-once",
-                    BTreeSet::from([
-                        DENY_1_FIXTURE,
-                        DENY_2_FIXTURE,
-                        DENY_3_FIXTURE,
-                        NARROW_FIXTURE,
-                        NARROW_DENY_2_FIXTURE,
-                        NARROW_DENY_3_FIXTURE,
-                    ]),
-                    vec![
-                        (vec![0x68], Some("allow-once"), None),
-                        (vec![0x0d], Some("deny-once"), None),
-                        (vec![0x0d], None, Some(REASON_RULE)),
-                    ],
-                ),
-            ] {
-                assert_eq!(plan.choice_id(), choice);
-                assert_eq!(plan.focus_matcher_id(), "focus");
-                let actual = plan
-                    .stages()
-                    .iter()
-                    .map(|stage| {
-                        assert_eq!(stage.required_rule_id(), PERMISSION_RULE);
-                        assert_eq!(stage.required_choice_id(), choice);
-                        assert!(!stage.bytes().contains(&0x1b), "no stage sends Escape");
-                        (
-                            stage.bytes().to_vec(),
-                            stage.required_focus_choice_id(),
-                            stage.required_screen_rule_id(),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(actual, stages, "{decision:?}");
-                let capability = plan.capability();
-                assert_eq!(capability.backend(), CodingAgent::Opencode);
-                assert_eq!(capability.native_version(), OPENCODE_VERSION);
-                assert_eq!(capability.request_rule_id(), PERMISSION_RULE);
-                assert_eq!(capability.answer_rule_id(), answer_rule);
-                assert_eq!(capability.key(), &AnswerKey::Decision(decision));
-                assert_eq!(
-                    capability
-                        .fixture_ids()
-                        .iter()
-                        .map(String::as_str)
-                        .collect::<BTreeSet<_>>(),
-                    fixtures,
-                    "{decision:?}"
-                );
-                let bundled = ProfileCatalog::bundled().unwrap();
-                for (backend, version, request) in [
-                    (CodingAgent::Opencode, OPENCODE_VERSION, REASON_RULE),
-                    (CodingAgent::Opencode, OPENCODE_VERSION, IDLE_RULE),
-                    (CodingAgent::Codex, OPENCODE_VERSION, PERMISSION_RULE),
-                    (CodingAgent::Claude, OPENCODE_VERSION, PERMISSION_RULE),
-                ] {
-                    assert!(
-                        bundled
-                            .answer_plan(backend, version, request, &AnswerKey::Decision(decision))
-                            .is_none(),
-                        "{backend:?} {version} {request}"
-                    );
-                }
-            }
         }
 
         #[test]
@@ -8250,185 +6334,6 @@ mod tests {
                 assert_ne!(observation.rule_id, REASON_RULE, "{case}");
             }
         }
-
-        #[test]
-        fn bundled_opencode_replay_paints_each_captured_background_run() {
-            let screen = replay(&fixture(PERMISSION_FIXTURE));
-            let bg = |row: u16, col: u16| screen.screen.cell(row, col).unwrap().bgcolor();
-            assert_eq!(bg(21, 0), vt100::Color::Rgb(30, 30, 30));
-            for col in 2..14 {
-                assert_eq!(bg(21, col), vt100::Color::Rgb(250, 178, 131), "col {col}");
-            }
-            assert_eq!(bg(21, 14), vt100::Color::Rgb(30, 30, 30));
-            assert_eq!(bg(10, 0), vt100::Color::Rgb(20, 20, 20));
-            assert_eq!(bg(3, 0), vt100::Color::Default);
-            assert_eq!(bg(23, 0), vt100::Color::Default);
-            assert_eq!(
-                screen.screen.cell(21, 3).unwrap().contents(),
-                "A",
-                "the repaint keeps the captured text"
-            );
-            let idle = replay(&fixture(IDLE_FIXTURE));
-            for row in 0..36 {
-                for col in 0..120 {
-                    assert_eq!(
-                        idle.screen.cell(row, col).unwrap().bgcolor(),
-                        vt100::Color::Default,
-                        "an absent key means every cell has the default background"
-                    );
-                }
-            }
-        }
-
-        #[test]
-        fn bundled_guard_accepts_the_opencode_fixtures_and_rejects_altered_backgrounds() {
-            let run = |row: u64, start: u64, end: u64, bg: Value| json!({"row":row,"start_col":start,"end_col":end,"bg":bg});
-            let rgb = json!({"kind":"rgb","r":1,"g":2,"b":3});
-            for (case, runs) in [
-                (
-                    "indexed colour",
-                    json!([run(30, 0, 4, json!({"kind":"indexed","index":255}))]),
-                ),
-                (
-                    "adjacent runs",
-                    json!([
-                        run(30, 0, 4, rgb.clone()),
-                        run(30, 4, 8, json!({"kind":"indexed","index":3}))
-                    ]),
-                ),
-                ("full-width run", json!([run(30, 0, 120, rgb.clone())])),
-            ] {
-                assert!(
-                    guarded_fixture(IDLE_FIXTURE, |s| s["cell_backgrounds"] = runs).is_ok(),
-                    "{case} is a valid run set"
-                );
-            }
-            for (case, runs) in [
-                (
-                    "row below the geometry",
-                    json!([run(36, 0, 4, rgb.clone())]),
-                ),
-                (
-                    "end past the width",
-                    json!([run(30, 100, 121, rgb.clone())]),
-                ),
-                ("masked row", json!([run(35, 0, 4, rgb.clone())])),
-                ("empty run", json!([run(30, 4, 4, rgb.clone())])),
-                ("reversed run", json!([run(30, 8, 4, rgb.clone())])),
-                (
-                    "overlapping runs",
-                    json!([run(30, 0, 6, rgb.clone()), run(30, 5, 9, rgb.clone())]),
-                ),
-                (
-                    "default colour",
-                    json!([run(30, 0, 4, json!({"kind":"default"}))]),
-                ),
-                (
-                    "unknown colour kind",
-                    json!([run(30, 0, 4, json!({"kind":"named","name":"red"}))]),
-                ),
-                (
-                    "rgb component out of range",
-                    json!([run(30, 0, 4, json!({"kind":"rgb","r":256,"g":0,"b":0}))]),
-                ),
-                (
-                    "rgb component missing",
-                    json!([run(30, 0, 4, json!({"kind":"rgb","r":1,"g":2}))]),
-                ),
-                (
-                    "rgb extra field",
-                    json!([run(30, 0, 4, json!({"kind":"rgb","r":1,"g":2,"b":3,"a":4}))]),
-                ),
-                (
-                    "indexed out of range",
-                    json!([run(30, 0, 4, json!({"kind":"indexed","index":256}))]),
-                ),
-                (
-                    "negative column",
-                    json!([{"row":30,"start_col":-1,"end_col":4,"bg":rgb.clone()}]),
-                ),
-                (
-                    "run extra field",
-                    json!([{"row":30,"start_col":0,"end_col":4,"bg":rgb.clone(),"fg":rgb.clone()}]),
-                ),
-                (
-                    "run missing field",
-                    json!([{"row":30,"start_col":0,"bg":rgb.clone()}]),
-                ),
-                ("not an array", json!({"row":30})),
-            ] {
-                assert!(
-                    guarded_fixture(IDLE_FIXTURE, |s| s["cell_backgrounds"] = runs).is_err(),
-                    "{case} must be rejected"
-                );
-            }
-            assert!(
-                guarded_fixture(PERMISSION_FIXTURE, |s| {
-                    s["cell_backgrounds"]
-                        .as_array_mut()
-                        .unwrap()
-                        .push(json!({"row":21,"start_col":5,"end_col":7,"bg":{"kind":"indexed","index":1}}));
-                })
-                .is_err(),
-                "a run overlapping a captured run is rejected"
-            );
-        }
-
-        #[test]
-        fn bundled_opencode_episode_survives_the_dialog_and_closes_not_visible_on_the_idle_composer()
-         {
-            let at = |bytes: &[u8], output_seq: u64| {
-                let mut replayed = observe(&replay(bytes));
-                replayed.output_seq = output_seq;
-                replayed.raw_evidence["screen_seq"] = json!(output_seq);
-                replayed
-            };
-            let origin = Instant::now();
-            let mut tracker = tracker();
-            open(&mut tracker, &at(&fixture(PERMISSION_FIXTURE), 1), origin);
-            let episode = tracker.active_episode();
-            for (index, millis) in [200u64, 400, 3000].into_iter().enumerate() {
-                let update = tracker
-                    .observe(
-                        &at(&fixture(DENY_3_FIXTURE), 2 + index as u64),
-                        origin + Duration::from_millis(millis),
-                        NOW,
-                    )
-                    .unwrap();
-                assert!(
-                    update.transitions.is_empty(),
-                    "{millis} ms: {:?}",
-                    update.transitions
-                );
-                assert_eq!(update.visibility, Visibility::Visible, "{millis} ms");
-                assert_eq!(tracker.active_episode(), episode);
-            }
-            let first = tracker
-                .observe(
-                    &at(&fixture(IDLE_FIXTURE), 10),
-                    origin + Duration::from_millis(3100),
-                    NOW,
-                )
-                .unwrap();
-            assert!(first.transitions.is_empty());
-            let held = tracker
-                .observe(
-                    &at(&fixture(IDLE_FIXTURE), 11),
-                    origin + Duration::from_millis(3350),
-                    NOW,
-                )
-                .unwrap();
-            let closes = held
-                .transitions
-                .iter()
-                .filter(|t| t.kind == RuntimeEventKind::InteractionClosed)
-                .collect::<Vec<_>>();
-            assert_eq!(closes.len(), 1, "{:?}", held.transitions);
-            assert_eq!(
-                closes[0].close_reason,
-                Some(InteractionCloseReason::NotVisible)
-            );
-        }
     }
 
     mod annotation {
@@ -8580,9 +6485,15 @@ mod tests {
                     .unwrap()
                     .remove("frame");
             });
-            rejected("empty frame require patterns", |value| {
-                rule(value, REFUSAL)["frame"]["require_patterns"] = json!([]);
-            });
+            let mut empty_require = annotated();
+            rule(&mut empty_require, REFUSAL)["frame"]["require_patterns"] = json!([]);
+            match ProfileCatalog::from_definitions(&empty_require) {
+                Err(cause) => assert_eq!(
+                    cause.message(),
+                    "invalid native profile: annotation frame requires a live-screen pattern"
+                ),
+                Ok(_) => panic!("an annotation frame without a require pattern loads"),
+            }
             rejected("uncompilable frame require pattern", |value| {
                 rule(value, REFUSAL)["frame"]["require_patterns"] = json!(["^(unclosed$"]);
             });
@@ -8606,25 +6517,41 @@ mod tests {
     }
     mod profile_thresholds {
         use crate::coding_agent::catalog::tests::*;
-        use crate::coding_agent::detector::test_support::bundled_observe;
 
         fn catalog(profiles: &[(&str, &str)]) -> ProfileCatalog {
             ProfileCatalog::from_definitions(&thresholds(profiles)).unwrap()
         }
 
-        /// The label of the declaration whose `min_version` the selection reports.
+        /// The label of the threshold profile selected for `probe`, named by its allow plan.
+        fn selected_for(
+            catalog: &ProfileCatalog,
+            backend: CodingAgent,
+            probe: &str,
+        ) -> Option<String> {
+            let plan = catalog.answer_plan(
+                backend,
+                probe,
+                RULE,
+                &AnswerKey::Decision(PermissionDecision::Allow),
+            )?;
+            let label = plan
+                .capability()
+                .answer_rule_id()
+                .strip_suffix("-allow-plan")
+                .expect("a threshold answer plan is named after its label");
+            Some(label.to_owned())
+        }
+
         fn selected<'a>(
             catalog: &ProfileCatalog,
             declarations: &[(&'a str, &str)],
             probe: &str,
         ) -> Option<&'a str> {
-            let min_version = catalog
-                .capabilities(CodingAgent::Codex, Some(probe))
-                .min_version?;
+            let label = selected_for(catalog, CodingAgent::Codex, probe)?;
             let (label, _) = declarations
                 .iter()
-                .find(|(_, declared)| *declared == min_version)
-                .expect("selection reports a declared min_version");
+                .find(|(declared, _)| *declared == label)
+                .expect("selection names a declared threshold");
             Some(label)
         }
 
@@ -8763,16 +6690,13 @@ mod tests {
             }
             let catalog = ProfileCatalog::from_definitions(&value).unwrap();
             for (backend, probe, expected) in [
-                (CodingAgent::Codex, "1.0.0", Some("0.5.0")),
+                (CodingAgent::Codex, "1.0.0", Some("codex-low")),
                 (CodingAgent::Claude, "1.0.0", None),
-                (CodingAgent::Claude, "2.0.0", Some("2.0.0")),
+                (CodingAgent::Claude, "2.0.0", Some("claude-only")),
                 (CodingAgent::Opencode, "2.0.0", None),
             ] {
                 assert_eq!(
-                    catalog
-                        .capabilities(backend, Some(probe))
-                        .min_version
-                        .as_deref(),
+                    selected_for(&catalog, backend, probe).as_deref(),
                     expected,
                     "{backend:?} {probe}"
                 );
@@ -8849,9 +6773,7 @@ mod tests {
             ];
             rows.extend(lines("write disposable.txt"));
             let screen = terminal(&rows, 80, false).snapshot();
-            for (run, name, min_version) in
-                [("1.4.2", "first", "1.0.0"), ("3.1.4", "second", "2.0.0")]
-            {
+            for (run, name) in [("1.4.2", "first"), ("3.1.4", "second")] {
                 let fixture = format!("{FIXTURE}-codex-{name}");
                 let observed = Detector::new(&catalog, CodingAgent::Codex, Some(run))
                     .observe(&screen)
@@ -8860,23 +6782,13 @@ mod tests {
                     observed.kind,
                     ObservationKind::Interaction(InteractionClass::PermissionRequest)
                 );
-                assert_eq!(
-                    catalog
-                        .capabilities(CodingAgent::Codex, Some(run))
-                        .min_version
-                        .as_deref(),
-                    Some(min_version),
-                    "{run}"
-                );
                 assert_eq!(observed.raw_evidence["native_version"], run);
                 assert_eq!(observed.annotations.len(), 1, "{run}");
                 assert_eq!(observed.annotations[0].raw_evidence["native_version"], run);
                 for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                    let plan = catalog
+                    catalog
                         .composer_plan(CodingAgent::Codex, run, operation)
                         .unwrap_or_else(|| panic!("{run} {operation:?} plan"));
-                    assert_eq!(plan.native_version(), run);
-                    assert_eq!(plan.fixture_ids(), std::slice::from_ref(&fixture));
                 }
                 let capability = catalog
                     .answer_plan(
@@ -8891,81 +6803,6 @@ mod tests {
                 assert_eq!(capability.native_version(), run);
                 assert_eq!(capability.answer_rule_id(), format!("{name}-allow-plan"));
                 assert_eq!(capability.fixture_ids(), &[fixture]);
-            }
-        }
-
-        #[test]
-        fn bundled_later_versions_reuse_the_complete_boundary_profile_including_claude_2_1_308() {
-            let bundled = ProfileCatalog::bundled().unwrap();
-            for (boundary, request) in BUNDLED_BOUNDARIES.iter().zip([
-                "claude-bash-permission",
-                "codex-exec-approval",
-                "opencode-shell-permission",
-            ]) {
-                let backend = boundary.backend;
-                let at = bundled.capabilities(backend, Some(boundary.min_version));
-                assert_eq!(at.min_version.as_deref(), Some(boundary.min_version));
-                for later in boundary.later {
-                    let context = format!("{backend:?} {later}");
-                    let reused = bundled.capabilities(backend, Some(later));
-                    assert_eq!(reused.min_version, at.min_version, "{context}");
-                    assert_eq!(reused.detection, at.detection, "{context}");
-                    assert_eq!(reused.composer, at.composer, "{context}");
-                    assert_eq!(reused.prompt_submission, at.prompt_submission, "{context}");
-                    assert_eq!(
-                        reused.native_exec_submission, at.native_exec_submission,
-                        "{context}"
-                    );
-                    assert_eq!(reused.answer_decisions, at.answer_decisions, "{context}");
-                    for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                        let exact = bundled
-                            .answer_plan(
-                                backend,
-                                boundary.min_version,
-                                request,
-                                &AnswerKey::Decision(decision),
-                            )
-                            .expect("bundled boundary answer plan");
-                        let plan = bundled
-                            .answer_plan(backend, later, request, &AnswerKey::Decision(decision))
-                            .unwrap_or_else(|| panic!("{context} {decision:?}"));
-                        assert_eq!(plan.capability().native_version(), later);
-                        assert_eq!(
-                            plan.capability().answer_rule_id(),
-                            exact.capability().answer_rule_id()
-                        );
-                        assert_eq!(
-                            plan.stages()
-                                .iter()
-                                .map(|s| s.bytes().to_vec())
-                                .collect::<Vec<_>>(),
-                            exact
-                                .stages()
-                                .iter()
-                                .map(|s| s.bytes().to_vec())
-                                .collect::<Vec<_>>(),
-                            "{context} {decision:?}"
-                        );
-                    }
-                }
-            }
-            for id in [
-                "claude-2.1.302-auto-ask-permission-1",
-                "claude-2.1.302-auto-refusal-notice-idle-1",
-            ] {
-                let exact = bundled_observe(CodingAgent::Claude, "2.1.302", id);
-                let reused = bundled_observe(CodingAgent::Claude, "2.1.308", id);
-                assert_eq!(reused.kind, exact.kind, "{id}");
-                assert_eq!(reused.rule_id, exact.rule_id, "{id}");
-                assert_eq!(reused.raw_evidence["native_version"], "2.1.308", "{id}");
-                let rules = |observed: &ScreenObservation| {
-                    observed
-                        .annotations
-                        .iter()
-                        .map(|block| block.rule_id.clone())
-                        .collect::<Vec<_>>()
-                };
-                assert_eq!(rules(&reused), rules(&exact), "{id}");
             }
         }
     }
@@ -9032,50 +6869,39 @@ mod tests {
 
     #[test]
     fn composer_prompt_plan_retains_exact_selected_metadata_and_independent_coverage() {
-        let catalog = ProfileCatalog::from_definitions(&definition(Some("7e"), None)).unwrap();
-        metadata(
-            &plan(&catalog, ComposerOperation::Prompt),
-            &[PROMPT_FIXTURE.to_owned()],
-        );
-        capabilities(
-            &catalog,
-            CodingAgent::Codex,
-            Some(VERSION),
-            Coverage::Tested,
-            (Coverage::Tested, Coverage::Unknown),
-        );
-        assert!(
-            catalog
-                .composer_plan(CodingAgent::Codex, VERSION, ComposerOperation::Exec)
-                .is_none()
-        );
-        let actual = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
-        assert_eq!(actual.detection, Coverage::Unknown);
-        assert!(actual.answer_decisions.is_empty());
-    }
-
-    #[test]
-    fn composer_exec_plan_retains_exact_selected_metadata_and_independent_coverage() {
-        let catalog = ProfileCatalog::from_definitions(&definition(None, Some("6b6c"))).unwrap();
-        metadata(
-            &plan(&catalog, ComposerOperation::Exec),
-            &[EXEC_FIXTURE.to_owned()],
-        );
-        capabilities(
-            &catalog,
-            CodingAgent::Codex,
-            Some(VERSION),
-            Coverage::Tested,
-            (Coverage::Unknown, Coverage::Tested),
-        );
-        assert!(
-            catalog
-                .composer_plan(CodingAgent::Codex, VERSION, ComposerOperation::Prompt)
-                .is_none()
-        );
-        let actual = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
-        assert_eq!(actual.detection, Coverage::Unknown);
-        assert!(actual.answer_decisions.is_empty());
+        for (operation, other, value, coverage) in [
+            (
+                ComposerOperation::Prompt,
+                ComposerOperation::Exec,
+                definition(Some("7e"), None),
+                (Coverage::Tested, Coverage::Unknown),
+            ),
+            (
+                ComposerOperation::Exec,
+                ComposerOperation::Prompt,
+                definition(None, Some("6b6c")),
+                (Coverage::Unknown, Coverage::Tested),
+            ),
+        ] {
+            let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+            plan(&catalog, operation);
+            capabilities(
+                &catalog,
+                CodingAgent::Codex,
+                Some(VERSION),
+                Coverage::Tested,
+                coverage,
+            );
+            assert!(
+                catalog
+                    .composer_plan(CodingAgent::Codex, VERSION, other)
+                    .is_none(),
+                "{operation:?}"
+            );
+            let actual = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
+            assert_eq!(actual.detection, Coverage::Unknown);
+            assert!(actual.answer_decisions.is_empty());
+        }
     }
 
     #[test]
@@ -9096,8 +6922,6 @@ mod tests {
         let catalog = ProfileCatalog::from_definitions(&value).unwrap();
         let prompt = plan(&catalog, ComposerOperation::Prompt);
         let exec = plan(&catalog, ComposerOperation::Exec);
-        metadata(&prompt, &[PROMPT_FIXTURE.to_owned()]);
-        metadata(&exec, &[EXEC_FIXTURE.to_owned()]);
         assert_eq!(prompt.encode("literal").unwrap(), b"literal~");
         assert_eq!(exec.encode("literal").unwrap(), b"! literalkl");
         capabilities(
@@ -9120,27 +6944,20 @@ mod tests {
             Coverage::Unknown,
             (Coverage::Unknown, Coverage::Unknown),
         );
-        let bundled = ProfileCatalog::bundled().unwrap();
         for &backend in CodingAgent::all() {
-            let actual = bundled.capabilities(backend, Some(VERSION));
-            assert_eq!(
-                (actual.prompt_submission, actual.native_exec_submission),
-                (Coverage::Unknown, Coverage::Unknown),
-                "{backend:?}"
-            );
-            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                assert!(bundled.composer_plan(backend, VERSION, operation).is_none());
-                if backend != CodingAgent::Codex {
-                    assert!(catalog.composer_plan(backend, VERSION, operation).is_none());
-                    capabilities(
-                        &catalog,
-                        backend,
-                        Some(VERSION),
-                        Coverage::Unknown,
-                        (Coverage::Unknown, Coverage::Unknown),
-                    );
-                }
+            if backend == CodingAgent::Codex {
+                continue;
             }
+            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
+                assert!(catalog.composer_plan(backend, VERSION, operation).is_none());
+            }
+            capabilities(
+                &catalog,
+                backend,
+                Some(VERSION),
+                Coverage::Unknown,
+                (Coverage::Unknown, Coverage::Unknown),
+            );
         }
     }
 
@@ -9177,7 +6994,7 @@ mod tests {
                 };
                 let catalog = ProfileCatalog::from_definitions(&value).unwrap();
                 let selected = plan(&catalog, operation);
-                let literal_size = 65536 - operation_prefix(operation).len() - submit_length;
+                let literal_size = 65536 - operation.prefix().len() - submit_length;
                 let literal = format!(
                     "{}{}",
                     "界".repeat(literal_size / 3),

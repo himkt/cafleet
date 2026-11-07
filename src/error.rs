@@ -20,6 +20,12 @@ pub enum CafleetError {
 }
 
 impl CafleetError {
+    pub(crate) fn with_diagnostic(self, diagnostic: impl Into<String>) -> Self {
+        Self::WithDiagnostics {
+            cause: Box::new(self),
+            diagnostics: vec![diagnostic.into()],
+        }
+    }
     /// Append a compensation diagnostic without changing the primary exit category.
     pub(crate) fn with_cleanup(self, diagnostic: impl std::fmt::Display) -> Self {
         let message = format!("{self}\n{diagnostic}");

@@ -33,6 +33,7 @@ CREATE TABLE member_placements (
     mux_window_id TEXT NOT NULL,
     mux_pane_id TEXT,
     backend TEXT NOT NULL DEFAULT 'tmux',
+    mux_server TEXT NOT NULL,
     coding_agent TEXT NOT NULL,
     created_at TEXT NOT NULL
 );

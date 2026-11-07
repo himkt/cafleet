@@ -14,12 +14,14 @@ use crate::broker::runtime::RuntimeEventView;
 use crate::broker::runtime::RuntimeSnapshot;
 use crate::output::truncate_text;
 
-pub(crate) fn format_message(message: &MessageRecord, limit: usize) -> String {
+const TEXT_BODY_LIMIT: usize = 200;
+
+pub(crate) fn format_message(message: &MessageRecord) -> String {
     let header = format!(
         "[{} | from:{} | {}]",
         message.message_id, message.from_member_id, message.status_timestamp
     );
-    let body = truncate_text(&message.text, limit);
+    let body = truncate_text(&message.text, TEXT_BODY_LIMIT);
     if body.is_empty() {
         header
     } else {
@@ -27,45 +29,40 @@ pub(crate) fn format_message(message: &MessageRecord, limit: usize) -> String {
     }
 }
 
-pub(crate) fn format_messages(messages: &[MessageRecord], limit: usize) -> String {
+pub(crate) fn format_messages(messages: &[MessageRecord]) -> String {
     if messages.is_empty() {
         return "No messages found.".into();
     }
     messages
         .iter()
-        .map(|message| format_message(message, limit))
+        .map(format_message)
         .collect::<Vec<_>>()
         .join("\n\n")
 }
 
 pub(crate) fn format_message_sent(
     message: &MessageRecord,
-    limit: usize,
     input_id: Option<i64>,
     delivery: &DeliveryProjection,
 ) -> String {
     with_delivery(
-        format!("Message sent.\n{}", format_message(message, limit)),
+        format!("Message sent.\n{}", format_message(message)),
         input_id,
         delivery,
     )
 }
 
-pub(crate) fn format_message_acknowledged(message: &MessageRecord, limit: usize) -> String {
-    format!("Message acknowledged.\n{}", format_message(message, limit))
+pub(crate) fn format_message_acknowledged(message: &MessageRecord) -> String {
+    format!("Message acknowledged.\n{}", format_message(message))
 }
 
-pub(crate) fn format_message_wait(
-    member_id: i64,
-    messages: &[MessageRecord],
-    limit: usize,
-) -> String {
+pub(crate) fn format_message_wait(member_id: i64, messages: &[MessageRecord]) -> String {
     if messages.is_empty() {
         format!("Timed out waiting for member {member_id}.")
     } else {
         format!(
             "Messages available for member {member_id}.\n{}",
-            format_messages(messages, limit)
+            format_messages(messages)
         )
     }
 }
@@ -484,27 +481,27 @@ mod tests {
         #[test]
         fn delivery_text_send_appends_delivery_then_input_only_when_allocated() {
             let message = MessageRecord::fixture(9, 2, 3, "hello");
-            let envelope = format_message(&message, 2000);
+            let envelope = format_message(&message);
             let submitted = projection(
                 DeliveryStatus::Submitted,
                 Some(DeliveryMethod::Profile),
                 None,
             );
             assert_eq!(
-                format_message_sent(&message, 2000, Some(4), &submitted),
+                format_message_sent(&message, Some(4), &submitted),
                 format!(
                     "Message sent.\n{envelope}\nDelivery: status=submitted method=profile reason=-\nInput: 4"
                 )
             );
             let director = projection(DeliveryStatus::NotApplicable, None, Some("director_stdout"));
             assert_eq!(
-                format_message_sent(&message, 2000, None, &director),
+                format_message_sent(&message, None, &director),
                 format!(
                     "Message sent.\n{envelope}\nDelivery: status=not_applicable method=- reason=director_stdout"
                 )
             );
             let queued = projection(DeliveryStatus::Queued, None, Some("earlier_input"));
-            let text = format_message_sent(&message, 2000, Some(5), &queued);
+            let text = format_message_sent(&message, Some(5), &queued);
             assert!(text.starts_with(&format!(
                 "Message sent.\n{envelope}\nDelivery: status=queued method=- reason=earlier_input\nInput: 5"
             )));
@@ -521,19 +518,29 @@ mod tests {
             created_at: "created".into(),
             status_timestamp: "acked".into(),
             status: MessageStatus::Completed,
-            text: "界🙂a\nnext".into(),
+            text: format!("{}🙂a\nnext", "界".repeat(TEXT_BODY_LIMIT - 1)),
         };
-        assert_eq!(format_message(&message, 2), "[5 | from:2 | acked]\n界🙂…");
+        assert_eq!(
+            format_message(&message),
+            format!(
+                "[5 | from:2 | acked]\n{}🙂…",
+                "界".repeat(TEXT_BODY_LIMIT - 1)
+            )
+        );
         assert_eq!(
             crate::output::json::message(&message)["text"],
-            "界🙂a\nnext"
+            message.text.as_str()
         );
-        assert_eq!(format_message(&message, 0), "[5 | from:2 | acked]\n…");
-        message.text.clear();
-        assert_eq!(format_message(&message, 0), "[5 | from:2 | acked]");
-        assert_eq!(format_messages(&[], 0), "No messages found.");
+        message.text = "界".repeat(TEXT_BODY_LIMIT);
         assert_eq!(
-            format_messages(&[message.clone(), message], 0),
+            format_message(&message),
+            format!("[5 | from:2 | acked]\n{}", message.text)
+        );
+        message.text.clear();
+        assert_eq!(format_message(&message), "[5 | from:2 | acked]");
+        assert_eq!(format_messages(&[]), "No messages found.");
+        assert_eq!(
+            format_messages(&[message.clone(), message]),
             "[5 | from:2 | acked]\n\n[5 | from:2 | acked]"
         );
     }
@@ -567,6 +574,7 @@ mod tests {
             mux_pane_id: None,
             coding_agent: "codex".into(),
             created_at: "created".into(),
+            mux_server: "/tmp/tmux-1000/default".into(),
         });
         row.idle = Some(60);
         assert!(format_member_list(&[row.clone()]).contains("codex     (pending)  1m"));
@@ -659,33 +667,6 @@ mod tests {
     }
 
     #[test]
-    fn permission_inspection_json_places_supported_choices_after_supported_decisions() {
-        let output = crate::output::json::permission_inspection(
-            &crate::runtime::control::test_support::question_inspection(),
-        );
-        let value = &output["request"];
-        let keys = value
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        let decisions = keys
-            .iter()
-            .position(|key| *key == "supported_decisions")
-            .unwrap();
-        assert_eq!(keys[decisions + 1], "supported_choices");
-        assert_eq!(value["supported_decisions"], serde_json::json!([]));
-        assert_eq!(
-            value["supported_choices"],
-            serde_json::json!([
-                {"choice_id":"not-now","label":"Not now","scope":"persistent"},
-                {"choice_id":"dont-show-again","label":"Don't show again","scope":"persistent"}
-            ])
-        );
-    }
-
-    #[test]
     fn permission_response_text_names_the_decision_or_the_choice_with_a_dash_for_the_other() {
         use crate::coding_agent::catalog::AnswerKey;
         use crate::runtime::PermissionResponseResult;
@@ -712,6 +693,20 @@ mod tests {
         assert!(
             choice.starts_with("Permission response: interaction=12 run=7 decision=- choice=not-now source=director-auto status=held"),
             "{choice}"
+        );
+    }
+
+    #[test]
+    fn member_press_text_acknowledges_the_canonical_keys_without_effect_counts() {
+        let keys = crate::multiplexer::PressKeys::parse(&["cTrL+A".into(), ";".into()]).unwrap();
+        let value = crate::runtime::KeyAcknowledgment {
+            member_id: 42,
+            pane_id: "%5".into(),
+            keys: keys.canonical(),
+        };
+        assert_eq!(
+            crate::output::format_member_press(&value),
+            "Acknowledged keys [\"Ctrl+a\",\";\"] for member 42 (%5).",
         );
     }
 }

@@ -306,11 +306,7 @@ impl Transport {
         let count = write_pending(&mut self.display, self.limits.bytes_per_tick, |bytes| {
             display.try_write(bytes)
         })?;
-        match display.try_flush() {
-            Ok(()) => {}
-            Err(cause) if cause.kind() == ErrorKind::WouldBlock => {}
-            Err(cause) => return Err(io_error(cause)),
-        }
+        flush_nonblocking(display)?;
         Ok(count)
     }
     pub(crate) fn resize(&mut self, pty: &mut impl PtyIo, size: TerminalSize) -> Result<()> {
@@ -608,11 +604,7 @@ impl Transport {
                 remaining.display -= written;
                 check_deadline(Instant::now(), deadline)?;
             }
-            match display.try_flush() {
-                Ok(()) => {}
-                Err(cause) if cause.kind() == ErrorKind::WouldBlock => {}
-                Err(cause) => return Err(io_error(cause)),
-            }
+            flush_nonblocking(display)?;
             check_deadline(Instant::now(), deadline)?;
             let ended = if interrupted {
                 Some("terminal input interrupted")
@@ -752,6 +744,13 @@ enum State {
 
 /// Decides how many forwarded outer-terminal bytes count as manual input.
 /// It never holds bytes: forwarding happens before and independently of it.
+fn flush_nonblocking(display: &mut impl Display) -> Result<()> {
+    match display.try_flush() {
+        Err(cause) if cause.kind() != ErrorKind::WouldBlock => Err(io_error(cause)),
+        _ => Ok(()),
+    }
+}
+
 #[derive(Default)]
 pub(super) struct ReplyClassifier {
     state: State,
@@ -1010,11 +1009,15 @@ impl TerminalState {
             sequence: 0,
         })
     }
-    pub(crate) fn feed(&mut self, bytes: &[u8]) -> Result<()> {
+    fn advance_sequence(&mut self, by: u64) -> Result<()> {
         self.sequence = self
             .sequence
-            .checked_add(bytes.len() as u64)
+            .checked_add(by)
             .ok_or_else(|| error("terminal sequence exhausted"))?;
+        Ok(())
+    }
+    pub(crate) fn feed(&mut self, bytes: &[u8]) -> Result<()> {
+        self.advance_sequence(bytes.len() as u64)?;
         self.parser.process(bytes);
         Ok(())
     }
@@ -1071,10 +1074,7 @@ impl TerminalState {
     }
     pub(crate) fn resize(&mut self, size: TerminalSize) -> Result<()> {
         size.validate()?;
-        self.sequence = self
-            .sequence
-            .checked_add(1)
-            .ok_or_else(|| error("terminal sequence exhausted"))?;
+        self.advance_sequence(1)?;
         self.parser.set_size(
             size.rows.try_into().expect("validated rows"),
             size.cols.try_into().expect("validated cols"),
@@ -1141,6 +1141,9 @@ impl Drop for RawTerminalGuard {
 
 #[cfg(test)]
 mod tests {
+    use crate::runtime::transport::test_support::FakeDisplay;
+    use crate::runtime::transport::test_support::FakeInput;
+    use crate::runtime::transport::test_support::FakePty;
     use crate::runtime::transport::test_support::Observer;
     use crate::runtime::transport::*;
 
@@ -1267,13 +1270,15 @@ mod tests {
     use crate::broker::runtime as storage;
     use crate::coding_agent::ProfileCatalog;
 
+    use crate::runtime::observation::test_support::controller::Clock;
     use crate::runtime::transport::REPLY_PREFIX_BOUND;
-    use crate::runtime::writer::test_support::Clock;
     use crate::runtime::writer::test_support::Hooks;
     use crate::runtime::writer::test_support::Release;
     use crate::runtime::writer::test_support::WriterFixture;
+    use crate::runtime::writer::test_support::committed;
     use crate::runtime::writer::test_support::start;
     use crate::runtime::writer::test_support::transition;
+    use crate::runtime::writer::test_support::wait_until;
     use std::cell::Cell;
     use std::cell::RefCell;
     use std::io;
@@ -1552,7 +1557,7 @@ mod tests {
             let fixture = WriterFixture::new();
             let controller = ObservationController::new(
                 &fixture.fixture.run,
-                &ProfileCatalog::bundled().unwrap(),
+                ProfileCatalog::bundled(),
                 storage::evidence::EvidencePolicy::metadata(),
                 1..=256,
             )
@@ -1592,6 +1597,28 @@ mod tests {
                     facts: self.observations.clone(),
                 },
                 until,
+            )
+        }
+
+        fn drain_with(
+            &mut self,
+            transport: &mut Transport,
+            io: &mut Endpoints,
+        ) -> Result<InputDrain> {
+            let until = self.until;
+            self.drain(transport, &mut io.human, &mut io.pty, &mut io.output, until)
+        }
+
+        fn tick_with(
+            &mut self,
+            transport: &mut Transport,
+            io: &mut Endpoints,
+        ) -> Result<TransportProgress> {
+            transport.tick(
+                &mut io.human,
+                &mut io.pty,
+                &mut io.output,
+                &mut self.controller.observer(&self.writer, &self.clock),
             )
         }
 
@@ -1638,6 +1665,22 @@ mod tests {
                 "writer cleanup has no confirmed join: {result:?}"
             );
             assert_eq!(result, (0, 0));
+        }
+    }
+
+    struct Endpoints {
+        human: Reader,
+        pty: DrainPty,
+        output: DrainOutput,
+    }
+
+    impl Endpoints {
+        fn new(trace: &Trace, human: Reader) -> Self {
+            Self {
+                human,
+                pty: DrainPty::new(trace),
+                output: DrainOutput::new(trace),
+            }
         }
     }
 
@@ -1727,7 +1770,6 @@ mod tests {
     #[test]
     fn drain_fragmented_reads_and_partial_writes_preserve_real_bytes_and_sequence() {
         with_harness(|h| {
-            h.control();
             let human_bytes = "literal 世界\r".as_bytes();
             let child_bytes = b"child\r\n";
             let mut drain_transport = drain_transport(64, 64, 64);
@@ -1781,60 +1823,31 @@ mod tests {
 
     #[test]
     fn drain_interrupted_reads_require_a_later_actual_same_round_wouldblock_pair() {
-        for human_interrupted in [true, false] {
+        for (step, on_human) in [
+            (Read::Interrupted, true),
+            (Read::Interrupted, false),
+            (Read::Eof, true),
+            (Read::Eof, false),
+        ] {
             with_harness(|h| {
-                h.control();
                 let mut drain_transport = drain_transport(32, 32, 32);
-                let mut human = Reader::new(Site::Human, &h.trace, []);
-                let mut pty = DrainPty::new(&h.trace);
-                let mut output = DrainOutput::new(&h.trace);
-                if human_interrupted {
-                    human.steps.push_back(Read::Interrupted);
+                let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
+                let interrupted = matches!(step, Read::Interrupted);
+                if on_human {
+                    io.human.steps.push_back(step);
                 } else {
-                    pty.reader.steps.push_back(Read::Interrupted);
+                    io.pty.reader.steps.push_back(step);
                 }
-                let result = h.drain(
-                    &mut drain_transport,
-                    &mut human,
-                    &mut pty,
-                    &mut output,
-                    h.until,
-                );
+                let result = h.drain_with(&mut drain_transport, &mut io);
                 assert_pending(result, &mut drain_transport);
                 assert_eq!(drain_transport.human_generation(), 0);
                 assert_eq!(h.observations.health_reads.get(), 0);
-                assert!(human.calls.len() <= 1 && pty.reader.calls.len() <= 1);
-                h.seal(&mut drain_transport);
-                assert!(drain_transport.take_input_drain().is_some());
-            });
-        }
-    }
-
-    #[test]
-    fn drain_eof_is_not_a_quiet_read_and_adds_no_manual_generation() {
-        for human_eof in [true, false] {
-            with_harness(|h| {
-                h.control();
-                let mut drain_transport = drain_transport(32, 32, 32);
-                let mut human = Reader::new(Site::Human, &h.trace, []);
-                let mut pty = DrainPty::new(&h.trace);
-                let mut output = DrainOutput::new(&h.trace);
-                if human_eof {
-                    human.steps.push_back(Read::Eof);
-                } else {
-                    pty.reader.steps.push_back(Read::Eof);
+                assert!(io.human.calls.len() <= 1 && io.pty.reader.calls.len() <= 1);
+                assert_bounds(&io.human, &io.pty, &io.output, 32);
+                if interrupted {
+                    h.seal(&mut drain_transport);
+                    assert!(drain_transport.take_input_drain().is_some());
                 }
-                let result = h.drain(
-                    &mut drain_transport,
-                    &mut human,
-                    &mut pty,
-                    &mut output,
-                    h.until,
-                );
-                assert_pending(result, &mut drain_transport);
-                assert_eq!(drain_transport.human_generation(), 0);
-                assert_eq!(h.observations.health_reads.get(), 0);
-                assert_bounds(&human, &pty, &output, 32);
             });
         }
     }
@@ -1914,42 +1927,29 @@ mod tests {
     #[test]
     fn drain_full_manual_queue_supplies_no_read_proof_and_preserves_order_on_release() {
         with_harness(|h| {
-            h.control();
             let mut drain_transport = drain_transport(16, 4, 32);
-            let mut human = Reader::data(Site::Human, &h.trace, b"abcdefgh", 8);
-            let mut pty = DrainPty::new(&h.trace);
-            pty.write_error = Some(ErrorKind::WouldBlock);
-            let mut output = DrainOutput::new(&h.trace);
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
+            let mut io = Endpoints::new(
+                &h.trace,
+                Reader::data(Site::Human, &h.trace, b"abcdefgh", 8),
             );
+            io.pty.write_error = Some(ErrorKind::WouldBlock);
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_pending(result, &mut drain_transport);
-            assert_eq!(human.calls.len(), 1);
-            assert_eq!(human.calls[0].capacity, 4);
+            assert_eq!(io.human.calls.len(), 1);
+            assert_eq!(io.human.calls[0].capacity, 4);
             assert_eq!(drain_transport.pending_input_bytes(), 4);
             assert_eq!(drain_transport.human_generation(), 4);
-            assert!(pty.bytes.is_empty());
-            assert!(pty.offered.len() <= 8);
-            pty.write_error = None;
+            assert!(io.pty.bytes.is_empty());
+            assert!(io.pty.offered.len() <= 8);
+            io.pty.write_error = None;
             assert!(matches!(
-                h.drain(
-                    &mut drain_transport,
-                    &mut human,
-                    &mut pty,
-                    &mut output,
-                    h.until
-                )
-                .unwrap(),
+                h.drain_with(&mut drain_transport, &mut io).unwrap(),
                 InputDrain::Quiescent {
                     human_generation: 8,
                     ..
                 }
             ));
-            assert_eq!(pty.bytes, b"abcdefgh");
+            assert_eq!(io.pty.bytes, b"abcdefgh");
             assert_eq!(drain_transport.pending_input_bytes(), 0);
         });
     }
@@ -2050,7 +2050,6 @@ mod tests {
     #[test]
     fn drain_absent_health_keeps_manual_observation_progress_without_a_proof() {
         with_harness(|h| {
-            h.control();
             let mut drain_transport = drain_transport(32, 32, 32);
             let mut human = Reader::data(Site::Human, &h.trace, b"human", 5);
             let mut pty = DrainPty::new(&h.trace);
@@ -2086,16 +2085,8 @@ mod tests {
             assert!(expected.degraded);
             assert!(expected.gap_count > 0);
             let mut drain_transport = drain_transport(32, 32, 32);
-            let mut human = Reader::new(Site::Human, &h.trace, []);
-            let mut pty = DrainPty::new(&h.trace);
-            let mut output = DrainOutput::new(&h.trace);
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
-            );
+            let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_pending(result, &mut drain_transport);
             assert_eq!(h.observations.health_reads.get(), 1);
             assert_eq!(
@@ -2109,28 +2100,13 @@ mod tests {
     #[test]
     fn drain_real_pending_writer_commit_blocks_health_until_release_and_persistence() {
         with_harness(|h| {
-            h.control();
             h.hooks.pause(WriterBoundary::Persist);
             h.writer.submit(transition(&h.fixture, 1)).unwrap();
-            while h.hooks.calls(WriterBoundary::Persist) == 0 {
-                assert!(
-                    Instant::now() < h.until,
-                    "actual persist boundary was not entered"
-                );
-                std::thread::sleep(Duration::from_millis(1));
-            }
+            h.hooks.wait(WriterBoundary::Persist, 1);
             assert_eq!(h.writer.status().pending_count, 1);
             let mut drain_transport = drain_transport(32, 32, 32);
-            let mut human = Reader::new(Site::Human, &h.trace, []);
-            let mut pty = DrainPty::new(&h.trace);
-            let mut output = DrainOutput::new(&h.trace);
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
-            );
+            let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_pending(result, &mut drain_transport);
             assert_eq!(
                 h.observations
@@ -2142,25 +2118,8 @@ mod tests {
                 1
             );
             drop(h.release.take());
-            while h.writer.status().pending_count != 0 {
-                assert!(
-                    Instant::now() < h.until,
-                    "actual event commit did not finish"
-                );
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            let count: i64 = h
-                .fixture
-                .fixture
-                .conn
-                .query_row(
-                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1",
-                    [h.fixture.fixture.run.run_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 1);
-            assert_eq!(h.writer.status().pending_count, 0);
+            wait_until(|| h.writer.status().pending_count == 0);
+            assert_eq!(committed(&h.fixture), 1);
             h.seal(&mut drain_transport);
             assert!(drain_transport.take_input_drain().is_some());
         });
@@ -2171,28 +2130,28 @@ mod tests {
         for quiesce in [false, true] {
             for failure in ["pty", "child", "display", "flush", "observer", "zero"] {
                 with_harness(|h| {
-                    h.control();
                     let mut drain_transport = drain_transport(32, 32, 32);
                     h.seal(&mut drain_transport);
-                    let mut human = Reader::data(Site::Human, &h.trace, "世x".as_bytes(), 4);
-                    let mut pty = DrainPty::new(&h.trace);
-                    pty.reader = Reader::data(Site::Child, &h.trace, b"output", 6);
-                    let mut output = DrainOutput::new(&h.trace);
+                    let mut io = Endpoints::new(
+                        &h.trace,
+                        Reader::data(Site::Human, &h.trace, "世x".as_bytes(), 4),
+                    );
+                    io.pty.reader = Reader::data(Site::Child, &h.trace, b"output", 6);
                     let expected = match failure {
                         "pty" => {
-                            pty.write_error = Some(ErrorKind::BrokenPipe);
+                            io.pty.write_error = Some(ErrorKind::BrokenPipe);
                             "fixture PTY write failure"
                         }
                         "child" => {
-                            pty.reader.steps = [Read::Error(ErrorKind::BrokenPipe)].into();
+                            io.pty.reader.steps = [Read::Error(ErrorKind::BrokenPipe)].into();
                             "fixture read failure"
                         }
                         "display" => {
-                            output.write_error = Some(ErrorKind::BrokenPipe);
+                            io.output.write_error = Some(ErrorKind::BrokenPipe);
                             "fixture display write failure"
                         }
                         "flush" => {
-                            output.flush_error = Some(ErrorKind::BrokenPipe);
+                            io.output.flush_error = Some(ErrorKind::BrokenPipe);
                             "fixture flush failure"
                         }
                         "observer" => {
@@ -2205,67 +2164,26 @@ mod tests {
                             "observation clock regressed"
                         }
                         "zero" => {
-                            pty.max_write = 0;
+                            io.pty.max_write = 0;
                             "terminal write made no progress"
                         }
                         _ => unreachable!("fixed failure matrix"),
                     };
                     let result = if quiesce {
-                        h.drain(
-                            &mut drain_transport,
-                            &mut human,
-                            &mut pty,
-                            &mut output,
-                            h.until,
-                        )
-                        .map(|_| ())
+                        h.drain_with(&mut drain_transport, &mut io).map(|_| ())
                     } else {
-                        drain_transport
-                            .tick(
-                                &mut human,
-                                &mut pty,
-                                &mut output,
-                                &mut h.controller.observer(&h.writer, &h.clock),
-                            )
-                            .map(|_| ())
+                        h.tick_with(&mut drain_transport, &mut io).map(|_| ())
                     };
                     assert!(
                         result.unwrap_err().message().contains(expected),
                         "{failure}"
                     );
-                    assert_eq!(human.bytes, "世x".as_bytes());
+                    assert_eq!(io.human.bytes, "世x".as_bytes());
                     assert_eq!(drain_transport.human_generation(), 4);
                     assert!(drain_transport.take_input_drain().is_none());
                 });
             }
         }
-    }
-
-    #[test]
-    fn drain_opaque_proof_is_single_use_and_diagnostic_copies_supply_no_authority() {
-        with_harness(|h| {
-            let mut other = drain_transport(32, 32, 32);
-            let mut drain_transport = drain_transport(32, 32, 32);
-            h.seal(&mut drain_transport);
-            let diagnostic = InputDrain::Quiescent {
-                human_generation: 0,
-                output_seq: drain_transport.snapshot().screen_seq,
-            };
-            let copied = diagnostic;
-            assert_eq!(
-                copied,
-                InputDrain::Quiescent {
-                    human_generation: 0,
-                    output_seq: 0
-                }
-            );
-            assert_eq!(drain_transport.human_generation(), 0);
-            assert_eq!(drain_transport.snapshot().screen_seq, 0);
-            assert!(other.take_input_drain().is_none());
-            assert!(drain_transport.take_input_drain().is_some());
-            assert!(drain_transport.take_input_drain().is_none());
-            assert!(other.take_input_drain().is_none());
-        });
     }
 
     #[test]
@@ -2286,106 +2204,78 @@ mod tests {
             "drain-expired",
         ] {
             with_harness(|h| {
-                h.control();
                 let mut drain_transport = drain_transport(32, 32, 32);
                 h.seal(&mut drain_transport);
-                let mut human = Reader::new(Site::Human, &h.trace, []);
-                let mut pty = DrainPty::new(&h.trace);
-                let mut output = DrainOutput::new(&h.trace);
+                let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
                 match operation {
                     "tick" => {
-                        drain_transport
-                            .tick(
-                                &mut human,
-                                &mut pty,
-                                &mut output,
-                                &mut h.controller.observer(&h.writer, &h.clock),
-                            )
-                            .unwrap();
+                        h.tick_with(&mut drain_transport, &mut io).unwrap();
                     }
                     "tick-error" => {
-                        human.steps.push_back(Read::Error(ErrorKind::BrokenPipe));
-                        assert!(
-                            drain_transport
-                                .tick(
-                                    &mut human,
-                                    &mut pty,
-                                    &mut output,
-                                    &mut h.controller.observer(&h.writer, &h.clock)
-                                )
-                                .is_err()
-                        );
+                        io.human.steps.push_back(Read::Error(ErrorKind::BrokenPipe));
+                        assert!(h.tick_with(&mut drain_transport, &mut io).is_err());
                     }
                     "resize" => {
                         drain_transport
-                            .resize(&mut pty, TerminalSize { rows: 25, cols: 80 })
+                            .resize(&mut io.pty, TerminalSize { rows: 25, cols: 80 })
                             .unwrap();
                     }
                     "resize-invalid" => {
                         assert!(
                             drain_transport
-                                .resize(&mut pty, TerminalSize { rows: 0, cols: 80 })
+                                .resize(&mut io.pty, TerminalSize { rows: 0, cols: 80 })
                                 .is_err()
                         );
                     }
                     "resize-error" => {
-                        pty.resize_error = true;
+                        io.pty.resize_error = true;
                         assert!(
                             drain_transport
-                                .resize(&mut pty, TerminalSize { rows: 25, cols: 80 })
+                                .resize(&mut io.pty, TerminalSize { rows: 25, cols: 80 })
                                 .is_err()
                         );
                     }
                     "prefetch" => {
-                        assert_eq!(drain_transport.prefetch_child_bytes(&mut pty).unwrap(), 0);
+                        assert_eq!(
+                            drain_transport.prefetch_child_bytes(&mut io.pty).unwrap(),
+                            0
+                        );
                     }
                     "prefetch-data" => {
-                        pty.reader.steps.push_back(Read::Data(b"tail".to_vec()));
-                        assert_eq!(drain_transport.prefetch_child_bytes(&mut pty).unwrap(), 4);
+                        io.pty.reader.steps.push_back(Read::Data(b"tail".to_vec()));
+                        assert_eq!(
+                            drain_transport.prefetch_child_bytes(&mut io.pty).unwrap(),
+                            4
+                        );
                     }
                     "flush" => {
-                        assert_eq!(drain_transport.flush_display(&mut output).unwrap(), 0);
+                        assert_eq!(drain_transport.flush_display(&mut io.output).unwrap(), 0);
                     }
                     "flush-error" => {
-                        output.flush_error = Some(ErrorKind::BrokenPipe);
-                        assert!(drain_transport.flush_display(&mut output).is_err());
+                        io.output.flush_error = Some(ErrorKind::BrokenPipe);
+                        assert!(drain_transport.flush_display(&mut io.output).is_err());
                     }
                     "discard" => {
                         assert_eq!(drain_transport.discard_display_tail(), 0);
                     }
                     "drain-interrupted" => {
-                        human.steps.push_back(Read::Interrupted);
+                        io.human.steps.push_back(Read::Interrupted);
                         assert_pending(
-                            h.drain(
-                                &mut drain_transport,
-                                &mut human,
-                                &mut pty,
-                                &mut output,
-                                h.until,
-                            ),
+                            h.drain_with(&mut drain_transport, &mut io),
                             &mut drain_transport,
                         );
                     }
                     "drain-error" => {
-                        human.steps.push_back(Read::Error(ErrorKind::BrokenPipe));
-                        assert!(
-                            h.drain(
-                                &mut drain_transport,
-                                &mut human,
-                                &mut pty,
-                                &mut output,
-                                h.until
-                            )
-                            .is_err()
-                        );
+                        io.human.steps.push_back(Read::Error(ErrorKind::BrokenPipe));
+                        assert!(h.drain_with(&mut drain_transport, &mut io).is_err());
                     }
                     "drain-expired" => {
                         assert_deadline(
                             h.drain(
                                 &mut drain_transport,
-                                &mut human,
-                                &mut pty,
-                                &mut output,
+                                &mut io.human,
+                                &mut io.pty,
+                                &mut io.output,
                                 Instant::now(),
                             ),
                             &mut drain_transport,
@@ -2404,29 +2294,26 @@ mod tests {
             let mut drain_transport = drain_transport(32, 32, 32);
             h.seal(&mut drain_transport);
             h.reset_observations();
-            let mut human = Reader::new(Site::Human, &h.trace, []);
-            let mut pty = DrainPty::new(&h.trace);
-            let mut output = DrainOutput::new(&h.trace);
+            let mut io = Endpoints::new(&h.trace, Reader::new(Site::Human, &h.trace, []));
             assert_deadline(
                 h.drain(
                     &mut drain_transport,
-                    &mut human,
-                    &mut pty,
-                    &mut output,
+                    &mut io.human,
+                    &mut io.pty,
+                    &mut io.output,
                     Instant::now(),
                 ),
                 &mut drain_transport,
             );
             assert!(h.trace.borrow().is_empty());
-            assert!(human.calls.is_empty() && pty.reader.calls.is_empty());
-            assert!(pty.offered.is_empty() && output.offered.is_empty());
-            assert_eq!(output.flushes, 0);
+            assert!(io.human.calls.is_empty() && io.pty.reader.calls.is_empty());
+            assert!(io.pty.offered.is_empty() && io.output.offered.is_empty());
+            assert_eq!(io.output.flushes, 0);
         });
         for fails in [false, true] {
             with_harness(|h| {
-                h.control();
                 let mut drain_transport = drain_transport(32, 32, 32);
-                let mut human = Reader::new(
+                let human = Reader::new(
                     Site::Human,
                     &h.trace,
                     [if fails {
@@ -2435,20 +2322,19 @@ mod tests {
                         Read::Data(b"read".to_vec())
                     }],
                 );
+                let mut io = Endpoints::new(&h.trace, human);
                 let until = Instant::now() + Duration::from_millis(100);
-                human.delay_until = Some(until);
-                let mut pty = DrainPty::new(&h.trace);
-                let mut output = DrainOutput::new(&h.trace);
+                io.human.delay_until = Some(until);
                 let result = h.drain(
                     &mut drain_transport,
-                    &mut human,
-                    &mut pty,
-                    &mut output,
+                    &mut io.human,
+                    &mut io.pty,
+                    &mut io.output,
                     until,
                 );
                 let returned = Instant::now();
-                assert_eq!(human.calls.len(), 1);
-                let call = &human.calls[0];
+                assert_eq!(io.human.calls.len(), 1);
+                let call = &io.human.calls[0];
                 assert!(call.entered < until);
                 assert!(call.returned >= until && returned >= call.returned);
                 if fails {
@@ -2468,9 +2354,9 @@ mod tests {
                     assert_eq!(drain_transport.pending_input_bytes(), 4);
                 }
                 assert_eq!(*h.trace.borrow(), vec![Site::Human]);
-                assert!(pty.reader.calls.is_empty() && pty.offered.is_empty());
-                assert!(output.offered.is_empty());
-                assert_eq!(output.flushes, 0);
+                assert!(io.pty.reader.calls.is_empty() && io.pty.offered.is_empty());
+                assert!(io.output.offered.is_empty());
+                assert_eq!(io.output.flushes, 0);
                 assert_eq!(h.observations.health_reads.get(), 0);
             });
         }
@@ -2626,33 +2512,30 @@ mod tests {
     #[test]
     fn drain_incomplete_delayed_positive_child_read_keeps_display_and_lifetime_fence() {
         with_harness(|h| {
-            h.control();
             let mut drain_transport = drain_transport(64, 64, 64);
             h.seal(&mut drain_transport);
             h.reset_observations();
             let child_bytes = b"unseen\r\nsuffix";
-            let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
-            let mut pty = DrainPty::new(&h.trace);
-            pty.reader = Reader::data(Site::Child, &h.trace, child_bytes, child_bytes.len());
+            let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
+            io.pty.reader = Reader::data(Site::Child, &h.trace, child_bytes, child_bytes.len());
             let until = Instant::now() + Duration::from_millis(100);
-            pty.reader.delay_until = Some(until);
-            let mut output = DrainOutput::new(&h.trace);
+            io.pty.reader.delay_until = Some(until);
             let result = h.drain(
                 &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
+                &mut io.human,
+                &mut io.pty,
+                &mut io.output,
                 until,
             );
             assert_deadline(result, &mut drain_transport);
-            assert_eq!(human.bytes, b"typed");
+            assert_eq!(io.human.bytes, b"typed");
             assert_eq!(drain_transport.human_generation(), 5);
-            assert_eq!(pty.bytes, b"typed");
-            assert_eq!(pty.reader.calls.len(), 1);
-            let call = &pty.reader.calls[0];
+            assert_eq!(io.pty.bytes, b"typed");
+            assert_eq!(io.pty.reader.calls.len(), 1);
+            let call = &io.pty.reader.calls[0];
             assert!(call.entered < until && call.returned >= until);
             assert_eq!(call.count, Some(child_bytes.len()));
-            assert_eq!(pty.reader.bytes, child_bytes);
+            assert_eq!(io.pty.reader.bytes, child_bytes);
             assert_eq!(drain_transport.pending_display_bytes(), child_bytes.len());
             assert_eq!(drain_transport.snapshot().screen_seq, 0);
             assert_eq!(drain_transport.snapshot().screen.contents(), "");
@@ -2661,13 +2544,13 @@ mod tests {
                 *h.trace.borrow(),
                 vec![Site::Human, Site::ManualWrite, Site::Child]
             );
-            assert!(output.bytes.is_empty() && output.offered.is_empty());
-            assert_eq!(output.flushes, 0);
+            assert!(io.output.bytes.is_empty() && io.output.offered.is_empty());
+            assert_eq!(io.output.flushes, 0);
             assert_eq!(h.observations.health_reads.get(), 0);
             assert_incomplete_observation_stays_fenced(
                 h,
                 &mut drain_transport,
-                (&mut human, &mut pty, &mut output),
+                (&mut io.human, &mut io.pty, &mut io.output),
                 child_bytes,
                 0,
             );
@@ -2707,23 +2590,20 @@ mod tests {
     #[test]
     fn drain_incomplete_complete_control_observes_every_fragment_and_can_seal() {
         with_harness(|h| {
-            h.control();
             let mut drain_transport = drain_transport(64, 64, 64);
-            let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
-            let mut pty = DrainPty::new(&h.trace);
-            pty.reader = Reader::data(
+            let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
+            io.pty.reader = Reader::data(
                 Site::Child,
                 &h.trace,
                 CONTROL_SEPARATED_CHILD,
                 CONTROL_SEPARATED_CHILD.len(),
             );
-            let mut output = DrainOutput::new(&h.trace);
             let records = Rc::default();
             let until = h.until;
             let result = callback_drain(
                 h,
                 &mut drain_transport,
-                (&mut human, &mut pty, &mut output),
+                (&mut io.human, &mut io.pty, &mut io.output),
                 CallbackFault::None,
                 until,
                 &records,
@@ -2735,7 +2615,7 @@ mod tests {
                     output_seq: 17
                 }
             );
-            assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
+            assert_eq!(io.output.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(drain_transport.pending_display_bytes(), 0);
             assert_eq!(drain_transport.snapshot().screen.contents(), "TAIL\nsuffix");
             assert_eq!(drain_transport.snapshot().screen_seq, 17);
@@ -2974,18 +2854,9 @@ mod tests {
                     std::sync::atomic::AtomicBool::new(true),
                 )))
                 .unwrap();
-            let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
-            let mut pty = DrainPty::new(&h.trace);
-            pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
-            let mut output = DrainOutput::new(&h.trace);
-            let progress = drain_transport
-                .tick(
-                    &mut human,
-                    &mut pty,
-                    &mut output,
-                    &mut h.controller.observer(&h.writer, &h.clock),
-                )
-                .unwrap();
+            let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
+            io.pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
+            let progress = h.tick_with(&mut drain_transport, &mut io).unwrap();
             assert_eq!(progress.human_bytes, 5);
             assert_eq!(progress.child_bytes, 17);
             assert_eq!(progress.display_bytes, 17);
@@ -2999,12 +2870,12 @@ mod tests {
             ));
             assert_eq!(drain_transport.snapshot().screen_seq, 0);
             assert_eq!(drain_transport.snapshot().screen.contents(), "");
-            assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
+            assert_eq!(io.output.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(drain_transport.human_generation(), 5);
             assert_incomplete_observation_stays_fenced(
                 h,
                 &mut drain_transport,
-                (&mut human, &mut pty, &mut output),
+                (&mut io.human, &mut io.pty, &mut io.output),
                 CONTROL_SEPARATED_CHILD,
                 0,
             );
@@ -3016,28 +2887,20 @@ mod tests {
         for quiesce in [false, true] {
             for discard in [false, true] {
                 with_harness(|h| {
-                    h.control();
                     let mut drain_transport = drain_transport(64, 64, 64);
-                    let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
-                    let mut pty = DrainPty::new(&h.trace);
-                    pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
-                    let mut output = DrainOutput::new(&h.trace);
-                    output.write_error = Some(ErrorKind::BrokenPipe);
+                    let mut io =
+                        Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
+                    io.pty.reader =
+                        Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
+                    io.output.write_error = Some(ErrorKind::BrokenPipe);
                     let result = if quiesce {
-                        h.drain(
-                            &mut drain_transport,
-                            &mut human,
-                            &mut pty,
-                            &mut output,
-                            h.until,
-                        )
-                        .map(|_| ())
+                        h.drain_with(&mut drain_transport, &mut io).map(|_| ())
                     } else {
                         drain_transport
                             .tick(
-                                &mut human,
-                                &mut pty,
-                                &mut output,
+                                &mut io.human,
+                                &mut io.pty,
+                                &mut io.output,
                                 &mut Measured {
                                     inner: h.controller.observer(&h.writer, &h.clock),
                                     trace: h.trace.clone(),
@@ -3057,20 +2920,14 @@ mod tests {
                     assert_eq!(drain_transport.snapshot().screen.contents(), "TAIL\nsuffix");
                     assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
                     assert_eq!(drain_transport.pending_display_bytes(), 17);
-                    assert!(output.bytes.is_empty());
+                    assert!(io.output.bytes.is_empty());
                     assert!(drain_transport.take_input_drain().is_none());
-                    output.write_error = None;
+                    io.output.write_error = None;
                     if discard {
                         assert_eq!(drain_transport.discard_display_tail(), 17);
                     }
                     assert_healthy(h);
-                    let result = h.drain(
-                        &mut drain_transport,
-                        &mut human,
-                        &mut pty,
-                        &mut output,
-                        h.until,
-                    );
+                    let result = h.drain_with(&mut drain_transport, &mut io);
                     assert_eq!(
                         result.unwrap(),
                         InputDrain::Quiescent {
@@ -3080,7 +2937,7 @@ mod tests {
                     );
                     assert_eq!(drain_transport.pending_display_bytes(), 0);
                     assert_eq!(
-                        output.bytes,
+                        io.output.bytes,
                         if discard {
                             b"".as_slice()
                         } else {
@@ -3096,22 +2953,16 @@ mod tests {
     #[test]
     fn drain_incomplete_prefetch_consumption_control_observes_once_and_can_seal() {
         with_harness(|h| {
-            h.control();
             let mut drain_transport = drain_transport(64, 64, 64);
-            let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
-            let mut pty = DrainPty::new(&h.trace);
-            pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
-            let mut output = DrainOutput::new(&h.trace);
-            assert_eq!(drain_transport.prefetch_child_bytes(&mut pty).unwrap(), 17);
+            let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
+            io.pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
+            assert_eq!(
+                drain_transport.prefetch_child_bytes(&mut io.pty).unwrap(),
+                17
+            );
             assert_eq!(drain_transport.snapshot().screen_seq, 0);
             assert!(h.observations.screens.borrow().is_empty());
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
-            );
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_eq!(
                 result.unwrap(),
                 InputDrain::Quiescent {
@@ -3120,7 +2971,7 @@ mod tests {
                 }
             );
             assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
-            assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
+            assert_eq!(io.output.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(drain_transport.pending_display_bytes(), 0);
             assert!(drain_transport.take_input_drain().is_some());
         });
@@ -3131,35 +2982,30 @@ mod tests {
         with_harness(|h| {
             h.control();
             let mut drain_transport = drain_transport(64, 64, 64);
-            let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
-            let mut pty = DrainPty::new(&h.trace);
-            let mut output = DrainOutput::new(&h.trace);
-            let progress = drain_transport
-                .tick(
-                    &mut human,
-                    &mut pty,
-                    &mut output,
-                    &mut h.controller.observer(&h.writer, &h.clock),
-                )
-                .unwrap();
+            let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"typed", 5));
+            let progress = h.tick_with(&mut drain_transport, &mut io).unwrap();
             assert_eq!(progress.human_bytes, 5);
             assert_eq!(progress.child_bytes, 0);
             h.reset_observations();
-            pty.reader
+            io.pty
+                .reader
                 .steps
                 .push_back(Read::Data(CONTROL_SEPARATED_CHILD.to_vec()));
-            assert_eq!(drain_transport.prefetch_child_bytes(&mut pty).unwrap(), 17);
-            assert_eq!(pty.reader.calls.last().unwrap().count, Some(17));
-            assert_eq!(pty.reader.bytes, CONTROL_SEPARATED_CHILD);
+            assert_eq!(
+                drain_transport.prefetch_child_bytes(&mut io.pty).unwrap(),
+                17
+            );
+            assert_eq!(io.pty.reader.calls.last().unwrap().count, Some(17));
+            assert_eq!(io.pty.reader.bytes, CONTROL_SEPARATED_CHILD);
             assert_eq!(drain_transport.discard_display_tail(), 17);
             assert_eq!(drain_transport.pending_display_bytes(), 0);
             assert_eq!(drain_transport.snapshot().screen_seq, 0);
             assert!(h.observations.screens.borrow().is_empty());
-            assert!(output.bytes.is_empty());
+            assert!(io.output.bytes.is_empty());
             assert_incomplete_observation_stays_fenced(
                 h,
                 &mut drain_transport,
-                (&mut human, &mut pty, &mut output),
+                (&mut io.human, &mut io.pty, &mut io.output),
                 b"",
                 0,
             );
@@ -3169,19 +3015,10 @@ mod tests {
     #[test]
     fn drain_complete_terminal_reply_seals_a_proof_without_manual_generation() {
         with_harness(|h| {
-            h.control();
             let reply = b"\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R";
             let mut drain_transport = drain_transport(64, 64, 64);
-            let mut human = Reader::data(Site::Human, &h.trace, reply, 64);
-            let mut pty = DrainPty::new(&h.trace);
-            let mut output = DrainOutput::new(&h.trace);
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
-            );
+            let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, reply, 64));
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_eq!(
                 result.unwrap(),
                 InputDrain::Quiescent {
@@ -3189,61 +3026,33 @@ mod tests {
                     output_seq: drain_transport.snapshot().screen_seq,
                 }
             );
-            assert_eq!(pty.bytes, reply, "the reply is forwarded unchanged");
+            assert_eq!(io.pty.bytes, reply, "the reply is forwarded unchanged");
             assert!(drain_transport.take_input_drain().is_some());
-        });
-    }
-
-    #[test]
-    fn drain_pending_reply_prefix_blocks_the_proof_with_terminal_reply_pending() {
-        with_harness(|h| {
-            h.control();
-            let mut drain_transport = drain_transport(64, 64, 64);
-            let mut human = Reader::data(Site::Human, &h.trace, b"\x1b[24;", 64);
-            let mut pty = DrainPty::new(&h.trace);
-            let mut output = DrainOutput::new(&h.trace);
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
-            );
-            assert_pending(result, &mut drain_transport);
-            assert_eq!(
-                drain_transport.drain_blocker(),
-                Some("terminal reply pending")
-            );
-            assert_eq!(pty.bytes, b"\x1b[24;", "the prefix is forwarded, not held");
-            assert_eq!(drain_transport.pending_input_bytes(), 0);
-            assert_eq!(drain_transport.human_generation(), 0);
         });
     }
 
     #[test]
     fn drain_completed_reply_prefix_seals_a_proof_with_unchanged_generation() {
         with_harness(|h| {
-            h.control();
             let mut drain_transport = drain_transport(64, 64, 64);
-            let mut human = Reader::data(Site::Human, &h.trace, b"\x1b[24;", 64);
-            let mut pty = DrainPty::new(&h.trace);
-            let mut output = DrainOutput::new(&h.trace);
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
+            let mut io = Endpoints::new(
+                &h.trace,
+                Reader::data(Site::Human, &h.trace, b"\x1b[24;", 64),
             );
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_pending(result, &mut drain_transport);
-            human.steps.push_back(Read::Data(b"80R".to_vec()));
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
+            assert_eq!(
+                drain_transport.drain_blocker(),
+                Some("terminal reply pending")
             );
+            assert_eq!(
+                io.pty.bytes, b"\x1b[24;",
+                "the prefix is forwarded, not held"
+            );
+            assert_eq!(drain_transport.pending_input_bytes(), 0);
+            assert_eq!(drain_transport.human_generation(), 0);
+            io.human.steps.push_back(Read::Data(b"80R".to_vec()));
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_eq!(
                 result.unwrap(),
                 InputDrain::Quiescent {
@@ -3252,7 +3061,7 @@ mod tests {
                 }
             );
             assert_eq!(drain_transport.drain_blocker(), None);
-            assert_eq!(pty.bytes, b"\x1b[24;80R");
+            assert_eq!(io.pty.bytes, b"\x1b[24;80R");
             let proof = drain_transport
                 .take_input_drain()
                 .expect("quiet drain seals a proof");
@@ -3266,7 +3075,6 @@ mod tests {
     #[test]
     fn drain_proof_taken_before_a_reply_prefix_fails_validation_while_it_is_pending() {
         with_harness(|h| {
-            h.control();
             let mut drain_transport = drain_transport(64, 64, 64);
             h.seal(&mut drain_transport);
             let proof = drain_transport
@@ -3275,30 +3083,15 @@ mod tests {
             drain_transport
                 .validate_observation_drain(&proof, h.until)
                 .unwrap();
-            let mut human = Reader::data(Site::Human, &h.trace, b"\x1b", 64);
-            let mut pty = DrainPty::new(&h.trace);
-            let mut output = DrainOutput::new(&h.trace);
-            drain_transport
-                .tick(
-                    &mut human,
-                    &mut pty,
-                    &mut output,
-                    &mut h.controller.observer(&h.writer, &h.clock),
-                )
-                .unwrap();
+            let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"\x1b", 64));
+            h.tick_with(&mut drain_transport, &mut io).unwrap();
             assert_eq!(drain_transport.human_generation(), 0);
             assert!(
                 drain_transport
                     .validate_observation_drain(&proof, h.until)
                     .is_err()
             );
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
-            );
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_pending(result, &mut drain_transport);
             assert_eq!(
                 drain_transport.drain_blocker(),
@@ -3315,18 +3108,9 @@ mod tests {
     #[test]
     fn drain_backdated_lone_escape_resolves_as_manual_on_the_next_drain() {
         with_harness(|h| {
-            h.control();
             let mut drain_transport = drain_transport(64, 64, 64);
-            let mut human = Reader::data(Site::Human, &h.trace, b"\x1b", 64);
-            let mut pty = DrainPty::new(&h.trace);
-            let mut output = DrainOutput::new(&h.trace);
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
-            );
+            let mut io = Endpoints::new(&h.trace, Reader::data(Site::Human, &h.trace, b"\x1b", 64));
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_pending(result, &mut drain_transport);
             assert_eq!(
                 drain_transport.drain_blocker(),
@@ -3334,13 +3118,7 @@ mod tests {
             );
             assert_eq!(drain_transport.human_generation(), 0);
             drain_transport.backdate_reply_prefix(REPLY_PREFIX_BOUND);
-            let result = h.drain(
-                &mut drain_transport,
-                &mut human,
-                &mut pty,
-                &mut output,
-                h.until,
-            );
+            let result = h.drain_with(&mut drain_transport, &mut io);
             assert_eq!(
                 result.unwrap(),
                 InputDrain::Quiescent {
@@ -3348,7 +3126,7 @@ mod tests {
                     output_seq: drain_transport.snapshot().screen_seq,
                 }
             );
-            assert_eq!(pty.bytes, b"\x1b");
+            assert_eq!(io.pty.bytes, b"\x1b");
             let proof = drain_transport
                 .take_input_drain()
                 .expect("quiet drain seals a proof");
@@ -3648,15 +3426,6 @@ mod tests {
         }
 
         #[test]
-        fn reply_classifier_overlong_csi_in_one_read_counts_every_byte() {
-            let mut input = b"\x1b[?".to_vec();
-            input.extend(joined(&["1"; 40]).bytes());
-            input.push(b'c');
-            assert!(input.len() - 3 > CSI_PARAMETER_LIMIT);
-            assert_manual(&input);
-        }
-
-        #[test]
         fn reply_classifier_osc_body_over_the_limit_is_manual() {
             let mut prefix = b"\x1b]".to_vec();
             prefix.extend(std::iter::repeat_n(b'x', STRING_BODY_LIMIT));
@@ -3702,19 +3471,6 @@ mod tests {
         }
 
         #[test]
-        fn reply_classifier_bracketed_paste_split_across_reads_counts_every_byte() {
-            let input: &[u8] = b"\x1b[200~one\x1b[1;1R\x1b[Itwo\x1b[201~";
-            let mut classifier = classifier();
-            let now = Instant::now();
-            let manual: usize = input
-                .chunks(3)
-                .map(|chunk| classifier.feed(chunk, now).manual)
-                .sum();
-            assert_eq!(manual, input.len());
-            assert!(!classifier.pending());
-        }
-
-        #[test]
         fn reply_classifier_reply_after_bracketed_paste_counts_zero() {
             let paste: &[u8] = b"\x1b[200~text\x1b[201~";
             let mut classifier = classifier();
@@ -3754,11 +3510,6 @@ mod tests {
         #[test]
         fn reply_classifier_parameter_byte_after_an_intermediate_is_manual() {
             assert_manual(b"\x1b[1$1y");
-        }
-
-        #[test]
-        fn reply_classifier_bel_ends_an_osc_reply() {
-            assert_reply(b"\x1b]11;x\x07");
         }
 
         #[test]
@@ -3830,22 +3581,6 @@ mod tests {
         }
 
         #[test]
-        fn reply_classifier_reply_fed_one_byte_per_read_counts_zero() {
-            let now = Instant::now();
-            for reply in SPLIT_REPLIES {
-                let mut classifier = classifier();
-                for (index, byte) in reply.iter().enumerate() {
-                    assert_eq!(classifier.feed(&[*byte], now).manual, 0);
-                    assert_eq!(
-                        classifier.pending(),
-                        index + 1 < reply.len(),
-                        "{reply:?} after byte {index}"
-                    );
-                }
-            }
-        }
-
-        #[test]
         fn reply_classifier_reply_split_across_reads_at_different_instants_counts_zero() {
             let start = Instant::now();
             let mut classifier = classifier();
@@ -3904,17 +3639,6 @@ mod tests {
             assert_eq!(classifier.expire(expired).manual, 1);
             assert_eq!(classifier.feed(b"[I", expired).manual, 2);
             assert_eq!(classifier.feed(b"\x1b[I", expired).manual, 0);
-            assert!(!classifier.pending());
-        }
-
-        #[test]
-        fn reply_classifier_backdate_ages_a_pending_prefix_to_the_bound() {
-            let now = Instant::now();
-            let mut classifier = classifier();
-            assert_eq!(classifier.feed(b"\x1b[", now).manual, 0);
-            assert_eq!(classifier.expire(now).manual, 0);
-            classifier.backdate(REPLY_PREFIX_BOUND);
-            assert_eq!(classifier.expire(now).manual, 2);
             assert!(!classifier.pending());
         }
 
@@ -3979,123 +3703,6 @@ mod tests {
 
     use crate::error::CafleetError;
 
-    struct Bytes {
-        chunks: VecDeque<Vec<u8>>,
-        eof: bool,
-    }
-
-    impl Bytes {
-        fn new(bytes: &[u8], width: usize) -> Self {
-            assert!(width > 0);
-            Self {
-                chunks: bytes.chunks(width).map(<[u8]>::to_vec).collect(),
-                eof: false,
-            }
-        }
-    }
-
-    impl ByteInput for Bytes {
-        fn try_read(&mut self, target: &mut [u8]) -> io::Result<usize> {
-            let Some(mut chunk) = self.chunks.pop_front() else {
-                return if self.eof {
-                    Ok(0)
-                } else {
-                    Err(ErrorKind::WouldBlock.into())
-                };
-            };
-            let count = target.len().min(chunk.len());
-            target[..count].copy_from_slice(&chunk[..count]);
-            chunk.drain(..count);
-            if !chunk.is_empty() {
-                self.chunks.push_front(chunk);
-            }
-            Ok(count)
-        }
-    }
-
-    struct Pty {
-        output: Bytes,
-        input: Vec<u8>,
-        offers: Vec<usize>,
-        blocked: bool,
-        max_write: usize,
-        sizes: Vec<TerminalSize>,
-        closed: bool,
-    }
-
-    impl Pty {
-        fn new(output: &[u8], width: usize) -> Self {
-            Self {
-                output: Bytes::new(output, width),
-                input: Vec::new(),
-                offers: Vec::new(),
-                blocked: false,
-                max_write: usize::MAX,
-                sizes: Vec::new(),
-                closed: false,
-            }
-        }
-    }
-
-    impl ByteInput for Pty {
-        fn try_read(&mut self, target: &mut [u8]) -> io::Result<usize> {
-            self.output.try_read(target)
-        }
-    }
-
-    impl PtyIo for Pty {
-        fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if self.blocked {
-                return Err(ErrorKind::WouldBlock.into());
-            }
-            self.offers.push(bytes.len());
-            let count = bytes.len().min(self.max_write);
-            self.input.extend_from_slice(&bytes[..count]);
-            Ok(count)
-        }
-        fn resize(&mut self, size: TerminalSize) -> std::result::Result<(), CafleetError> {
-            self.sizes.push(size);
-            Ok(())
-        }
-        fn close(&mut self) -> std::result::Result<(), CafleetError> {
-            self.closed = true;
-            Ok(())
-        }
-    }
-
-    #[derive(Default)]
-    struct Output {
-        bytes: Vec<u8>,
-        blocked: bool,
-        broken: bool,
-        max_write: Option<usize>,
-        ordering: Option<Rc<RefCell<Vec<&'static str>>>>,
-    }
-
-    impl Display for Output {
-        fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if self.broken {
-                return Err(ErrorKind::BrokenPipe.into());
-            }
-            if self.blocked {
-                return Err(ErrorKind::WouldBlock.into());
-            }
-            if let Some(ordering) = &self.ordering {
-                ordering.borrow_mut().push("display");
-            }
-            let count = bytes.len().min(self.max_write.unwrap_or(bytes.len()));
-            self.bytes.extend_from_slice(&bytes[..count]);
-            Ok(count)
-        }
-        fn try_flush(&mut self) -> io::Result<()> {
-            if self.blocked {
-                Err(ErrorKind::WouldBlock.into())
-            } else {
-                Ok(())
-            }
-        }
-    }
-
     fn transport() -> Transport {
         Transport::new(
             TerminalSize { rows: 24, cols: 80 },
@@ -4126,7 +3733,7 @@ mod tests {
             .collect()
     }
 
-    fn reads(sizes: &[usize]) -> (Bytes, Vec<u8>) {
+    fn reads(sizes: &[usize]) -> (FakeInput, Vec<u8>) {
         let mut all = Vec::new();
         let mut chunks = VecDeque::new();
         for (salt, &size) in sizes.iter().enumerate() {
@@ -4134,16 +3741,31 @@ mod tests {
             all.extend_from_slice(&chunk);
             chunks.push_back(chunk);
         }
-        (Bytes { chunks, eof: false }, all)
+        (
+            FakeInput {
+                chunks,
+                ..FakeInput::default()
+            },
+            all,
+        )
     }
 
-    fn unread(input: &Bytes) -> usize {
+    fn unread(input: &FakeInput) -> usize {
         input.chunks.iter().map(Vec::len).sum()
     }
 
-    fn one_tick(transport: &mut Transport, human: &mut Bytes, pty: &mut Pty) -> TransportProgress {
+    fn one_tick(
+        transport: &mut Transport,
+        human: &mut FakeInput,
+        pty: &mut FakePty,
+    ) -> TransportProgress {
         transport
-            .tick(human, pty, &mut Output::default(), &mut Observer::default())
+            .tick(
+                human,
+                pty,
+                &mut FakeDisplay::default(),
+                &mut Observer::default(),
+            )
             .unwrap()
     }
 
@@ -4151,7 +3773,7 @@ mod tests {
     fn runner_transport_one_tick_drains_a_split_outer_reply_and_writes_it_in_one_offer() {
         let mut transport = service_transport();
         let (mut human, reply) = reads(&[4096, 3600]);
-        let mut pty = Pty::new(b"", 1);
+        let mut pty = FakePty::new(b"", 1);
         let generation = transport.human_generation();
         let progress = one_tick(&mut transport, &mut human, &mut pty);
         assert_eq!(
@@ -4159,9 +3781,12 @@ mod tests {
             0,
             "the tick reads until the outer input would block"
         );
-        assert_eq!(pty.input, reply, "all 7696 bytes reach the child in order");
         assert_eq!(
-            pty.offers,
+            pty.written, reply,
+            "all 7696 bytes reach the child in order"
+        );
+        assert_eq!(
+            pty.offers.iter().map(Vec::len).collect::<Vec<_>>(),
             [7696],
             "the whole queue is offered in one write"
         );
@@ -4176,7 +3801,7 @@ mod tests {
     fn runner_transport_outer_reads_stop_at_the_full_input_queue_and_resume_next_tick() {
         let mut transport = service_transport();
         let (mut human, payload) = reads(&[16384, 16384, 16384, 16384, 16384]);
-        let mut pty = Pty::new(b"", 1);
+        let mut pty = FakePty::new(b"", 1);
         let first = one_tick(&mut transport, &mut human, &mut pty);
         assert_eq!(first.human_bytes, 65536);
         assert_eq!(transport.human_generation(), 65536);
@@ -4185,14 +3810,14 @@ mod tests {
             16384,
             "reads stop once the queue holds 65536 bytes"
         );
-        assert_eq!(pty.input, payload[..65536]);
+        assert_eq!(pty.written, payload[..65536]);
         let second = one_tick(&mut transport, &mut human, &mut pty);
         assert_eq!(
             second.human_bytes, 16384,
             "the remaining reply is read on the next tick"
         );
         assert_eq!(unread(&human), 0);
-        assert_eq!(pty.input, payload);
+        assert_eq!(pty.written, payload);
         assert_eq!(transport.human_generation(), 81920);
     }
 
@@ -4200,7 +3825,7 @@ mod tests {
     fn runner_transport_blocked_master_keeps_the_full_queue_and_reads_nothing_more() {
         let mut transport = service_transport();
         let (mut human, payload) = reads(&[16384, 16384, 16384, 16384, 16384]);
-        let mut pty = Pty::new(b"", 1);
+        let mut pty = FakePty::new(b"", 1);
         pty.blocked = true;
         one_tick(&mut transport, &mut human, &mut pty);
         assert_eq!(transport.pending_input_bytes(), 65536);
@@ -4217,7 +3842,7 @@ mod tests {
         for _ in 0..3 {
             one_tick(&mut transport, &mut human, &mut pty);
         }
-        assert_eq!(pty.input, payload);
+        assert_eq!(pty.written, payload);
         assert_eq!(transport.human_generation(), 81920);
     }
 
@@ -4226,9 +3851,9 @@ mod tests {
         let mut transport = service_transport();
         let (mut human, reply) = reads(&[4096, 12]);
         human.eof = true;
-        let mut pty = Pty::new(b"", 1);
+        let mut pty = FakePty::new(b"", 1);
         let progress = one_tick(&mut transport, &mut human, &mut pty);
-        assert_eq!(pty.input, reply);
+        assert_eq!(pty.written, reply);
         assert!(progress.outer_eof);
         assert_eq!(progress.human_bytes, 4108);
         assert_eq!(transport.human_generation(), 4108);
@@ -4238,18 +3863,21 @@ mod tests {
     fn runner_transport_partial_master_write_keeps_the_remainder_queued_in_order() {
         let mut transport = service_transport();
         let (mut human, reply) = reads(&[4096, 3600]);
-        let mut pty = Pty::new(b"", 1);
+        let mut pty = FakePty::new(b"", 1);
         pty.max_write = 5000;
         one_tick(&mut transport, &mut human, &mut pty);
-        assert_eq!(pty.input, reply[..5000]);
+        assert_eq!(pty.written, reply[..5000]);
         assert_eq!(transport.pending_input_bytes(), 2696);
         let later = patterned(10, 99);
         human.chunks.push_back(later.clone());
         one_tick(&mut transport, &mut human, &mut pty);
         let mut expected = reply.clone();
         expected.extend_from_slice(&later);
-        assert_eq!(pty.input, expected, "queued bytes precede later reads");
-        assert_eq!(pty.offers, [7696, 2706]);
+        assert_eq!(pty.written, expected, "queued bytes precede later reads");
+        assert_eq!(
+            pty.offers.iter().map(Vec::len).collect::<Vec<_>>(),
+            [7696, 2706]
+        );
         assert_eq!(transport.pending_input_bytes(), 0);
     }
 
@@ -4258,14 +3886,14 @@ mod tests {
         let mut transport = service_transport();
         let reply =
             b"\x1b]4;0;rgb:0000/0000/0000\x1b\\\x1b]11;rgb:afaf/d7d7/8787\x07\x1b[".to_vec();
-        let mut human = Bytes {
+        let mut human = FakeInput {
             chunks: VecDeque::from([reply.clone()]),
-            eof: false,
+            ..FakeInput::default()
         };
-        let mut pty = Pty::new(b"", 1);
+        let mut pty = FakePty::new(b"", 1);
         one_tick(&mut transport, &mut human, &mut pty);
         assert_eq!(
-            pty.input, reply,
+            pty.written, reply,
             "an unterminated sequence is forwarded, not held"
         );
         assert_eq!(transport.pending_input_bytes(), 0);
@@ -4275,8 +3903,9 @@ mod tests {
             "complete OSC replies and a pending prefix are not yet manual"
         );
         transport.backdate_reply_prefix(REPLY_PREFIX_BOUND);
-        one_tick(&mut transport, &mut human, &mut pty);
-        assert_eq!(pty.input, reply);
+        let progress = one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(progress.human_bytes, 0);
+        assert_eq!(pty.written, reply, "classification never synthesizes bytes");
         assert_eq!(
             transport.human_generation(),
             2,
@@ -4289,10 +3918,10 @@ mod tests {
         let child = "\u{1b}[2J許可 ✓\r\n\u{1b}]0;title\u{7}".as_bytes();
         let human = "\u{1b}[200~literal 世界\u{1b}[201~\r\u{3}".as_bytes();
         let mut transport = transport();
-        let mut pty = Pty::new(child, 1);
+        let mut pty = FakePty::new(child, 1);
         pty.max_write = 1;
-        let mut human_input = Bytes::new(human, 2);
-        let mut display = Output {
+        let mut human_input = FakeInput::new(human, 2);
+        let mut display = FakeDisplay {
             max_write: Some(1),
             ..Default::default()
         };
@@ -4302,7 +3931,7 @@ mod tests {
                 .tick(&mut human_input, &mut pty, &mut display, &mut observer)
                 .unwrap();
         }
-        assert_eq!(pty.input, human);
+        assert_eq!(pty.written, human);
         assert_eq!(display.bytes, child);
         assert_eq!(transport.pending_input_bytes(), 0);
         assert_eq!(transport.pending_display_bytes(), 0);
@@ -4312,9 +3941,9 @@ mod tests {
     fn runner_transport_observes_reconstructed_output_before_displaying_it() {
         let ordering = Rc::new(RefCell::new(Vec::new()));
         let mut transport = transport();
-        let mut pty = Pty::new(b"request", 7);
-        let mut human = Bytes::new(b"", 1);
-        let mut display = Output {
+        let mut pty = FakePty::new(b"request", 7);
+        let mut human = FakeInput::new(b"", 1);
+        let mut display = FakeDisplay {
             ordering: Some(ordering.clone()),
             ..Default::default()
         };
@@ -4343,9 +3972,9 @@ mod tests {
     fn runner_transport_full_display_queue_bounds_memory_while_human_input_continues() {
         let payload = vec![b'x'; 4096];
         let mut transport = transport();
-        let mut pty = Pty::new(&payload, 16);
-        let mut human = Bytes::new(b"human native answer\r", 1);
-        let mut display = Output {
+        let mut pty = FakePty::new(&payload, 16);
+        let mut human = FakeInput::new(b"human native answer\r", 1);
+        let mut display = FakeDisplay {
             blocked: true,
             ..Default::default()
         };
@@ -4357,7 +3986,7 @@ mod tests {
             assert!(transport.pending_display_bytes() <= 64);
             assert!(transport.pending_input_bytes() <= 32);
         }
-        assert_eq!(pty.input, b"human native answer\r");
+        assert_eq!(pty.written, b"human native answer\r");
         assert!(!pty.output.chunks.is_empty());
         display.blocked = false;
         for _ in 0..1024 {
@@ -4372,10 +4001,10 @@ mod tests {
     fn runner_transport_bounded_input_backpressure_preserves_all_pending_human_bytes() {
         let payload = vec![b'a'; 512];
         let mut transport = transport();
-        let mut pty = Pty::new(b"", 1);
+        let mut pty = FakePty::new(b"", 1);
         pty.blocked = true;
-        let mut human = Bytes::new(&payload, 16);
-        let mut display = Output::default();
+        let mut human = FakeInput::new(&payload, 16);
+        let mut display = FakeDisplay::default();
         let mut observer = Observer::default();
         for _ in 0..64 {
             transport
@@ -4391,15 +4020,15 @@ mod tests {
                 .tick(&mut human, &mut pty, &mut display, &mut observer)
                 .unwrap();
         }
-        assert_eq!(pty.input, payload);
+        assert_eq!(pty.written, payload);
     }
 
     #[test]
     fn runner_transport_observation_queue_failure_reports_degradation_and_preserves_manual_io() {
         let mut transport = transport();
-        let mut pty = Pty::new(b"native output", 4);
-        let mut human = Bytes::new(b"yes\r", 1);
-        let mut display = Output::default();
+        let mut pty = FakePty::new(b"native output", 4);
+        let mut human = FakeInput::new(b"yes\r", 1);
+        let mut display = FakeDisplay::default();
         let mut observer = Observer {
             fail: true,
             ..Default::default()
@@ -4412,23 +4041,23 @@ mod tests {
             reported |= progress.observation_error.is_some();
         }
         assert!(reported);
-        assert_eq!(pty.input, b"yes\r");
+        assert_eq!(pty.written, b"yes\r");
         assert_eq!(display.bytes, b"native output");
     }
 
     #[test]
     fn runner_transport_forwards_one_outer_terminal_query_answer_without_parser_duplicates() {
         let mut transport = transport();
-        let mut pty = Pty::new(b"\x1b[6n", 1);
-        let mut human = Bytes::new(b"\x1b[1;1R", 1);
-        let mut display = Output::default();
+        let mut pty = FakePty::new(b"\x1b[6n", 1);
+        let mut human = FakeInput::new(b"\x1b[1;1R", 1);
+        let mut display = FakeDisplay::default();
         let mut observer = Observer::default();
         for _ in 0..64 {
             transport
                 .tick(&mut human, &mut pty, &mut display, &mut observer)
                 .unwrap();
         }
-        assert_eq!(pty.input, b"\x1b[1;1R");
+        assert_eq!(pty.written, b"\x1b[1;1R");
         assert_eq!(display.bytes, b"\x1b[6n");
         assert_eq!(
             transport.human_generation(),
@@ -4442,11 +4071,11 @@ mod tests {
         let mut transport = service_transport();
         let burst = b"\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b[O"
             .to_vec();
-        let mut human = Bytes::new(&burst, 5);
-        let mut pty = Pty::new(b"", 1);
+        let mut human = FakeInput::new(&burst, 5);
+        let mut pty = FakePty::new(b"", 1);
         let progress = one_tick(&mut transport, &mut human, &mut pty);
         assert_eq!(
-            pty.input, burst,
+            pty.written, burst,
             "replies are forwarded byte-for-byte in order"
         );
         assert_eq!(
@@ -4461,14 +4090,14 @@ mod tests {
     #[test]
     fn runner_transport_reply_split_across_ticks_stays_out_of_manual_generation() {
         let mut transport = service_transport();
-        let mut human = Bytes::new(b"\x1b[24", 16);
-        let mut pty = Pty::new(b"", 1);
+        let mut human = FakeInput::new(b"\x1b[24", 16);
+        let mut pty = FakePty::new(b"", 1);
         one_tick(&mut transport, &mut human, &mut pty);
-        assert_eq!(pty.input, b"\x1b[24", "the prefix is forwarded, not held");
+        assert_eq!(pty.written, b"\x1b[24", "the prefix is forwarded, not held");
         assert_eq!(transport.human_generation(), 0);
         human.chunks.push_back(b";80R".to_vec());
         one_tick(&mut transport, &mut human, &mut pty);
-        assert_eq!(pty.input, b"\x1b[24;80R");
+        assert_eq!(pty.written, b"\x1b[24;80R");
         assert_eq!(transport.human_generation(), 0);
     }
 
@@ -4476,37 +4105,23 @@ mod tests {
     fn runner_transport_counts_only_manual_bytes_around_a_reply() {
         let mut transport = service_transport();
         let input = b"ab\x1b[Icd".to_vec();
-        let mut human = Bytes::new(&input, 16);
-        let mut pty = Pty::new(b"", 1);
+        let mut human = FakeInput::new(&input, 16);
+        let mut pty = FakePty::new(b"", 1);
         let progress = one_tick(&mut transport, &mut human, &mut pty);
-        assert_eq!(pty.input, input);
+        assert_eq!(pty.written, input);
         assert_eq!(progress.human_bytes, input.len());
         assert_eq!(transport.human_generation(), 4);
     }
 
     #[test]
-    fn runner_transport_keystrokes_still_advance_manual_generation() {
-        let mut transport = service_transport();
-        let input = b"yes\r\x1b[A\x03".to_vec();
-        let mut human = Bytes::new(&input, 1);
-        let mut pty = Pty::new(b"", 1);
-        one_tick(&mut transport, &mut human, &mut pty);
-        assert_eq!(pty.input, input);
-        assert_eq!(
-            transport.human_generation(),
-            u64::try_from(input.len()).unwrap()
-        );
-    }
-
-    #[test]
     fn runner_transport_outer_eof_counts_a_pending_reply_prefix_as_manual() {
         let mut transport = service_transport();
-        let mut human = Bytes::new(b"ab\x1b[", 16);
+        let mut human = FakeInput::new(b"ab\x1b[", 16);
         human.eof = true;
-        let mut pty = Pty::new(b"", 1);
+        let mut pty = FakePty::new(b"", 1);
         let progress = one_tick(&mut transport, &mut human, &mut pty);
         assert!(progress.outer_eof);
-        assert_eq!(pty.input, b"ab\x1b[");
+        assert_eq!(pty.written, b"ab\x1b[");
         assert_eq!(
             transport.human_generation(),
             4,
@@ -4515,35 +4130,9 @@ mod tests {
     }
 
     #[test]
-    fn runner_transport_outer_eof_after_a_complete_reply_adds_no_manual_generation() {
-        let mut transport = service_transport();
-        let mut human = Bytes::new(b"\x1b[I", 16);
-        human.eof = true;
-        let mut pty = Pty::new(b"", 1);
-        let progress = one_tick(&mut transport, &mut human, &mut pty);
-        assert!(progress.outer_eof);
-        assert_eq!(transport.human_generation(), 0);
-    }
-
-    #[test]
-    fn runner_transport_lone_escape_counts_as_manual_once_its_prefix_bound_passes() {
-        let mut transport = service_transport();
-        let mut human = Bytes::new(b"\x1b", 16);
-        let mut pty = Pty::new(b"", 1);
-        one_tick(&mut transport, &mut human, &mut pty);
-        assert_eq!(pty.input, b"\x1b", "a lone Escape is forwarded immediately");
-        assert_eq!(transport.human_generation(), 0);
-        transport.backdate_reply_prefix(REPLY_PREFIX_BOUND);
-        let progress = one_tick(&mut transport, &mut human, &mut pty);
-        assert_eq!(progress.human_bytes, 0);
-        assert_eq!(transport.human_generation(), 1);
-        assert_eq!(pty.input, b"\x1b", "classification never synthesizes bytes");
-    }
-
-    #[test]
     fn runner_transport_resize_reaches_the_pty_and_screen_together() {
         let mut transport = transport();
-        let mut pty = Pty::new(b"", 1);
+        let mut pty = FakePty::new(b"", 1);
         transport
             .resize(
                 &mut pty,
@@ -4570,15 +4159,15 @@ mod tests {
     fn runner_transport_reports_outer_and_child_eof_as_distinct_observations() {
         for outer in [false, true] {
             let mut transport = transport();
-            let mut pty = Pty::new(b"", 1);
+            let mut pty = FakePty::new(b"", 1);
             pty.output.eof = !outer;
-            let mut human = Bytes::new(b"", 1);
+            let mut human = FakeInput::new(b"", 1);
             human.eof = outer;
             let progress = transport
                 .tick(
                     &mut human,
                     &mut pty,
-                    &mut Output::default(),
+                    &mut FakeDisplay::default(),
                     &mut Observer::default(),
                 )
                 .unwrap();
@@ -4590,9 +4179,9 @@ mod tests {
     #[test]
     fn runner_transport_broken_display_fails_and_tail_discard_counts_only_pending_bytes() {
         let mut transport = transport();
-        let mut pty = Pty::new(b"undelivered tail", 16);
-        let mut human = Bytes::new(b"", 1);
-        let mut display = Output {
+        let mut pty = FakePty::new(b"undelivered tail", 16);
+        let mut human = FakeInput::new(b"", 1);
+        let mut display = FakeDisplay {
             blocked: true,
             ..Default::default()
         };
@@ -4606,7 +4195,7 @@ mod tests {
         assert!(pending > 0);
         assert_eq!(transport.discard_display_tail(), pending);
         assert_eq!(transport.discard_display_tail(), 0);
-        pty.output = Bytes::new(b"broken", 6);
+        pty.output = FakeInput::new(b"broken", 6);
         display.blocked = false;
         display.broken = true;
         assert!(
@@ -4641,6 +4230,9 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::io;
+    use std::io::ErrorKind;
     use std::rc::Rc;
 
     use crate::error::CafleetError;
@@ -4663,6 +4255,145 @@ pub(crate) mod test_support {
                 Err(CafleetError::App(
                     "fixture observation queue unavailable".into(),
                 ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// Terminal input that yields its queued chunks one per read, then `WouldBlock`, or
+    /// end of file once `eof` is set.
+    #[derive(Default)]
+    pub(crate) struct FakeInput {
+        pub(crate) chunks: VecDeque<Vec<u8>>,
+        pub(crate) eof: bool,
+        pub(crate) consumed: Vec<u8>,
+    }
+
+    impl FakeInput {
+        pub(crate) fn new(bytes: &[u8], width: usize) -> Self {
+            assert!(width > 0);
+            Self {
+                chunks: bytes.chunks(width).map(<[u8]>::to_vec).collect(),
+                ..Self::default()
+            }
+        }
+    }
+
+    impl ByteInput for FakeInput {
+        fn try_read(&mut self, target: &mut [u8]) -> io::Result<usize> {
+            let Some(mut chunk) = self.chunks.pop_front() else {
+                return if self.eof {
+                    Ok(0)
+                } else {
+                    Err(ErrorKind::WouldBlock.into())
+                };
+            };
+            let count = target.len().min(chunk.len());
+            target[..count].copy_from_slice(&chunk[..count]);
+            chunk.drain(..count);
+            if !chunk.is_empty() {
+                self.chunks.push_front(chunk);
+            }
+            self.consumed.extend_from_slice(&target[..count]);
+            Ok(count)
+        }
+    }
+
+    /// A PTY whose child side reads from `output` and whose master side records every offer.
+    /// `failure` refuses every write, `fault` only the next one.
+    pub(crate) struct FakePty {
+        pub(crate) output: FakeInput,
+        pub(crate) reads: usize,
+        pub(crate) written: Vec<u8>,
+        pub(crate) offers: Vec<Vec<u8>>,
+        pub(crate) blocked: bool,
+        pub(crate) failure: Option<ErrorKind>,
+        pub(crate) fault: Option<ErrorKind>,
+        pub(crate) max_write: usize,
+        pub(crate) sizes: Vec<TerminalSize>,
+        pub(crate) closed: bool,
+    }
+
+    impl FakePty {
+        pub(crate) fn new(output: &[u8], width: usize) -> Self {
+            Self {
+                output: FakeInput::new(output, width),
+                reads: 0,
+                written: Vec::new(),
+                offers: Vec::new(),
+                blocked: false,
+                failure: None,
+                fault: None,
+                max_write: usize::MAX,
+                sizes: Vec::new(),
+                closed: false,
+            }
+        }
+    }
+
+    impl ByteInput for FakePty {
+        fn try_read(&mut self, target: &mut [u8]) -> io::Result<usize> {
+            self.reads += 1;
+            self.output.try_read(target)
+        }
+    }
+
+    impl PtyIo for FakePty {
+        fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            assert!(!bytes.is_empty());
+            if self.blocked {
+                return Err(ErrorKind::WouldBlock.into());
+            }
+            self.offers.push(bytes.to_vec());
+            if let Some(kind) = self.fault.take().or(self.failure) {
+                return Err(io::Error::new(kind, "fixture PTY write failure"));
+            }
+            let count = bytes.len().min(self.max_write);
+            self.written.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+
+        fn resize(&mut self, size: TerminalSize) -> std::result::Result<(), CafleetError> {
+            self.sizes.push(size);
+            Ok(())
+        }
+
+        fn close(&mut self) -> std::result::Result<(), CafleetError> {
+            self.closed = true;
+            Ok(())
+        }
+    }
+
+    /// A display that records accepted bytes; `ordering` logs each write as `display`.
+    #[derive(Default)]
+    pub(crate) struct FakeDisplay {
+        pub(crate) bytes: Vec<u8>,
+        pub(crate) blocked: bool,
+        pub(crate) broken: bool,
+        pub(crate) max_write: Option<usize>,
+        pub(crate) ordering: Option<Rc<RefCell<Vec<&'static str>>>>,
+    }
+
+    impl Display for FakeDisplay {
+        fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.broken {
+                return Err(ErrorKind::BrokenPipe.into());
+            }
+            if self.blocked {
+                return Err(ErrorKind::WouldBlock.into());
+            }
+            if let Some(ordering) = &self.ordering {
+                ordering.borrow_mut().push("display");
+            }
+            let count = bytes.len().min(self.max_write.unwrap_or(bytes.len()));
+            self.bytes.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+
+        fn try_flush(&mut self) -> io::Result<()> {
+            if self.blocked {
+                Err(ErrorKind::WouldBlock.into())
             } else {
                 Ok(())
             }

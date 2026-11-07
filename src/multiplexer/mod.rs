@@ -118,6 +118,12 @@ impl<F: Fn(&str) -> Result<(), MultiplexerError>> Drop for PaneOwnership<F> {
 
 impl std::error::Error for MultiplexerError {}
 
+impl From<MultiplexerError> for CafleetError {
+    fn from(error: MultiplexerError) -> Self {
+        CafleetError::App(error.to_string())
+    }
+}
+
 /// A subprocess failure below the backend's message mapping.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RunError {
@@ -152,7 +158,10 @@ pub(crate) trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
-        self.run(argv, Some(whole_seconds(timeout)))
+        self.run(
+            argv,
+            Some(timeout.as_secs() + u64::from(timeout.subsec_nanos() > 0)),
+        )
     }
     fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
         let remaining = deadline
@@ -168,10 +177,6 @@ pub(crate) trait CommandRunner {
     fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
         Ok(None)
     }
-}
-
-fn whole_seconds(duration: Duration) -> u64 {
-    duration.as_secs() + u64::from(duration.subsec_nanos() > 0)
 }
 
 const PLACEMENT_MISMATCH: &str = "press target context does not match the recorded placement";
@@ -221,14 +226,21 @@ fn check_capture_lines(lines: i64) -> Result<(), MultiplexerError> {
     Ok(())
 }
 
+pub(crate) fn argv(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|part| part.to_string()).collect()
+}
+
 /// The runner, environment and error mapping shared by every backend; a
 /// backend adds only its own argv construction and output parsing.
-struct BackendCore {
+pub(crate) struct BackendCore {
     runner: Rc<dyn CommandRunner>,
     env: std::collections::HashMap<String, String>,
     name: &'static str,
-    session_variable: &'static str,
     pane_gone: fn(&str) -> bool,
+    server_flag: &'static str,
+    /// The recorded server every argv targets; `None` only for the caller-environment
+    /// multiplexer that `fleet create` and doctor detect.
+    server: Option<String>,
 }
 
 impl BackendCore {
@@ -237,9 +249,22 @@ impl BackendCore {
             runner: DeadlineRunner::wrap(self.runner.clone(), deadline),
             env: self.env.clone(),
             name: self.name,
-            session_variable: self.session_variable,
             pane_gone: self.pane_gone,
+            server_flag: self.server_flag,
+            server: self.server.clone(),
         }
+    }
+
+    /// `parts` with the recorded server selector inserted after the binary.
+    fn argv(&self, parts: &[&str]) -> Vec<String> {
+        let (binary, rest) = parts.split_first().expect("an argv names its binary");
+        let mut command = vec![binary.to_string()];
+        if let Some(server) = &self.server {
+            command.push(self.server_flag.to_owned());
+            command.push(server.clone());
+        }
+        command.extend(argv(rest));
+        command
     }
 
     fn env_var(&self, name: &str) -> Option<&str> {
@@ -283,12 +308,6 @@ impl BackendCore {
         if !self.runner.binary_exists(self.name) {
             return Err(MultiplexerError::new(format!(
                 "{} binary not found on PATH",
-                self.name
-            )));
-        }
-        if self.env_var(self.session_variable).is_none() {
-            return Err(MultiplexerError::new(format!(
-                "cafleet member commands must be run inside a {} session",
                 self.name
             )));
         }
@@ -419,182 +438,237 @@ pub(crate) fn capture_window(raw: &str, lines: i64) -> String {
     parts[start..].join("\n")
 }
 
-/// The closed backend dispatch the resolver returns.
-pub(crate) enum AnyMultiplexer {
-    Tmux(TmuxMultiplexer),
-    Herdr(HerdrMultiplexer),
-}
+/// A multiplexer backend. The provided pane close and layout restoration are tmux's; herdr
+/// overrides them to rebalance the closed pane's tab after deregistration.
+pub(crate) trait Multiplexer {
+    fn core(&self) -> &BackendCore;
 
-pub(crate) enum PostCloseLayout {
-    None,
-    HerdrTab(String),
-}
+    fn bounded(&self, deadline: crate::time::Deadline) -> Box<dyn Multiplexer>;
 
-impl AnyMultiplexer {
-    pub(crate) fn close_pane(
+    /// Confirms that the recorded `pane` still sits at `placement`'s session and window.
+    fn check_key_target(
         &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<PostCloseLayout, MultiplexerError> {
-        match self {
-            Self::Tmux(mux) => {
-                mux.kill_pane(target_pane_id, ignore_missing)?;
-                Ok(PostCloseLayout::None)
-            }
-            Self::Herdr(mux) => Ok(mux
-                .close_pane(target_pane_id, ignore_missing)?
-                .map_or(PostCloseLayout::None, PostCloseLayout::HerdrTab)),
-        }
-    }
-
-    pub(crate) fn restore_after_close(
-        &self,
-        layout: PostCloseLayout,
-    ) -> Result<(), MultiplexerError> {
-        match (self, layout) {
-            (_, PostCloseLayout::None) => Ok(()),
-            (Self::Herdr(mux), PostCloseLayout::HerdrTab(tab_id)) => {
-                mux.resize_after_close(&tab_id)
-            }
-            (Self::Tmux(_), PostCloseLayout::HerdrTab(_)) => {
-                unreachable!("post-close layout belongs to its multiplexer backend");
-            }
-        }
-    }
-
-    pub(crate) fn bounded(&self, deadline: crate::time::Deadline) -> Self {
-        match self {
-            Self::Tmux(mux) => Self::Tmux(mux.bounded(deadline)),
-            Self::Herdr(mux) => Self::Herdr(mux.bounded(deadline)),
-        }
-    }
-}
-
-impl AnyMultiplexer {
-    pub(crate) fn name(&self) -> &'static str {
-        match self {
-            Self::Tmux(mux) => mux.name(),
-            Self::Herdr(mux) => mux.name(),
-        }
-    }
-
-    pub(crate) fn ensure_available(&self) -> Result<(), MultiplexerError> {
-        match self {
-            Self::Tmux(mux) => mux.ensure_available(),
-            Self::Herdr(mux) => mux.ensure_available(),
-        }
-    }
-
-    pub(crate) fn validate_key_target(
-        &self,
+        pane: &str,
         placement: &crate::broker::Placement,
         deadline: crate::time::Deadline,
-    ) -> Result<(), MultiplexerError> {
-        match self {
-            Self::Tmux(mux) => mux.validate_key_target(placement, deadline),
-            Self::Herdr(mux) => mux.validate_key_target(placement, deadline),
-        }
-    }
+    ) -> Result<(), MultiplexerError>;
 
-    pub(crate) fn send_keys(
+    fn send_keys(
         &self,
         pane_id: &str,
         keys: &PressKeys,
         deadline: crate::time::Deadline,
-    ) -> Result<(), MultiplexerError> {
-        match self {
-            Self::Tmux(mux) => mux.send_keys(pane_id, keys, deadline),
-            Self::Herdr(mux) => mux.send_keys(pane_id, keys, deadline),
-        }
-    }
+    ) -> Result<(), MultiplexerError>;
 
-    pub(crate) fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
-        match self {
-            Self::Tmux(mux) => mux.context_discovery(),
-            Self::Herdr(mux) => mux.context_discovery(),
-        }
-    }
+    fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError>;
 
-    pub(crate) fn split_window(
+    /// The session, window and pane of `pane` on the targeted server, or `None` when the server
+    /// has no such pane.
+    fn pane_context(&self, pane: &str) -> Result<Option<MultiplexerContext>, MultiplexerError>;
+
+    fn split_window(
         &self,
         reference: &MultiplexerContext,
-        env: &[(String, String)],
         command: &[String],
-    ) -> Result<String, MultiplexerError> {
-        match self {
-            Self::Tmux(mux) => mux.split_window(reference, env, command),
-            Self::Herdr(mux) => mux.split_window(reference, env, command),
-        }
+    ) -> Result<String, MultiplexerError>;
+
+    fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
+
+    fn kill_pane(&self, target_pane_id: &str, ignore_missing: bool)
+    -> Result<(), MultiplexerError>;
+
+    fn name(&self) -> &'static str {
+        self.core().name
     }
 
-    pub(crate) fn capture_pane(
+    fn ensure_available(&self) -> Result<(), MultiplexerError> {
+        self.core().ensure_available()
+    }
+
+    fn validate_key_target(
         &self,
-        target_pane_id: &str,
-        lines: i64,
-    ) -> Result<String, MultiplexerError> {
-        match self {
-            Self::Tmux(mux) => mux.capture_pane(target_pane_id, lines),
-            Self::Herdr(mux) => mux.capture_pane(target_pane_id, lines),
-        }
+        placement: &crate::broker::Placement,
+        deadline: crate::time::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        check_deadline(deadline)?;
+        self.ensure_available()?;
+        check_deadline(deadline)?;
+        let pane = placement
+            .mux_pane_id
+            .as_deref()
+            .ok_or_else(|| MultiplexerError::new("press target has no pane"))?;
+        self.check_key_target(pane, placement, deadline)
     }
 
-    pub(crate) fn kill_pane(
+    fn close_pane(
         &self,
         target_pane_id: &str,
         ignore_missing: bool,
     ) -> Result<(), MultiplexerError> {
+        self.kill_pane(target_pane_id, ignore_missing)
+    }
+
+    /// Restores the layout after the most recent `close_pane`.
+    fn restore_after_close(&self) -> Result<(), MultiplexerError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MuxBackend {
+    Tmux,
+    Herdr,
+}
+
+impl MuxBackend {
+    pub(crate) fn name(self) -> &'static str {
         match self {
-            Self::Tmux(mux) => mux.kill_pane(target_pane_id, ignore_missing),
-            Self::Herdr(mux) => mux.kill_pane(target_pane_id, ignore_missing),
+            Self::Tmux => "tmux",
+            Self::Herdr => "herdr",
+        }
+    }
+
+    pub(crate) fn parse(name: &str) -> Result<Self, MultiplexerError> {
+        match name {
+            "tmux" => Ok(Self::Tmux),
+            "herdr" => Ok(Self::Herdr),
+            other => Err(MultiplexerError::new(format!(
+                "unsupported recorded multiplexer backend '{other}'"
+            ))),
+        }
+    }
+
+    /// The multiplexer that targets `server` on this backend explicitly.
+    pub(crate) fn for_server(
+        self,
+        server: &str,
+        runner: Rc<dyn CommandRunner>,
+    ) -> Box<dyn Multiplexer> {
+        match self {
+            Self::Tmux => Box::new(TmuxMultiplexer::for_server(runner, server)),
+            Self::Herdr => Box::new(HerdrMultiplexer::for_server(runner, server)),
+        }
+    }
+
+    /// Auto-detects the backend from `HERDR_ENV` / `TMUX` (an empty value counts as unset);
+    /// ambiguity and absence are hard errors.
+    pub(crate) fn detect(env: impl Fn(&str) -> Option<String>) -> Result<Self, MultiplexerError> {
+        let present = |name: &str| env(name).is_some_and(|value| !value.is_empty());
+        match (present("HERDR_ENV"), present("TMUX")) {
+            (true, true) => Err(MultiplexerError::new(
+                "ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; \
+                 unset the one that does not belong to this session",
+            )),
+            (true, false) => Ok(Self::Herdr),
+            (false, true) => Ok(Self::Tmux),
+            (false, false) => Err(MultiplexerError::new(
+                "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; \
+                 run cafleet inside a tmux or herdr session",
+            )),
         }
     }
 }
 
-/// Resolve the selected backend and construct it over the
-/// given runner and environment snapshot.
+/// The set caller-environment variables multiplexer detection and `fleet create` read; a
+/// non-UTF-8 one fails with its name.
+pub(crate) fn caller_env()
+-> Result<std::collections::HashMap<String, String>, crate::error::CafleetError> {
+    let names =
+        "TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH HERDR_PANE_ID HERMES_SESSION_ID";
+    let set = |name: &str| Ok(crate::config::process_env(name)?.map(|value| (name.into(), value)));
+    names
+        .split(' ')
+        .filter_map(|name| set(name).transpose())
+        .collect()
+}
+
+/// The caller-environment multiplexer that `fleet create` and doctor detect.
 pub(crate) fn resolve_multiplexer(
-    override_value: Option<&str>,
     env: std::collections::HashMap<String, String>,
-    runner: std::rc::Rc<dyn CommandRunner>,
-) -> Result<AnyMultiplexer, MultiplexerError> {
-    let name = resolve_multiplexer_name(override_value, |key| env.get(key).cloned())?;
-    Ok(match name {
-        "herdr" => AnyMultiplexer::Herdr(HerdrMultiplexer::new(runner, env)),
-        "tmux" => AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner, env)),
-        other => unreachable!("the resolver returned an unsupported multiplexer: {other}"),
+    runner: Rc<dyn CommandRunner>,
+) -> Result<Box<dyn Multiplexer>, MultiplexerError> {
+    Ok(match MuxBackend::detect(|key| env.get(key).cloned())? {
+        MuxBackend::Herdr => Box::new(HerdrMultiplexer::new(runner, env)),
+        MuxBackend::Tmux => Box::new(TmuxMultiplexer::new(runner, env)),
     })
 }
 
-/// An explicit backend override must name
-/// a registry key; otherwise auto-detect from `HERDR_ENV` / `TMUX` (an empty
-/// value counts as unset); ambiguity and absence are hard errors.
-fn resolve_multiplexer_name(
-    override_value: Option<&str>,
+/// The multiplexer that targets `server` on the recorded `backend` explicitly.
+pub(crate) fn multiplexer_for_server(
+    backend: &str,
+    server: &str,
+    runner: Rc<dyn CommandRunner>,
+) -> Result<Box<dyn Multiplexer>, MultiplexerError> {
+    Ok(MuxBackend::parse(backend)?.for_server(server, runner))
+}
+
+/// The caller's server on `backend` when `fleet create` receives no `--mux-server`.
+pub(crate) fn caller_server(
+    backend: MuxBackend,
     env: impl Fn(&str) -> Option<String>,
-) -> Result<&'static str, MultiplexerError> {
-    if let Some(value) = override_value {
-        return match value {
-            "tmux" => Ok("tmux"),
-            "herdr" => Ok("herdr"),
-            other => Err(MultiplexerError::new(format!(
-                "CAFLEET_MULTIPLEXER='{other}' is not a supported multiplexer \
-                 (expected one of: herdr, tmux)"
-            ))),
-        };
+    runner: &dyn CommandRunner,
+) -> Result<String, MultiplexerError> {
+    let present = |name: &str| env(name).filter(|value| !value.is_empty());
+    match backend {
+        MuxBackend::Tmux => match present("TMUX") {
+            Some(tmux) => Ok(tmux
+                .rsplitn(3, ',')
+                .last()
+                .expect("rsplitn yields a first segment")
+                .to_owned()),
+            None => default_tmux_socket(runner),
+        },
+        MuxBackend::Herdr => {
+            if let Some(session) = present("HERDR_SESSION") {
+                return Ok(session);
+            }
+            match present("HERDR_SOCKET_PATH") {
+                Some(socket) => herdr_session_for_socket(runner, &socket),
+                None => Ok(DEFAULT_HERDR_SESSION.to_owned()),
+            }
+        }
     }
-    let present = |name: &str| env(name).is_some_and(|value| !value.is_empty());
-    match (present("HERDR_ENV"), present("TMUX")) {
-        (true, true) => Err(MultiplexerError::new(
-            "ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; \
-             set CAFLEET_MULTIPLEXER to 'tmux' or 'herdr' to disambiguate",
-        )),
-        (true, false) => Ok("herdr"),
-        (false, true) => Ok("tmux"),
-        (false, false) => Err(MultiplexerError::new(
-            "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; \
-             run cafleet inside a tmux or herdr session, or set CAFLEET_MULTIPLEXER",
-        )),
+}
+
+const DEFAULT_HERDR_SESSION: &str = "default";
+
+fn default_tmux_socket(runner: &dyn CommandRunner) -> Result<String, MultiplexerError> {
+    let no_server =
+        || MultiplexerError::new("no tmux server found; pass --mux-server <socket path>");
+    let argv = argv(&["tmux", "display-message", "-p", "#{socket_path}"]);
+    let socket = match runner.run(&argv, None) {
+        Ok(out) => out.trim().to_owned(),
+        Err(RunError::Failed { .. }) => return Err(no_server()),
+        Err(error) => return Err(map_run_error("tmux", &argv, None, error)),
+    };
+    if socket.is_empty() {
+        return Err(no_server());
     }
+    Ok(socket)
+}
+
+fn herdr_session_for_socket(
+    runner: &dyn CommandRunner,
+    socket: &str,
+) -> Result<String, MultiplexerError> {
+    let argv = argv(&["herdr", "session", "list", "--json"]);
+    let out = runner
+        .run(&argv, None)
+        .map_err(|error| map_run_error("herdr", &argv, None, error))?;
+    let listing: serde_json::Value = serde_json::from_str(&out).map_err(|_| {
+        MultiplexerError::new(format!(
+            "herdr session list returned non-JSON output: {out:?}"
+        ))
+    })?;
+    let sessions = listing["sessions"]
+        .as_array()
+        .ok_or_else(|| MultiplexerError::new("herdr session list missing 'sessions' field"))?;
+    Ok(sessions
+        .iter()
+        .find(|session| session["socket_path"].as_str() == Some(socket))
+        .and_then(|session| session["name"].as_str())
+        .unwrap_or(DEFAULT_HERDR_SESSION)
+        .to_owned())
 }
 
 const NAMED_KEYS: &[(&str, &str, &str)] = &[
@@ -792,9 +866,7 @@ pub(crate) mod test_support {
         }
     }
 
-    pub(crate) fn argv(parts: &[&str]) -> Vec<String> {
-        parts.iter().map(|s| s.to_string()).collect()
-    }
+    pub(crate) use crate::multiplexer::argv;
 
     pub(crate) fn run_event(parts: &[&str], timeout_secs: Option<u64>) -> Event {
         Event::Run {
@@ -843,18 +915,19 @@ mod tests {
     use crate::time::Deadline;
     use std::cell::RefCell;
 
-    fn adapter(backend: &str, runner: Rc<FakeRunner>) -> AnyMultiplexer {
+    const TMUX_SOCKET: &str = "/tmp/tmux-1000/default";
+    const HERDR_SESSION: &str = "default";
+
+    fn server(backend: &str) -> &'static str {
         match backend {
-            "tmux" => AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-                runner,
-                env(&[("TMUX", "fixture"), ("TMUX_PANE", "%0")]),
-            )),
-            "herdr" => AnyMultiplexer::Herdr(HerdrMultiplexer::new(
-                runner,
-                env(&[("HERDR_ENV", "fixture")]),
-            )),
+            "tmux" => TMUX_SOCKET,
+            "herdr" => HERDR_SESSION,
             _ => panic!("fixture backend"),
         }
+    }
+
+    fn adapter(backend: &str, runner: Rc<FakeRunner>) -> Box<dyn Multiplexer> {
+        multiplexer_for_server(backend, server(backend), runner).unwrap()
     }
 
     #[test]
@@ -881,6 +954,8 @@ mod tests {
                 "%2",
                 argv(&[
                     "tmux",
+                    "-S",
+                    TMUX_SOCKET,
                     "send-keys",
                     "-t",
                     "%2",
@@ -905,6 +980,8 @@ mod tests {
                 "w1:p2",
                 argv(&[
                     "herdr",
+                    "--session",
+                    HERDR_SESSION,
                     "pane",
                     "send-keys",
                     "w1:p2",
@@ -933,7 +1010,7 @@ mod tests {
             let mut actual = runner.run_argvs();
             assert_eq!(actual.len(), 1);
             if backend == "tmux" {
-                for value in &mut actual[0][4..9] {
+                for value in &mut actual[0][6..11] {
                     assert!(value.starts_with("0x") && value.len() == 4);
                     value.make_ascii_lowercase();
                 }
@@ -959,56 +1036,143 @@ mod tests {
             mux_pane_id: Some(if backend == "tmux" { "%2" } else { "w1:p2" }.into()),
             coding_agent: "codex".into(),
             created_at: "2026-10-27T10:33:00+00:00".into(),
+            mux_server: server(backend).into(),
         }
     }
 
     #[test]
-    fn press_target_validation_rejects_a_wrong_tmux_tuple_and_ambiguous_herdr_target() {
-        let tmux = FakeRunner::with_binary("tmux");
-        tmux.respond(Ok("main|@1|%0\n".into()));
-        tmux.respond(Ok("%2|@9|main\n".into()));
-        assert!(
-            adapter("tmux", tmux.clone())
-                .validate_key_target(&placement("tmux"), Deadline::new())
-                .is_err()
-        );
-        assert!(
-            tmux.run_argvs()
-                .iter()
-                .all(|args| args[1] == "display-message")
-        );
+    fn press_target_validation_reads_only_the_recorded_target_on_the_recorded_server() {
+        let tmux_target = argv(&[
+            "tmux",
+            "-S",
+            TMUX_SOCKET,
+            "display-message",
+            "-p",
+            "-t",
+            "%2",
+            "#{pane_id}|#{window_id}|#{session_name}",
+        ]);
+        let valid = FakeRunner::with_binary("tmux");
+        valid.respond(Ok("%2|@1|main\n".into()));
+        adapter("tmux", valid.clone())
+            .validate_key_target(&placement("tmux"), Deadline::new())
+            .unwrap();
+        assert_eq!(valid.run_argvs(), vec![tmux_target.clone()]);
 
+        let moved = FakeRunner::with_binary("tmux");
+        moved.respond(Ok("%2|@9|main\n".into()));
+        let failure = adapter("tmux", moved.clone())
+            .validate_key_target(&placement("tmux"), Deadline::new())
+            .unwrap_err();
+        assert_eq!(failure.to_string(), PLACEMENT_MISMATCH);
+        assert_eq!(moved.run_argvs(), vec![tmux_target]);
+
+        let herdr_list = argv(&["herdr", "--session", HERDR_SESSION, "pane", "list"]);
         let pane = serde_json::json!({"workspace_id":"main","tab_id":"@1","pane_id":"w1:p2"});
         let valid = FakeRunner::with_binary("herdr");
-        valid.respond(Ok(herdr_envelope(
-            serde_json::json!({"pane":{"workspace_id":"main","tab_id":"@1","pane_id":"w1:p0"}}),
-        )));
         valid.respond(Ok(herdr_envelope(
             serde_json::json!({"panes":[pane.clone()]}),
         )));
         adapter("herdr", valid.clone())
             .validate_key_target(&placement("herdr"), Deadline::new())
             .unwrap();
-        assert_eq!(
-            valid.run_argvs(),
-            vec![
-                argv(&["herdr", "pane", "current"]),
-                argv(&["herdr", "pane", "list"])
-            ]
-        );
+        assert_eq!(valid.run_argvs(), vec![herdr_list.clone()]);
+
         let duplicate = FakeRunner::with_binary("herdr");
-        duplicate.respond(Ok(herdr_envelope(
-            serde_json::json!({"pane":{"workspace_id":"main","tab_id":"@1","pane_id":"w1:p0"}}),
-        )));
         duplicate.respond(Ok(herdr_envelope(
             serde_json::json!({"panes":[pane.clone(),pane]}),
         )));
-        assert!(
-            adapter("herdr", duplicate.clone())
-                .validate_key_target(&placement("herdr"), Deadline::new())
-                .is_err()
+        let failure = adapter("herdr", duplicate.clone())
+            .validate_key_target(&placement("herdr"), Deadline::new())
+            .unwrap_err();
+        assert_eq!(failure.to_string(), PLACEMENT_MISMATCH);
+        assert_eq!(duplicate.run_argvs(), vec![herdr_list]);
+    }
+
+    #[test]
+    fn a_recorded_server_needs_only_the_binary_and_rejects_an_unsupported_backend() {
+        for backend in ["tmux", "herdr"] {
+            adapter(backend, FakeRunner::with_binary(backend))
+                .ensure_available()
+                .unwrap();
+            assert_eq!(
+                adapter(backend, FakeRunner::without_binaries())
+                    .ensure_available()
+                    .unwrap_err()
+                    .to_string(),
+                format!("{backend} binary not found on PATH")
+            );
+        }
+        let failure = match multiplexer_for_server("screen", "s", FakeRunner::without_binaries()) {
+            Ok(_) => panic!("an unsupported recorded backend builds no multiplexer"),
+            Err(failure) => failure,
+        };
+        assert_eq!(
+            failure.to_string(),
+            "unsupported recorded multiplexer backend 'screen'"
         );
-        assert_eq!(duplicate.run_argvs().len(), 2);
+    }
+
+    #[test]
+    fn a_recorded_tmux_or_herdr_server_reads_the_requested_pane_and_reports_a_missing_one() {
+        for (reply, found) in [
+            ("main|@1|%2\n", true),
+            ("||\n", false),
+            ("main|@1|%3\n", false),
+        ] {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(Ok(reply.into()));
+            let context = adapter("tmux", runner.clone()).pane_context("%2").unwrap();
+            assert_eq!(context.is_some(), found, "{reply:?}");
+            assert_eq!(
+                runner.run_argvs(),
+                vec![argv(&[
+                    "tmux",
+                    "-S",
+                    TMUX_SOCKET,
+                    "display-message",
+                    "-p",
+                    "-t",
+                    "%2",
+                    "#{session_name}|#{window_id}|#{pane_id}",
+                ])]
+            );
+        }
+
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Ok(herdr_envelope(
+            serde_json::json!({"pane":{"workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p2"}}),
+        )));
+        let context = adapter("herdr", runner.clone())
+            .pane_context("w1:p2")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (context.session, context.window_id, context.pane_id),
+            ("w1".into(), "w1:t1".into(), "w1:p2".into())
+        );
+        assert_eq!(
+            runner.run_argvs(),
+            vec![argv(&[
+                "herdr",
+                "--session",
+                HERDR_SESSION,
+                "pane",
+                "current",
+                "--pane",
+                "w1:p2",
+            ])]
+        );
+        let missing = FakeRunner::with_binary("herdr");
+        missing.respond(Err(RunError::Failed {
+            stderr: test_support::herdr_error_stderr("pane_not_found"),
+        }));
+        assert!(
+            adapter("herdr", missing)
+                .pane_context("w1:p9")
+                .unwrap()
+                .is_none()
+        );
     }
 
     struct AbsoluteRecorder(RefCell<Vec<Instant>>);
@@ -1047,85 +1211,127 @@ mod tests {
         assert!(matches!(failure.source, RunError::NotStarted(_)));
         assert_eq!(recorder.0.borrow().len(), 2);
     }
-    fn no_env(_: &str) -> Option<String> {
-        None
+    fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let vars = env(pairs);
+        move |name: &str| vars.get(name).cloned()
     }
 
     #[test]
-    fn a_valid_override_wins() {
+    fn auto_detection_resolves_the_single_present_backend_or_fails() {
+        let ambiguous = "ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; \
+                         unset the one that does not belong to this session";
+        let absent = "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; \
+                      run cafleet inside a tmux or herdr session";
+        for (pairs, expected) in [
+            (&[("HERDR_ENV", "1")][..], Ok(MuxBackend::Herdr)),
+            (
+                &[("TMUX", "/tmp/tmux-1000/default,123,0")],
+                Ok(MuxBackend::Tmux),
+            ),
+            (&[("HERDR_ENV", ""), ("TMUX", "")], Err(absent)),
+            (&[("HERDR_ENV", "1"), ("TMUX", "/tmp/tmux")], Err(ambiguous)),
+            (&[], Err(absent)),
+        ] {
+            assert_eq!(
+                MuxBackend::detect(lookup(pairs)).map_err(|error| error.to_string()),
+                expected.map_err(str::to_owned),
+                "{pairs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tmux_caller_server_is_the_tmux_socket_path_before_its_last_two_commas() {
+        let runner = FakeRunner::with_binary("tmux");
         assert_eq!(
-            resolve_multiplexer_name(Some("tmux"), no_env).unwrap(),
-            "tmux"
+            caller_server(
+                MuxBackend::Tmux,
+                lookup(&[("TMUX", "/tmp/a,b/default,123,0")]),
+                runner.as_ref()
+            )
+            .unwrap(),
+            "/tmp/a,b/default"
+        );
+        assert!(runner.events().is_empty());
+    }
+
+    #[test]
+    fn tmux_caller_server_without_tmux_asks_the_default_server_for_its_socket() {
+        let default_socket = argv(&["tmux", "display-message", "-p", "#{socket_path}"]);
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Ok("/tmp/tmux-0/default\n".into()));
+        assert_eq!(
+            caller_server(MuxBackend::Tmux, lookup(&[("TMUX", "")]), runner.as_ref()).unwrap(),
+            "/tmp/tmux-0/default"
+        );
+        assert_eq!(runner.run_argvs(), vec![default_socket.clone()]);
+
+        for response in [
+            Err(RunError::Failed {
+                stderr: "no server running on /tmp/tmux-0/default".into(),
+            }),
+            Ok("\n".into()),
+        ] {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(response);
+            let failure =
+                caller_server(MuxBackend::Tmux, lookup(&[]), runner.as_ref()).unwrap_err();
+            assert_eq!(
+                failure.to_string(),
+                "no tmux server found; pass --mux-server <socket path>"
+            );
+            assert_eq!(runner.run_argvs(), vec![default_socket.clone()]);
+        }
+    }
+
+    #[test]
+    fn herdr_caller_server_prefers_the_session_then_the_matching_socket_then_default() {
+        let runner = FakeRunner::with_binary("herdr");
+        assert_eq!(
+            caller_server(
+                MuxBackend::Herdr,
+                lookup(&[
+                    ("HERDR_SESSION", "work"),
+                    ("HERDR_SOCKET_PATH", "/run/other.sock")
+                ]),
+                runner.as_ref()
+            )
+            .unwrap(),
+            "work"
         );
         assert_eq!(
-            resolve_multiplexer_name(Some("herdr"), no_env).unwrap(),
-            "herdr"
+            caller_server(
+                MuxBackend::Herdr,
+                lookup(&[("HERDR_SESSION", "")]),
+                runner.as_ref()
+            )
+            .unwrap(),
+            "default"
         );
-    }
+        assert!(runner.events().is_empty());
 
-    #[test]
-    fn an_unknown_override_is_rejected_with_the_sorted_key_list() {
-        let err = resolve_multiplexer_name(Some("bogus"), no_env)
-            .expect_err("an unknown override must be rejected");
-        assert_eq!(
-            err.to_string(),
-            "CAFLEET_MULTIPLEXER='bogus' is not a supported multiplexer \
-                 (expected one of: herdr, tmux)"
-        );
-    }
-
-    #[test]
-    fn auto_detect_picks_the_single_present_backend() {
-        let herdr_only = |name: &str| match name {
-            "HERDR_ENV" => Some("1".to_string()),
-            _ => None,
-        };
-        assert_eq!(resolve_multiplexer_name(None, herdr_only).unwrap(), "herdr");
-
-        let tmux_only = |name: &str| match name {
-            "TMUX" => Some("/tmp/tmux-1000/default,123,0".to_string()),
-            _ => None,
-        };
-        assert_eq!(resolve_multiplexer_name(None, tmux_only).unwrap(), "tmux");
-    }
-
-    #[test]
-    fn empty_presence_values_count_as_unset() {
-        let empty_both = |name: &str| match name {
-            "HERDR_ENV" | "TMUX" => Some(String::new()),
-            _ => None,
-        };
-        let err = resolve_multiplexer_name(None, empty_both)
-            .expect_err("empty presence vars mean no backend");
-        assert!(
-            err.to_string()
-                .starts_with("no supported multiplexer detected:")
-        );
-    }
-
-    #[test]
-    fn both_present_is_a_hard_error() {
-        let both = |name: &str| match name {
-            "HERDR_ENV" => Some("1".to_string()),
-            "TMUX" => Some("/tmp/tmux".to_string()),
-            _ => None,
-        };
-        let err = resolve_multiplexer_name(None, both).expect_err("ambiguous env");
-        assert_eq!(
-            err.to_string(),
-            "ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; \
-                 set CAFLEET_MULTIPLEXER to 'tmux' or 'herdr' to disambiguate"
-        );
-    }
-
-    #[test]
-    fn neither_present_is_a_hard_error() {
-        let err = resolve_multiplexer_name(None, no_env).expect_err("no backend");
-        assert_eq!(
-            err.to_string(),
-            "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; \
-                 run cafleet inside a tmux or herdr session, or set CAFLEET_MULTIPLEXER"
-        );
+        let listing = serde_json::json!({"sessions": [
+            {"name": "default", "status": "running", "socket_path": "/run/herdr.sock"},
+            {"name": "work", "status": "running", "socket_path": "/run/work.sock"},
+        ]})
+        .to_string();
+        for (socket, expected) in [("/run/work.sock", "work"), ("/run/gone.sock", "default")] {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Ok(listing.clone()));
+            assert_eq!(
+                caller_server(
+                    MuxBackend::Herdr,
+                    lookup(&[("HERDR_SOCKET_PATH", socket)]),
+                    runner.as_ref()
+                )
+                .unwrap(),
+                expected
+            );
+            assert_eq!(
+                runner.run_argvs(),
+                vec![argv(&["herdr", "session", "list", "--json"])]
+            );
+        }
     }
 
     #[test]
@@ -1160,15 +1366,10 @@ mod tests {
     #[test]
     fn expired_deadlines_start_no_native_command_or_optional_layout_restore() {
         let runner = test_support::FakeRunner::without_binaries();
-        let mux = AnyMultiplexer::Herdr(HerdrMultiplexer::new(
-            runner.clone(),
-            test_support::env(&[]),
-        ))
-        .bounded(crate::time::Deadline::until(std::time::Instant::now()));
-        assert!(
-            mux.restore_after_close(PostCloseLayout::HerdrTab("tab".into()))
-                .is_err()
-        );
+        let mux = HerdrMultiplexer::new(runner.clone(), test_support::env(&[]))
+            .bounded(crate::time::Deadline::until(std::time::Instant::now()));
+        assert!(mux.close_pane("w1:p2", true).is_err());
+        mux.restore_after_close().unwrap();
         assert!(runner.events().is_empty());
     }
 

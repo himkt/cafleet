@@ -13,6 +13,13 @@ macro_rules! stored_enum {
             pub(crate) const VALUES: &'static [&'static str] = &[$($wire),+];
         }
     };
+    (test_values $name:ident, $field:literal, {$($variant:ident => $wire:literal),+ $(,)?}) => {
+        stored_enum!(@enum $name, $field, {$($variant => $wire),+});
+        #[cfg(test)]
+        impl $name {
+            pub(crate) const VALUES: &'static [&'static str] = &[$($wire),+];
+        }
+    };
     (@enum $name:ident, $field:literal, {$($variant:ident => $wire:literal),+}) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
         pub(crate) enum $name { $(#[serde(rename = $wire)] $variant),+ }
@@ -23,7 +30,7 @@ macro_rules! stored_enum {
         }
         impl TryFrom<&str> for $name {
             type Error = $crate::error::CafleetError;
-            fn try_from(value: &str) -> Result<Self, Self::Error> {
+            fn try_from(value: &str) -> ::std::result::Result<Self, Self::Error> {
                 match value {
                     $($wire => Ok(Self::$variant),)+
                     _ => Err($crate::error::CafleetError::InvalidStoredValue {
@@ -60,7 +67,11 @@ pub(crate) struct Placement {
     pub(crate) mux_pane_id: Option<String>,
     pub(crate) coding_agent: String,
     pub(crate) created_at: String,
+    pub(crate) mux_server: String,
 }
+
+/// The `member_placements` columns [`Placement::from_row`] reads, in order, for the `p` alias.
+pub(crate) const PLACEMENT_COLUMNS: &str = "p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at, p.mux_server";
 
 impl Placement {
     pub(crate) fn from_row(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<Self> {
@@ -71,6 +82,7 @@ impl Placement {
             mux_pane_id: row.get(offset + 3)?,
             coding_agent: row.get(offset + 4)?,
             created_at: row.get(offset + 5)?,
+            mux_server: row.get(offset + 6)?,
         })
     }
 }
