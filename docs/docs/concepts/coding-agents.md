@@ -17,7 +17,11 @@ lists what setup installs for each backend and the configuration you add.
 - `cafleet fleet create --coding-agent` is required, operator-declared
   metadata — cafleet does not spawn the root Director's process and cannot
   auto-detect what is already running in the calling pane, so the operator
-  states the backend the Director is actually running on.
+  states the backend the Director is actually running on. `fleet create`
+  records the calling pane and its multiplexer server; a Hermes Director,
+  whose terminal tools run in a shared gateway, names its pane with
+  `--pane <pane-id>`, and `--mux-server <server>` selects another server
+  ([Hermes setup](../quickstart.md#hermes)).
 - `cafleet member create --coding-agent` both selects which backend is spawned
   and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
@@ -45,7 +49,7 @@ A Director backend needs two capabilities, checked independently: goal lifecycle
 
 A Hermes Director runs the TUI because records the plugin delivers to a classic CLI session run without appearing in that pane; Hermes members keep the classic CLI. The shared OpenCode background service passes no client environment to plugins, so it is not a supported Director launch.
 
-`cafleet setup` installs the CAFleet plugin for OpenCode and Hermes next to the skills and presets, records which `cafleet` executable the plugin runs, and for Hermes enables the plugin in your Hermes configuration. `cafleet doctor` checks that each installed plugin matches the copy embedded in the CLI and that Hermes enables it. The plugin tools refuse to run in member sessions, and the OpenCode member presets deny them.
+`cafleet setup` installs the CAFleet plugin for OpenCode and Hermes next to the skills and presets, records which `cafleet` executable the plugin runs, and for Hermes enables the plugin in your Hermes configuration. `cafleet doctor` checks that each installed plugin matches the copy embedded in the CLI and that Hermes enables it. Each plugin tool takes the Director's ID and runs only for a root Director, and the OpenCode member presets deny them.
 
 ## Launch modes
 
@@ -65,11 +69,12 @@ When the member's bundled runner profile recognizes an approval prompt, the Dire
 ## cafleet usage from a member pane
 
 The cafleet CLI works unchanged from any backend pane. Identity reaches a
-member through its spawn prompt: `cafleet member create` renders four identity
-placeholders to literals, so the member reads its ids as plain text lines
-(e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on every
-command. The [spawn-prompt substitution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#spawn-prompt-substitution)
-lists each placeholder and its label line. The member environment carries `CAFLEET_DATABASE_URL`, `CAFLEET_MEMBER_ID` and the selected backend's config-location variable when the creator sets it; `CAFLEET_MEMBER_ID` only marks the process for the [Director-only command guard](members.md#command-routing).
+member through its spawn prompt: `cafleet member create` renders the identity
+and database placeholders to literals, so the member reads its ids as plain
+text lines (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly
+on every command, adding `--database-url <url>` when its `DATABASE URL:` line
+names a URL rather than `default`. The [spawn-prompt substitution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#spawn-prompt-substitution)
+lists each placeholder and its label line. The member environment carries only the selected backend's config-location variable when the creator sets it.
 Each backend honors a leading-`!` shell shortcut on the coding agent's input line, including the minimal `mini` interface that OpenCode member panes run; [backend capabilities](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares their sandbox and shell-command posture.
 `cafleet member exec` submits a visible native command through the runner, using the profile's measured native-exec plan or delivery fallback and queueing it while a detected native interaction is open. A member routes a
 command its harness does not run through the Director — see

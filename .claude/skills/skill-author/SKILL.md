@@ -27,7 +27,7 @@ Members open their authoritative role first, load their own backend and required
 
 Normalize research/design inputs to their task folder before resolving BASE. Agent-only artifacts use hidden folders; deliverables use visible paths. Inherit literal BASE or its documented disabled-audit state.
 
-Render a compact role-by-path prompt to a unique `.prompts/<member>-<UTC-compact>.md` and preserve that pre-spawn audit input. Leave only `{fleet_id}`, `{member_id}`, `{director_member_id}` and `{coding_agent}` for CLI identity substitution; double other literal braces. A missing BASE follows its guarded inline transport branch.
+Render a compact role-by-path prompt to a unique `.prompts/<member>-<UTC-compact>.md` and preserve that pre-spawn audit input. Leave only `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}` for CLI substitution; double other literal braces. A missing BASE follows its guarded inline transport branch.
 
 Send individually to selected recipients. Members poll after ready, before reporting and on each wake. Ordinary members receive pane previews; the Director follows [Director wake](../../../skills/cafleet/roles/director.md#director-wake). Native shell dispatch returns submission metadata; inspect output and explicitly continue after completion evidence if the host has not resumed the member.
 

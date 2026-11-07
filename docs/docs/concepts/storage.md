@@ -4,7 +4,7 @@ Use one SQLite file for a fleet's registry and durable messages. The CLI accesse
 
 ## Backend
 
-The default path is `~/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1`). Set `CAFLEET_DATABASE_URL` to a `sqlite:///<path>` URL to select another file. Resolve a relative file path against the invoking working directory, then canonicalize the selected database file for shared pane-lock identity. Spawned panes inherit that URL.
+The default path is `~/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1`). Pass `--database-url sqlite:///<path>` on a command to select another file. A relative file path resolves against the invoking working directory, then the selected database file is canonicalized for shared pane-lock identity. `member create` renders a non-default database into the spawn prompt's `DATABASE URL:` line, and the member passes that URL on every command; a prompt without the `{database_url}` placeholder is refused for a non-default database ([database selection](https://github.com/himkt/cafleet/blob/main/SPEC.md#database-selection)).
 
 Connections enforce foreign keys and normally use `PRAGMA busy_timeout=5000`. Bounded receiving caps database waits to its remaining operation budget. Fleet creation writes its registry and current Director placement in one transaction, and a failed member creation rolls back or deregisters its pending member ([creation failure compensation](https://github.com/himkt/cafleet/blob/main/SPEC.md#creation-failure-compensation)).
 
@@ -32,7 +32,7 @@ Each cafleet version starts from a fresh database, so no fleets, messages or run
 2. After upgrading, run `cafleet setup` once. It creates the version's `~/.local/share/cafleet/cafleet_<VERSION>.db` and records the asset installations there; until then `cafleet doctor` reports the database as absent.
 3. Create your fleets anew.
 
-Database files of earlier versions in `~/.local/share/cafleet/` stay in place, byte for byte. Selecting one through `CAFLEET_DATABASE_URL` reports an incompatible format; delete them by hand when you no longer need them. With an explicit `CAFLEET_DATABASE_URL`, point it at a new empty path, or delete the old file by hand, then run `cafleet setup`.
+Database files of earlier versions in `~/.local/share/cafleet/` stay in place, byte for byte. Selecting one through `--database-url` reports an incompatible format; delete them by hand when you no longer need them. With an explicit `--database-url`, point it at a new empty path, or delete the old file by hand, then run `cafleet setup`.
 
 ## Assets-install recording
 

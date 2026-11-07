@@ -69,7 +69,7 @@ If a native permission prompt is open in your pane, leave it; the Director or us
 
 ## Identity and authority
 
-Take literal IDs from `FLEET ID:`, `YOUR MEMBER ID:` and `DIRECTOR MEMBER ID:`; pass them explicitly. CLI validation surfaces missing identity. Use Send, Poll, ACK and `message show` on your own inbox; every other `cafleet` command is Director-owned. The [guarded subset](../reference/cli.md#director-only-command-guard) — explicit pane input, permission answers, input reconciliation and run recovery — refuses inside a member with a `Director-only command` error; the rest run without that refusal and remain the Director's. Send a need for any Director-owned command to the Director with the routing message in [Reconsider, then route](#reconsider-then-route), naming the command and its purpose.
+Take literal IDs from `FLEET ID:`, `YOUR MEMBER ID:` and `DIRECTOR MEMBER ID:`; pass them explicitly. When your `DATABASE URL:` line names a URL rather than `default`, add `--database-url <url>` to every `cafleet` command, the ready signal included. CLI validation surfaces missing identity. Use Send, Poll, ACK and `message show` on your own inbox; every other `cafleet` command is Director-owned. The [guarded subset](../reference/cli.md#director-only-command-guard) — explicit pane input, permission answers, input reconciliation and run recovery — requires the Director's `--from-member-id` and refuses your own ID with a `Director-only command` error; the rest take no caller ID and remain the Director's. Send a need for any Director-owned command to the Director with the routing message in [Reconsider, then route](#reconsider-then-route), naming the command and its purpose.
 
 ## Shutdown
 

@@ -193,7 +193,7 @@ Keep the prompt body focused (the skeleton below): the member opens its role thr
 
 Every CAFleet-native team skill spawns its ordinary members from this one shared frame; each skill supplies only a compact **per-role delta** (a table in that skill) for the parts that vary.
 
-Fixed frame — the identity lines carry the CLI's four identity placeholders, rendered to literals by `cafleet member create` at spawn time; `[INSERT …]` markers are rendered by the Director before `member create`; the `‹…›` slots are filled from the per-role delta:
+Fixed frame — the identity lines carry the CLI's five placeholders, rendered to literals by `cafleet member create` at spawn time; `[INSERT …]` markers are rendered by the Director before `member create`; the `‹…›` slots are filled from the per-role delta:
 
 ```text
 You are ‹ROLE TITLE› in a ‹TEAM NAME› team (CAFleet-native).
@@ -210,6 +210,7 @@ DIRECTOR MEMBER ID: {director_member_id}
 YOUR MEMBER ID: {member_id}
 BASE: [INSERT abs BASE path]
 CODING AGENT: {coding_agent}
+DATABASE URL: {database_url}
 ‹CONTEXT LINES›
 
 ‹IMPORTANT / ROLE-CONSTRAINT LINES›
@@ -222,7 +223,7 @@ On spawn, as your first operational broker shell command, send the ready signal:
 ‹START CUE›
 ```
 
-Render known paths, BASE, skill loads and `‹…›` role-delta slots first; leave only the four CLI identity placeholders as single braces and double every other literal brace. The CLI then supplies the allocated IDs/backend. Members read literal identity lines and learn commands from their role/core, so omit a repeated communication block. `CODING AGENT:` selects the recorded backend, inherited from the Director when the spawn omits it. Runtime placeholders resolve separately from the selected overlay. [member create](../reference/cli.md#member-create) owns substitution syntax and errors.
+Render known paths, BASE, skill loads and `‹…›` role-delta slots first; leave only the five CLI placeholders as single braces and double every other literal brace. The CLI then supplies the allocated IDs, backend and database (`default` or `sqlite:///<path>`); a member whose `DATABASE URL:` names a URL passes `--database-url <url>` on every command, and `member create` refuses a prompt without `{database_url}` for a non-default database. Members read literal identity lines and learn commands from their role/core, so omit a repeated communication block. `CODING AGENT:` selects the recorded backend, inherited from the Director when the spawn omits it. Runtime placeholders resolve separately from the selected overlay. [member create](../reference/cli.md#member-create) owns substitution syntax and errors.
 
 | Slot | Filled per role with |
 |---|---|
@@ -322,7 +323,7 @@ All writers share the bounded pane-input lock. Prompt/exec requires the pinned r
 Read the request, record the outstanding action in host-owned state, authorize its exact command, then dispatch and ACK consumption:
 
 ```bash
-cafleet member exec <member-id> "<command>"
+cafleet member exec <member-id> --from-member-id <my-member-id> "<command>"
 ```
 
 ```bash
@@ -342,7 +343,7 @@ cafleet member capture <member-id> --lines 80
 After completion evidence, continue a member that has not resumed:
 
 ```bash
-cafleet member prompt <member-id> "Use the native command output and continue your assignment."
+cafleet member prompt <member-id> --from-member-id <my-member-id> "Use the native command output and continue your assignment."
 ```
 
 Retain input IDs and pane/native evidence. A first write can partially type; failure after Enter can mean execution began. Before another authorized attempt, inspect captures and durable receipts under [Runtime events](#runtime-events).
@@ -351,15 +352,15 @@ Refuse by broker reply, then ACK. Route new user decisions through {decision_sur
 
 ### Member Exec
 
-Authorize `cafleet member exec <member-id> COMMAND` or `--file PATH` and follow [Director-side dispatch](#director-side-dispatch) for result inspection, uncertainty and continuation.
+Authorize `cafleet member exec <member-id> --from-member-id <my-member-id> COMMAND` or `--file PATH` and follow [Director-side dispatch](#director-side-dispatch) for result inspection, uncertainty and continuation.
 
 ### Member Prompt
 
-Use `cafleet member prompt <member-id> TEXT` for authorized composer input under [delivery arbitration](../reference/cli.md#wrapped-delivery-methods). It rejects the Director's pane; `delivery` reports submission/queue acceptance. Follow [dispatch checks](#director-side-dispatch).
+Use `cafleet member prompt <member-id> --from-member-id <my-member-id> TEXT` for authorized composer input under [delivery arbitration](../reference/cli.md#wrapped-delivery-methods). It rejects the Director's pane; `delivery` reports submission/queue acceptance. Follow [dispatch checks](#director-side-dispatch).
 
 ### Member Press
 
-Use explicitly authorized `cafleet member press <member-id> KEY...` for ordered manual keys through the recorded outer pane, including wrapped members whose programmatic input is queued or held. Pass only intended keys, using `--` for literal punctuation; append neither Escape nor Enter. The [CLI contract](../reference/cli.md#member-press) owns grammar, limits, output and errors. It holds the revalidated shared pane lock and sends one bounded backend request.
+Use explicitly authorized `cafleet member press <member-id> --from-member-id <my-member-id> KEY...` for ordered manual keys through the recorded outer pane, including wrapped members whose programmatic input is queued or held. Pass only intended keys, using `--` for literal punctuation; append neither Escape nor Enter. The [CLI contract](../reference/cli.md#member-press) owns grammar, limits, output and errors. It holds the revalidated shared pane lock and sends one bounded backend request.
 
 Apply host and current request-specific user/Director policy before answering a native request. Manual keys supply neither authorization to answer nor a request-bound receipt; `permission respond` is the separately bound semantic decision interface.
 
@@ -369,7 +370,7 @@ Backend acknowledgment establishes neither actual PTY input nor native outcome. 
 
 ## Runtime events
 
-The Director owns `permission inspect`/`respond`, `input reconcile` and `member recover`; the [CLI guard](../reference/cli.md#director-only-command-guard) refuses all of them except `permission inspect` inside a member. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
+The Director owns `permission inspect`/`respond`, `input reconcile` and `member recover`; each of them except `permission inspect` takes your literal ID as `--from-member-id`, and the [CLI guard](../reference/cli.md#director-only-command-guard) refuses any other caller ID. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
 
 New members use CAFleet-owned PTYs with separate launch-policy, detection, empty-composer, prompt/native-exec and request-bound answer capabilities. [Launch policy](#member-launch-policy) owns omitted defaults and user-requested choices. Select the profile with greatest `min_version` at or below the native version and take every capability from it. Refuse a known version below the first boundary; failed probes/unknown coverage preserve manual work and generated-input fallback. [Runtime command facts](../reference/cli.md#member-runtime) owns commands and fields.
 
@@ -417,7 +418,7 @@ The host owns continuation, native tools and user gates; CAFleet persists messag
 
 1. Read [Director policy](#required-reading), the executing backend in [coding-agents.md](../reference/coding-agents.md), BASE and supplied host rules. Resolve selected member backend/model/effort before writing its prompt.
 2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues. Preserve the user's host continuation controls as supplied.
-3. Register the current Director: `cafleet fleet create --name <name> --coding-agent <backend> --json`. Capture literal fleet and Director IDs. This performs one atomic registration without starting another process.
+3. Register the current Director: `cafleet fleet create --name <name> --coding-agent <backend> --json`. Capture literal fleet and Director IDs. This performs one atomic registration of your pane and multiplexer server without starting another process; every later command targets that recorded placement. A Hermes Director first reads its pane with its leading-`!` local shell (`! echo $TMUX_PANE` or `! echo $HERDR_PANE_ID`) and adds `--pane <pane-id>`; add `--mux-server <server>` when the pane is on a server other than the default ([fleet commands](../reference/cli.md#fleet-commands)). With a custom database, pass `--database-url <url>` on every command, this one included.
 4. Arm one `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md): a native tool, the `--codex-thread` forwarder or a CAFleet plugin tool. Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. An unavailable, denied or refused native or extension tool, an `ok: false` result, a `[cafleet listen closed]` turn and a forwarded `closed` or `session_exited` closure follow [receiver recovery](#receiver-recovery).
 5. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
 6. Receive each member's ready and ACK it. Dispatch that member's assignment as soon as its inputs exist; other members' readiness does not delay it.
@@ -486,15 +487,15 @@ Relay explicit member questions through the executing backend's decision surface
 
 ### Recovery
 
-Read this section immediately before recovery. Run `cafleet doctor` and read its `members` summary lines: each groups member IDs by state and names the next command, such as `cafleet member recover ID`, to run per listed ID; `cafleet doctor --verbose` shows each run's probe observations. Check inbox/roster/pane/artifact evidence. Use `cafleet member capture` before deciding that an agent is dead or unusable.
+Read this section immediately before recovery. Run `cafleet doctor` and read its `members` summary lines: each groups member IDs by state and names the next command, such as `cafleet member recover ID --from-member-id <director-id>`, to run per listed ID; `cafleet doctor --verbose` shows each run's probe observations. Check inbox/roster/pane/artifact evidence. Use `cafleet member capture` before deciding that an agent is dead or unusable.
 
 Once evidence confirms a missing/dead pane or an authorized unusable-session replacement, use `cafleet member delete`, then `cafleet member create` with a context-preserving prompt. Carry the assignment, full message IDs, completed/remaining work, artifacts and blocker context. The replacement gets a new ID and its own ready gate.
 
-A multiplexer failure calls for diagnosis of the calling context and target placement. Registry existence alone proves no physical pane presence. Resolve connectivity before selecting destructive recovery.
+A multiplexer failure calls for diagnosis of the recorded Director placement and server and the target placement. Registry existence alone proves no physical pane presence. Resolve connectivity before selecting destructive recovery.
 
 #### Inspect and recover
 
-`member show --json` reports stored identities without probing the socket. Failed health holds input and preserves interactions. `doctor` diagnoses without mutation; the Director uses `member recover MEMBER_ID --json` for exclusive bounded recovery. Recovery replays observations, archives inactive ownership history and sends neither answer keys nor replacement-agent launch.
+`member show --json` reports stored identities without probing the socket. Failed health holds input and preserves interactions. `doctor` diagnoses without mutation; the Director uses `member recover MEMBER_ID --from-member-id <my-member-id> --json` for exclusive bounded recovery. Recovery replays observations, archives inactive ownership history and sends neither answer keys nor replacement-agent launch.
 
 For unreadable owner identity, `--owner-terminated` requires the inspected run/epoch and operator evidence together. Bind it to that snapshot; positive live evidence rejects the claim. Preserve unknown process/receipt outcomes until evidence resolves them. Coordinate owned shutdown before authorized pane/registry cleanup and retain unconfirmed-child diagnostics.
 

@@ -58,11 +58,14 @@ Pass full database-assigned integers literally. Angle-bracket examples denote va
 | Positional `MESSAGE_ID` | Delivery on `message ack/show`; recipient and fleet derive from it |
 | Positional `FLEET_ID` | Fleet on `fleet show/delete` and `member list` |
 | `--from-member-id`, `--to-member-id` | Sender/recipient on `message send`; fleet derives from sender |
+| `--from-member-id` on a Director-only command | The caller, which must be the subject fleet's root Director |
 | `--fleet-id` | Fleet joined by `member create`; Director derives from the fleet |
 
-Read your literal `FLEET ID:`, `DIRECTOR MEMBER ID:` and `YOUR MEMBER ID:` spawn lines. Directors use IDs returned by creation. `<my-member-id>` is your own ID; `<target-member-id>` a recipient; `<message-id>` the printed delivery ID.
+Read your literal `FLEET ID:`, `DIRECTOR MEMBER ID:`, `YOUR MEMBER ID:` and `DATABASE URL:` spawn lines. Directors use IDs returned by creation. `<my-member-id>` is your own ID; `<target-member-id>` a recipient; `<message-id>` the printed delivery ID.
 
-Spawn prompts contain exactly the CLI's identity placeholders `{fleet_id}`, `{member_id}`, `{director_member_id}` and `{coding_agent}`. The CLI fills the newly allocated member ID and renders `CODING AGENT:` to the selected backend. Supply exactly one positional `PROMPT` or `--file PATH`. [CLI environment variables](reference/cli.md#environment-variables) owns supported environment settings.
+Spawn prompts contain exactly the CLI's placeholders `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}`. The CLI fills the newly allocated member ID, renders `CODING AGENT:` to the selected backend and renders `DATABASE URL:` as `default` or `sqlite:///<path>`; `member create` refuses a prompt without `{database_url}` for a non-default database. Supply exactly one positional `PROMPT` or `--file PATH`.
+
+CAFleet reads no `CAFLEET_*` environment variable. When your `DATABASE URL:` line names a URL rather than `default`, pass `--database-url <url>` on every `cafleet` command, including broker commands (`cafleet message poll 7 --json --database-url <url>`); omitted, the default database applies ([database selection](reference/cli.md#database-selection)).
 
 ## Soliciting user reactions
 
@@ -80,7 +83,7 @@ For `Operation not permitted` / `Permission denied`, check isolation and the hos
 cafleet message send --from-member-id <my-member-id> --to-member-id <target-member-id> "Assignment or reply"
 ```
 
-Supply one positional body or `--file PATH`; use file input for long/multiline text. Text output truncates bodies at `CAFLEET_MAX_TEXT_LEN`; `--json` returns complete payloads.
+Supply one positional body or `--file PATH`; use file input for long/multiline text. Text output truncates bodies at a fixed 200 codepoints; `--json` returns complete payloads.
 
 Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a `message show ID --json` pointer; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/queue/fallback behavior. The root Director uses native reception or manual broker reads without automatic pane input, and its sends report `notification_sent: false` without a pane diagnostic or multiplexer requirement.
 
