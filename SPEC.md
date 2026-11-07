@@ -154,7 +154,7 @@ CAFleet reads no `CAFLEET_*` environment variable. Member creation renders the s
 | `permission respond --decision`, `--decision-source`, `--director-mode` | Their possible values | The stored enum values of the permission response storage (§6.9 Permission response storage) |
 | `input reconcile --disposition`, `member create --event-evidence` | Their possible values | Their command enums |
 
-An invalid value for an option with possible values exits 2 with a usage error that lists those values. `member create` resolves its backend at run time, so a `--permission-mode` value outside that backend's catalog keeps its run-time usage error `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, also with exit 2. Help reads `Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart)`.
+An invalid value for an option with possible values exits 2 with a usage error that lists those values. `member create` resolves its backend at run time, so a `--permission-mode` value outside that backend's catalog keeps its run-time usage error `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, also with exit 2. Help reads `Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet); hermes: smart, manual (default smart); pi: cafleet, cafleet-ask (default cafleet)`.
 
 #### Output shapes
 
@@ -252,6 +252,7 @@ Every surface that installs to or checks a backend's user-level config directory
 | opencode (skills) | `~/.config/opencode` (fixed discovery path) | `<base>/skills` | — | — |
 | opencode (preset) | `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode` | — | `<base>/agents/cafleet.md`, `<base>/agents/cafleet-ask.md` | `<base>` |
 | hermes | `$HERMES_HOME`, else `~/.hermes` | `<base>/skills` | — (setup installs the `cafleet` plugin under `<hermes home>` and enables it in the Hermes configuration; § Asset installation) | `<base>` |
+| pi | `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` | `<base>/skills` | — (setup installs the CAFleet pi extension under `<base>/extensions`; § Asset installation) | `<base>` |
 
 OpenCode discovers skills only at the fixed path but loads agent definitions from `OPENCODE_CONFIG_DIR`, so only its presets follow the variable.
 
@@ -271,16 +272,17 @@ Each agent's presets and extensions, where they exist, are static files embedded
 | codex | `presets/codex/cafleet.rules` → `<codex base>/rules/cafleet.rules` | — | — |
 | opencode | `presets/opencode/cafleet.md` → `<preset base>/agents/cafleet.md`; `presets/opencode/cafleet-ask.md` → `<preset base>/agents/cafleet-ask.md` | `extensions/opencode/cafleet.ts` → `<preset base>/plugins/cafleet.ts` | `<preset base>/plugins/cafleet.executable` |
 | hermes | — | `extensions/hermes/cafleet/` (every file) → `<hermes home>/plugins/cafleet/` | `<hermes home>/plugins/cafleet/executable` |
+| pi | — | `extensions/pi/cafleet.ts` → `<pi base>/extensions/cafleet.ts` | `<pi base>/extensions/cafleet.executable` |
 
 Existing targets are deleted before their replacements are written; a symlink target is unlinked as an entry, keeping its referent. Unrelated skills and plugins remain untouched.
 
-`<preset base>` is the opencode preset base (`$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`). `<hermes home>` is the parent directory of the `<config path>` that `hermes config path` prints (§ Hermes plugin enablement step 1); Hermes discovers user plugins under its home, and a sticky `<base>/active_profile` re-homes both that directory and `hermes config path` to the profile directory. Setup for `hermes` runs `hermes config path` once, in the read batch before the extension install, so installing the Hermes extension requires `hermes` on `PATH`. Extension files are embedded verbatim, so the embedded bytes equal the installed bytes.
+`<preset base>` is the opencode preset base (`$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`). `<hermes home>` is the parent directory of the `<config path>` that `hermes config path` prints (§ Hermes plugin enablement step 1); Hermes discovers user plugins under its home, and a sticky `<base>/active_profile` re-homes both that directory and `hermes config path` to the profile directory. Setup for `hermes` runs `hermes config path` once, in the read batch before the extension install, so installing the Hermes extension requires `hermes` on `PATH`. `<pi base>` is the pi base (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`); setup for `pi` runs no `pi` command, so it needs no `pi` on `PATH`. Extension files are embedded verbatim, so the embedded bytes equal the installed bytes.
 
-The *executable record* is a one-line file holding the absolute, canonicalized path of the running `cafleet` executable (`std::env::current_exe()`), written after the extension files. It is neither an embedded asset nor byte-compared; OpenCode plugin discovery loads only `.ts`/`.js` files and directories, so it ignores the record. The plugins execute only the recorded path.
+The *executable record* is a one-line file holding the absolute, canonicalized path of the running `cafleet` executable (`std::env::current_exe()`), written after the extension files. It is neither an embedded asset nor byte-compared; OpenCode plugin discovery loads only `.ts`/`.js` files and directories, and pi extension discovery loads only `*.ts`, `*.js`, `*/index.ts` and `*/package.json` entries, so both ignore the record. The plugins and extensions execute only the recorded path.
 
 Skills-operation errors retain `failed to install skills into <skills_dir>: <error>`, preset-operation errors `failed to install preset into <target>: <error>`, and extension-operation errors, including the executable record, `failed to install extension into <target>: <error>`. A successful install records one `asset_installs` row for the agent, covering its skills, presets and extensions; a failure on any preset, extension or plugin enablement step fails setup and records no installation.
 
-Setup prints each success line after its operation completes and records the installed version after all operations succeed: the skills line, one preset line per installed preset target in install order, then one extension line per extension target once the target and its executable record are written; a directory extension prints its directory once. Claude prints only the skills line; Hermes prints the skills line, the extension line and a plugin enablement line (§ Hermes plugin enablement):
+Setup prints each success line after its operation completes and records the installed version after all operations succeed: the skills line, one preset line per installed preset target in install order, then one extension line per extension target once the target and its executable record are written; a directory extension prints its directory once. Claude prints only the skills line; pi prints the skills line and the extension line; Hermes prints the skills line, the extension line and a plugin enablement line (§ Hermes plugin enablement):
 
 ```
 <agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
@@ -294,6 +296,13 @@ Setup prints each success line after its operation completes and records the ins
 hermes: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
 hermes: installed extension (v<version>) -> <hermes home>/plugins/cafleet
 hermes: plugin cafleet already enabled -> <config path>
+```
+
+`cafleet setup --coding-agent pi` prints:
+
+```
+pi: installed cafleet, cafleet-design-doc (v<version>) -> <pi base>/skills
+pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 ```
 
 ###### Hermes plugin enablement
@@ -405,7 +414,7 @@ Each check has a stable `name`, a `status` and a one-line `detail`. Checks run i
 | `<agent>.configuration` | The resolved config path (§ Config-dir resolution) | — | — | The config-path validation error, or `HOME is not set` |
 | `<agent>.executable` | `<binary> is on PATH` | `<binary> is optional and absent from PATH` | — | — |
 | `opencode.preset[.<mode>]` | § OpenCode preset checks | § OpenCode preset checks | — | § OpenCode preset checks |
-| `opencode.extension`, `hermes.extension`, `hermes.plugin_enabled` | § Extension checks | § Extension checks | — | § Extension checks |
+| `opencode.extension`, `hermes.extension`, `hermes.plugin_enabled`, `pi.extension` | § Extension checks | § Extension checks | — | § Extension checks |
 | `<agent>.installation` | `recorded <version> at <installed_at>` when the version at the resolved path equals the CLI version | `unavailable: configuration failed: <cause>`; `unavailable: <database error>` for a database that is not current | `recorded <version> at <installed_at>; run 'cafleet setup --coding-agent <agent>'` for another version; `no installation recorded at <path>; run 'cafleet setup --coding-agent <agent>'` | `installation query failed: <cause>` |
 | `member_runtime.<run_id>`, `member_runtime` | § Member runtime checks | § Member runtime checks | § Member runtime checks | § Member runtime checks |
 
@@ -490,7 +499,7 @@ An OpenCode installation recorded only at another base is not the resolved insta
 
 ###### Extension checks
 
-Each extension check is read-only. An executable record is usable when it names an existing executable file. `opencode.extension` checks `<preset base>/plugins/cafleet.ts` and `<preset base>/plugins/cafleet.executable`; `hermes.extension` checks `<hermes home>/plugins/cafleet/`, located by the batch's `hermes config path`; `hermes.plugin_enabled` reads `disabled`, `enabled` and `entries.cafleet.allow_gateway_injection` from the batch's one bounded `hermes config get --json plugins` call under the *not set* and subtree rules (§ Hermes plugin enablement).
+Each extension check is read-only. An executable record is usable when it names an existing executable file. `opencode.extension` checks `<preset base>/plugins/cafleet.ts` and `<preset base>/plugins/cafleet.executable`; `hermes.extension` checks `<hermes home>/plugins/cafleet/`, located by the batch's `hermes config path`; `hermes.plugin_enabled` reads `disabled`, `enabled` and `entries.cafleet.allow_gateway_injection` from the batch's one bounded `hermes config get --json plugins` call under the *not set* and subtree rules (§ Hermes plugin enablement); `pi.extension` follows `pi.executable`, precedes `pi.installation` and checks `<pi base>/extensions/cafleet.ts` and `<pi base>/extensions/cafleet.executable`.
 
 `hermes.extension` and `hermes.plugin_enabled` share one concurrent read batch, `hermes config path` and `hermes config get --json plugins`, run with null stdin and `HERMES_HOME` set to the resolved base under one two-second deadline. The batch starts before the multiplexer, database, OpenCode and member checks and overlaps them; the rows keep their check order. A `hermes` call against a missing home makes Hermes create one, so when the resolved Hermes base does not exist doctor runs no `hermes` process.
 
@@ -502,9 +511,9 @@ A preset or extension check reports the first matching state:
 | Every preset and extension check | The backend executable is absent from `PATH` | `info` | `unavailable: executable is absent` |
 | `hermes.extension`, `hermes.plugin_enabled` | The resolved Hermes base does not exist | `info` | `unavailable: no Hermes home at <base>` |
 | `hermes.extension` | `hermes config path` fails or times out | `error` | `cannot read hermes configuration through 'hermes config path': <cause>` |
-| `opencode.extension`, `hermes.extension` | An embedded file's installed copy is missing, unreadable or differs | `error` | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'` |
-| `opencode.extension`, `hermes.extension` | The executable record is missing, unreadable or names no executable file | `error` | `<record path>: <cause>; run 'cafleet setup --coding-agent <agent>'` |
-| `opencode.extension`, `hermes.extension` | Otherwise | `ok` | The plugin path; for Hermes, the plugin directory |
+| `opencode.extension`, `hermes.extension`, `pi.extension` | An embedded file's installed copy is missing, unreadable or differs | `error` | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'` |
+| `opencode.extension`, `hermes.extension`, `pi.extension` | The executable record is missing, unreadable or names no executable file | `error` | `<record path>: <cause>; run 'cafleet setup --coding-agent <agent>'` |
+| `opencode.extension`, `hermes.extension`, `pi.extension` | Otherwise | `ok` | The plugin path; for Hermes, the plugin directory; for pi, the extension path |
 | `hermes.plugin_enabled` | The call fails other than *not set*, times out or prints a member of the wrong JSON type | `error` | `cannot read hermes configuration through 'hermes config get': <cause>` |
 | `hermes.plugin_enabled` | `plugins.disabled` lists `cafleet` | `error` | `hermes plugins.disabled lists cafleet; remove it, then run 'cafleet setup --coding-agent hermes'` |
 | `hermes.plugin_enabled` | `plugins.enabled` lacks `cafleet`, or `allow_gateway_injection` is not `true` | `error` | `hermes plugin cafleet is not enabled: <key>, …; run 'cafleet setup --coding-agent hermes'` |
@@ -738,7 +747,7 @@ Register a member **and** spawn its coding-agent pane. A fleet has exactly one r
 | `--name` | yes | Display name; per-backend pane-title behavior: §6.7 Backend capabilities. |
 | `--description` | yes | One-sentence purpose. |
 | `--coding-agent` | no | A backend registry token; when omitted, the member inherits the spawning Director's placement backend. Availability failures exit 1 (below). |
-| `--model` | no | Forwarded to the backend binary's own `--model` flag; opencode requires `<provider-id>/<model-id>`. Per-backend formats and create-time validation: §6.7 Model selection. |
+| `--model` | no | Forwarded to the backend binary's own `--model` flag; opencode requires `<provider-id>/<model-id>`, and pi refuses a `:<thinking>` suffix. Per-backend formats and create-time validation: §6.7 Model selection. |
 | `--permission-mode MODE` | no | Launch-only selection from the resolved backend’s policy catalog; omission selects the backend's default `auto` mode (§6.9 Launch policy and capability registry). |
 | `--event-evidence POLICY` | no | `metadata` by default, or explicit `redacted` evidence under the privacy contract (§6.9 Persistence, notification and read interfaces). |
 | `--event-redaction-file PATH` | for redacted | Absolute readable UTF-8 redaction configuration; invalid combinations/configuration fail with usage exit 2 before registration. |
@@ -747,7 +756,7 @@ Register a member **and** spawn its coding-agent pane. A fleet has exactly one r
 | `--file PATH` | one of | UTF-8 spawn-prompt file (`-` = stdin) under the shared body-input and transport contract (§6.3 Text bodies (positional `TEXT` / `--file`)). |
 | `--json` | no | Output as JSON |
 
-A missing backend binary exits 1 with `Error: binary <name> not found on PATH`. The opencode backend also requires the selected launch policy's agent preset `<preset base>/agents/<mode>.md` at the resolved preset path (§ Config-dir resolution); a missing or unreadable preset or an invalid config-location variable exits 1 (§6.3 Error Messages). The hermes backend also resolves its effective home through `hermes config path`, concurrently with the native version probe (§6.7 Hermes availability preflight).
+A missing backend binary exits 1 with `Error: binary <name> not found on PATH`. The opencode backend also requires the selected launch policy's agent preset `<preset base>/agents/<mode>.md` at the resolved preset path (§ Config-dir resolution); a missing or unreadable preset or an invalid config-location variable exits 1 (§6.3 Error Messages). The hermes backend also resolves its effective home through `hermes config path`, concurrently with the native version probe (§6.7 Hermes availability preflight). The pi backend also requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a missing or unreadable extension exits 1 (§6.7 Contract error strings), and a pi prompt beginning with `@` exits 2 before registration (§6.7 Per-backend `build_spawn_argv`).
 
 The split reference — session, window and Director pane — and the multiplexer server come from the fleet Director's recorded placement (§6.5 Multiplexer context); each new member placement copies the Director's `mux_server`.
 
@@ -1498,6 +1507,10 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 | `hermes` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with ordered gateway injection on the TUI client: subscribe probe (idle wake, 70 s busy command, bursts of 3 and 10 in order) and `/exit` ending the child, 2026.9.24, checked 2026-11-06. |
 | `hermes` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
 | `hermes` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the Hermes profile from `2026.9.24`. |
+| `pi` | Director | `goal` | `extension` | — | `no` | not established (acceptance run A-P pending) |
+| `pi` | Director | `listen` | `extension` | `subscribe` | `no` | not established (acceptance run A-P pending) |
+| `pi` | Director | `verdict` | — | — | `no` | `goal, listen` |
+| `pi` | Member | — | — | — | `no` | not established (acceptance run A-M pending) |
 
 | Column | Values |
 |---|---|
@@ -1509,15 +1522,16 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 
 #### Interface
 
-A coding-agent backend is a stateless value selected per member at spawn time, with two read-only properties and four operations:
+A coding-agent backend is a stateless value selected per member at spawn time, with two read-only properties and five operations:
 
 - **`name`** — the registry key: a stable lowercase string that MUST equal its `--coding-agent` token, the persisted `placement.coding_agent` lookup value and its registration key.
 - **`binary_name`** — the executable resolved against `PATH`; equal to `name` for every backend.
-- **`ensure_available()`** — fails on the first unmet spawn precondition, in order: the config directory resolves per §6.3 CLI *Config-dir resolution* (an invalid config-location variable fails first); the binary resolves on `PATH`; the backend's own check (opencode: the selected preset file is readable; hermes: the effective approvals configuration passes § Hermes availability preflight). A shared helper resolves `binary_name` to an absolute path per §6.9 Member PTY runtime *Native executable resolution*, failing with `binary {binary_name} not found on PATH`. Preconditions read the host through a **spawn probe** (binary lookup, home directory, `env_var(name) -> optional string`); the system probe reads the process environment.
+- **`ensure_available()`** — fails on the first unmet spawn precondition, in order: the config directory resolves per §6.3 CLI *Config-dir resolution* (an invalid config-location variable fails first); the binary resolves on `PATH`; the backend's own check (opencode: the selected preset file is readable; hermes: the effective approvals configuration passes § Hermes availability preflight; pi: the CAFleet pi extension `<pi base>/extensions/cafleet.ts` is readable). A shared helper resolves `binary_name` to an absolute path per §6.9 Member PTY runtime *Native executable resolution*, failing with `binary {binary_name} not found on PATH`. Preconditions read the host through a **spawn probe** (binary lookup, home directory, `env_var(name) -> optional string`); the system probe reads the process environment.
 - **`validate_model(model)`**, **`validate_effort(effort)`** — raise a value-error for a value malformed or unacceptable for this backend; `None` (flag omitted) is always valid. A backend without a reasoning-effort control rejects every non-`None` effort.
+- **`validate_prompt(prompt)`** — raises a value-error for a spawn-prompt body this backend cannot carry as its prompt argument; only pi rejects a body (§ Per-backend `build_spawn_argv`), and every other backend accepts every prompt. `member create` checks the raw body, before placeholder substitution.
 - **`build_spawn_argv(prompt, display_name, cwd, model, effort)`** — the full argv (binary + flags + prompt) for the multiplexer's window-split. Its leading token is `binary_name`; the launched `argv[0]` follows §6.9 Native executable resolution and later tokens are unchanged. `cwd` is the member's resolved absolute working directory (§6.5 Pane spawn working directory); only hermes emits it, and every other backend's argv is independent of it.
 
-**Ordering invariant:** `member create` MUST call `validate_model` → `validate_effort` → `ensure_available` → `build_spawn_argv`, so a malformed model or effort fails before any precondition check or side effect, as a usage error (exit 2) with the backend's message; broker value-errors (§7.2) exit 1.
+**Ordering invariant:** `member create` MUST call `validate_model` → `validate_effort` → `validate_prompt` → `ensure_available` → `build_spawn_argv`, so a malformed model, effort or prompt fails before any precondition check or side effect, as a usage error (exit 2) with the backend's message; broker value-errors (§7.2) exit 1. `validate_prompt` runs on the resolved prompt body before the Director placement lookup and registration.
 
 **No-model byte-identity:** a `None` model emits no `--model` tokens (never an empty `--model ""`) and a `None` effort emits no effort tokens, so each argv is byte-identical to its omitted form. An invalid effort never reaches argv construction.
 
@@ -1579,6 +1593,20 @@ The pane runs `opencode mini --standalone`, the long-lived minimal interactive i
 
 The argv carries no permission tokens (the operator configuration's `approvals.mode` governs the native session) and never `--provider` (the operator's configuration selects the provider). Every spawn starts a fresh conversation: the argv never contains `--resume`, `--continue` or `--create-if-missing`. `--source tool` keeps member sessions out of the operator's default session lists, and `-q` on a terminal seeds the interactive session with the prompt as its literal first turn.
 
+**pi** — `ensure_available` resolves the pi base per §6.3 *Config-dir resolution* (`PI_CODING_AGENT_DIR`, default `~/.pi/agent`), checks `pi` on `PATH`, then reads the CAFleet pi extension `<pi base>/extensions/cafleet.ts` in every launch mode, because every pi member depends on its gate (§ pi member gate). `display_name` becomes `--name`; `cwd` is unused.
+
+```
+["pi", "--cafleet-gate", "cafleet", "--no-approve", "--tui-mode", "fullscreen", "--name", <display_name>]
+                                                     # explicit selection replaces "cafleet" with <mode>
+  (+ ["--model", <model>]     if model is not None)
+  (+ ["--thinking", <effort>] if effort is not None)
+  (+ ["--", <prompt>])                               # bare trailing positional after --
+```
+
+The permission argv is the `--cafleet-gate <mode>` pair, where `<mode>` is `cafleet` or `cafleet-ask`. `--no-approve` ignores trust-gated project-local configuration and resources, so no project-trust dialog blocks a member; CAFleet skills load from `<pi base>/skills`, and `AGENTS.md` and `CLAUDE.md` still load. `--tui-mode fullscreen` pins the layout the pi profile matches, whatever the operator's `tuiMode` setting. `--` keeps a prompt that begins with `-` positional. Every spawn starts a fresh session: the argv never contains `--continue`, `--resume`, `--session`, `--session-id` or `--fork`. Spawn is validated against pi 1.5.0; the pi profile from `1.5.0` is the first boundary, so `member create` refuses an earlier probed version (§6.9 Profile selection by minimum version).
+
+**Prompt rule.** pi reads a positional argument beginning with `@` as a file attachment, so pi's `validate_prompt` rejects a prompt body whose first character is `@` with usage exit 2 and `Error: a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).`, before registration: no member row, run or pane is created. Checking the raw body is equivalent to checking the rendered prompt, because a leading placeholder renders to digits, `default`, a backend token or `sqlite:///…`. `build_spawn_argv` asserts the invariant for every prompt it receives.
+
 #### Model selection
 
 `member create --model <m>` inserts `--model <m>` immediately before the prompt tokens; omitted, no model tokens are emitted and the binary uses its configured default.
@@ -1589,6 +1617,7 @@ The argv carries no permission tokens (the operator configuration's `approvals.m
 | `codex` | Passes through verbatim | None; the binary rejects unknown models |
 | `opencode` | `<provider-id>/<model-id>`, split on the **first** `/` into two non-empty segments; model ids may contain further slashes | Exit 2 with `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` |
 | `hermes` | Passes through verbatim, including provider-prefixed ids; omitted, the operator's configured default model and provider apply | None; the binary rejects unknown models |
+| `pi` | Passes through verbatim: `provider/id`, an exact id or a fuzzy name; omitted, pi's `defaultProvider` and `defaultModel` settings apply | The value names a model without a thinking suffix: when the text after its last `:` equals one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, exit 2 with `Error: --model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '<value>').` Any other text after a `:`, such as a `:free` variant, passes through; the binary rejects unknown models |
 
 #### Reasoning effort
 
@@ -1600,6 +1629,9 @@ The argv carries no permission tokens (the operator configuration's `approvals.m
 | `codex` | `minimal`, `low`, `medium`, `high`, `xhigh` | The single token `--config=model_reasoning_effort=<level>` | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` |
 | `opencode` | None; the backend exposes no reasoning-effort control | — | `Error: opencode does not support reasoning effort.` |
 | `hermes` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `--reasoning <level>` | `Error: --effort for the hermes backend must be one of none, minimal, low, medium, high, xhigh, max, ultra (got '<value>').` |
+| `pi` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | `--thinking <level>` | `Error: --effort for the pi backend must be one of off, minimal, low, medium, high, xhigh, max (got '<value>').` |
+
+pi clamps a thinking level to the model's capability, and a non-reasoning model runs `off`; CAFleet performs no per-model check.
 
 #### Backend capabilities
 
@@ -1609,8 +1641,9 @@ The argv carries no permission tokens (the operator configuration's `approvals.m
 | `codex` | Kernel-enforced workspace-write sandbox | No; `member list` `pane_id` locates the pane | Runs commands its workspace/host rules permit; automatic review decides escalations, and a refused required command routes to the Director | `<codex home>/rules/cafleet.rules`, the `config.toml` settings below and a trusted working directory; a permission posture, not a spawn dependency |
 | `opencode` | None | No; `member list` `pane_id` locates the pane | `cafleet`: deny-by-default allowlist; `cafleet-ask`: the same allowlist, with every other command opening a native permission form | The selected policy's preset `<preset base>/agents/<mode>.md`; a spawn precondition |
 | `hermes` | None | No; `member list` `pane_id` locates the pane | `smart`: commands outside Hermes's dangerous-command patterns run unreviewed, and the guardian model reviews the rest and may open an approval prompt; `manual`: every pattern-detected command opens an approval prompt. Hardline floors, the sudo guard and `approvals.deny` block before any review | The operator configuration's `approvals.mode` |
+| `pi` | None | Yes, via `--name <member-name>`; pi titles the terminal `π - <name> - <cwd basename>` | `cafleet`: the CAFleet member gate's deny-by-default bash allowlist; `cafleet-ask`: the same allowlist, with every other bash command opening the gate's approval form (§ pi member gate) | The CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a spawn precondition |
 
-The omitted claude and codex policies are native automatic approval modes (§6.9 Launch policy and capability registry). The omitted hermes policy `smart` is also an `auto` mode: an ESCALATE or a guardian DENY opens a native approval prompt that the Director answers allow once or deny through the permission commands (§6.9 Bundled profiles and native screen fixtures), and an unanswered prompt fails closed after the configuration's `approvals.timeout`. Every session that reads a Hermes configuration applies its `approvals.deny`, so an operator glob there that matches a Director-only command also blocks it in a Hermes Director's own session, reported as `BLOCKED: this command matches the user-defined deny rule '<glob>' …`. CAFleet needs no `approvals.deny` entry, because the runner guard covers members (§6.3 Director-only command guard).
+The omitted claude and codex policies are native automatic approval modes (§6.9 Launch policy and capability registry). The omitted hermes policy `smart` is also an `auto` mode: an ESCALATE or a guardian DENY opens a native approval prompt that the Director answers allow once or deny through the permission commands (§6.9 Bundled profiles and native screen fixtures), and an unanswered prompt fails closed after the configuration's `approvals.timeout`. Every session that reads a Hermes configuration applies its `approvals.deny`, so an operator glob there that matches a Director-only command also blocks it in a Hermes Director's own session, reported as `BLOCKED: this command matches the user-defined deny rule '<glob>' …`. CAFleet needs no `approvals.deny` entry, because the runner guard covers members (§6.3 Director-only command guard). The omitted pi policy `cafleet` is an `auto` mode with a fixed allow/deny policy that renders no approval form; explicit `cafleet-ask` is `manual` (§ pi member gate).
 
 #### Claude permission posture
 
@@ -1716,6 +1749,80 @@ Deletion runs settlement for a `hermes` run before the runner shutdown. Each `he
 CAFleet never stops or restarts a Hermes gateway, kills by process name or
 touches a session it does not own.
 
+#### pi member gate
+
+The CAFleet pi extension (§6.3 Asset installation) auto-loads in every pi session and holds both the Director extension (§ Director extensions) and the member gate, a `tool_call` handler that enforces each pi launch mode (§6.9 Launch policy and capability registry). pi 1.5.0 has no per-tool approval and no OS sandbox, so the gate is the member's whole permission posture.
+
+**Activation.** The extension registers the string flag `--cafleet-gate`, and on `session_start` the gate reads `pi.getFlag("cafleet-gate")`:
+
+| Flag value | Gate |
+|---|---|
+| Absent (a Director or an operator session) | Inert: every `tool_call` passes through the gate untouched |
+| `cafleet` | Enforces the tool policy, with the bash allowlist for bash |
+| `cafleet-ask` | Enforces the tool policy, and opens the approval form for a bash command the allowlist does not allow |
+| Any other value | Blocks every tool call with `the CAFleet member gate received an unknown --cafleet-gate value '<value>'` |
+| Reading the flag fails | Blocks every tool call with `the CAFleet member gate could not read --cafleet-gate: <cause>` |
+
+An active gate sets the status `ctx.ui.setStatus("cafleet-gate", "cafleet gate: <mode>")`, so a pane capture shows the posture. The `tool_call` handler awaits a mode promise that the `session_start` handler settles in a `finally` block with the resolved mode or the read failure, so no tool call is evaluated before the mode is known, waits forever or runs ungated after a failed read.
+
+The permission argv stays independent of the pi base, so runtime observation re-derives it from the stored policy (§6.9 Effective policy record). pi 1.5.0 rejects a long option that no loaded extension registers, printing `Error: Unknown option: --cafleet-gate`: a gated member whose extension cannot register the flag (excluded from loading, a stale copy or a load failure) exits at startup, and the runner reports `runner_exited` with the native exit code instead of running the member ungated.
+
+**Tool policy.** Both launch modes apply:
+
+| Tool | `cafleet` | `cafleet-ask` |
+|---|---|---|
+| `bash` | Allowlist match runs; otherwise blocked | Allowlist match runs; otherwise the approval form |
+| `read`, `grep`, `find`, `ls` | Allowed, except a path whose final component is `.env` or begins with `.env.` | Same |
+| `edit`, `write` | Allowed for a path inside `ctx.cwd`, except the `.env` rule and the protected directories | Same |
+| A tool whose name begins with `cafleet_` | Blocked: `cafleet tools run only in a Director session` | Same |
+| Any other tool, MCP and extension tools included | Blocked: `the CAFleet member gate allows only bash, read, grep, find, ls, edit and write` | Same |
+
+A path resolves against `ctx.cwd` with `path.resolve`, following no symbolic link. `edit` and `write` are blocked for a path any of whose components relative to `ctx.cwd` is `.git`, `.pi` or `.agents`, with `the CAFleet member gate protects .git, .pi and .agents from edit and write; route the change to the Director if it is required`: `.git/hooks` runs under the allowlisted `git commit *`, and `.pi/extensions`, `.pi/settings.json`, `.pi/SYSTEM.md` and `.agents/skills` load into a later trusted-project pi session from the same directory. A block reason reaches the member as the tool's error result, and each bash block reason ends with `; route the command to the Director if it is required`. Leading-`!` input runs as pi's `user_bash`, outside `tool_call`, so Director-dispatched `member exec` commands stay under the Director's authorization.
+
+**Bash allowlist.** The gate's patterns are a constant in the extension and its content contract:
+
+```ts
+const MEMBER_ALLOWLIST = [
+  "git add *", "git commit *", "git diff *", "git grep *", "git log *", "git ls-tree *",
+  "git ls-files *", "git branch *", "git status", "grep *", "ls", "ls *", "stat *",
+  "tree", "tree *", "mise //:test", "mise //:test *", "mise //:lint", "mise //:format",
+  "mise //:typecheck", "mise //:build", "wc *", "cafleet *",
+];
+```
+
+A command is allowlisted when both hold:
+
+1. **Simple.** The command, trimmed of surrounding whitespace, is one simple command. A lexer tracks single quotes, double quotes and backslash escapes; single-quoted text is literal. The command is not simple when an unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)`, backtick or newline appears, when `$(` or a backtick appears unquoted or inside double quotes, or when a quote is unterminated.
+2. **Matching.** The whole trimmed command matches at least one pattern, where `*` matches any character sequence, spaces included, and every other character matches itself.
+
+A leading `NAME=value` assignment matches no pattern, so a member passes `--database-url` instead.
+
+**Approval form.** Under `cafleet-ask` the gate calls `ctx.ui.select(title, ["Allow once", "Deny"])` with the title:
+
+```
+CAFleet member gate: allow this bash command?
+
+$ <first command line>
+  <each further command line, prefixed with two spaces>
+```
+
+| Result | Gate action |
+|---|---|
+| `Allow once` | The command runs once |
+| `Deny` | Blocked: `the operator denied this command` |
+| `undefined` (Escape, Ctrl+C) | Blocked: `the approval form was dismissed; the command did not run` |
+
+The form has no timeout. Concurrent bash calls of one assistant message are evaluated in sequence through one promise chain, so one form is open at a time, and `Allow once` grants no persistent approval. The title, the two choice labels and pi's select hint line anchor the pi profile's request rule (§6.9 Bundled profiles and native screen fixtures).
+
+**Limits.**
+
+| Surface | Limit |
+|---|---|
+| Allowed tooling | An allowed command also runs the code and hooks it executes: `mise //:test *` runs workspace test code, and `git commit *` runs `.git/hooks` |
+| No sandbox | `read`, `grep`, `find` and `ls` reach any path outside `.env` files, and a symbolic link inside the cwd can target a path outside it |
+| Protected directories | The path check follows no symbolic link, so a link elsewhere in the cwd that targets `.git`, `.pi` or `.agents` stays writable; an allowlisted command writes where its own tool writes, as `git` does under `.git/` |
+| Delivery fallback | Escape interrupts a running pi turn and cancels an open form, so a delivery that falls back to Escape interrupts the member's run or dismisses the form |
+
 #### Contract error strings
 
 Model and effort rejections are in § Model selection and § Reasoning effort, and the hermes deletion error in § Hermes work settlement. The availability errors are:
@@ -1724,6 +1831,7 @@ Model and effort rejections are in § Model selection and § Reasoning effort, a
 |---|---|
 | PATH miss | `binary {binary_name} not found on PATH` |
 | Selected opencode preset missing or unreadable | `cannot read opencode agent preset at {preset}: {cause}; run 'cafleet setup --coding-agent opencode' first` |
+| CAFleet pi extension missing or unreadable | `cannot read the CAFleet pi extension at {path}: {cause}; run 'cafleet setup --coding-agent pi' first` |
 | Invalid config-path variable (§6.3 *Config-dir resolution*) | `{var} must be an absolute path (got '{value}')` |
 | Non-UTF-8 config-path variable or `HOME` (§6.3 *Config-dir resolution*) | `{var} is not valid UTF-8` |
 | `hermes config path` cannot start, times out or exits nonzero | `cannot read hermes configuration through 'hermes config path': {cause}` |
@@ -1745,23 +1853,25 @@ A native shell probe displayed the actual command, exit code, duration and outpu
 
 **hermes**: Hermes 2026.9.24 ships a user-operated `/goal` command with `status`, `show`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate` subcommands. A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), because turns injected through the gateway run without rendering in the classic CLI; members keep `--cli`. The Director receives inbox records through the `cafleet` plugin's `cafleet_listen` tool, which runs the listener inside the per-home gateway (§ Director extensions): each record becomes its own turn, and a record injected during a busy turn runs after that turn ends without interrupting it. Native `/goal` set, status, pause, resume and clear work in the TUI client, and continuation turns already queued before `/goal clear` still run after it. In the classic REPL and the TUI client, leading-`!` input runs a native shell command locally; the Director authorizes each routed command under its host rules. CAFleet makes no goal lifecycle calls and preserves activation, pause, completion and gate/wait authority.
 
+**pi**: pi 1.5.0 has no native goal, no native facility that pushes external text into a session and no per-tool approval; the CAFleet pi extension supplies reception, the goal extension and the `cafleet_ask` decision surface (§ Director extensions), and the member gate (§ pi member gate). A pi Director runs plain `pi` (the fullscreen TUI) from the project directory, so the extension auto-loads; pi's bash tool inherits the pane environment, so `fleet create` registers the pane without `--pane`. A pi Director runs its own tool calls without approval, and the member gate is inert in its session. The installed CAFleet skill's [pi native recipe](https://github.com/himkt/cafleet/blob/main/skills/cafleet/reference/coding-agents.md#pi-native-director-reception) owns the tool calls, consumption and recovery. Leading-`!` input runs a shell command as `user_bash` outside the member gate, stores its output for the next prompt and starts no turn, so after `member exec` the Director sends an explicit continuation; the Director authorizes each routed command under its host rules. Enter while a member works queues the text as a steering message.
+
 #### Director extensions
 
-The extensions §6.3 Asset installation installs supply Director reception for `hermes` and `opencode`, and the `opencode` goal extension. Each runs only the `cafleet` executable its executable record names, never a path from a tool argument, as `<recorded cafleet> message listen <director_id>` without `--timeout`, adding `--database-url <url>` when the tool received a `database_url` (§6.3 Database selection). The plugins replace no receiver automatically; every replacement belongs to the Director's receiver recovery.
+The extensions §6.3 Asset installation installs supply Director reception for `hermes`, `opencode` and `pi`, and the `opencode` and `pi` goal extensions. Each runs only the `cafleet` executable its executable record names, never a path from a tool argument, as `<recorded cafleet> message listen <director_id>` without `--timeout`, adding `--database-url <url>` when the tool received a `database_url` (§6.3 Database selection). The plugins replace no receiver automatically; every replacement belongs to the Director's receiver recovery.
 
 **Director verification.** `message listen` accepts any active member, so each Director-only tool verifies its `director_id` itself: it runs `<recorded cafleet> member show <director_id> --json`, adding `--database-url <url>` when given, and requires exit 0 with `"kind": "director"`; any other outcome returns the tool's member-refusal error with the CLI's stderr appended. Like the Director-only command guard (§6.3 Director-only command guard), the check is cooperative: it stops a member that passes its own ID.
 
-| Surface | Hermes plugin | OpenCode plugin |
-|---|---|---|
-| Receiver tool | `cafleet_listen(director_id: integer, database_url?: string)` in toolset `cafleet` | `cafleet_listen(director_id: integer, database_url?: string)` |
-| Verified tools | `cafleet_listen` | `cafleet_listen`, `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`, each with a required `director_id` and an optional `database_url` |
-| Session scope | One receiver per calling session key | One receiver per calling `sessionID` |
-| Success result | `{"ok": true, "pid": <pid>, "session_key": <key>}`, plus `"existing": true` for a live receiver | `{ ok, pid, sessionID }`, plus `existing: true` for a live receiver |
-| Delivery per stdout line | Ordered injection of `[cafleet listen record] <line>` into session `<key>`'s durable input queue, each committed before the next line | `session.synthetic({ sessionID, text: "[cafleet listen record] <line>", delivery: "queue" })` |
-| Member refusal | A failed Director verification returns `{"ok": false, "error": "cafleet_listen runs only in a Director session: <stderr>"}` | A failed Director verification refuses the tool with `cafleet tools run only in a Director session: <stderr>` |
-| Executable record error | `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent hermes'"}` | `ok: false` with the record path and `run 'cafleet setup --coding-agent opencode'` |
-| Child environment | The gateway's environment with every `CAFLEET_*` name removed | The server's environment |
-| Receiver end | Session finalize, plugin unload, 30 s with no client subscriber, a raising or overdue injection, or 600 s of refusals for one record kills the child | Plugin cleanup kills every child when the server ends |
+| Surface | Hermes plugin | OpenCode plugin | pi extension |
+|---|---|---|---|
+| Receiver tool | `cafleet_listen(director_id: integer, database_url?: string)` in toolset `cafleet` | `cafleet_listen(director_id: integer, database_url?: string)` | `cafleet_listen(director_id: integer, database_url?: string)` |
+| Verified tools | `cafleet_listen` | `cafleet_listen`, `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`, each with a required `director_id` and an optional `database_url` | `cafleet_listen`, `cafleet_ask`, `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`, each with a required `director_id` and an optional `database_url` |
+| Session scope | One receiver per calling session key | One receiver per calling `sessionID` | One receiver per extension runtime |
+| Success result | `{"ok": true, "pid": <pid>, "session_key": <key>}`, plus `"existing": true` for a live receiver | `{ ok, pid, sessionID }`, plus `existing: true` for a live receiver | `{"ok": true, "pid": <pid>, "sessionId": <id>}`, plus `"existing": true` for a live receiver |
+| Delivery per stdout line | Ordered injection of `[cafleet listen record] <line>` into session `<key>`'s durable input queue, each committed before the next line | `session.synthetic({ sessionID, text: "[cafleet listen record] <line>", delivery: "queue" })` | `pi.sendMessage({customType: "cafleet-listen", content: "[cafleet listen record] <line>", display: true}, {triggerTurn: true, deliverAs: "followUp"})`, in line order |
+| Member refusal | A failed Director verification returns `{"ok": false, "error": "cafleet_listen runs only in a Director session: <stderr>"}` | A failed Director verification refuses the tool with `cafleet tools run only in a Director session: <stderr>` | A failed Director verification returns `{"ok": false, "error": "cafleet tools run only in a Director session: <stderr>"}` with `isError: true`. An active member gate blocks every `cafleet_*` tool first (§ pi member gate) |
+| Executable record error | `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent hermes'"}` | `ok: false` with the record path and `run 'cafleet setup --coding-agent opencode'` | `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent pi'"}` |
+| Child environment | The gateway's environment with every `CAFLEET_*` name removed | The server's environment | The pi process's environment |
+| Receiver end | Session finalize, plugin unload, 30 s with no client subscriber, a raising or overdue injection, or 600 s of refusals for one record kills the child | Plugin cleanup kills every child when the server ends | `session_shutdown`, for every reason, kills the child with `SIGTERM` |
 
 A rejected `synthetic` call kills the child. A Hermes injection that raises or exceeds its 10 s deadline, or one record refused for 600 s, kills the child, logs the cause and attempts the closed notice below once through ordered injection. A child that exits unexpectedly, without a `closed` record and without the plugin stopping it, queues `[cafleet listen closed] exit <code>: <last stderr line>` into the owning session. A Hermes plugin unload for a still-attached session injects `[cafleet listen closed] the plugin unloaded: exit <code>: <last stderr line>` once through ordered injection after the child exits; a draining gateway refuses it, without retry. A child the plugin stops through session finalize, client detach, plugin cleanup or a Hermes unload for a detached session queues no closed notice, and each receiver attempts at most one. The OpenCode plugin decides the notice on the child's `close` event, after its stdio drains, so a final `closed` record is read first; a child `error` event, such as an asynchronous spawn failure, removes the receiver and queues the notice. An OpenCode child exiting by `SIGTERM` is an intentional stop by plugin cleanup or host shutdown (which can signal the child before cleanup runs) and queues no closed notice; a non-zero exit code or any other signal queues it. A `closed` record is delivered as a record and ends the receiver.
 
@@ -1797,6 +1907,50 @@ A rejected `synthetic` call kills the child. A Hermes injection that raises or e
 - **No-progress stop.** A continuation turn that ends without a `cafleet_goal_progress` or `cafleet_goal_complete` call increments `idle_streak`. At 3 the goal pauses and the plugin queues `[cafleet goal] paused: no progress in 3 consecutive continuation turns; the operator resumes it with /cafleet-goal resume` with `resume: false`. The 50-continuation cap also pauses the goal and queues `[cafleet goal] paused: reached 50 continuations; the operator resumes it with /cafleet-goal resume` with `resume: false`; resume starts a fresh budget of 50.
 - **Persistence.** The instruction entry carries the goal across compaction. A stored `active` goal for a `sessionID` is restored on the server's first event, tool call or command for that `sessionID`, so after a restart the Director's re-arming `cafleet_listen` turn restores it and the next `session.execution.succeeded` queues the continuation. Storage is shared by every server on the same OpenCode data directory, while restoration stays scoped to the sessions a server serves; setup scans no storage, so a member server or any other server sharing the config directory never restores the Director's goal.
 
+**pi extension.** One file loads in every pi session, members included, and holds the member gate (§ pi member gate) beside the Director tools. Each tool reads the executable record at `new URL("./cafleet.executable", import.meta.url)` and runs Director verification through `node:child_process` `execFile` before any work; its result text is its JSON object. The goal hooks act only on a session holding a goal set by the operator-typed `/cafleet-goal` command or by a goal tool whose `director_id` verified, so they stay inert in members.
+
+**pi receiver.** `cafleet_listen` spawns the listener with `node:child_process` `spawn` and returns `ok: false` with the spawn error when `child.pid` is undefined. `followUp` delivery starts a turn on an idle session; on a busy session it waits until the agent has no more tool calls, so a record never interrupts a running turn and arrives no later than its end, and records that arrive while a run is starting join that run.
+
+| Event | Extension action |
+|---|---|
+| The child closes (`close` event, after its stdio drains) without a `closed` record, and the extension did not stop it | Sends `[cafleet listen closed] exit <code>: <last stderr line>` the same way |
+| A child `error` event, such as an asynchronous spawn failure | Removes the receiver and sends the same closed notice |
+| A `sendMessage` call throws | Kills the child and sends the closed notice once |
+| A `closed` record | Delivered as a record; the receiver ends |
+| `session_shutdown`, for every reason | Marks the receiver stopped and kills the child with `SIGTERM`; a stopped receiver sends no closed notice |
+
+For a `session_shutdown` reason of `reload`, `new`, `resume` or `fork`, the pi process keeps running and loads a replacement runtime. The old runtime stores `{reason}` under `globalThis[Symbol.for("cafleet.pi.receiver-stopped")]`; the new runtime's `session_start` reads and clears it, then sends `[cafleet listen closed] the extension runtime was replaced (<reason>); re-arm with cafleet_listen` with `triggerTurn: true`. The reason `quit` (Ctrl+C, Ctrl+D, `SIGHUP`, `SIGTERM`) stores nothing, because the process exits, and a `SIGKILL` of the pi process runs no handler.
+
+**pi goal extension.** The state `{objective, status, generation, continuations, idle_streak}` is persisted with `pi.appendEntry("cafleet-goal", state)` after every change, outside LLM context, and restored on `session_start` from the last `cafleet-goal` entry on `ctx.sessionManager.getBranch()`. `status` is `active`, `paused`, `complete` or `cleared`.
+
+| Operation | Surface | Effect |
+|---|---|---|
+| set | `/cafleet-goal <objective>` | Status `active`, next generation, both counters 0; sends the first continuation |
+| status | `/cafleet-goal status`; tool `cafleet_goal_status` | The command shows `[cafleet goal] status: <json>` through `ctx.ui.notify`; the tool returns the stored JSON |
+| pause | `/cafleet-goal pause` | Status `paused`, bump `generation` |
+| resume | `/cafleet-goal resume` | Status `active`, bump `generation`, reset both counters; sends a continuation |
+| clear | `/cafleet-goal clear` | Status `cleared`, bump `generation`; the objective is dropped |
+| complete | tool `cafleet_goal_complete(director_id, summary, database_url?)` | Status `complete`, bump `generation` |
+| progress | tool `cafleet_goal_progress(director_id, note, database_url?)` | Reset `idle_streak` |
+
+- **Generations.** Generations increase monotonically per session; the `cleared` entry keeps the last generation, and set uses that value plus one.
+- **Continuation message.** A `custom_message` with `customType` `cafleet-goal`, `details: {generation}`, `display: true` and the content `[cafleet goal] Continue working toward the active goal: <objective>. Call cafleet_goal_progress after each step and cafleet_goal_complete when it is achieved.` Set and resume send it with `pi.sendMessage(..., {triggerTurn: true, deliverAs: "followUp"})`.
+- **Automatic continuation.** For an `active` goal, `agent_before_settle` (1) increments `idle_streak` when the run was a continuation run without a `cafleet_goal_progress` or `cafleet_goal_complete` call; (2) at 3, pauses and returns the entry `[cafleet goal] paused: no progress in 3 consecutive continuation turns; the operator resumes it with /cafleet-goal resume` with `continue: false`; (3) at 50 continuations, pauses and returns `[cafleet goal] paused: reached 50 continuations; the operator resumes it with /cafleet-goal resume`; (4) otherwise increments `continuations`, persists and returns the continuation entry with `continue: true`.
+- **Tracking.** pi 1.5.0 skips `before_agent_start` for a continuation that `agent_before_settle` requests, so the extension tracks runs with two in-memory flags. `pendingContinuation` is set whenever the extension starts a continuation (a returned `continue: true`, or the set and resume messages); `progressed` is set by every `cafleet_goal_progress` or `cafleet_goal_complete` execution. Each `agent_before_settle` reads both flags and clears them before it returns, a returned continuation sets `pendingContinuation` again, and an aborted run clears both at `agent_settled`.
+- **Interrupt.** `agent_settled` with `event.aborted` on an `active` goal pauses it and shows `[cafleet goal] paused: the run was interrupted; the operator resumes it with /cafleet-goal resume` through `ctx.ui.notify`.
+- **Stale continuations.** The `context` hook removes each `cafleet-goal` continuation after the last assistant message whose generation differs from the stored one or whose goal is not `active`; earlier history stays intact.
+- **Goal context.** The `context` hook runs before every model request, inside a continuation chain too. While the goal is `active` or `paused`, it appends one transient user-role message, `[cafleet goal] Active CAFleet goal (<status>): <objective>`, after the last message of `event.messages`; the message is never persisted and is rebuilt on every request, so it survives manual and threshold compaction and keeps the provider's cached prefix intact. A `complete` or `cleared` goal appends nothing.
+- **Restart.** `pi --continue` (or `--session <id>`) on the same session restores the state at `session_start`; the Director's re-arming `cafleet_listen` turn then ends at `agent_before_settle`, which continues an active goal without further input.
+- **Failures.** Each handler is wrapped in `try`/`catch` and logs a failure's cause. While the goal is `active`, a failure also pauses the goal and shows `[cafleet goal] paused: the goal cannot continue (<cause>); the operator resumes it with /cafleet-goal resume`.
+
+**pi decision surface.** `cafleet_ask(director_id, question, choices, database_url?)` registers with `executionMode: "sequential"`. After Director verification it requires `ctx.hasUI`, otherwise returning `{"ok": false, "error": "cafleet_ask needs the interactive pi TUI"}`, and requires `choices` to be 1–9 non-empty, distinct strings, none equal to `Other`, otherwise returning `ok: false` naming the violated rule. It calls `ctx.ui.select(question, [...choices, "Other"])`, and for `Other` then `ctx.ui.input(question, "")`:
+
+| Outcome | Result |
+|---|---|
+| A listed choice | `{"ok": true, "status": "answered", "answer": "<choice>", "choice": <1-based index>}` |
+| `Other` with non-empty text | `{"ok": true, "status": "answered", "answer": "<text>", "choice": null}` |
+| Cancelled, or `Other` with empty text | `{"ok": true, "status": "cancelled"}`, which records no decision |
+
 ### 6.8 Configuration
 
 Settings retain only the selected SQLite URL, built from `--database-url` (§6.3 Database selection). CAFleet reads no `CAFLEET_*` environment variable; it reads the backend config-location variables and `HOME` (§6.3 Config-dir resolution), and only `fleet create` and doctor's `multiplexer` row read the caller's multiplexer environment (§6.5 Backend selection). Spawned members receive, when the creator sets it, the selected backend's config-location variable (§6.3 *Member environment*); identity and the database are rendered into prompt literals (§6.3 Spawn-prompt substitution).
@@ -1813,6 +1967,7 @@ Settings retain only the selected SQLite URL, built from `--database-url` (§6.3
 | Codex | `approve-for-me` (default), `never` | `on-request` | `on-request` and `never` map to `--ask-for-approval <mode> --sandbox workspace-write`; `approve-for-me` maps to the single `--approve-for-me` flag, which selects the workspace-write sandbox itself. |
 | OpenCode | `cafleet` preset (default) | `cafleet-ask` | `--agent <mode>`, selecting the agent preset of that name; explicit `cafleet` records `mode_source=explicit`. |
 | Hermes | `smart` (default) | `manual` | No permission argv for any native version; the choice is recorded only, and the operator configuration's `approvals.mode` governs the native session. |
+| pi | `cafleet` (default) | `cafleet-ask` | `--cafleet-gate <mode>`, selecting the CAFleet member gate's mode (§6.7 pi member gate); explicit `cafleet` records `mode_source=explicit`. |
 
 Each backend has one default (omitted) mode, an `auto` mode wherever the backend offers one. Every launch mode carries an `auto` or `manual` class, a documentation and catalog property: `--permission-mode` values stay backend-native, and the class changes no argv, run-record field or CLI contract.
 
@@ -1825,7 +1980,7 @@ Claude `dontAsk` denies tools that are not pre-approved without prompting, Claud
 
 The omitted Claude and Codex selections are each backend's native automatic approval mode: an automatic reviewer decides the operations that no native rule settles, and the runner reports its observable refusals and unavailability as automatic review events (§ Automatic review events). An omitted selection is not validated against the version catalog, so a member whose probed version is newer than every profile boundary still launches with the default; a native version that rejects `auto` or `--approve-for-me` exits immediately with `runner_exited` (below).
 
-The bundled backend policy catalog is the single source of truth for each backend's launch-policy catalog, default, exact argv mapping and detector/composer/answer profiles; help and usage errors report its choices, and each backend accepts them for every native version. Claude accepts the native `--permission-mode` values, documented aliases included, verified from installed help and parser evidence: the verified Claude Code 2.1.302 and 2.1.312 accept canonical `default` and its `manual` alias, help displays `manual`, and the [official permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents both. Preserve the explicitly requested spelling in argv and launch intent. The Codex choices are verified from the installed `codex --help` of Codex 0.163.0; `approve-for-me` names the native `--approve-for-me` flag, which routes approval requests through automatic review, and explicit `on-request` and `never` inherit the user's Codex configuration, including an `approvals_reviewer` setting that can answer escalations without a native form. The OpenCode choices select agent presets rather than a native permission flag: `cafleet` resolves every shell check to `allow` or `deny`, and `cafleet-ask` asks for every shell command outside its allowlist, so OpenCode opens a native permission form. Hermes emits no argv because no Hermes launch flag selects an approval mode.
+The bundled backend policy catalog is the single source of truth for each backend's launch-policy catalog, default, exact argv mapping and detector/composer/answer profiles; help and usage errors report its choices, and each backend accepts them for every native version. Claude accepts the native `--permission-mode` values, documented aliases included, verified from installed help and parser evidence: the verified Claude Code 2.1.302 and 2.1.312 accept canonical `default` and its `manual` alias, help displays `manual`, and the [official permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents both. Preserve the explicitly requested spelling in argv and launch intent. The Codex choices are verified from the installed `codex --help` of Codex 0.163.0; `approve-for-me` names the native `--approve-for-me` flag, which routes approval requests through automatic review, and explicit `on-request` and `never` inherit the user's Codex configuration, including an `approvals_reviewer` setting that can answer escalations without a native form. The OpenCode choices select agent presets rather than a native permission flag: `cafleet` resolves every shell check to `allow` or `deny`, and `cafleet-ask` asks for every shell command outside its allowlist, so OpenCode opens a native permission form. Hermes emits no argv because no Hermes launch flag selects an approval mode. The pi choices select the mode of the CAFleet member gate, because pi 1.5.0 has no native per-tool approval: `cafleet` runs every allowlisted bash command and blocks every other one without a form, so it renders no approval form, and `cafleet-ask` opens the gate's approval form for every bash command outside the allowlist.
 
 Creation success establishes that the child was spawned, not that its native policy was accepted. A fast native exit after spawning, including policy rejection, produces `runner_exited` with the actual code/signal and a Director inbox event; the runner preserves the chosen mode rather than retrying with another one. An error from the spawn operation itself still fails creation and follows compensation. There is no post-spawn liveness window.
 
@@ -1838,6 +1993,8 @@ Record `requested_mode` as nullable text, `resolved_mode` as required text, `mod
 | Explicit Codex `never` | `never` | `never` | `explicit` | `["--ask-for-approval","never","--sandbox","workspace-write"]` |
 | Omitted Hermes | `null` | `smart` | `default` | `[]` |
 | Explicit Hermes `manual` | `manual` | `manual` | `explicit` | `[]` |
+| Omitted pi | `null` | `cafleet` | `default` | `["--cafleet-gate","cafleet"]` |
+| Explicit pi `cafleet-ask` | `cafleet-ask` | `cafleet-ask` | `explicit` | `["--cafleet-gate","cafleet-ask"]` |
 
 `effective_policy_json` remains null unless a tested native observation supplies it (§ Effective policy record); an installed version, argv or selected profile alone proves no effective authorization decision.
 
@@ -1860,6 +2017,7 @@ The probe yields a version only when it exits with status `0` and the first stdo
 | `2.1.302 (Claude Code)` | `2.1.302` |
 | `codex-cli 0.163.0` | `0.163.0` |
 | `opencode v2.1.4` | `2.1.4` |
+| `1.5.0` | `1.5.0` |
 | `claude 2.1.310-beta.1+build.7` | `2.1.310-beta.1+build.7` |
 | `v2.1.4 2.1.5` | Probe failure: several version tokens |
 | `tool 2.1` | Probe failure: no version token |
@@ -2216,6 +2374,31 @@ The Hermes profile from `2026.9.24` applies to `hermes chat --cli` under either 
 A digit selects and confirms its choice whatever the focus, so the answer stages have no focus gate. The focused choice carries the `❯ ` marker, and choices carry no background colour. Recorded layout limits: the ESCALATE form is detected at 37 columns and above, below which `3. Add to permanent allowlist` wraps; the override form is detected at 28 columns and above, below which the box border wraps. A command too long for the box adds `5. Show full command` and is answered manually.
 
 The Director answers single-request choices only: allow once or deny, on both the ESCALATE and the override prompt. The session and always choices have no choice entry. When the guardian model is unavailable, Hermes shows the same human prompt, detected by the same rule. An unanswered prompt fails closed after `approvals.timeout` (default 300 seconds): Hermes prints its timeout notice and returns a BLOCKED result to the model, the form disappears, and the runner closes the episode with the `not_visible` close reason. A later bound response then fails request-token revalidation.
+
+The pi profile from `1.5.0` applies to pi under every pi launch mode; only `cafleet-ask` shows an approval form, the CAFleet member gate's form (§6.7 pi member gate), and the argv pins `--tui-mode fullscreen`:
+
+| Capability | Status | Declaration |
+|---|---|---|
+| Detection | `tested` | Request rule `pi-gate-approval`: the gate's form, anchored on the `CAFleet member gate: allow this bash command?` title row, the `$ ` operation rows, the `Allow once` and `Deny` choice rows and pi's select hint row. The operation is the `$ ` row plus its two-space continuation rows |
+| Allow answer | `tested` | One stage: Enter (`0d`) gated on focus `allow-once`, as `allow-once` |
+| Deny answer | `tested` | Two stages: Down gated on focus `allow-once`, then Enter (`0d`) gated on focus `deny-once`, as `deny-once` |
+| Empty-composer observation | `tested` | `pi-idle-composer`: the idle editor between its two full-width `─` border rows, with the terminal cursor in the editor |
+| Prompt submission | `tested` | Composer plan `prompt` (§ Executable native plans) |
+| Native-exec submission | `tested` | Composer plan `exec` for `! COMMAND` (§ Executable native plans) |
+| Annotations | `unknown` | None declared |
+
+The title, the `Allow once` and `Deny` labels and the `$ ` operation prefix are CAFleet-authored, so they stay fixed across pi versions; pi renders the select list, its focus marker and its hint row. `Allow once` is the first choice and holds the initial focus, and the list moves with Up/Down. The deny answer sends no Escape, because Escape dismisses the form and the gate then blocks the command with the dismissal reason. A form inside a recorded layout limit opens no `interaction_opened` event and is answered manually on the native surface.
+
+| Element | Value |
+|---|---|
+| Row patterns of `pi-gate-approval` and `pi-idle-composer` | pending (capture run A-F) |
+| Focus marker and `focus_style` | pending (capture run A-F) |
+| Cursor condition | pending (capture run A-F) |
+| Down byte sequence | pending (capture run A-F) |
+| Composer plan bytes and settle intervals | pending (capture run A-F) |
+| `W_min` and recorded layout limits | pending (capture run A-F) |
+
+The pi fixtures live in `coding_agent/native/pi.json` with ids `pi-1.5.0-<screen>-<n>`, captured on tmux and herdr at 120 columns and at `W_min`, and cover the form, each answer's pre-stage screen, the idle composer and both submission plans. Their geometry, masked rows and fixture table are pending (capture run A-F).
 
 A backend fixture file has exactly these required fields:
 
@@ -3283,7 +3466,7 @@ CREATE TABLE member_runs (
     member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
     fleet_id INTEGER NOT NULL REFERENCES fleets(fleet_id) ON DELETE RESTRICT,
     director_member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
-    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode','hermes')),
+    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode','hermes','pi')),
     database_identity_json TEXT NOT NULL CHECK(json_valid(database_identity_json) AND json_type(database_identity_json) = 'object'),
     launch_nonce TEXT NOT NULL CHECK(length(launch_nonce) = 64 AND launch_nonce NOT GLOB '*[^0-9a-f]*'),
     runtime_path TEXT NOT NULL CHECK(length(trim(runtime_path)) > 0),
