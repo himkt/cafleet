@@ -1,6 +1,6 @@
 # Overview
 
-CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coordinates them through durable messages: collaborative coding across multiple coding-agent backends, with full code transparency. Use its CLI and skills to delegate research, implementation and review, then collect durable replies while your session continues the task.
+CAFleet coordinates independent coding-agent sessions in tmux or herdr through durable messages; this page defines its core terms, responsibilities and workflows.
 
 ## Core terms
 
@@ -10,7 +10,7 @@ CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coord
 | root Director | The current session registered by fleet creation; owns assignments and team lifecycle | [Members](members.md) |
 | member | An independent coding-agent session registered in a fleet | [Members](members.md) |
 | placement | The association between a member and its multiplexer session, window, pane and backend | [Database schema](https://github.com/himkt/cafleet/blob/main/SPEC.md#8-database-schema) |
-| broker | The synchronous SQLite data-access layer used by the CLI | [Storage](storage.md) |
+| broker | The CLI's synchronous SQLite data-access layer | [Storage](storage.md) |
 | message | One point-to-point delivery, consumed through `input_required → completed` | [Output and formatting](https://github.com/himkt/cafleet/blob/main/SPEC.md#64-output--formatting) |
 | inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a show pointer | [Push notifications](https://github.com/himkt/cafleet/blob/main/SPEC.md#push-notifications) |
 | finite receive | A bounded inbox wait (`message wait`) for scripts and manual use that also retries ordinary-member previews | [Message wait](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-wait) |
@@ -21,9 +21,9 @@ CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coord
 
 ## Fleet isolation
 
-Use the literal IDs returned by the CLI. A fleet partitions routing within the local trust model; it supplies no authentication. Members of a fleet share the selected database URL. Cross-fleet sends fail with `members {from} and {to} are not in the same fleet.`; missing destinations fail with `Destination member not found: {to_id}`.
+Use the literal IDs returned by the CLI. A fleet partitions routing within the local trust model and supplies no authentication; its members share the selected database URL. Cross-fleet sends fail with `members {from} and {to} are not in the same fleet.`; missing destinations fail with `Destination member not found: {to_id}`.
 
-Fleet creation atomically registers the calling Director and its current pane. You can create an ordinary member immediately afterward. The Director owns [teardown](members.md#teardown).
+Fleet creation atomically registers the calling Director and its current pane, after which you can create an ordinary member immediately; the Director owns [teardown](members.md#teardown).
 
 ## Responsibilities
 
@@ -37,15 +37,9 @@ Fleet creation atomically registers the calling Director and its current pane. Y
 
 The [subcommand summary](https://github.com/himkt/cafleet/blob/main/SPEC.md#subcommand-summary) owns the command registry. The product ships as a CLI with embedded skills/presets and this documentation site.
 
-## Receiving delegated work
-
-The Director receives replies through its listener and ordinary members receive pane previews; the [fleet guide](../mixed-backend-team.md#receive-results) explains reception, consumption and recovery.
-
 ## Design document workflow
 
-Develop a feature through a reviewed design and an implementation.
-The `cafleet` and `cafleet-design-doc` skills coordinate the teams; give your
-coding agent one prompt per stage.
+Develop a feature through a reviewed design and an implementation. The `cafleet` and `cafleet-design-doc` skills coordinate the teams; give your coding agent one prompt per stage. Each prompt is a plain request, and your coding agent loads the `cafleet-design-doc` skill through its own skill mechanism, which [Coding agents](coding-agents.md) lists for each backend. Read durable coordination with message poll/show and inspect the team’s visible panes with `member capture`; the Director receives replies and checks evidence for as long as the fleet exists.
 
 ### Prompts {#prompts}
 
@@ -62,17 +56,4 @@ work may use a Programmer without a Tester. Contributor setup is in
 
 ### Where output lands
 
-Creation writes `design-docs/NNNNNNN-<slug>/design-doc.md` in your repository.
-CAFleet assigns a seven-digit, zero-padded number one above the highest existing
-number in that repository's `design-docs/`, starting at `0000001`. The slug is a
-short kebab-case description, such as `add-search`, giving `0000001-add-search`.
-Execution updates the design's task progress while
-implementing the approved work.
-
-### Watch the team work
-
-Read durable coordination with message poll/show and inspect the team’s visible panes with `member capture`. The Director receives replies and checks evidence for as long as the fleet exists.
-
-### Invocation syntax
-
-Each prompt is a plain request; your coding agent loads the `cafleet-design-doc` skill through its own skill mechanism, which [Coding agents](coding-agents.md) lists for each backend.
+Creation writes `design-docs/NNNNNNN-<slug>/design-doc.md` in your repository. CAFleet assigns a seven-digit, zero-padded number one above the highest existing number in that repository's `design-docs/`, starting at `0000001`; the slug is a short kebab-case description, such as `add-search`, giving `0000001-add-search`. Execution updates the design's task progress while implementing the approved work.

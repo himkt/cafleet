@@ -12,7 +12,7 @@ Follow Quickstart to [install](quickstart.md#install), [configure](quickstart.md
 Use CAFleet to delegate independent reviews of this change, collect both reports, resolve their findings, and close the team.
 ```
 
-Your agent loads the Director instructions, starts its listener, creates members and assigns each after its ready. The Director consumes broker events and checks evidence while preserving the host's supplied continuation and user gates.
+Your agent loads the Director instructions, starts its listener, creates members and assigns each after its ready, then consumes broker events and checks evidence, preserving the host's supplied continuation and user gates.
 
 ## Manual lifecycle
 
@@ -28,7 +28,7 @@ Resolve diagnosis issues. Load the Director role, backend reference and supervis
 cafleet fleet create --name demo --coding-agent claude
 ```
 
-Example output: `1 director=2`. Creation registers the current pane and its multiplexer server without starting another session; the backend flag declares the calling coding agent, and every later command targets the recorded pane and server. A Hermes Director passes its own pane, read with `! echo $TMUX_PANE` or `! echo $HERDR_PANE_ID`, as `--pane <pane-id>` ([Hermes setup](quickstart.md#hermes)); `--mux-server <server>` selects a server other than the one CAFleet finds by default. Before creating members, the Director starts its listener through the installed CAFleet skill's backend recipe; the listener's startup replay recovers replies that race with its own startup. The [message listen contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) specifies the listener's records, and the [host evidence contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#host-evidence-and-native-input-authorization) states each backend's reception capabilities and evidence limits.
+Example output: `1 director=2`. Creation registers the current pane and its multiplexer server without starting another session, and the backend flag declares the calling coding agent; every later command targets that pane and server. A Hermes Director adds `--pane <pane-id>` ([Hermes setup](quickstart.md#hermes)), and `--mux-server <server>` selects a server other than the one CAFleet finds by default. Before creating members, the Director starts its listener through the installed CAFleet skill's backend recipe; its startup replay recovers replies that race with that startup. The [message listen contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) specifies the listener's records, and the [host evidence contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#host-evidence-and-native-input-authorization) each backend's reception capabilities and evidence limits.
 
 ### Create and dispatch a member
 
@@ -53,7 +53,7 @@ Poll and ACK your assignment, perform it, poll before reporting completion and o
 cafleet member create --fleet-id 1 --name alice --description "Independent review" --file /home/cafleet-demo/work/demo/.prompts/member.md
 ```
 
-Suppose the returned ID is `3`. Read its ready message, ACK its actual message ID, then dispatch its assignment:
+Suppose the returned ID is `3`. Read its ready message and ACK it by its actual ID, then dispatch the assignment:
 
 ```bash
 cafleet message send --from-member-id 2 --to-member-id 3 "Review the change and report findings."
@@ -77,7 +77,7 @@ cafleet message ack 10
 
 Keep deferred questions and approvals in host-owned task state after ACK, and reconcile replayed IDs before acting; broker events leave pending user decisions pending. The [message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) and [Director consumption](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-consumption-and-continuation) contracts own the full procedure.
 
-The Director keeps its listener for the fleet's lifetime and renews one whose lease expired while the fleet exists. After an unexpected exit it reconciles the inbox and replaces the listener only once the old process has ended; unACKed messages survive damaged output. A Codex Director's `cafleet message listen --codex-thread` forwarder and the OpenCode and Hermes plugins deliver each record as a queued turn: they start a turn on an idle Director and wait for the end of a busy one ([host evidence](https://github.com/himkt/cafleet/blob/main/SPEC.md#host-evidence-and-native-input-authorization)).
+The Director keeps its listener for the fleet's lifetime, renewing an expired lease while the fleet exists; after an unexpected exit it reconciles the inbox and replaces the listener only once the old process has ended. UnACKed messages survive damaged output. [Director requirements](concepts/coding-agents.md#director-requirements) lists each backend's reception mechanism.
 
 On a backend whose [Director verdict](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) is `yes` but whose listener tool is unavailable, the Director states that reception limit and uses manual `message poll` or a finite receive within host permissions. A finite receive also retries ordinary-member previews:
 
@@ -87,7 +87,7 @@ cafleet message wait 2 --timeout 300 --json
 
 ### Handle an observed permission request
 
-Handle the request as [Consume a runtime event](concepts/members.md#consume-a-runtime-event) describes. The Director decides allow or deny itself only when its own session runs in verified auto mode; otherwise it obtains your permission, and it answers manually on the member's native surface when answer coverage is unavailable.
+Handle the request as [Consume a runtime event](concepts/members.md#consume-a-runtime-event) describes. The Director decides allow or deny itself only when its own session runs in verified auto mode, otherwise it obtains your permission; without answer coverage the request is answered manually on the member's native surface.
 
 ### Run a command for a member
 
@@ -125,8 +125,8 @@ cafleet fleet list
 
 Fleet deletion closes the listener with reason `fleet_deleted` ([message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen)), the listener's only normal end; the Director confirms that the listener exited and starts no replacement. Pending messages stay available for later reads.
 
-Fleet deletion retains history. When `cafleet fleet delete` exits 1, the fleet stays registered and the Director keeps its listener; resolve the reported cause and rerun `cafleet fleet delete`. Limit cleanup to the team you own.
+Fleet deletion retains history. When `cafleet fleet delete` exits 1, the Director keeps its listener; resolve the reported cause and rerun it. Limit cleanup to the team you own.
 
 ## Backend variations
 
-Use explicit member backend/model flags to create a mixed team. Resolve role defaults and models through [model choice](concepts/coding-agents.md#model-choice). OpenCode members perform assignments through their selected provider/model, workspace tools, broker and native shell path. Hermes members use your configured default Hermes model unless you name one, and need the [Hermes setup](quickstart.md#hermes) before their first spawn. Each member receives its own installed role/core paths, shared BASE and host prerequisites.
+Create a mixed team with explicit member backend/model flags, resolving role defaults and models through [model choice](concepts/coding-agents.md#model-choice). OpenCode members work through their selected provider/model, workspace tools, broker and native shell path. Hermes members use your configured default Hermes model unless you name one and need the [Hermes setup](quickstart.md#hermes) before their first spawn. Each member receives its own installed role/core paths, shared BASE and host prerequisites.

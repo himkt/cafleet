@@ -4,9 +4,9 @@ Use one SQLite file for a fleet's registry and durable messages. The CLI accesse
 
 ## Backend
 
-The default path is `~/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1`). Pass `--database-url sqlite:///<path>` on a command to select another file. A relative file path resolves against the invoking working directory, then the selected database file is canonicalized for shared pane-lock identity. `member create` renders a non-default database into the spawn prompt's `DATABASE URL:` line, and the member passes that URL on every command; a prompt without the `{database_url}` placeholder is refused for a non-default database ([database selection](https://github.com/himkt/cafleet/blob/main/SPEC.md#database-selection)).
+The default path is `~/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1`). Pass `--database-url sqlite:///<path>` on a command to select another file; a relative path resolves against the invoking working directory, and the selected file is then canonicalized for shared pane-lock identity. `member create` renders a non-default database into the spawn prompt's `DATABASE URL:` line, and the member passes that URL on every command; for a non-default database, a prompt without the `{database_url}` placeholder is refused ([database selection](https://github.com/himkt/cafleet/blob/main/SPEC.md#database-selection)).
 
-Connections enforce foreign keys and normally use `PRAGMA busy_timeout=5000`. Bounded receiving caps database waits to its remaining operation budget. Fleet creation writes its registry and current Director placement in one transaction, and a failed member creation rolls back or deregisters its pending member ([creation failure compensation](https://github.com/himkt/cafleet/blob/main/SPEC.md#creation-failure-compensation)).
+Connections enforce foreign keys and normally use `PRAGMA busy_timeout=5000`; bounded receiving caps database waits to its remaining operation budget. Fleet creation writes its registry and current Director placement in one transaction, and [Members](members.md#registration-and-readiness) covers failed member creation.
 
 ## Relational model
 
@@ -14,7 +14,7 @@ Typed columns store every routing field and required enum. The [database schema]
 
 ## Schema management
 
-A compatible file has CAFleet's application identity, a ledger holding only the embedded schema baseline, the cafleet version that initialized it equal to the running CLI's, and the expected table/column shapes; unrelated auxiliary tables, indexes and triggers stay compatible. An incompatible selected file is preserved unchanged: diagnosis runs before database content writes or setup installs assets.
+A compatible file has CAFleet's application identity, a ledger holding only the embedded schema baseline, the cafleet version that initialized it equal to the running CLI's, and the expected table/column shapes; unrelated auxiliary tables, indexes and triggers stay compatible. An incompatible selected file is preserved unchanged: diagnosis runs before any database content write or asset installation.
 
 | Selected state | Setup behavior |
 |---|---|
@@ -22,7 +22,7 @@ A compatible file has CAFleet's application identity, a ledger holding only the 
 | Valid file of this version | Proceed idempotently |
 | Other populated/identified file, another version's file or malformed schema | Report incompatible format before writes |
 
-Run `cafleet setup` after installation. The same classifier guards normal commands and feeds doctor's read-only diagnosis. Exact errors are in the [schema-version guard](https://github.com/himkt/cafleet/blob/main/SPEC.md#schema-version-guard).
+Run `cafleet setup` after installation. The same classifier guards normal commands and feeds doctor's read-only diagnosis; the [schema-version guard](https://github.com/himkt/cafleet/blob/main/SPEC.md#schema-version-guard) has the exact errors.
 
 ### Upgrading cafleet
 
@@ -32,15 +32,15 @@ Each cafleet version starts from a fresh database, so no fleets, messages or run
 2. After upgrading, run `cafleet setup` once. It creates the version's `~/.local/share/cafleet/cafleet_<VERSION>.db` and records the asset installations there; until then `cafleet doctor` reports the database as absent.
 3. Create your fleets anew.
 
-Database files of earlier versions in `~/.local/share/cafleet/` stay in place, byte for byte. Selecting one through `--database-url` reports an incompatible format; delete them by hand when you no longer need them. With an explicit `--database-url`, point it at a new empty path, or delete the old file by hand, then run `cafleet setup`.
+Database files of earlier versions in `~/.local/share/cafleet/` stay in place, byte for byte; delete them by hand when you no longer need them. With an explicit `--database-url`, point it at a new empty path, or delete the old file by hand, then run `cafleet setup`.
 
 ## Assets-install recording
 
-`asset_installs` records the CLI version for each coding-agent/config-path pair. Setup upserts a record after installing embedded skills and any preset or plugin for that backend, and `cafleet doctor` reports the recorded asset version at each backend's resolved path. Operator customizations belong outside setup-owned assets.
+`asset_installs` records the CLI version for each coding-agent/config-path pair. Setup upserts it after installing that backend's embedded skills and any preset or plugin, and `cafleet doctor` reports the recorded asset version at each backend's resolved path. Operator customizations belong outside setup-owned assets.
 
 ## Retention and pane locks
 
-Deregistration and fleet deletion retain message history while active query paths filter the registry state. Input ownership uses stable lockfiles adjacent to the canonical database file, as specified by the [pane input lock](https://github.com/himkt/cafleet/blob/main/SPEC.md#pane-input-lock). Keep those files in place while processes may use the database.
+Deregistration and fleet deletion retain message history while active query paths filter the registry state. Input ownership uses stable lockfiles beside the canonical database file ([pane input lock](https://github.com/himkt/cafleet/blob/main/SPEC.md#pane-input-lock)); keep them in place while processes may use the database.
 
 ## Member runtime artifacts
 

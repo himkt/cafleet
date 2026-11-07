@@ -1,7 +1,6 @@
 # Coding agents
 
-Select a member backend through the CLI’s `--coding-agent` choices. Mixed-backend members share the same broker contracts. The value is recorded in the
-placement's `coding_agent` column.
+Select a member backend through the CLI’s `--coding-agent` choices; mixed-backend members share the same broker contracts, and the placement's `coding_agent` column records the value.
 
 | Backend | Product | How the pane loads the cafleet skill |
 |---|---|---|
@@ -10,35 +9,16 @@ placement's `coding_agent` column.
 | `opencode` | opencode.ai | Reads the cafleet skill files by absolute path |
 | `hermes` | Hermes Agent | Reads the cafleet skill files by absolute path |
 
-Plain `cafleet setup` installs assets for every supported backend
-in one run; `--coding-agent` narrows the selection. [Quickstart](../quickstart.md#configure)
-lists what setup installs for each backend and the configuration you add.
+Plain `cafleet setup` installs assets for every supported backend in one run, and `--coding-agent` narrows the selection; [Quickstart](../quickstart.md#configure) lists what setup installs for each backend and the configuration you add.
 
-- `cafleet fleet create --coding-agent` is required, operator-declared
-  metadata — cafleet does not spawn the root Director's process and cannot
-  auto-detect what is already running in the calling pane, so the operator
-  states the backend the Director is actually running on. `fleet create`
-  records the calling pane and its multiplexer server; a Hermes Director,
-  whose terminal tools run in a shared gateway, names its pane with
-  `--pane <pane-id>`, and `--mux-server <server>` selects another server
-  ([Hermes setup](../quickstart.md#hermes)).
-- `cafleet member create --coding-agent` both selects which backend is spawned
-  and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
-  value still wins).
+- `cafleet fleet create --coding-agent` is required operator-declared metadata naming the backend the Director actually runs on: cafleet does not spawn the root Director's process and cannot detect what already runs in the calling pane. `fleet create` records the calling pane and its multiplexer server; a Hermes Director names its pane with `--pane <pane-id>`, and `--mux-server <server>` selects another server ([Hermes setup](../quickstart.md#hermes)).
+- `cafleet member create --coding-agent` selects the spawned backend and is recorded as placement metadata; when omitted, the member inherits the spawning Director's placement backend.
 
-Run the root Director on a backend whose Director verdict is `yes`, and spawn members on backends whose Member verdict is `yes`; a backend whose Director verdict is `no` runs only as a member. [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records each backend's verdicts with their evidence.
+Run the root Director on a backend whose Director verdict is `yes` and members on backends whose Member verdict is `yes`; a backend whose Director verdict is `no` runs only as a member. [Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) records each backend's verdicts with their evidence.
 
 ## Director requirements
 
-A Director backend needs two capabilities, checked independently: goal lifecycle controls and reception of the Director's broker records. Goal controls come from the backend itself or from a CAFleet extension that supports the full goal lifecycle across compaction and restarts. Reception falls into three tiers:
-
-| Tier | How records reach the Director | Standing |
-|---|---|---|
-| Native subscribe | The backend itself pushes each record into the session, starting a turn when the session is idle | Preferred |
-| Extension subscribe | A CAFleet plugin that `cafleet setup` installs pushes each record the same way | Accepted, below native |
-| Built-in compromise | The model reads the running listener's output or receives periodic batches | Far below both; recorded only when neither subscribe tier exists |
-
-[Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the tiers and the probes that establish them. Each bundled backend meets both Director requirements as follows:
+A Director backend needs two capabilities, checked independently: goal lifecycle controls, from the backend itself or a CAFleet extension supporting the full goal lifecycle across compaction and restarts, and reception of its broker records. Reception preferably pushes each record into the session, natively or through a CAFleet plugin, starting a turn when idle; a model reading the listener's output ranks far below both ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines the tiers and their probes). Each bundled backend meets both requirements as follows:
 
 | Backend | Director launch | Reception | Goal |
 |---|---|---|---|
@@ -47,13 +27,13 @@ A Director backend needs two capabilities, checked independently: goal lifecycle
 | `opencode` | OpenCode 2.2.0 or later as `opencode mini --standalone` from the project directory, with the default agent | The CAFleet plugin's `cafleet_listen` tool | The CAFleet plugin's `/cafleet-goal` command |
 | `hermes` | The TUI client, `hermes chat --tui` | The CAFleet plugin's `cafleet_listen` tool | Native `/goal` |
 
-A Hermes Director runs the TUI because a classic CLI Director receives and answers member messages without showing the messages or its replies in its pane; Hermes members keep the classic CLI. The shared OpenCode background service passes no client environment to plugins, so it is not a supported Director launch.
+The shared OpenCode background service passes no client environment to plugins, so it is not a supported Director launch.
 
-`cafleet setup` installs the CAFleet plugin for OpenCode and Hermes next to the skills and presets, records which `cafleet` executable the plugin runs, and for Hermes enables the plugin in your Hermes configuration. `cafleet doctor` checks that each installed plugin matches the copy embedded in the CLI and that Hermes enables it. Each plugin tool takes the Director's ID and runs only for a root Director, and the OpenCode member presets deny them.
+For OpenCode and Hermes, `cafleet setup` installs the CAFleet plugin beside the skills and presets, records the `cafleet` executable it runs and, for Hermes, enables it in your Hermes configuration; `cafleet doctor` checks that each plugin matches the CLI's embedded copy and that Hermes enables it. Each plugin tool takes the Director's ID and runs only for a root Director; the OpenCode member presets deny them.
 
 ## Launch modes
 
-New members run through the CAFleet PTY runner with a declared detection-coverage state. Every launch mode is classified `auto` or `manual`. An `auto` mode is native automatic review or a fixed allow/deny policy, and a `manual` mode asks a human on the native surface for operations its rules do not settle. Omitting `--permission-mode` selects the backend's default mode, which is an `auto` mode on every backend:
+New members run through the CAFleet PTY runner with a declared detection-coverage state. Each launch mode is `auto` (native automatic review or a fixed allow/deny policy) or `manual` (a human answers on the native surface for operations its rules do not settle). Omitting `--permission-mode` selects the backend's default mode, `auto` on every backend:
 
 | Backend | Default mode | Other `auto` modes | `manual` modes |
 |---|---|---|---|
@@ -62,160 +42,63 @@ New members run through the CAFleet PTY runner with a declared detection-coverag
 | `opencode` | `cafleet` | — | `cafleet-ask` |
 | `hermes` | `smart` | — | `manual` |
 
-Hermes has no launch flag for its mode: CAFleet records the `smart` or `manual` choice, and the `approvals.mode` of your Hermes configuration governs the session. [Hermes configuration](#hermes-configuration) covers the configuration.
+Hermes has no launch flag for its mode: CAFleet records the `smart` or `manual` choice, and your Hermes configuration's `approvals.mode` ([Hermes configuration](#hermes-configuration)) governs the session.
 
-When the member's bundled runner profile recognizes an approval prompt, the Director handles it as a runtime event ([Consume a runtime event](members.md#consume-a-runtime-event)). A prompt the profile does not recognize, such as one in a pane narrower than the profile's captured layouts, is answered manually on the member's native surface. A Member-eligible backend's profile recognizes every approval prompt its default mode can show, outside its recorded layout limits ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements)). Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Choose a native policy](members.md#choose-a-native-policy) covers mode selection and profile coverage, and the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
+The Director handles an approval prompt the member's bundled runner profile recognizes as a [runtime event](members.md#consume-a-runtime-event); an unrecognized one, such as in a pane narrower than the profile's captured layouts, is answered manually on the member's native surface. A Member-eligible backend's profile recognizes every approval prompt its default mode can show outside its recorded layout limits ([Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements)). Each backend's launch configuration supplies broker access, subject to native and managed rules. [Choose a native policy](members.md#choose-a-native-policy) covers mode selection and profile coverage; the [spawn argv contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#per-backend-build_spawn_argv-exact-token-by-token) specifies child arguments, defaults and sandbox boundaries.
 
 ## cafleet usage from a member pane
 
-The cafleet CLI works unchanged from any backend pane. Identity reaches a
-member through its spawn prompt: `cafleet member create` renders the identity
-and database placeholders to literals, so the member reads its ids as plain
-text lines (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly
-on every command, adding `--database-url <url>` when its `DATABASE URL:` line
-names a URL rather than `default`. The [spawn-prompt substitution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#spawn-prompt-substitution)
-lists each placeholder and its label line. The member environment carries only the selected backend's config-location variable when the creator sets it.
-Each backend honors a leading-`!` shell shortcut on the coding agent's input line, including the minimal `mini` interface that OpenCode member panes run; [backend capabilities](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares their sandbox and shell-command posture.
-`cafleet member exec` submits a visible native command through the runner, using the profile's measured native-exec plan or delivery fallback and queueing it while a detected native interaction is open. A member routes a
-command its harness does not run through the Director — see
-[Command routing](members.md#command-routing). The
-[CLI specification](https://github.com/himkt/cafleet/blob/main/SPEC.md#63-cli)
-is the full command reference.
+The cafleet CLI works unchanged from any backend pane. `cafleet member create` renders the spawn prompt's identity and database placeholders to literals, so a member reads its IDs as plain text lines (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on every command, including a non-default database as [Storage](storage.md#backend) describes; the [spawn-prompt substitution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#spawn-prompt-substitution) lists each placeholder and its label line. Each backend honors a leading-`!` shell shortcut on its input line, including the minimal `mini` interface of OpenCode member panes; [backend capabilities](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares their sandbox and shell-command posture. `cafleet member exec` submits a visible native command through the runner ([Deliver generated input](members.md#deliver-generated-input)), and a member routes a command its harness does not run through the Director ([Command routing](members.md#command-routing)). The [CLI specification](https://github.com/himkt/cafleet/blob/main/SPEC.md#63-cli) is the full command reference.
 
 ## One-shot command isolation
 
-Members and the Director run each `cafleet` command as the only command of its
-shell-tool invocation, so the host's single-command permission rules match it.
-A compound line can fall outside those rules and fail with a permission error,
-even when every command in it is allowed.
+Members and the Director run each `cafleet` command as the only command of its shell-tool invocation, so the host's single-command permission rules match it; a compound line can fail with a permission error even when every command in it is allowed.
 
 ## Model choice
 
-Before each spawn, the Director reads the selected backend's model catalog
-and policy in the installed CAFleet skill, then passes the chosen
-`--coding-agent` and `--model` values. The CLI forwards the model; selection
-is a Director responsibility. The catalog provides exact spawn tokens,
-Claude aliases, reviewed capability classes, standard input/output prices
-and official sources, ordered from most to least capable within each backend.
-The OpenCode catalog lists every Console model with its `opencode/` prefix,
-excluding models past their published deprecation date, and every OpenCode Go
-model with its `opencode-go/` prefix.
+Before each spawn, the Director resolves the member's backend and model from the installed CAFleet skill's Director policy, which owns the exact rules, and that backend's model catalog — exact spawn tokens, Claude aliases, reviewed capability classes, standard input/output prices and official sources, most to least capable within each backend — then passes `--coding-agent` and `--model`; the CLI only forwards the model. The OpenCode catalog lists every Console model (`opencode/` prefix) not past its published deprecation date and every OpenCode Go model (`opencode-go/` prefix).
 
-A bare Claude or GPT model reference selects Claude Code or Codex on every fleet, including an OpenCode fleet, and a provider-prefixed reference such as `opencode/glm-5.3` selects OpenCode. Naming OpenCode for the member selects OpenCode for that model, and a bare name offered only by OpenCode selects OpenCode when it uniquely matches a catalog ID. For an OpenCode model named without a provider, the Director uses the OpenCode Go form when your configured providers offer it, otherwise the Console form. The Director asks you to resolve an unknown, ambiguous or mismatched reference, or an OpenCode model your providers do not offer. The installed Director policy owns the exact resolution rules.
+Name a model, a backend or both. A bare Claude or GPT reference selects Claude Code or Codex on any fleet. A provider-prefixed reference such as `opencode/glm-5.3`, naming OpenCode, or a bare name only OpenCode offers that uniquely matches a catalog ID selects OpenCode; a model named without a provider uses the Go form when your providers offer it, otherwise the Console form. Hermes has no catalog: the Director selects it only when you name it or the Director runs on it, and a Hermes member omits `--model` and `--effort` by default so your configured model and provider apply; a model you name passes through verbatim, provider-prefixed IDs included. The Director asks you to resolve an unknown, ambiguous or mismatched reference, a missing suitable model, a model your providers do not offer, or a Hermes model under cost efficiency mode.
 
-Use the selected backend's role defaults and catalog as the source of truth.
+Explicit backend, model and effort values are overrides. Only the exact phrase `cost efficiency mode` in your originating request activates cheapest-capable selection for ordinary members: the Director chooses a backend, then compares models within it, preferring models in your OpenCode Go subscription as effectively free. Otherwise ordinary members use the backend's other-member default; reviewers use their role defaults, including supported effort levels. The catalog is refreshed at least every 30 days through the model-refresh workflow; a stale catalog disables cost efficiency mode until a refreshed release ships. Prices are planning estimates and classes reviewed judgments, not invoice guarantees or provider benchmark claims.
 
-Hermes has no maintained model catalog. The Director selects `hermes` only when
-you name the backend or the fleet's Director runs on Hermes, never from a model
-name. A Hermes member omits `--model` and `--effort` by default, so your
-configured default model and provider apply; a model you name passes through
-verbatim, provider-prefixed ids included. Cost efficiency mode has no catalog
-prices to compare for Hermes, so the Director asks you to choose.
+Evidence of insufficient capability can trigger a replacement with a strictly stronger model on the same backend, a bounded number of times per task; a user-pinned model requires your decision first.
 
-Only the exact phrase `cost efficiency mode` in the originating user request
-activates cheapest-capable selection for ordinary members. The Director
-chooses a backend first and compares models within that backend. On OpenCode,
-models available through the operator's OpenCode Go subscription count as
-effectively free and are preferred. Outside cost efficiency mode, ordinary
-members use the backend's other-member default. Reviewers use their role defaults, including supported effort
-levels.
-
-Explicit backend, model and effort values remain overrides. A mismatch or
-missing suitable model is relayed to the operator. The catalog is maintained
-through the model-refresh workflow and refreshed at least every 30 days;
-staleness disables cost efficiency mode until a maintainer refreshes and
-ships it. Prices are planning estimates and capability classes are reviewed
-judgments, rather than invoice guarantees or provider benchmark claims.
-
-Evidence of insufficient capability can trigger a replacement with a strictly stronger model on the same backend, a bounded number of times per task. The installed Director policy owns evidence, handoff, limits and selection; a user-pinned model requires an operator decision before replacement.
-
-`cafleet member create --model <string>` forwards the value to the backend's
-own model flag; omission uses that binary's default. Claude, Codex and Hermes
-pass any value through and let the binary reject unknown models, so a newly released
-model needs no CAFleet release. OpenCode requires the `<provider-id>/<model-id>`
-form, checked when the member is created. The
-[model selection contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#model-selection)
-has the exact format and error.
+`cafleet member create --model <string>` forwards the value to the backend's model flag; omitted, the binary's default applies. Claude, Codex and Hermes pass any value through and let the binary reject unknown models, so a new model needs no CAFleet release; OpenCode requires `<provider-id>/<model-id>`, checked at creation ([model selection contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#model-selection)).
 
 ## Reasoning effort
 
-`cafleet member create --effort <level>` forwards a reasoning-effort level to
-the spawned backend binary. Unlike `--model`, the accepted level set is
-validated per backend at create time, before any registration or multiplexer
-side effect; omit the flag and the binary uses its own default. OpenCode has no
-reasoning-effort control, so omit the flag for OpenCode members. Hermes
-forwards the level as its own reasoning flag. The
-[reasoning effort contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#reasoning-effort)
-lists each backend's levels and forwarding form.
+`cafleet member create --effort <level>` forwards a reasoning-effort level to the spawned backend binary. Unlike `--model`, the level is validated per backend at create time, before any registration or multiplexer side effect; omitted, the binary uses its own default. OpenCode has no reasoning-effort control, so omit the flag for OpenCode members; Hermes forwards the level as its own reasoning flag. The [reasoning effort contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#reasoning-effort) lists each backend's levels and forwarding form.
 
 ## Backend differences
 
-The backends differ in reasoning effort, pane titles and sandbox isolation;
-the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities)
-compares them. Because only claude panes display the member name, use the
-`pane_id` column of `cafleet member list` to locate a member's pane.
+The backends differ in reasoning effort, pane titles and sandbox isolation, as the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares. Only claude panes display the member name, so locate a member's pane by the `pane_id` column of `cafleet member list`.
 
-A Hermes member's session can keep accepted work and background processes
-running after its pane's client exits. `cafleet member delete` stops that
-session's work and the background processes it registered, and keeps the
-member when it cannot verify the stop; CAFleet never touches your Hermes
-gateway or sessions it does not own.
+A Hermes member's session can keep accepted work and background processes running after its pane's client exits. `cafleet member delete` stops that session's work and registered background processes, keeping the member when it cannot verify the stop; CAFleet never touches your Hermes gateway or sessions it does not own.
 
 ## Backend configuration
 
-[Quickstart](../quickstart.md#configure) gives each backend's starting
-configuration. This section explains it and lists the fixes for common
-symptoms.
+[Quickstart](../quickstart.md#configure) gives each backend's starting configuration; this section explains it and lists fixes for common symptoms.
 
 ### Config directories
 
-`CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `HERMES_HOME` relocate their backend's
-installed assets. `OPENCODE_CONFIG_DIR` relocates only the OpenCode presets and
-plugin; its skills remain under `~/.config/opencode/skills`. Set the variable in
-the environment you run `cafleet setup` and `cafleet member create` from:
-`member create` forwards it to the member, so the member reads the
-configuration CAFleet installed into. The
-[config-dir resolution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#config-dir-resolution)
-specifies validation and every install target.
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `HERMES_HOME` relocate their backend's installed assets; `OPENCODE_CONFIG_DIR` relocates only the OpenCode presets and plugin, leaving its skills under `~/.config/opencode/skills`. Set the variable where you run `cafleet setup` and `cafleet member create`: `member create` forwards only the selected backend's variable to the member, which then reads the configuration CAFleet installed into. The [config-dir resolution contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#config-dir-resolution) specifies validation and every install target.
 
 ### Claude Code configuration
 
-Use the auto mode profile when your Director session runs in `auto` mode, and
-the other-modes profile for any other mode. Both profiles pre-approve what
-members need beyond their broker commands, and auto mode's classifier reviews
-each other member call.
+Use the auto mode profile when your Director session runs in `auto` mode, and the other-modes profile for any other mode. Both pre-approve what members need beyond their broker commands; in auto mode the classifier reviews every other member call and every Director command no rule matches, so that profile carries no `Bash(cafleet ...)` entry.
 
 | Entry | Profile | Needed by | Why |
 |---|---|---|---|
 | `Bash(cafleet *)` | Other modes | The Director | One pattern pre-approves every subcommand the Director runs, for every fleet, because IDs are literal integer arguments |
 | `Skill(cafleet)`, `Skill(cafleet-design-doc)` | Both | The Director and every member | Each loads the installed skills through the Skill tool |
-| `Read(~/.claude/skills/**)` | Both | The Director and every member | Role and reference pages of an installed skill sit outside the working directory |
+| `Read(~/.claude/skills/**)` | Both | The Director and every member | Role and reference pages of an installed skill sit outside the working directory; under a relocated `CLAUDE_CONFIG_DIR`, use that directory's `skills/**` |
 | `Edit`, `Write` | Both | Every member that writes files | A matching entry pre-approves the member's edits; no entry covers a protected path such as `.git` or `.claude` |
-| The `member prompt`, `member exec` and `member press` prefixes under `ask` | Both, optional | The Director | The operator confirms each of the Director's dispatches; `ask` entries outrank allow entries |
+| The `member prompt`, `member exec` and `member press` prefixes under `ask` | Both, optional | The Director | The operator confirms each Director dispatch, including each `member exec` for a member's denied or refused command; `ask` entries outrank allow entries |
 
-In auto mode a classifier reviews each Director command that no rule matches,
-so the auto mode profile carries no `Bash(cafleet ...)` entry. `defaultMode`
-selects auto mode from user-level or managed settings; a project or local
-settings file cannot select it.
+`defaultMode` selects auto mode only from user-level or managed settings. `Edit` and `Write` apply to every session that reads the settings file, your own included; to confine them, replace both with a path rule such as `Edit(~/work/**)`, which covers every file-editing tool.
 
-`Edit` and `Write` apply to every session that reads the settings file, your
-own included. To confine the approval, replace both with a path rule such as
-`Edit(~/work/**)`, which covers every file-editing tool. When
-`CLAUDE_CONFIG_DIR` relocates the config directory, write the `Read` entry
-against that directory's `skills/**`.
-
-A claude member needs no allow rule of its own for the broker commands:
-cafleet passes `Bash(cafleet message *)` on the member's spawn command line. A
-`deny` or `ask` rule that matches a broker command, the managed setting
-`allowManagedPermissionRulesOnly` or a blocking `PreToolUse` hook still stops
-a member. Every Director-only command takes the caller's ID as
-`--from-member-id` and refuses unless it is the fleet's root Director, which
-catches a member's accidental invocation; this guard is not a security
-boundary ([Command routing](members.md#command-routing)).
-
-A member whose shell command is denied or refused by auto mode asks its
-Director to run it, and with the `ask` entries each such `cafleet member exec`
-asks you to confirm.
+A claude member needs no broker allow rule: cafleet passes `Bash(cafleet message *)` on its spawn command line. A `deny` or `ask` rule matching a broker command, the managed setting `allowManagedPermissionRulesOnly` or a blocking `PreToolUse` hook still stops it. A member whose shell command is denied or refused by auto mode asks its Director to run it, and Director-only commands refuse a member's own ID ([Command routing](members.md#command-routing)).
 
 | Symptom | Cause | Resolution |
 |---|---|---|
@@ -225,32 +108,13 @@ asks you to confirm.
 | The classifier blocks a Director `cafleet` command | Auto mode judged the action outside the request | Add an allow pattern for that subcommand |
 | `defaultMode: "auto"` has no effect | It is set in a project or local settings file, or auto mode is unavailable for the organization or model | Move it to `~/.claude/settings.json`; when auto mode is unavailable, use the other-modes profile |
 
-Claude Code can show two auto-mode dialogs in a member pane after a turn:
-`Make auto mode your default permission mode?` when your
-`~/.claude/settings.json` pins a non-`auto` `defaultMode`, and `Teach auto mode
-about your environment?` in auto mode. The runner holds input behind each one
-and sends the Director a question event. The Director dismisses the first with
-`No, keep …` and the second with `Not now`, and asks you before choosing `Don't
-show again`; each answer changes only that dialog's own flag in the member's
-Claude configuration. The `Yes` choices are never sent for you; answer them in
-the member pane if you want them.
+Claude Code can show two auto-mode dialogs in a member pane after a turn: `Make auto mode your default permission mode?` when your `~/.claude/settings.json` pins a non-`auto` `defaultMode`, and `Teach auto mode about your environment?` in auto mode. The runner holds input behind each and sends the Director a question event. The Director dismisses the first with `No, keep …` and the second with `Not now`, asking you before `Don't show again`; each answer changes only that dialog's flag in the member's Claude configuration. CAFleet never sends the `Yes` choices; answer them in the member pane if you want them.
 
 ### Codex configuration
 
-`network_access = true` is required because tmux and herdr communicate over a
-local socket, which the Codex sandbox classifies as network access; without it
-cafleet commands fail with `Operation not permitted`. `writable_roots` grants
-write access to the directory of the selected database file, the default
-`~/.local/share/cafleet` unless `--database-url` selects another.
+`network_access = true` is required because tmux and herdr communicate over a local socket, which the Codex sandbox classifies as network access; without it cafleet commands fail with `Operation not permitted`. `writable_roots` grants write access to the selected database file's directory, `~/.local/share/cafleet` unless `--database-url` selects another.
 
-`cafleet setup` installs `~/.codex/rules/cafleet.rules`, which allows every
-`cafleet` command. Codex members need it to run their broker commands, and
-the Director-only commands refuse a member's own ID on their own. Codex
-applies the strictest decision across every `*.rules` file in that directory,
-and setup overwrites its own file on every install, so put your own rules,
-such as `prompt` rules to confirm the Director's commands, in a separate file
-there. A rules directory maintained without the installed file, for example
-from a dotfiles repository, needs at least this rule:
+`cafleet setup` installs `~/.codex/rules/cafleet.rules`, which allows every `cafleet` command. Codex members need it for their broker commands, and the Director-only commands refuse a member's own ID by themselves. Codex applies the strictest decision across every `*.rules` file in that directory, and setup overwrites its own file on every install, so put your own rules, such as `prompt` rules confirming the Director's commands, in a separate file there. A rules directory maintained without the installed file, for example from a dotfiles repository, needs at least this rule:
 
 ```text
 prefix_rule(
@@ -261,31 +125,15 @@ prefix_rule(
 )
 ```
 
-That rule is enough for members. Keep the installed file for a Director
-session: Codex has no classifier to review the other `cafleet` commands the
-Director runs, so without a matching allow each of them follows the session's
-own approval policy and sandbox.
+That rule is enough for members. Keep the installed file for a Director session: Codex has no classifier to review the Director's other `cafleet` commands, so without a matching allow each follows the session's own approval policy and sandbox.
 
 ### OpenCode configuration
 
-`cafleet setup` installs both agent presets into `~/.config/opencode/agents/`
-and the CAFleet plugin as `~/.config/opencode/plugins/cafleet.ts`, with a
-`cafleet.executable` file naming the `cafleet` it runs; rerun setup after
-moving or upgrading the CLI. The `cafleet` preset allows its listed commands
-and denies every other shell command without a prompt, and `cafleet-ask` opens
-a native permission form for the Director to answer instead. Neither preset is
-an OS-level sandbox: keep every loaded OpenCode configuration free of MCP
-servers, submit one shell command per invocation, and use the `codex` backend
-when you need kernel-enforced isolation.
+`cafleet setup` installs both agent presets into `~/.config/opencode/agents/` and the CAFleet plugin as `~/.config/opencode/plugins/cafleet.ts`, with a `cafleet.executable` file naming the `cafleet` it runs; rerun setup after moving or upgrading the CLI. The `cafleet` preset allows its listed commands and denies every other shell command without a prompt; `cafleet-ask` instead opens a native permission form for the Director to answer. Neither preset is an OS-level sandbox: keep every loaded OpenCode configuration free of MCP servers, submit one shell command per invocation, and use the `codex` backend for kernel-enforced isolation.
 
-While a goal is active the plugin continues the session turn by turn, and it
-pauses the goal after three continuation turns without reported progress or
-after 50 continuations; `/cafleet-goal resume` restarts it with a fresh
-continuation budget.
+While a goal is active the plugin continues the session turn by turn, pausing the goal after three continuation turns without reported progress or after 50 continuations; `/cafleet-goal resume` restarts it with a fresh continuation budget.
 
-OpenCode allows every action by default, so the plugin tools run on a default
-Director without a prompt. If your configuration adds a broad `ask` or `deny`
-rule, add this rule after it so the Director keeps the plugin tools:
+OpenCode allows every action by default, so the plugin tools run on a default Director without a prompt. If your configuration adds a broad `ask` or `deny` rule, add this rule after it so the Director keeps the plugin tools:
 
 ```json
 { "action": "cafleet", "resource": "*", "effect": "allow" }
@@ -293,29 +141,13 @@ rule, add this rule after it so the Director keeps the plugin tools:
 
 ### Hermes configuration
 
-Hermes members use your existing Hermes configuration: your configured default
-provider and model, and your profile when `active_profile` selects one. Each
-member starts a fresh conversation.
+Hermes members use your existing Hermes configuration: your configured default provider and model, and your profile when `active_profile` selects one. Each member starts a fresh conversation.
 
-`cafleet setup --coding-agent hermes` installs the CAFleet plugin into the
-`plugins/cafleet/` directory of the Hermes home that `hermes config path`
-reports, including an active profile's home, with an `executable` file naming
-the `cafleet` it runs. It then edits the file `hermes config path` reports,
-keeping the rest of the file: it adds `cafleet` to `plugins.enabled` and sets
-`plugins.entries.cafleet.allow_gateway_injection` to `true`. A plain
-`cafleet setup` on a host without `hermes` installs the skills and skips the
-plugin.
+`cafleet setup --coding-agent hermes` installs the CAFleet plugin into `plugins/cafleet/` of the Hermes home that `hermes config path` reports, including an active profile's home, with an `executable` file naming the `cafleet` it runs. It then edits the reported file, keeping the rest of it: it adds `cafleet` to `plugins.enabled` and sets `plugins.entries.cafleet.allow_gateway_injection` to `true`. A plain `cafleet setup` on a host without `hermes` installs the skills and skips the plugin.
 
-A Hermes Director names its pane with `--pane` because Hermes runs every
-session's terminal tools in one shared gateway, which may carry another pane's
-variables; the leading-`!` local shell runs in your pane's own environment.
-Each broker record arrives as its own turn, in the order the broker delivered
-it.
+Hermes runs every session's terminal tools in one shared gateway, which may carry another pane's variables, so a Hermes Director names its pane with `--pane`; the leading-`!` local shell runs in your pane's own environment. Each broker record arrives as its own turn, in the broker's delivery order.
 
-Under `approvals.mode: smart`, the default, commands Hermes does not consider
-dangerous run without review, and its guardian model reviews the rest. A
-guardian escalation shows an approval prompt in the member's pane, which the
-Director answers. CAFleet needs no `approvals.deny` entries.
+Under `approvals.mode: smart`, the default, commands Hermes does not consider dangerous run without review and its guardian model reviews the rest; a guardian escalation shows an approval prompt in the member's pane, which the Director answers. CAFleet needs no `approvals.deny` entries.
 
 | Symptom | Cause | Resolution |
 |---|---|---|
