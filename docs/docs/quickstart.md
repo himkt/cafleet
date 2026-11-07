@@ -28,6 +28,7 @@ Configure each backend you use:
 | [`codex` (OpenAI Codex CLI)](#codex) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` |
 | [`opencode`](#opencode) | — | — | The skills, the `cafleet` and `cafleet-ask` agent presets and the CAFleet plugin |
 | [`hermes` (Hermes Agent)](#hermes) | `~/.hermes/config.yaml` | Keep `approvals.mode` at its `smart` default | The skills and the CAFleet plugin, enabled in your Hermes configuration |
+| [`pi` (pi coding agent)](#pi) | — | — | The skills and the CAFleet pi extension |
 
 The paths above are defaults ([Config directories](concepts/coding-agents.md#config-directories) covers relocating them); [Backend configuration](concepts/coding-agents.md#backend-configuration) has each backend's full reference and troubleshooting.
 
@@ -129,6 +130,26 @@ Run the Director in the TUI client: `hermes chat --tui`, or set
 5. Start reception with the plugin's `cafleet_listen` tool, passing the
    Director ID.
 
+### pi
+
+1. Install pi 1.5.0 or later and configure its default provider and model.
+2. Run `cafleet setup --coding-agent pi`. Setup installs into `~/.pi/agent`,
+   or into `PI_CODING_AGENT_DIR` when you set it; set the same value where
+   you run `cafleet member create`.
+3. Launch the Director with plain `pi` from the project directory, so the
+   CAFleet pi extension loads.
+4. Register the fleet with
+   `cafleet fleet create --name <name> --coding-agent pi`, then start
+   reception with the extension's `cafleet_listen` tool, passing the
+   Director ID.
+5. Manage a goal with `/cafleet-goal <objective>` and its `status`,
+   `pause`, `resume` and `clear` subcommands.
+
+Members run under the CAFleet member gate's `cafleet` mode, which blocks
+every shell command outside its allowlist. Choose
+`--permission-mode cafleet-ask` for a member whose other commands should ask
+the Director instead ([pi configuration](concepts/coding-agents.md#pi-configuration)).
+
 ### Trust the working directory
 
 A freshly spawned member stalls on its coding agent's first-run trust prompt, ignoring every message until the prompt is cleared. Trust each working directory in advance: launch your coding agent there once and accept the prompt, or add a trust entry to its configuration. For Codex, add the absolute workspace path to `~/.codex/config.toml`:
@@ -138,7 +159,7 @@ A freshly spawned member stalls on its coding agent's first-run trust prompt, ig
 trust_level = "trusted"
 ```
 
-Trust is granted per directory, so each git worktree needs its own approval.
+Trust is granted per directory, so each git worktree needs its own approval. pi members skip pi's project-trust prompt by ignoring trust-gated project-local resources, so they need no trust entry.
 
 ## Simple example — invoke from a coding agent
 

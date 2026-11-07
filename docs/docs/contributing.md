@@ -6,11 +6,11 @@ Develop changes through reviewed designs and the bundled CAFleet workflows, runn
 
 | Entry | Responsibility |
 |---|---|
-| `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters; built by the root `Cargo.toml` and `build.rs`, which embeds `skills/`, `presets/` and `extensions/` |
+| `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters; built by the root `Cargo.toml` and `build.rs`, which embeds `skills/`, `presets/` and `extensions/`; `src/coding_agent/native/` holds one native screen fixture file per backend with catalogued screens |
 | `migrations/` | Embedded SQL schema baseline |
 | `skills/` | Installed agent-facing skills, roles and references |
 | `presets/` | Backend permission/configuration assets |
-| `extensions/` | Backend plugins that `cafleet setup` installs for Director reception and goals |
+| `extensions/` | One directory per backend whose plugin or extension `cafleet setup` installs, for Director reception, goals and, where the backend has no native per-tool approval, the member gate |
 | `docs/` | Independent operator documentation and its Node/pnpm site tooling |
 | `design-docs/` | Numbered design documents and local evidence |
 

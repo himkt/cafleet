@@ -1,7 +1,7 @@
 # pi coding-agent backend
 
 **Status**: Approved
-**Progress**: 8/52 tasks complete
+**Progress**: 14/52 tasks complete
 **Last Updated**: 2026-11-07
 
 ## Overview
@@ -540,15 +540,15 @@ Steps 1–5 write the documentation before code. They write the pi Role eligibil
 
 ### Step 2: Documentation site
 
-- [ ] `docs/docs/concepts/coding-agents.md`: the pi backend, its launch modes in Launch modes, the member gate posture, no sandbox and the extension-backed Director <!-- completed: -->
-- [ ] `docs/docs/quickstart.md`: a § pi section (install, `cafleet setup --coding-agent pi`, plain `pi` Director launch, `/cafleet-goal`, `PI_CODING_AGENT_DIR`) <!-- completed: -->
-- [ ] `docs/docs/concepts/members.md` and `docs/docs/mixed-backend-team.md`: pi mentions where these pages carry backend-specific content (launch-mode forms, models without a catalog) <!-- completed: -->
-- [ ] `docs/docs/contributing.md`: `extensions/pi/` and `native/pi.json` in the project-structure content <!-- completed: -->
-- [ ] Run `mise //docs:build` and inspect any changed piped table cell in the rendered HTML <!-- completed: -->
+- [x] `docs/docs/concepts/coding-agents.md`: the pi backend, its launch modes in Launch modes, the member gate posture, no sandbox and the extension-backed Director <!-- completed: 2026-11-07T23:53 -->
+- [x] `docs/docs/quickstart.md`: a § pi section (install, `cafleet setup --coding-agent pi`, plain `pi` Director launch, `/cafleet-goal`, `PI_CODING_AGENT_DIR`) <!-- completed: 2026-11-07T23:53 -->
+- [x] `docs/docs/concepts/members.md` and `docs/docs/mixed-backend-team.md`: pi mentions where these pages carry backend-specific content (launch-mode forms, models without a catalog) <!-- completed: 2026-11-07T23:53 -->
+- [x] `docs/docs/contributing.md`: `extensions/pi/` and `native/pi.json` in the project-structure content <!-- completed: 2026-11-07T23:53 -->
+- [x] Run `mise //docs:build` and inspect any changed piped table cell in the rendered HTML <!-- completed: 2026-11-07T23:53 -->
 
 ### Step 3: README.md
 
-- [ ] Check the README pitch and install commands against the docs index; edit only on drift <!-- completed: -->
+- [x] Check the README pitch and install commands against the docs index; edit only on drift <!-- completed: 2026-11-07T23:53 -->
 
 ### Step 4: Skills
 
