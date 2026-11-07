@@ -8,9 +8,9 @@ numbering/format rules live in the shared [design-document guidelines](../../ski
 
 | Audience | Home | Content |
 |---|---|---|
-| Everything (contract) | `SPEC.md` | Every contract: CLI, output, errors, environment, schema, runtime, multiplexer, backends, presets, wire. §6.7 Coding-agent backends covers role requirements, per-backend role eligibility, Director extensions, backend argv, model/effort validation, permission posture, presets and host evidence. |
-| Users | `docs/` site | Concepts, usage, setup and configuration steps a user performs; exact contract detail is a link to `SPEC.md`. `docs/docs/concepts/coding-agents.md` explains backend differences, selection and configuration. |
-| Agents | `skills/` | Necessary-and-sufficient instructions to drive cafleet, with command facts in `skills/cafleet/reference/cli.md`. `skills/cafleet/reference/coding-agents.md` owns the runtime overlay. |
+| Everything (contract) | `SPEC.md` | Every contract: CLI, output, errors, environment, schema, runtime, multiplexer, backends, presets, wire. §6.7 Coding-agent backends covers role requirements, per-backend role eligibility, Director extensions, backend argv, model/effort validation, the permission posture contract (recommended user permission profiles are `docs/` content), presets and host evidence. |
+| Users | `docs/` site | Concepts, usage, setup and configuration steps a user performs, stated as user-visible behavior and the decisions a user makes; numbered Director procedures live in the skills, and mechanism and exact contract detail is a link to `SPEC.md`. `docs/docs/concepts/coding-agents.md` explains backend differences, selection and configuration. |
+| Agents | `skills/` | Necessary-and-sufficient instructions to drive cafleet: `skills/cafleet/reference/cli.md` carries the command facts an agent acts on (invocations, flags, outputs it reads, errors it must recognize, next commands), role files carry procedure and link `cli.md` for command behavior, and implementation timing, concurrency and internal mechanics stay in `SPEC.md`. `skills/cafleet/reference/coding-agents.md` owns the runtime overlay. |
 
 Skills never link `docs/` or `SPEC.md`; they carry the facts they need. `SPEC.md` never links `docs/`.
 
@@ -31,7 +31,17 @@ Every target below is updated in the same design-doc cycle as the change that to
 | `skills/cafleet/reference/cli.md` | Any change to a `SPEC.md` fact that `cli.md` carries, updated in the same change | Agents run stale commands |
 | `.claude/rules/` | The project convention the rule captures changes | Agents follow outdated conventions |
 
-`SPEC.md` edits preserve its section structure and contract-level detail, and stay descriptive — specification only, no recommendations or implementation advice. Paths that are part of a specified contract (embedded preset paths and their install targets, the schema baseline) are `SPEC.md` content.
+`SPEC.md` edits preserve its section numbering (an empty numbered section is removed without renumbering the others) and contract-level detail, and stay descriptive — specification only, no recommendations or implementation advice. Paths that are part of a specified contract (embedded preset paths and their install targets, the schema baseline) are `SPEC.md` content.
+
+Each `SPEC.md` fact class has one owning section. Every other section keeps only its own interaction with the fact plus a `§` pointer to the owner.
+
+| Fact class | Owning section | Other sections |
+|---|---|---|
+| CLI surface: synopsis, flags, validation order, output fields | §6.3 CLI | Module, runtime and multiplexer sections keep their behavior plus `§6.3 <heading>` |
+| Broker, multiplexer, runtime and backend behavior | Its module section (§6.1–§6.9) | §6.3 keeps the command-level outcome plus a `§` pointer |
+| Verbatim error strings | §6.3 `#### Error Messages`; backend contract errors in §6.7 `#### Contract error strings` | Action prose cites the row |
+| Table columns, enums, nullability, CHECKs, indexes | §8 exact DDL | §6.9 states runtime semantics only: identity, retention, transactional checks, privacy, claim release, audit immutability |
+| Cross-cutting policy | Its §6 owner | §7 keeps a `§` pointer and states only the policy no §6 section owns |
 
 ## Audiences and paths
 
@@ -116,7 +126,8 @@ strings are preserved verbatim when they move into a cell.
 An enumeration that would otherwise appear on more than one page gets exactly
 one **owning page** carrying the table. Every other mention is a **link plus a
 one-clause summary** — enough for the reader to know whether to follow it, never
-a restatement of the owned attributes.
+a restatement of the owned attributes. `SPEC.md` applies the same rule between its
+sections, with a `§` reference as the link.
 
 Two rules keep the non-owning mentions honest:
 
@@ -151,9 +162,9 @@ Write CAFleet base instructions so they read the same on every backend: family `
 2. **Role defaults**: the concrete model and effort assignments for reviewers and other members; models come from the backend catalog (or are `—` when the backend has no maintained catalog) and effort matches its runtime capability.
 3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
-5. **Role eligibility**: per-requirement `yes`/`no` rows — Director `goal`, `listen` and `verdict`, plus Member — each requirement row with its source, delivery, checked native version and date.
+5. **Role eligibility**: a `Role | Eligible | Basis` table with a Director row and a Member row. Basis carries each requirement's source, delivery and checked native version plus the runtime caveats an agent acts on, while the evidence prose lives in `SPEC.md` § Role eligibility.
 
-Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying the Template in this rule and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill exclusively maintains model catalogs, provenance/context notes, canonical Role defaults and shared freshness metadata from official sources, refreshing model data at least every 30 days. Runtime documentation maintenance owns Runtime bindings, bound runtime notes, Role eligibility and worked resolutions, and re-checks eligibility whenever a bundled profile boundary or `Evidence:` line changes; structural reorganization preserves the model freshness date.
+Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying the Template in this rule and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection, whose resolution procedures live in `skills/cafleet/reference/model-selection.md`. The `cafleet-model-list-refresh` skill exclusively maintains model catalogs, provenance/context notes, canonical Role defaults and shared freshness metadata from official sources, refreshing model data at least every 30 days. Runtime documentation maintenance owns Runtime bindings, bound runtime notes, Role eligibility and worked resolutions, and re-checks eligibility whenever a bundled profile boundary or `Evidence:` line changes; structural reorganization preserves the model freshness date.
 
 ### How the base and overlay connect
 
@@ -163,7 +174,7 @@ State shared operational facts in each home for its audience.
 
 ### Director verdict changes
 
-To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version. The goal requirement needs native goal lifecycle controls from official documentation or installed help, or a CAFleet extension verified live against the extension-goal minimum bar. The listen requirement records its highest established tier: the subscribe probe for a native or extension subscribe listen, or the stream probe for a built-in compromise listen together with tier-1 and tier-2 negative evidence, each source named with its version and check date. Record each requirement row's source, delivery, version and date in `SPEC.md` § Role eligibility and the backend's Role eligibility table, derive the `verdict` row, then add a Director reception recipe or state the manual `poll` / finite `wait` reception limit.
+To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version. The goal requirement needs native goal lifecycle controls from official documentation or installed help, or a CAFleet extension verified live against the extension-goal minimum bar. The listen requirement records its highest established tier: the subscribe probe for a native or extension subscribe listen, or the stream probe for a built-in compromise listen together with tier-1 and tier-2 negative evidence, each source named with its version and check date. Record each requirement row's source, delivery, version and date in `SPEC.md` § Role eligibility and derive its `verdict` row, then update the backend's skill Role eligibility Eligible and Basis cells, and add a Director reception recipe or state the manual `poll` / finite `wait` reception limit.
 
 ### Template
 
@@ -187,4 +198,4 @@ Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names
 
 #### Role eligibility
 
-Use a `Role | Requirement | Source | Delivery | Eligible | Evidence` table with Director `goal`, `listen` and `verdict` rows and one Member row. Source is `native` or `extension` on `goal` and `listen` rows; Delivery is `subscribe` or `compromise` on the `listen` row; every other Requirement, Source and Delivery cell is `—`. Mark a requirement row `yes` only when [Role requirements](../../skills/cafleet/reference/coding-agents.md#role-requirements) establishes it; otherwise `no` with "not established" or the observed failure. The `verdict` row is `yes` only when the `goal` and `listen` rows are both `yes`, with Evidence `goal and listen rows`, and otherwise names the unmet requirements. Each requirement row's Evidence names the mechanism, native version and `checked YYYY-MM-DD` in at most two sentences, and the Member row names its bundled profile instead of listing its capabilities.
+Use a `Role | Eligible | Basis` table with one Director row and one Member row. The Director row is `yes` only when [Role requirements](../../SPEC.md#role-requirements) establishes both `goal` and `listen`. Its Basis names each requirement's source (`native` or `extension`), the `listen` delivery (`subscribe` or `compromise`), each checked native version and every runtime caveat an agent acts on; a `no` names each unmet requirement with "not established" or the observed failure. The Member row's Basis names its bundled profile and runtime caveats instead of listing its capabilities. `SPEC.md` § Role eligibility carries the per-requirement rows with their mechanism, native version and check date.

@@ -10,13 +10,13 @@ Preserve BASE/output paths and role boundaries.
 
 ## Director responsibilities
 
-Preserve the user's scope, answers and existing annotations. Assign explicit owned paths and report evidence rather than inferring completion from idle time. Read full durable messages and ACK consumption. Maintain native reception for the fleet's lifetime and supervise outstanding work under the shared Director procedure.
+Preserve the user's scope, answers and existing annotations. Assign explicit owned paths, and report evidence instead of inferring completion from idle time. Read full durable messages, ACK consumption, and keep reception and supervision under the shared [Director procedure](../../cafleet/roles/director.md#supervision).
 
 ### Step 0: Path Resolution & Resume Detection (Director)
 
-Normalize the argument using the guidelines and resolve the selected folder through BASE before writing. Preserve explicit targets; a newly chosen folder uses the next available seven-digit prefix. Set the document's absolute output path and guard audit writes through BASE.
+Normalize the argument per the guidelines and resolve the selected folder through BASE before writing. Preserve explicit targets; a newly chosen folder takes the next available seven-digit prefix. Set the document's absolute output path and guard audit writes through BASE.
 
-For an existing document, retain its content. Existing user-relay markers enter resume mode. Otherwise resolve whether the user wants quality review or a fresh draft before replacing content.
+An existing document keeps its content: existing user-relay markers enter resume mode; otherwise resolve whether the user wants quality review or a fresh draft before replacing content.
 
 ### Step 1: Register & Spawn Members (Director)
 
@@ -25,20 +25,19 @@ For an existing document, retain its content. Existing user-relay markers enter 
 3. Spawn the [Drafter](roles/drafter.md) and [Reviewer](roles/reviewer.md) with their role paths, required skills, concrete document/BASE paths and scoped assignments.
 4. Receive and ACK ready before depending on a member. Dispatch each assignment when its inputs exist; inspect actual placement when launch evidence is uncertain.
 
-Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the CAFleet load purpose `for communication with the Director` and this per-role delta. Each line in the IMPORTANT row is a separate prompt line, rendered verbatim.
+Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with ROLE TITLE `the <Role>`, TEAM `design document creation`, role-file `roles/<role>.md`, CAFleet load purpose `for communication with the Director`, EXTRA SKILL LOADS `cafleet-design-doc` and this per-role delta.
 
 | Slot | Drafter (fresh draft) | Drafter (resume or review-only) | Reviewer |
 |---|---|---|---|
-| ROLE TITLE / TEAM | `the Drafter` / `design document creation` | `the Drafter` / `design document creation` | `the Reviewer` / `design document creation` |
-| role-file + ROLE-DEF SUFFIX | `roles/drafter.md` | `roles/drafter.md` + `Follow the Resume Mode section in particular.` (resume) or `Follow the Review-only Mode section in particular.` (review-only) | `roles/reviewer.md` |
-| EXTRA SKILL LOADS | `cafleet-design-doc` | `cafleet-design-doc` | `cafleet-design-doc` |
+| ROLE-DEF SUFFIX | — | `Follow the Resume Mode section in particular.` (resume) or `Follow the Review-only Mode section in particular.` (review-only) | — |
 | CONTEXT LINES | `OUTPUT PATH: [INSERT absolute design-doc path]`, `USER REQUEST: [INSERT the user's request]` | `OUTPUT PATH: [INSERT absolute design-doc path]` | `DESIGN DOCUMENT: [INSERT absolute design-doc path]` |
-| IMPORTANT / ROLE-CONSTRAINT LINES (verbatim) | `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.`, `Send your questions to the Director who will relay them to the user.`, `Do NOT create any design document file until you have received answers.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` | `When you see cafleet message poll output with a message from the Director, act on those instructions.` | `IMPORTANT: Your only edits are COMMENT(reviewer) markers in the design document.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
-| start cue (verbatim) | `Read the target codebase for context, then send your clarifying questions to the Director.` | `Read the design document, then wait for the Director's revision assignment.` | `Wait for the Director to route the draft with ready (doc).` |
+| START CUE (verbatim) | `Read the target codebase for context, then send your clarifying questions to the Director.` | `Read the design document, then wait for the Director's revision assignment.` | `Wait for the Director to route the draft with ready (doc).` |
+
+Render the IMPORTANT / ROLE-CONSTRAINT lines verbatim, one prompt line each, in this order: for the fresh Drafter, `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.`, `Send your questions to the Director who will relay them to the user.` and `Do NOT create any design document file until you have received answers.`; for the Reviewer, `IMPORTANT: Your only edits are COMMENT(reviewer) markers in the design document.`; then, for every role, `When you see cafleet message poll output with a message from the Director, act on those instructions.`
 
 ### Step 2: Clarification Phase (Director)
 
-For fresh work, have the Drafter inspect relevant source and send one clarification round before drafting: questions for consequential unanswered requirements and confirmation of the requirements it understood. Relay it through the executing backend's user-decision surface, preserve answers and route them back faithfully. Resume and review-only work start from existing content and annotations.
+For fresh work, the Drafter inspects relevant source and sends one clarification round before drafting: questions on consequential unanswered requirements and confirmation of the requirements it understood. Relay it through the executing backend's user-decision surface, preserve the answers and route them back faithfully. Resume and review-only work start from existing content and annotations.
 
 ### Step 3: Internal Quality Loop (Director)
 
@@ -49,7 +48,7 @@ For fresh work, have the Drafter inspect relevant source and send one clarificat
 
 ### Step 4: Present to User (Director)
 
-Present the reviewed document, its location and the decisions that need approval. Use the executing backend's decision surface for the user's reaction. A question requests an answer; approval is its own decision.
+Present the reviewed document, its location and the decisions needing approval, collecting the user's reaction through the executing backend's decision surface. A question requests an answer; approval is its own decision.
 
 ### Step 5: User Feedback Loop (Director)
 
@@ -59,4 +58,4 @@ Route ordinary-language feedback and existing user markers to the Drafter withou
 
 After user approval, send the Drafter exactly `ready (doc) — user approved; finalize`: incorporate accepted decisions, resolve coordination markers, set Status to Approved and keep implementation progress accurate. Verify the final artifact and apply host Git/publication rules. Honor abort without marking the design approved.
 
-Delete owned ordinary members, verify the root-only roster, delete the owned fleet, then collect the receiver's `fleet_deleted` closure and observed process exit and confirm the fleet's absence. When a deletion fails and the fleet stays registered, keep native reception active, resolve the cause and rerun. Preserve resources outside this team's ownership.
+Delete owned ordinary members and verify the root-only roster, then delete the owned fleet under the Director [Shutdown](../../cafleet/roles/director.md#shutdown), preserving resources outside this team's ownership.

@@ -12041,13 +12041,15 @@ mod tests {
 
     /// Shows the synthetic `form` and waits for the quiet timer to open its interaction.
     fn quiet(fixture: &mut crate::runtime::service::test_support::ServiceFixture, form: &str) {
-        use crate::runtime::service::test_support::observation_services::{count, wait_until};
+        use crate::runtime::service::test_support::observation_services::count;
         fixture
             .master
             .write_all(format!("{form}\r").as_bytes())
             .unwrap();
         fixture.read_until(&format!("Operation: write {form}.txt"));
-        wait_until(|| count(fixture, "interaction_opened") == 1);
+        crate::runtime::writer::test_support::wait_until_within(Duration::from_secs(30), || {
+            count(fixture, "interaction_opened") == 1
+        });
     }
 
     mod observation_contract {
@@ -13385,7 +13387,7 @@ mod tests {
             controller
                 .poll(&terminal.snapshot(), &writer, &clock)
                 .unwrap();
-            wait_until(|| committed(&fixture) == 1);
+            wait_until_within(Duration::from_secs(20), || committed(&fixture) == 1);
             assert!(child.identity().matches().unwrap());
             nix::sys::signal::kill(
                 nix::unistd::Pid::from_raw(i32::try_from(child.identity().pid).unwrap()),
@@ -13405,7 +13407,7 @@ mod tests {
             controller
                 .child_exited(ChildExit::Signal(15), &terminal.snapshot(), &writer, &clock)
                 .unwrap();
-            wait_until(|| committed(&fixture) == 3);
+            wait_until_within(Duration::from_secs(20), || committed(&fixture) == 3);
             let kinds = crate::runtime::service::test_support::observation_services::kinds(
                 &fixture.fixture.conn,
                 fixture.fixture.run.run_id,
