@@ -17,6 +17,7 @@ use crate::runtime::control::MemberState;
 use crate::runtime::system::SystemProbe;
 use clap::Args;
 use rusqlite::Connection;
+use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
 use std::path::Path;
@@ -120,12 +121,15 @@ pub(crate) struct DoctorArgs {
     json: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(crate) struct Check {
     name: String,
+    #[serde(serialize_with = "status_text")]
     status: CheckStatus,
     detail: String,
+    #[serde(skip)]
     problem: Option<Problem>,
+    #[serde(flatten)]
     runtime: Option<RuntimeFields>,
 }
 
@@ -136,10 +140,19 @@ struct Problem {
     setup_fix: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct RuntimeFields {
     member_id: Option<i64>,
+    #[serde(serialize_with = "state_token")]
     state: MemberState,
+}
+
+fn status_text<S: serde::Serializer>(status: &CheckStatus, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(status.as_str())
+}
+
+fn state_token<S: serde::Serializer>(state: &MemberState, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(state.token())
 }
 
 impl Check {
@@ -158,6 +171,11 @@ impl Check {
             phrase: phrase.into(),
             setup_fix,
         });
+        self
+    }
+
+    fn runtime(mut self, member_id: Option<i64>, state: MemberState) -> Self {
+        self.runtime = Some(RuntimeFields { member_id, state });
         self
     }
 
@@ -188,11 +206,21 @@ impl Check {
     }
 }
 
+#[derive(Serialize)]
 struct Summary {
     component: String,
+    #[serde(serialize_with = "status_text")]
     status: CheckStatus,
     detail: String,
-    members: Option<(MemberState, Vec<i64>)>,
+    #[serde(flatten)]
+    members: Option<MemberGroup>,
+}
+
+#[derive(Serialize)]
+struct MemberGroup {
+    #[serde(serialize_with = "state_token")]
+    state: MemberState,
+    member_ids: Vec<i64>,
 }
 
 impl Summary {
@@ -212,7 +240,7 @@ impl Summary {
         member_ids: Vec<i64>,
     ) -> Self {
         Self {
-            members: Some((state, member_ids)),
+            members: Some(MemberGroup { state, member_ids }),
             ..Self::new("members", status, detail)
         }
     }
@@ -348,33 +376,25 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
 const HERMES_DOCTOR_BUDGET: Duration = Duration::from_secs(2);
 
 pub(crate) fn render(report: &Report, mode: Mode) -> String {
-    let lines = |rows: Vec<(CheckStatus, &str, &str)>| {
-        rows.iter()
-            .map(|(status, name, detail)| format!("{} {name}: {}", status.as_str(), escape(detail)))
-            .collect::<Vec<_>>()
-            .join("\n")
+    let rows: Vec<(CheckStatus, &str, &str)> = match mode {
+        Mode::Json => {
+            return json!({"summary": report.summary, "checks": report.checks}).to_string();
+        }
+        Mode::Verbose => report
+            .checks
+            .iter()
+            .map(|check| (check.status, check.name.as_str(), check.detail.as_str()))
+            .collect(),
+        Mode::Summary => report
+            .summary
+            .iter()
+            .map(|line| (line.status, line.component.as_str(), line.detail.as_str()))
+            .collect(),
     };
-    match mode {
-        Mode::Json => json!({
-            "summary": report.summary.iter().map(summary_json).collect::<Vec<_>>(),
-            "checks": report.checks.iter().map(check_json).collect::<Vec<_>>(),
-        })
-        .to_string(),
-        Mode::Verbose => lines(
-            report
-                .checks
-                .iter()
-                .map(|check| (check.status, check.name.as_str(), check.detail.as_str()))
-                .collect(),
-        ),
-        Mode::Summary => lines(
-            report
-                .summary
-                .iter()
-                .map(|line| (line.status, line.component.as_str(), line.detail.as_str()))
-                .collect(),
-        ),
-    }
+    rows.iter()
+        .map(|(status, name, detail)| format!("{} {name}: {}", status.as_str(), escape(detail)))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn multiplexer_rows(reading: MuxReading) -> (Vec<Check>, Vec<Summary>) {
@@ -422,32 +442,6 @@ fn database_rows(settings: &Settings, schema: &SchemaState) -> (Check, Summary) 
 
 fn escape(detail: &str) -> String {
     detail.replace('\n', "\\n").replace('\r', "\\r")
-}
-
-fn summary_json(summary: &Summary) -> Value {
-    let mut entry = json!({
-        "component": summary.component,
-        "status": summary.status.as_str(),
-        "detail": summary.detail,
-    });
-    if let Some((state, member_ids)) = &summary.members {
-        entry["state"] = state.token().into();
-        entry["member_ids"] = json!(member_ids);
-    }
-    entry
-}
-
-fn check_json(check: &Check) -> Value {
-    let mut entry = json!({
-        "name": check.name,
-        "status": check.status.as_str(),
-        "detail": check.detail,
-    });
-    if let Some(runtime) = &check.runtime {
-        entry["member_id"] = json!(runtime.member_id);
-        entry["state"] = runtime.state.token().into();
-    }
-    entry
 }
 
 fn backend_summary(agent: CodingAgent, checks: &[Check]) -> Summary {
@@ -503,15 +497,13 @@ fn backend_summary(agent: CodingAgent, checks: &[Check]) -> Summary {
     Summary::new(name, status, detail)
 }
 
-struct MemberRun {
-    run_id: i64,
-    member_id: i64,
-    director_member_id: Option<i64>,
+struct MemberRun<'a> {
+    row: &'a MemberRunRegistry,
     state: MemberState,
     phrases: Vec<String>,
 }
 
-fn classify_registry(row: &MemberRunRegistry) -> Option<MemberRun> {
+fn classify_registry(row: &MemberRunRegistry) -> Option<MemberRun<'_>> {
     let active = row.member_status == "active";
     let state = match (row.is_settled(), active) {
         (true, false) => MemberState::Ended,
@@ -520,9 +512,7 @@ fn classify_registry(row: &MemberRunRegistry) -> Option<MemberRun> {
         (false, true) => return None,
     };
     Some(MemberRun {
-        run_id: row.run_id,
-        member_id: row.member_id,
-        director_member_id: row.director_member_id,
+        row,
         state,
         phrases: vec![format!(
             "run {}, cleanup {}",
@@ -532,7 +522,11 @@ fn classify_registry(row: &MemberRunRegistry) -> Option<MemberRun> {
     })
 }
 
-fn probe_run(source: Option<&str>, row: &MemberRunRegistry, deadline: Instant) -> MemberRun {
+fn probe_run<'a>(
+    source: Option<&str>,
+    row: &'a MemberRunRegistry,
+    deadline: Instant,
+) -> MemberRun<'a> {
     let now = Instant::now();
     let (state, phrases) = if now >= deadline {
         (
@@ -552,9 +546,7 @@ fn probe_run(source: Option<&str>, row: &MemberRunRegistry, deadline: Instant) -
         }
     };
     MemberRun {
-        run_id: row.run_id,
-        member_id: row.member_id,
-        director_member_id: row.director_member_id,
+        row,
         state,
         phrases,
     }
@@ -565,11 +557,11 @@ const PROBE_WORKERS: usize = 16;
 
 /// Probes `rows` on up to [`PROBE_WORKERS`] threads, each probing a contiguous share through its
 /// own read-only connections, and returns the runs in `rows` order.
-fn probe_runs(
+fn probe_runs<'a>(
     source: Option<&str>,
-    rows: &[&MemberRunRegistry],
+    rows: &[&'a MemberRunRegistry],
     deadline: Instant,
-) -> Vec<MemberRun> {
+) -> Vec<MemberRun<'a>> {
     let chunk = rows.len().div_ceil(PROBE_WORKERS).max(1);
     std::thread::scope(|scope| {
         let workers = rows
@@ -597,15 +589,12 @@ fn member_checks(
     let rows = match registry(conn) {
         Ok(rows) => rows,
         Err(cause) => {
-            let mut check = Check::new(
+            let check = Check::new(
                 "member_runtime",
                 CheckStatus::Error,
                 format!("member runtimes could not be read: {cause}"),
-            );
-            check.runtime = Some(RuntimeFields {
-                member_id: None,
-                state: MemberState::CheckFailed,
-            });
+            )
+            .runtime(None, MemberState::CheckFailed);
             let summary = Summary::members(
                 CheckStatus::Error,
                 format!("could not be checked: {cause}"),
@@ -659,35 +648,31 @@ fn runtime_check(run: &MemberRun) -> Check {
         MemberState::CheckFailed => String::new(),
         state => run_suffix(
             state.next_commands(),
-            &run.member_id.to_string(),
-            &director_label(&[run.director_member_id]),
+            &run.row.member_id.to_string(),
+            &director_label(&[run.row.director_member_id]),
         ),
     };
     let detail = format!(
         "member {} {}: {}{suffix}",
-        run.member_id,
+        run.row.member_id,
         run.state.label(),
         run.phrases.join("; ")
     );
-    let mut check = Check::new(
-        format!("member_runtime.{}", run.run_id),
+    Check::new(
+        format!("member_runtime.{}", run.row.run_id),
         run.state.status(),
         detail,
-    );
-    check.runtime = Some(RuntimeFields {
-        member_id: Some(run.member_id),
-        state: run.state,
-    });
-    check
+    )
+    .runtime(Some(run.row.member_id), run.state)
 }
 
 fn state_summary(state: MemberState, runs: &[&MemberRun]) -> Summary {
-    let mut member_ids = runs.iter().map(|run| run.member_id).collect::<Vec<_>>();
+    let mut member_ids = runs.iter().map(|run| run.row.member_id).collect::<Vec<_>>();
     member_ids.sort_unstable();
     member_ids.dedup();
     let directors = runs
         .iter()
-        .map(|run| run.director_member_id)
+        .map(|run| run.row.director_member_id)
         .collect::<Vec<_>>();
     let detail = format!(
         "{} {}: {}{}",
@@ -789,19 +774,12 @@ fn unavailable(
     paths: &Result<PathBuf, CafleetError>,
     available: bool,
 ) -> Option<Check> {
-    match (paths, available) {
-        (Err(cause), _) => Some(Check::new(
-            name,
-            CheckStatus::Info,
-            format!("unavailable: configuration failed: {cause}"),
-        )),
-        (_, false) => Some(Check::new(
-            name,
-            CheckStatus::Info,
-            "unavailable: executable is absent",
-        )),
-        (Ok(_), true) => None,
-    }
+    let detail = match (paths, available) {
+        (Err(cause), _) => format!("unavailable: configuration failed: {cause}"),
+        (_, false) => "unavailable: executable is absent".to_owned(),
+        (Ok(_), true) => return None,
+    };
+    Some(Check::new(name, CheckStatus::Info, detail))
 }
 
 /// A Hermes row without a batch reading: unavailable, or no Hermes home at the base.
@@ -1806,14 +1784,23 @@ mod tests {
 
         #[test]
         fn recover_hints_name_the_shared_fleet_director_or_keep_the_placeholder() {
-            let lost = |member_id, director_member_id| MemberRun {
+            let row = |member_id, director_member_id| MemberRunRegistry {
                 run_id: member_id,
                 member_id,
+                run_status: RunStatus::Running,
+                cleanup_state: CleanupState::Incomplete,
+                member_status: "active".into(),
                 director_member_id,
-                state: MemberState::LostRuntime,
-                phrases: vec!["owner lock is free".into()],
             };
-            let same_fleet = [lost(3, Some(1)), lost(4, Some(1))];
+            fn lost(row: &MemberRunRegistry) -> MemberRun<'_> {
+                MemberRun {
+                    row,
+                    state: MemberState::LostRuntime,
+                    phrases: vec!["owner lock is free".into()],
+                }
+            }
+            let same_fleet = [row(3, Some(1)), row(4, Some(1))];
+            let same_fleet = [lost(&same_fleet[0]), lost(&same_fleet[1])];
             assert_eq!(
                 runtime_check(&same_fleet[0]).detail,
                 "member 3 lost runtime: owner lock is free — run 'cafleet member recover 3 --from-member-id 1' or 'cafleet member delete 3'"
@@ -1823,11 +1810,12 @@ mod tests {
                 "2 lost runtime: 3, 4 — run 'cafleet member recover ID --from-member-id 1' or 'cafleet member delete ID'"
             );
             for spanning in [
-                [lost(3, Some(1)), lost(9, Some(7))],
-                [lost(3, Some(1)), lost(9, None)],
+                [row(3, Some(1)), row(9, Some(7))],
+                [row(3, Some(1)), row(9, None)],
             ] {
+                let runs = [lost(&spanning[0]), lost(&spanning[1])];
                 assert_eq!(
-                    state_summary(MemberState::LostRuntime, &[&spanning[0], &spanning[1]]).detail,
+                    state_summary(MemberState::LostRuntime, &[&runs[0], &runs[1]]).detail,
                     "2 lost runtime: 3, 9 — run 'cafleet member recover ID --from-member-id <director-id>' or 'cafleet member delete ID'"
                 );
             }
@@ -3111,7 +3099,7 @@ mod tests {
             let rows = rows.iter().collect::<Vec<_>>();
             let probed = probe_runs(conn.path(), &rows, Instant::now() + Duration::from_secs(5));
             assert_eq!(
-                probed.iter().map(|run| run.run_id).collect::<Vec<_>>(),
+                probed.iter().map(|run| run.row.run_id).collect::<Vec<_>>(),
                 runs.iter().map(|run| run.run_id).collect::<Vec<_>>()
             );
             assert!(

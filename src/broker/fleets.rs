@@ -1,8 +1,6 @@
 use crate::broker::CreatedFleet;
 use crate::broker::FleetRecord;
 use crate::broker::FleetSummary;
-use crate::broker::MemberKind;
-use crate::broker::MemberRecord;
 use crate::broker::MemberStatus;
 use crate::broker::Placement;
 use crate::broker::members::NewPlacement;
@@ -42,10 +40,10 @@ pub(crate) fn create_fleet(
     name: Option<&str>,
     director: &NewPlacement,
 ) -> Result<CreatedFleet, CafleetError> {
-    let mux_pane_id = director
-        .mux_pane_id
-        .clone()
-        .expect("the Director placement records its pane");
+    assert!(
+        director.mux_pane_id.is_some(),
+        "the Director placement records its pane"
+    );
     let now = now_stamp();
     let tx = conn.transaction()?;
     let fleet_id = tx.query_row(
@@ -60,29 +58,13 @@ pub(crate) fn create_fleet(
         params![director_id, fleet_id],
     )?;
     tx.commit()?;
+    let director = crate::broker::members::get_member(conn, director_id, fleet_id)?
+        .expect("the created root Director is active");
     Ok(CreatedFleet {
         fleet_id,
         name: name.map(str::to_owned),
-        created_at: now.clone(),
-        director: MemberRecord {
-            member_id: director_id,
-            fleet_id,
-            name: DIRECTOR_NAME.into(),
-            description: DIRECTOR_DESCRIPTION.into(),
-            registered_at: now.clone(),
-            status: MemberStatus::Active,
-            kind: MemberKind::Director,
-            runtime: None,
-            placement: Some(Placement {
-                backend: director.backend.clone(),
-                mux_session: director.mux_session.clone(),
-                mux_window_id: director.mux_window_id.clone(),
-                mux_pane_id: Some(mux_pane_id),
-                coding_agent: director.coding_agent.clone(),
-                created_at: now,
-                mux_server: director.mux_server.clone(),
-            }),
-        },
+        created_at: now,
+        director,
     })
 }
 
@@ -289,7 +271,7 @@ mod tests {
         let stored = get_fleet(&conn, fleet).unwrap().unwrap();
         assert_eq!(stored.director_member_id, Some(director));
         let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
-        assert_eq!(member.kind, MemberKind::Director);
+        assert_eq!(member.kind, crate::broker::MemberKind::Director);
         assert_eq!(member.placement.unwrap().mux_pane_id.as_deref(), Some("%0"));
     }
 

@@ -601,21 +601,15 @@ impl HermesSettlementHost for PaneSettlementHost<'_> {
         let keys = crate::multiplexer::PressKeys::parse(
             &keys.iter().map(|key| (*key).to_owned()).collect::<Vec<_>>(),
         )?;
-        self.mux
-            .send_keys(self.pane_id, &keys, self.deadline)
-            .map_err(|cause| CafleetError::App(cause.to_string()))
+        Ok(self.mux.send_keys(self.pane_id, &keys, self.deadline)?)
     }
     fn capture(&mut self) -> Result<String, CafleetError> {
-        self.mux
-            .capture_pane(self.pane_id, CAPTURE_LINES)
-            .map(|screen| crate::output::strip_ansi(&screen))
-            .map_err(|cause| CafleetError::App(cause.to_string()))
+        let screen = self.mux.capture_pane(self.pane_id, CAPTURE_LINES)?;
+        Ok(crate::output::strip_ansi(&screen))
     }
     fn composer_empty(&mut self) -> Result<bool, CafleetError> {
-        self.mux
-            .capture_pane(self.pane_id, CAPTURE_LINES)
-            .map(|screen| composer_row_empty(&screen))
-            .map_err(|cause| CafleetError::App(cause.to_string()))
+        let screen = self.mux.capture_pane(self.pane_id, CAPTURE_LINES)?;
+        Ok(composer_row_empty(&screen))
     }
     fn record_session_id(&mut self, session_id: &str) -> Result<(), CafleetError> {
         let mut session = crate::broker::runtime::native_session(self.conn, self.run_id)?

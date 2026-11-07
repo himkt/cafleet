@@ -886,70 +886,47 @@ pub(crate) fn update_interaction_evidence(
     })
 }
 
-const FIELDS: [&str; 6] = [
-    "schema_version",
-    "automatic_review",
-    "observed_mode",
-    "rule_id",
-    "event_id",
-    "observed_at",
-];
+/// The stored `member_runs.effective_policy_json` record, schema version 1.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredEffectivePolicy {
+    schema_version: u64,
+    automatic_review: AutomaticReview,
+    observed_mode: Option<String>,
+    rule_id: String,
+    event_id: Option<i64>,
+    observed_at: String,
+}
 
 pub(super) fn validate(run: &RunRecord) -> Result<(), CafleetError> {
     let Some(record) = &run.effective_policy_json else {
         return Ok(());
     };
     let field = "member_runs.effective_policy_json";
-    let object = record.as_object().expect("decoded effective policy object");
+    let stored: StoredEffectivePolicy = serde_json::from_value(record.clone())
+        .map_err(|_| invalid(field, "typed effective policy fields required"))?;
     require(
-        object.len() == FIELDS.len() && FIELDS.iter().all(|key| object.contains_key(*key)),
+        serde_json::to_value(&stored).expect("a stored policy serializes") == *record,
         field,
         "exact effective policy fields required",
     )?;
     require(
-        record["schema_version"].as_u64() == Some(1),
+        stored.schema_version == 1,
         field,
         "unsupported effective policy schema",
     )?;
-    let review = AutomaticReview::try_from(
-        record["automatic_review"]
-            .as_str()
-            .ok_or_else(|| invalid(field, "automatic review state required"))?,
-    )?;
-    let mode = &record["observed_mode"];
     require(
-        mode.is_null() || mode.is_string(),
+        stored.event_id.is_none_or(|id| id > 0)
+            && stored.event_id.is_none() == (stored.automatic_review == AutomaticReview::Available),
         field,
-        "nullable observed mode text required",
+        "only an unavailable record names its event, by a positive id",
     )?;
-    require(
-        run.event_evidence == EventEvidence::Redacted || mode.is_null(),
-        field,
-        "metadata runs record no observed mode",
-    )?;
-    nonblank(
-        record["rule_id"]
-            .as_str()
-            .ok_or_else(|| invalid(field, "rule id required"))?,
-        field,
-    )?;
-    let event = &record["event_id"];
-    require(
-        event.is_null() || event.as_i64().is_some_and(|id| id > 0),
-        field,
-        "nullable positive event id required",
-    )?;
-    require(
-        event.is_null() == (review == AutomaticReview::Available),
-        field,
-        "only an unavailable record names its event",
-    )?;
-    rfc3339(
-        record["observed_at"]
-            .as_str()
-            .ok_or_else(|| invalid(field, "observation time required"))?,
-        field,
-    )
+    let observation = EffectivePolicyObservation {
+        automatic_review: stored.automatic_review,
+        observed_mode: stored.observed_mode,
+        rule_id: stored.rule_id,
+        observed_at: stored.observed_at,
+    };
+    check_observation(run, &observation, observation.automatic_review)
 }
 
 fn check_observation(
@@ -984,17 +961,21 @@ fn write_if_changed(
     if unchanged {
         return Ok(false);
     }
-    let record: Value = json!({
-        "schema_version":1,
-        "automatic_review":observation.automatic_review.as_str(),
-        "observed_mode":observation.observed_mode,
-        "rule_id":observation.rule_id,
-        "event_id":event_id,
-        "observed_at":observation.observed_at,
-    });
+    let record = StoredEffectivePolicy {
+        schema_version: 1,
+        automatic_review: observation.automatic_review,
+        observed_mode: observation.observed_mode.clone(),
+        rule_id: observation.rule_id.clone(),
+        event_id,
+        observed_at: observation.observed_at.clone(),
+    };
     let changed = conn.execute(
         "UPDATE member_runs SET effective_policy_json=?1 WHERE run_id=?2 AND owner_epoch=?3",
-        params![record.to_string(), run.run_id, run.owner_epoch],
+        params![
+            serde_json::to_string(&record).expect("a stored policy serializes"),
+            run.run_id,
+            run.owner_epoch
+        ],
     )?;
     require(
         changed == 1,
