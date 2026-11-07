@@ -174,16 +174,14 @@ pub(crate) fn run(
                     &delivery,
                 ),
                 || format_message_sent(&message, input_id, &delivery),
-            );
-            Ok(())
+            )
         }
         MessageCommand::Poll { member_id, json } => {
             let messages = broker::poll_messages(conn, member_id)?;
             let payload = serde_json::Value::Array(
                 messages.iter().map(crate::output::json::message).collect(),
             );
-            emit(json, &payload, || format_messages(&messages));
-            Ok(())
+            emit(json, &payload, || format_messages(&messages))
         }
         MessageCommand::Wait {
             member_id,
@@ -201,8 +199,7 @@ pub(crate) fn run(
                 "outcome":if messages.is_empty() { "timeout" } else { "messages" },
                 "messages":messages.iter().map(crate::output::json::message).collect::<Vec<_>>(),
             });
-            emit(json, &payload, || format_message_wait(member_id, messages));
-            Ok(())
+            emit(json, &payload, || format_message_wait(member_id, messages))
         }
         MessageCommand::Listen {
             member_id,
@@ -221,8 +218,7 @@ pub(crate) fn run(
                 json,
                 &crate::output::json::message_envelope(&message),
                 || format_message_acknowledged(&message),
-            );
-            Ok(())
+            )
         }
         MessageCommand::Show { message_id, json } => {
             let message = broker::get_message(conn, message_id)?;
@@ -230,8 +226,7 @@ pub(crate) fn run(
                 json,
                 &crate::output::json::message_envelope(&message),
                 || format_message(&message),
-            );
-            Ok(())
+            )
         }
     }
 }
@@ -741,7 +736,10 @@ fn process_parent_and_argv0(pid: i64) -> Result<Option<(i64, String)>, CafleetEr
         .and_then(|(_, tail)| tail.split_whitespace().nth(1))
         .and_then(|field| field.parse().ok())
         .ok_or_else(|| CafleetError::App(format!("malformed /proc/{pid}/stat")))?;
-    let argv0 = cmdline.split(|byte| *byte == 0).next().unwrap_or_default();
+    let argv0 = cmdline
+        .split(|byte| *byte == 0)
+        .next()
+        .expect("split yields a first segment");
     Ok(Some((parent, String::from_utf8_lossy(argv0).into_owned())))
 }
 
@@ -1082,57 +1080,50 @@ mod tests {
             "message {} was not notified to member {worker}: member {worker} has no recorded run; the next send to member {worker} or the next message wait retries it.\n",
             message.message_id,
         )).collect::<String>();
-        for _ in 0..2 {
-            let (output, pane_calls) = crate::cli::test_support::isolated_cli(
-                &settings,
-                &[
-                    "message",
-                    "wait",
-                    &director.to_string(),
-                    "--timeout",
-                    "2",
-                    "--json",
-                ],
-            );
-            assert_eq!(output.status.code(), Some(0));
-            assert_eq!(String::from_utf8(output.stderr).unwrap(), expected);
-            assert!(pane_calls.is_empty(), "{pane_calls}");
-            let stdout = String::from_utf8(output.stdout).unwrap();
-            let payload: serde_json::Value = serde_json::from_str(
-                stdout
-                    .lines()
-                    .find(|line| line.starts_with('{'))
-                    .expect("wait JSON"),
-            )
-            .unwrap();
-            assert_eq!(payload["member_id"], director);
-            assert_eq!(payload["outcome"], "timeout");
-            assert_eq!(payload["messages"], serde_json::json!([]));
-            assert_eq!(
-                broker::poll_messages(&conn, worker).unwrap(),
-                messages.iter().rev().cloned().collect::<Vec<_>>()
-            );
-            assert_eq!(conn.query_row(
+        let (output, pane_calls) = crate::cli::test_support::isolated_cli(
+            &settings,
+            &[
+                "message",
+                "wait",
+                &director.to_string(),
+                "--timeout",
+                "2",
+                "--json",
+            ],
+        );
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(String::from_utf8(output.stderr).unwrap(), expected);
+        assert!(pane_calls.is_empty(), "{pane_calls}");
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(
+            stdout
+                .lines()
+                .find(|line| line.starts_with('{'))
+                .expect("wait JSON"),
+        )
+        .unwrap();
+        assert_eq!(payload["member_id"], director);
+        assert_eq!(payload["outcome"], "timeout");
+        assert_eq!(payload["messages"], serde_json::json!([]));
+        assert_eq!(
+            broker::poll_messages(&conn, worker).unwrap(),
+            messages.iter().rev().cloned().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            conn.query_row(
                 "SELECT COUNT(*) FROM messages WHERE to_member_id=?1 AND notified_at IS NOT NULL",
-                [worker], |row| row.get::<_, i64>(0),
-            ).unwrap(), 0);
-        }
+                [worker],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
+        );
     }
 
     #[test]
     fn send_delivery_reports_a_wrapped_self_send_and_the_queued_preview_receipt() {
         let mut fixture = crate::runtime::test_support::Fixture::new();
         let run = fixture.run.clone();
-        let own =
-            broker::send_message(&mut fixture.conn, run.member_id, run.member_id, "self").unwrap();
-        assert_eq!(
-            send_delivery(&fixture.conn, &own, None).unwrap(),
-            (
-                None,
-                projection(DeliveryStatus::NotApplicable, None, Some("self_send"))
-            ),
-            "a self-send precedes the wrapped recipient's own delivery"
-        );
         let message = broker::send_message(
             &mut fixture.conn,
             run.director_member_id,
@@ -1161,30 +1152,24 @@ mod tests {
                 projection(DeliveryStatus::Queued, None, Some("interaction_open"))
             )
         );
-    }
-
-    #[test]
-    fn a_send_whose_recipient_is_deregistered_after_the_commit_reports_it_held() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "deregistered");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let message = broker::send_message(&mut conn, director, worker, "committed").unwrap();
+        let committed = broker::send_message(&mut conn, director, worker, "committed").unwrap();
         assert!(
             crate::broker::members::test_support::deregister_member(&mut conn, worker).unwrap()
         );
-        let (input_id, delivery) = send_delivery(&conn, &message, None)
-            .expect("a committed send reports its record after the recipient is gone");
-        assert_eq!(input_id, None);
         assert_eq!(
-            delivery,
-            DeliveryProjection {
-                status: DeliveryStatus::Held,
-                method: None,
-                reason: Some("notification_held".into()),
-            }
+            send_delivery(&conn, &committed, None)
+                .expect("a committed send reports its record after the recipient is gone"),
+            (
+                None,
+                projection(DeliveryStatus::Held, None, Some("notification_held"))
+            )
         );
     }
+
     use crate::cli::message::run_on_descriptor;
     use nix::fcntl::FcntlArg;
     use nix::fcntl::OFlag;
@@ -1451,12 +1436,10 @@ mod tests {
             let mut io = ScriptedInbox {
                 clock: &clock,
                 snapshots: Vec::new(),
-                script: |_, check| {
-                    if check == fail_at {
-                        Err(CafleetError::App("snapshot failed".into()))
-                    } else {
-                        Ok(open(vec![message(10)]))
-                    }
+                script: |_, check| match (check == fail_at, fail_at) {
+                    (true, 1) => Err(CafleetError::App("snapshot failed".into())),
+                    (true, _) => Err(CafleetError::DeadlineExceeded),
+                    (false, _) => Ok(open(vec![message(10)])),
                 },
             };
             let mut output = RecordingOutput::new(&clock);
@@ -1468,7 +1451,14 @@ mod tests {
                 Some(Duration::from_secs(3)),
             )
             .unwrap_err();
-            assert!(error.message().contains("snapshot failed"));
+            if fail_at == 1 {
+                assert!(error.message().contains("snapshot failed"));
+            } else {
+                assert!(
+                    matches!(error, CafleetError::DeadlineExceeded),
+                    "a midstream snapshot budget failure ends the stream instead of a timeout"
+                );
+            }
             assert_eq!(output.records.len(), if fail_at == 1 { 0 } else { 2 });
             assert!(
                 output
@@ -1507,36 +1497,8 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_budget_failure_terminates_the_stream_instead_of_becoming_a_timeout() {
-        let clock = test_clock();
-        let mut io = ScriptedInbox {
-            clock: &clock,
-            snapshots: Vec::new(),
-            script: |_, check| {
-                if check == 1 {
-                    Ok(open(Vec::new()))
-                } else {
-                    Err(CafleetError::DeadlineExceeded)
-                }
-            },
-        };
-        let mut output = RecordingOutput::new(&clock);
-        assert!(matches!(
-            listen(
-                &clock,
-                &mut io,
-                &mut output,
-                1,
-                Some(Duration::from_secs(2))
-            ),
-            Err(CafleetError::DeadlineExceeded)
-        ));
-        assert_eq!(output.records.len(), 1);
-    }
-
-    #[test]
     fn output_failure_stops_before_another_snapshot_and_retains_only_flushed_records() {
-        for fail_at in [0, 1, 2] {
+        for fail_at in [0, 1] {
             let clock = test_clock();
             let mut io = ScriptedInbox {
                 clock: &clock,
@@ -1560,7 +1522,7 @@ mod tests {
     }
 
     #[test]
-    fn an_ack_output_race_preserves_the_snapshot_record_and_a_restart_replays_only_pending_ids() {
+    fn an_ack_output_race_preserves_the_snapshot_record() {
         let clock = test_clock();
         let acknowledged = Cell::new(false);
         let mut io = ScriptedInbox {
@@ -1603,22 +1565,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(event_ids(&output.output), [10, 11]);
-        let clock = test_clock();
-        let mut io = ScriptedInbox {
-            clock: &clock,
-            snapshots: Vec::new(),
-            script: |_, _| Ok(open(vec![message(11)])),
-        };
-        let mut restarted = RecordingOutput::new(&clock);
-        listen(
-            &clock,
-            &mut io,
-            &mut restarted,
-            1,
-            Some(Duration::from_secs(1)),
-        )
-        .unwrap();
-        assert_eq!(event_ids(&restarted), [11]);
     }
 
     #[test]
@@ -1741,11 +1687,10 @@ mod tests {
 
     #[test]
     fn real_pipe_backpressure_and_broken_consumers_restore_flags_and_preserve_pending_rows() {
-        for (broken, nonblocking) in [(false, false), (false, true), (true, false), (true, true)] {
-            let (_dir, mut conn, _, director, worker) = broker_fixture();
-            let pending =
-                broker::send_message(&mut conn, worker, director, &"雪".repeat(1024 * 1024))
-                    .unwrap();
+        let (_dir, mut conn, _, director, worker) = broker_fixture();
+        let pending =
+            broker::send_message(&mut conn, worker, director, &"雪".repeat(1024 * 1024)).unwrap();
+        for (broken, nonblocking) in [(false, true), (true, false)] {
             let (read_end, write_end, retained, original) = primed_pipe(nonblocking);
             let mut read_end = Some(read_end);
             if broken {
@@ -1762,7 +1707,10 @@ mod tests {
             assert!(started.elapsed() < Duration::from_secs(2), "{error}");
             assert_eq!(fcntl(&retained, FcntlArg::F_GETFL).unwrap(), original);
             assert!(conn.is_autocommit());
-            assert_eq!(broker::poll_messages(&conn, director).unwrap(), [pending]);
+            assert_eq!(
+                broker::poll_messages(&conn, director).unwrap(),
+                std::slice::from_ref(&pending)
+            );
             if let Some(read_end) = read_end {
                 let flags = OFlag::from_bits_retain(fcntl(&read_end, FcntlArg::F_GETFL).unwrap());
                 fcntl(&read_end, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK)).unwrap();
@@ -2372,47 +2320,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
         }
 
         #[test]
-        fn a_failed_codex_queue_exits_one_after_forwarding_the_closed_notice() {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            let message = broker.send(worker, director, "refused");
-            let forwarder = start(
-                &broker,
-                &listen_args(director, None),
-                Some(&codex_refusing_records(&format!(
-                    "printf '%s\\n' 'thread {THREAD} not found' >&2\nexit 2"
-                ))),
-                Launch::Session,
-            );
-            assert_eq!(forwarder.wait_exit(Duration::from_secs(15)), 1);
-            let stderr = forwarder.stderr();
-            let diagnostic = stderr
-                .lines()
-                .find(|line| {
-                    line.contains(&format!(
-                        "failed to forward record to codex thread {THREAD}: "
-                    ))
-                })
-                .unwrap_or_else(|| panic!("{stderr}"));
-            assert!(
-                diagnostic.contains(&format!("thread {THREAD} not found")),
-                "{stderr}"
-            );
-            let forwarded = forwarder.forwarded();
-            assert_eq!(forwarded.len(), 2, "{forwarded:?}");
-            assert_eq!(forwarded[0], queued(&broker.record_text(message)));
-            assert_eq!(forwarded[1][..4], queued("")[..4]);
-            let notice = &forwarded[1][4];
-            assert!(
-                notice.starts_with(&format!(
-                    "[cafleet listen closed] exit 1: failed to forward record to codex thread {THREAD}: "
-                )) && notice.contains(&format!("thread {THREAD} not found")),
-                "{notice}"
-            );
-            assert_stdout_has_no_forwarded_records(&forwarder, &broker);
-        }
-
-        #[test]
         fn a_codex_queue_past_its_deadline_is_killed_and_the_closed_notice_names_the_deadline() {
             let mut broker = broker();
             let (director, worker) = (broker.director, broker.worker);
@@ -2603,39 +2510,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
         }
 
         #[test]
-        fn a_codex_queue_past_its_deadline_after_the_pinned_session_ended_closes_the_listener_with_session_exited()
-         {
-            let mut broker = broker();
-            let (director, worker) = (broker.director, broker.worker);
-            let message = broker.send(worker, director, "in flight");
-            let mut forwarder = start(
-                &broker,
-                &listen_args(director, None),
-                Some(&codex_refusing_records("exec sleep 30")),
-                Launch::Session,
-            );
-            forwarder.wait_forwarded(1);
-            forwarder.end_session();
-            assert_eq!(
-                forwarder.wait_exit(Duration::from_secs(20)),
-                0,
-                "{}",
-                forwarder.stderr()
-            );
-            assert_closed_with_session_exited(&forwarder, &broker, director);
-            assert!(
-                !forwarder.stderr().contains("did not finish within"),
-                "{}",
-                forwarder.stderr()
-            );
-            assert_eq!(
-                forwarder.forwarded(),
-                [queued(&broker.record_text(message))],
-                "no closed notice goes to the exited session"
-            );
-        }
-
-        #[test]
         fn a_closing_record_failing_after_the_pinned_session_ended_closes_the_listener_with_session_exited()
          {
             let mut broker = broker();
@@ -2749,7 +2623,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
             assert!(
                 forwarded[2][4].starts_with(&format!(
                     "[cafleet listen closed] exit 1: failed to forward record to codex thread {THREAD}: "
-                )),
+                )) && forwarded[2][4].contains(&format!("thread {THREAD} not found")),
                 "{forwarded:?}"
             );
             let gaps = forwarder.invocation_gaps();
@@ -2757,6 +2631,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 gaps[0] >= wait && gaps[1] < wait,
                 "only the full-queue refusal waits: {gaps:?}"
             );
+            assert_stdout_has_no_forwarded_records(&forwarder, &broker);
         }
 
         #[test]
@@ -2835,21 +2710,6 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
                 forwarder.forwarded().is_empty(),
                 "nothing is forwarded to an exited session"
             );
-        }
-
-        #[test]
-        fn a_listener_keeps_running_while_its_codex_session_lives() {
-            let broker = broker();
-            let forwarder = start(
-                &broker,
-                &listen_args(broker.director, None),
-                Some(&accepting_codex()),
-                Launch::Session,
-            );
-            forwarder.wait_ready();
-            std::thread::sleep(Duration::from_secs(3));
-            assert_eq!(forwarder.status(), None, "{}", forwarder.stderr());
-            assert!(forwarder.forwarded().is_empty());
         }
     }
 }

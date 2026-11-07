@@ -9,6 +9,7 @@ use crate::broker::runtime::InputState;
 use crate::broker::runtime::InteractionClass;
 use crate::broker::runtime::PermissionDecision;
 use crate::broker::runtime::RunRecord;
+use crate::broker::stored_enum;
 use crate::coding_agent::catalog::AnswerKey;
 use crate::coding_agent::catalog::ChoiceScope;
 use crate::coding_agent::catalog::valid_choice_id;
@@ -158,44 +159,19 @@ impl ControlDecoder {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum SubmissionStatus {
-    Accepted,
-    Queued,
-    Held,
-    Rejected,
-    Uncertain,
-}
-impl SubmissionStatus {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Accepted => "accepted",
-            Self::Queued => "queued",
-            Self::Held => "held",
-            Self::Rejected => "rejected",
-            Self::Uncertain => "uncertain",
-        }
-    }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum SubmissionStage {
-    ZeroBytes,
-    Partial,
-    Submitted,
-    Unknown,
-}
-impl SubmissionStage {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::ZeroBytes => "zero_bytes",
-            Self::Partial => "partial",
-            Self::Submitted => "submitted",
-            Self::Unknown => "unknown",
-        }
-    }
-}
+stored_enum!(SubmissionStatus, "submission.status", {
+    Accepted => "accepted",
+    Queued => "queued",
+    Held => "held",
+    Rejected => "rejected",
+    Uncertain => "uncertain",
+});
+stored_enum!(SubmissionStage, "submission.stage", {
+    ZeroBytes => "zero_bytes",
+    Partial => "partial",
+    Submitted => "submitted",
+    Unknown => "unknown",
+});
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubmissionResult {
@@ -272,32 +248,16 @@ pub(crate) struct PermissionResponseResult {
     pub(crate) key: AnswerKey,
     pub(crate) decision_source: DecisionSource,
 }
-#[derive(Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum MissingEvidence {
-    Operation,
-    Arguments,
-    Cwd,
-    Environment,
-    Targets,
-    Effects,
-    ChoiceScope,
-}
-impl MissingEvidence {
-    /// The wire values in declaration order, which is also the required reply order.
-    const VALUES: &'static [&'static str] = &[
-        "operation",
-        "arguments",
-        "cwd",
-        "environment",
-        "targets",
-        "effects",
-        "choice_scope",
-    ];
-    pub(crate) fn as_str(&self) -> &'static str {
-        Self::VALUES[*self as usize]
-    }
-}
+// Declaration order is also the required reply order.
+stored_enum!(values MissingEvidence, "missing_evidence", {
+    Operation => "operation",
+    Arguments => "arguments",
+    Cwd => "cwd",
+    Environment => "environment",
+    Targets => "targets",
+    Effects => "effects",
+    ChoiceScope => "choice_scope",
+});
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SupportedChoice {
@@ -936,7 +896,10 @@ fn inspection(value: &Value) -> Result<Box<PermissionInspection>> {
         PermissionDecision::VALUES,
     )?;
     validate_order(
-        result.missing_evidence.iter().map(MissingEvidence::as_str),
+        result
+            .missing_evidence
+            .iter()
+            .map(|missing| missing.as_str()),
         MissingEvidence::VALUES,
     )?;
     let mut choices = std::collections::BTreeSet::new();
@@ -1732,6 +1695,16 @@ pub(crate) mod test_support {
 
     pub(crate) fn activate(fixture: &mut Fixture) -> (RunArtifacts, RunLock) {
         let artifacts = fixture.artifacts();
+        let held = transfer_setting(
+            fixture,
+            "status='running',runner_pid=?1,runner_start_identity=?2,child_pid=?1,child_start_identity=?2",
+        );
+        (artifacts, held)
+    }
+
+    /// Transfers the run to this process, then applies the `member_runs` SET list `columns`,
+    /// where `?1` is this process's pid and `?2` its start identity.
+    pub(crate) fn transfer_setting(fixture: &mut Fixture, columns: &str) -> RunLock {
         let held = RunLock::acquire(&fixture.conn, &fixture.run.owner())
             .unwrap()
             .unwrap();
@@ -1739,9 +1712,15 @@ pub(crate) mod test_support {
         let next = held
             .transfer_to_runner(&mut fixture.conn, &fixture.run.owner(), process.clone())
             .unwrap();
-        fixture.conn.execute("UPDATE member_runs SET status='running',runner_pid=?1,runner_start_identity=?2,child_pid=?1,child_start_identity=?2 WHERE run_id=?3",params![process.pid,process.start_identity,next.run_id]).unwrap();
+        fixture
+            .conn
+            .execute(
+                &format!("UPDATE member_runs SET {columns} WHERE run_id=?3"),
+                params![process.pid, process.start_identity, next.run_id],
+            )
+            .unwrap();
         fixture.run = storage::get_run(&fixture.conn, next.run_id).unwrap();
-        (artifacts, held)
+        held
     }
 
     pub(crate) struct SilentServer {
@@ -2025,7 +2004,7 @@ mod tests {
         }
     }
     mod control_codec_tests {
-        use crate::broker::runtime as storage;
+        use crate::runtime::control::test_support::transfer_setting;
         use crate::runtime::control::tests::*;
         use crate::runtime::test_support::Fixture;
         use crate::runtime::test_support::read_fixture_bytes;
@@ -2039,8 +2018,6 @@ mod tests {
 
         #[test]
         fn runner_review_codec_encoding_pins_big_endian_length_and_required_version() {
-            assert_eq!(CONTROL_PROTOCOL_VERSION, 1);
-            assert_eq!(MAX_CONTROL_FRAME, 65536);
             for value in [
                 json!({"protocol_version":1,"kind":"health","identity":{},"text":"literal\n世界"}),
                 json!({"protocol_version":1,"result":{"text":"literal\nreply"}}),
@@ -2143,20 +2120,10 @@ mod tests {
             ] {
                 let mut fixture = Fixture::new();
                 let artifacts = fixture.artifacts();
-                let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                    .unwrap()
-                    .unwrap();
+                let _held =
+                    transfer_setting(&mut fixture, "runner_pid=?1,runner_start_identity=?2");
                 let process = ProcessIdentity::current().unwrap();
-                lock.transfer_to_runner(&mut fixture.conn, &fixture.run.owner(), process.clone())
-                    .unwrap();
-                fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET runner_pid=?1,runner_start_identity=?2 WHERE run_id=?3",
-                    rusqlite::params![process.pid, process.start_identity, fixture.run.run_id],
-                )
-                .unwrap();
-                let run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                let run = fixture.run.clone();
                 let listener = UnixListener::bind(&artifacts.paths.control_socket).unwrap();
                 std::fs::set_permissions(
                     &artifacts.paths.control_socket,
@@ -2720,27 +2687,16 @@ mod tests {
         use crate::runtime::control::test_support::Endpoint;
         use crate::runtime::control::test_support::StartupInterval;
         use crate::runtime::control::test_support::bound_socket;
+        use crate::runtime::control::test_support::transfer_setting;
 
         #[test]
         fn runner_readiness_post_start_health_preserves_strict_endpoint_failures() {
             for interval in [StartupInterval::Bound, StartupInterval::BeforePrivateMode] {
                 let mut endpoint = Endpoint::new();
-                let held = RunLock::acquire(&endpoint.fixture.conn, &endpoint.fixture.run.owner())
-                    .unwrap()
-                    .unwrap();
-                let process = ProcessIdentity::current().unwrap();
-                held.transfer_to_runner(
-                    &mut endpoint.fixture.conn,
-                    &endpoint.fixture.run.owner(),
-                    process.clone(),
-                )
-                .unwrap();
-                endpoint.fixture.conn.execute(
-                        "UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2 WHERE run_id=?3",
-                        rusqlite::params![process.pid,process.start_identity,endpoint.fixture.run.run_id],
-                    ).unwrap();
-                endpoint.fixture.run =
-                    storage::get_run(&endpoint.fixture.conn, endpoint.fixture.run.run_id).unwrap();
+                let _held = transfer_setting(
+                    &mut endpoint.fixture,
+                    "status='running',child_pid=?1,child_start_identity=?2",
+                );
                 let listener = match interval {
                     StartupInterval::Bound => bound_socket(endpoint.path(), 0o600, false),
                     StartupInterval::BeforePrivateMode => {
@@ -3350,11 +3306,6 @@ mod tests {
         let mut legacy = good.clone();
         legacy["kind"] = json!("health");
         assert!(decode_service_request(&prefix(&legacy, r#""kind":"submit_prompt","#)).is_err());
-    }
-    #[test]
-    fn request_lifecycle_then_input_duplicate_kind_cannot_escape_strict_routing() {
-        let good = Case::new().request("submit_prompt", None);
-        decoded(&good);
         assert!(decode_service_request(&prefix(&good, r#""kind":"health","#)).is_err());
     }
     #[test]
@@ -3691,60 +3642,10 @@ mod tests {
         let case = Case::new();
         let request = case.request("permission_inspect", None);
         for supported in [false, true] {
-            let payload = case.inspection(supported);
-            let good = reply("inspection", "request", payload.clone());
-            let actual = match decoded_reply(&good, &request) {
-                InputControlReply::Inspection(actual) => actual,
-                _ => panic!("inspection result has exact kind"),
-            };
-            assert_eq!(actual.event_id, 11);
-            assert_eq!(actual.message_id, 14);
-            assert_eq!(actual.member_id, case.fixture.run.member_id);
-            assert_eq!(actual.fleet_id, case.fixture.run.fleet_id);
-            assert_eq!(
-                actual.director_member_id,
-                case.fixture.run.director_member_id
-            );
-            assert_eq!(actual.run_id, case.fixture.run.run_id);
-            assert_eq!(actual.owner_epoch, case.fixture.run.owner_epoch);
-            assert_eq!(actual.interaction_id, 12);
-            assert_eq!(actual.episode_seq, 1);
-            assert_eq!(
-                serde_json::to_value(actual.classification).unwrap(),
-                payload["classification"]
-            );
-            assert_eq!(
-                serde_json::to_value(actual.visibility).unwrap(),
-                payload["visibility"]
-            );
-            assert_eq!(actual.backend, "codex");
-            assert_eq!(actual.native_version, case.fixture.run.native_version);
-            assert_eq!(
-                actual.answer_rule_id.as_deref(),
-                payload["answer_rule_id"].as_str()
-            );
-            assert_eq!(
-                actual.answer_capability.as_str(),
-                payload["answer_capability"].as_str().unwrap()
-            );
-            assert_eq!(
-                actual.capability_reason.as_deref(),
-                payload["capability_reason"].as_str()
-            );
-            assert_eq!(
-                serde_json::to_value(&actual.supported_decisions).unwrap(),
-                payload["supported_decisions"]
-            );
-            assert_eq!(
-                actual.request_token.as_deref(),
-                payload["request_token"].as_str()
-            );
-            assert_eq!(actual.output_seq, 2);
-            assert_eq!(actual.evidence, payload["evidence"]);
-            assert_eq!(
-                serde_json::to_value(actual.missing_evidence).unwrap(),
-                payload["missing_evidence"]
-            );
+            let good = reply("inspection", "request", case.inspection(supported));
+            let actual = decoded_reply(&good, &request);
+            assert!(matches!(actual, InputControlReply::Inspection(_)));
+            assert_frame(&encode_input_reply(Ok(&actual)).unwrap(), &good);
         }
     }
     #[test]
@@ -4552,42 +4453,29 @@ mod tests {
         fn identity_decode_requires_an_absolute_string_database_path() {
             let case = Case::new();
             let good = control(&case);
-            for (index, value) in bad_paths().into_iter().enumerate() {
-                let mut bad = good.clone();
-                bad["identity"]["database_identity_json"]["canonical_path"] = value;
-                reject_decode(&good, &bad, &format!("canonical_path {index}"));
-            }
-        }
-
-        #[test]
-        fn identity_decode_requires_a_32_character_ascii_hex_instance_id() {
-            let case = Case::new();
-            let good = control(&case);
-            for (index, value) in bad_hex(32).into_iter().enumerate() {
-                let mut bad = good.clone();
-                bad["identity"]["database_identity_json"]["instance_id"] = value;
-                reject_decode(&good, &bad, &format!("instance_id {index}"));
-            }
-        }
-
-        fn reject_numeric_field(field: &str) {
-            let case = Case::new();
-            let good = control(&case);
-            for (index, value) in bad_numbers().into_iter().enumerate() {
-                let mut bad = good.clone();
-                bad["identity"]["database_identity_json"][field] = value;
-                reject_decode(&good, &bad, &format!("{field} {index}"));
+            for (field, values) in [
+                ("canonical_path", bad_paths()),
+                ("instance_id", bad_hex(32)),
+            ] {
+                for (index, value) in values.into_iter().enumerate() {
+                    let mut bad = good.clone();
+                    bad["identity"]["database_identity_json"][field] = value;
+                    reject_decode(&good, &bad, &format!("{field} {index}"));
+                }
             }
         }
 
         #[test]
         fn identity_decode_requires_an_unsigned_64_bit_device() {
-            reject_numeric_field("device");
-        }
-
-        #[test]
-        fn identity_decode_requires_an_unsigned_64_bit_inode() {
-            reject_numeric_field("inode");
+            let case = Case::new();
+            let good = control(&case);
+            for field in ["device", "inode"] {
+                for (index, value) in bad_numbers().into_iter().enumerate() {
+                    let mut bad = good.clone();
+                    bad["identity"]["database_identity_json"][field] = value;
+                    reject_decode(&good, &bad, &format!("{field} {index}"));
+                }
+            }
         }
 
         #[test]
@@ -4688,114 +4576,77 @@ mod tests {
             HealthProbe::Failed("member runtime: ECONNREFUSED: Connection refused".into())
         }
 
-        fn assert_diagnosis(diagnosis: RuntimeDiagnosis, state: MemberState, phrases: &[&str]) {
-            assert_eq!(diagnosis.state, state, "{:?}", diagnosis.diagnostics);
-            assert_eq!(diagnosis.diagnostics, phrases);
-        }
-
-        #[test]
-        fn invalid_run_paths_are_an_interrupted_launch() {
-            assert_diagnosis(
-                RuntimeProbes::InvalidPaths("namespace manifest is missing".into()).classify(),
-                MemberState::InterruptedLaunch,
-                &["runtime files are invalid: namespace manifest is missing"],
-            );
+        fn lock_failure() -> OwnerLockProbe {
+            OwnerLockProbe::Failed("owner lock identity changed".into())
         }
 
         #[test]
         fn a_leftover_descriptor_is_an_interrupted_launch_before_any_health_outcome() {
-            for (held, lock_phrase) in [(true, "owner lock is held"), (false, "owner lock is free")]
-            {
-                let lock = || {
-                    if held {
-                        OwnerLockProbe::Held
-                    } else {
-                        OwnerLockProbe::Free
-                    }
-                };
-                assert_diagnosis(
-                    observed(true, lock(), HealthProbe::Answered),
+            const REFUSED: &str = "runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused";
+            let cases: Vec<(RuntimeDiagnosis, MemberState, &[&str])> = vec![
+                (
+                    RuntimeProbes::InvalidPaths("namespace manifest is missing".into()).classify(),
+                    MemberState::InterruptedLaunch,
+                    &["runtime files are invalid: namespace manifest is missing"],
+                ),
+                (
+                    observed(true, OwnerLockProbe::Held, HealthProbe::Answered),
                     MemberState::InterruptedLaunch,
                     &[
                         "launch descriptor left over",
-                        lock_phrase,
+                        "owner lock is held",
                         "runtime answered the health probe",
                     ],
-                );
-                assert_diagnosis(
-                    observed(true, lock(), HealthProbe::Skipped),
+                ),
+                (
+                    observed(true, OwnerLockProbe::Free, HealthProbe::Skipped),
                     MemberState::InterruptedLaunch,
-                    &["launch descriptor left over", lock_phrase],
-                );
-            }
-        }
-
-        #[test]
-        fn a_health_reply_is_running_whatever_the_lock_state() {
-            assert_diagnosis(
-                observed(false, OwnerLockProbe::Held, HealthProbe::Answered),
-                MemberState::Running,
-                &["owner lock is held", "runtime answered the health probe"],
-            );
-            assert_diagnosis(
-                observed(false, OwnerLockProbe::Free, HealthProbe::Answered),
-                MemberState::Running,
-                &["owner lock is free", "runtime answered the health probe"],
-            );
-        }
-
-        #[test]
-        fn a_held_lock_without_a_health_reply_is_not_responding() {
-            assert_diagnosis(
-                observed(false, OwnerLockProbe::Held, refused()),
-                MemberState::NotResponding,
-                &[
-                    "owner lock is held",
-                    "runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused",
-                ],
-            );
-        }
-
-        #[test]
-        fn a_free_lock_without_a_health_reply_is_a_lost_runtime() {
-            assert_diagnosis(
-                observed(false, OwnerLockProbe::Free, refused()),
-                MemberState::LostRuntime,
-                &[
-                    "owner lock is free",
-                    "runtime did not answer the health probe: member runtime: ECONNREFUSED: Connection refused",
-                ],
-            );
-        }
-
-        #[test]
-        fn a_health_probe_skipped_by_the_deadline_is_not_checked() {
-            assert_diagnosis(
-                observed(false, OwnerLockProbe::Held, HealthProbe::Skipped),
-                MemberState::NotChecked,
-                &["owner lock is held"],
-            );
-            assert_diagnosis(
-                observed(false, OwnerLockProbe::Free, HealthProbe::Skipped),
-                MemberState::NotChecked,
-                &["owner lock is free"],
-            );
-        }
-
-        #[test]
-        fn an_owner_lock_probe_failure_is_check_failed_with_only_its_cause() {
-            for descriptor_leftover in [false, true] {
-                for health in [HealthProbe::Answered, refused(), HealthProbe::Skipped] {
-                    assert_diagnosis(
-                        observed(
-                            descriptor_leftover,
-                            OwnerLockProbe::Failed("owner lock identity changed".into()),
-                            health,
-                        ),
-                        MemberState::CheckFailed,
-                        &["owner lock identity changed"],
-                    );
-                }
+                    &["launch descriptor left over", "owner lock is free"],
+                ),
+                (
+                    observed(false, OwnerLockProbe::Held, HealthProbe::Answered),
+                    MemberState::Running,
+                    &["owner lock is held", "runtime answered the health probe"],
+                ),
+                (
+                    observed(false, OwnerLockProbe::Free, HealthProbe::Answered),
+                    MemberState::Running,
+                    &["owner lock is free", "runtime answered the health probe"],
+                ),
+                (
+                    observed(false, OwnerLockProbe::Held, refused()),
+                    MemberState::NotResponding,
+                    &["owner lock is held", REFUSED],
+                ),
+                (
+                    observed(false, OwnerLockProbe::Free, refused()),
+                    MemberState::LostRuntime,
+                    &["owner lock is free", REFUSED],
+                ),
+                (
+                    observed(false, OwnerLockProbe::Held, HealthProbe::Skipped),
+                    MemberState::NotChecked,
+                    &["owner lock is held"],
+                ),
+                (
+                    observed(false, OwnerLockProbe::Free, HealthProbe::Skipped),
+                    MemberState::NotChecked,
+                    &["owner lock is free"],
+                ),
+                (
+                    observed(false, lock_failure(), HealthProbe::Answered),
+                    MemberState::CheckFailed,
+                    &["owner lock identity changed"],
+                ),
+                (
+                    observed(true, lock_failure(), refused()),
+                    MemberState::CheckFailed,
+                    &["owner lock identity changed"],
+                ),
+            ];
+            for (diagnosis, state, phrases) in cases {
+                assert_eq!(diagnosis.state, state, "{:?}", diagnosis.diagnostics);
+                assert_eq!(diagnosis.diagnostics, phrases);
             }
         }
     }

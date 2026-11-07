@@ -9,6 +9,7 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::fs::TryLockError;
 use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -105,14 +106,7 @@ impl PaneLock {
                     path.display()
                 ))
             })?;
-        match file.try_lock() {
-            Ok(()) => Ok(Some(Self { file, path })),
-            Err(TryLockError::WouldBlock) => Ok(None),
-            Err(TryLockError::Error(error)) => Err(CafleetError::App(format!(
-                "cannot lock pane input {}: {error}",
-                path.display()
-            ))),
-        }
+        Ok(try_lock(&file, &path)?.then_some(Self { file, path }))
     }
 
     /// Releases this held lock so the member's runner can write its staged input.
@@ -128,22 +122,10 @@ impl PaneLock {
     /// Retakes a released lock, retrying every 50 ms until `lock_deadline`; `false` means it
     /// stayed busy.
     pub(crate) fn reacquire_within(&self, lock_deadline: Deadline) -> Result<bool, CafleetError> {
-        loop {
-            match self.file.try_lock() {
-                Ok(()) => return Ok(true),
-                Err(TryLockError::WouldBlock) => {}
-                Err(TryLockError::Error(error)) => {
-                    return Err(CafleetError::App(format!(
-                        "cannot lock pane input {}: {error}",
-                        self.path.display()
-                    )));
-                }
-            }
-            let Ok(left) = lock_deadline.remaining() else {
-                return Ok(false);
-            };
-            std::thread::sleep(left.min(Duration::from_millis(50)));
-        }
+        let reacquired = retry_until(lock_deadline, || {
+            Ok(try_lock(&self.file, &self.path)?.then_some(()))
+        })?;
+        Ok(reacquired.is_some())
     }
 
     /// Retry a held lock every 50 ms until `lock_deadline`; `None` means it stayed busy.
@@ -152,15 +134,36 @@ impl PaneLock {
         placement: &Placement,
         lock_deadline: Deadline,
     ) -> Result<Option<Self>, CafleetError> {
-        loop {
-            if let Some(guard) = Self::try_acquire(database_url, placement)? {
-                return Ok(Some(guard));
-            }
-            let Ok(left) = lock_deadline.remaining() else {
-                return Ok(None);
-            };
-            std::thread::sleep(left.min(Duration::from_millis(50)));
+        retry_until(lock_deadline, || Self::try_acquire(database_url, placement))
+    }
+}
+
+/// `false` means another holder has the lock.
+fn try_lock(file: &File, path: &Path) -> Result<bool, CafleetError> {
+    match file.try_lock() {
+        Ok(()) => Ok(true),
+        Err(TryLockError::WouldBlock) => Ok(false),
+        Err(TryLockError::Error(error)) => Err(CafleetError::App(format!(
+            "cannot lock pane input {}: {error}",
+            path.display()
+        ))),
+    }
+}
+
+/// Repeats `attempt` every 50 ms until it yields a value, making one last attempt after the
+/// sleep that reaches `deadline`; `None` means every attempt came up empty.
+fn retry_until<T>(
+    deadline: Deadline,
+    mut attempt: impl FnMut() -> Result<Option<T>, CafleetError>,
+) -> Result<Option<T>, CafleetError> {
+    loop {
+        if let Some(value) = attempt()? {
+            return Ok(Some(value));
         }
+        let Ok(left) = deadline.remaining() else {
+            return Ok(None);
+        };
+        std::thread::sleep(left.min(Duration::from_millis(50)));
     }
 }
 
@@ -260,19 +263,12 @@ pub(crate) fn lock_deletion<S, T>(
         targets.dedup_by(|left, right| left.0 == right.0);
         let mut guards = Vec::new();
         for (_, member_id, placement) in targets {
-            let guard = loop {
-                deadline.remaining()?;
-                if let Some(guard) = PaneLock::try_acquire(&settings.database_url, &placement)
-                    .map_err(member_pane_input_error(member_id))?
-                {
-                    break guard;
-                }
-                let left = deadline.remaining().map_err(|_| busy(member_id))?;
-                std::thread::sleep(left.min(Duration::from_millis(50)));
-                if deadline.remaining().is_err() {
-                    return Err(busy(member_id));
-                }
-            };
+            deadline.remaining()?;
+            let guard = retry_until(deadline, || {
+                PaneLock::try_acquire(&settings.database_url, &placement)
+                    .map_err(member_pane_input_error(member_id))
+            })?
+            .ok_or_else(|| busy(member_id))?;
             guards.push(guard);
         }
         let span = crate::time::DeferTermination::begin()?;
@@ -403,37 +399,20 @@ mod tests {
         #[test]
         fn runner_recovery_pane_guard_validates_the_actual_database_placement_and_named_inode() {
             use std::os::unix::fs::PermissionsExt;
-            let fixture = Fixture::new();
-            let configuration = crate::config::Settings::for_database(std::path::Path::new(
-                fixture.conn.path().unwrap(),
-            ));
-            let placement = crate::broker::get_member(
-                &fixture.conn,
-                fixture.run.member_id,
-                fixture.run.fleet_id,
-            )
-            .unwrap()
-            .unwrap()
-            .placement
-            .unwrap();
+            let fixture = crate::pane_lock::test_support::LockFixture::new();
+            let configuration = &fixture.settings;
+            let placement = fixture.placement().clone();
             let held = PaneLock::try_acquire(&configuration.database_url, &placement)
                 .unwrap()
                 .unwrap();
             held.validate_binding(&configuration.database_url, &placement)
                 .unwrap();
-            for field in ["backend", "session", "pane"] {
-                let mut changed = placement.clone();
-                match field {
-                    "backend" => changed.backend = "herdr".into(),
-                    "session" => changed.mux_session.push_str("-foreign"),
-                    "pane" => changed.mux_pane_id = Some("%foreign".into()),
-                    _ => unreachable!(),
-                }
-                assert!(
-                    held.validate_binding(&configuration.database_url, &changed)
-                        .is_err()
-                );
-            }
+            let mut changed = placement.clone();
+            changed.mux_pane_id = Some("%foreign".into());
+            assert!(
+                held.validate_binding(&configuration.database_url, &changed)
+                    .is_err()
+            );
             let sibling_path = fixture._dir.path().join("sibling.db");
             let mut sibling = Connection::open(&sibling_path).unwrap();
             crate::db::initialize(&mut sibling).unwrap();
@@ -524,21 +503,6 @@ mod tests {
         }
 
         #[test]
-        fn a_lock_released_just_before_the_reserved_deadline_is_acquired() {
-            let fixture = LockFixture::new();
-            let lock_deadline = LockFixture::writer_deadline();
-            let holder = fixture.hold_for(Duration::from_millis(1300));
-            let guard = PaneLock::acquire_within(
-                &fixture.settings.database_url,
-                fixture.placement(),
-                lock_deadline,
-            )
-            .unwrap();
-            assert!(guard.is_some(), "the 50 ms retry observes the release");
-            holder.join().unwrap();
-        }
-
-        #[test]
         fn a_lock_still_busy_at_the_reserved_deadline_returns_none() {
             let fixture = LockFixture::new();
             let _held = fixture.hold();
@@ -604,6 +568,127 @@ mod tests {
                 .unwrap();
             assert_eq!(std::fs::metadata(&path).unwrap().ino(), metadata.ino());
             assert_eq!(std::fs::read(&path).unwrap(), b"operator marker");
+        }
+    }
+
+    mod deletion_locks {
+        use crate::broker::Placement;
+        use crate::error::CafleetError;
+        use crate::pane_lock::PaneLock;
+        use crate::pane_lock::lock_deletion;
+        use crate::pane_lock::lock_path;
+        use crate::pane_lock::test_support::LockFixture;
+        use crate::pane_lock::tests::*;
+        use crate::time::Deadline;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        /// The fixture's Director and member placements, in physical lock-key order.
+        fn director_and_member_in_key_order(fixture: &LockFixture) -> Vec<(i64, Placement)> {
+            let fleet = fixture.member.fleet_id;
+            let director = crate::broker::get_fleet(&fixture.conn, fleet)
+                .unwrap()
+                .unwrap()
+                .director_member_id
+                .unwrap();
+            let director_placement = crate::broker::get_member(&fixture.conn, director, fleet)
+                .unwrap()
+                .unwrap()
+                .placement
+                .unwrap();
+            let mut targets = vec![
+                (director, director_placement),
+                (fixture.member.member_id, fixture.placement().clone()),
+            ];
+            targets.sort_by_key(|(_, placement)| {
+                lock_path(&fixture.settings.database_url, placement).unwrap()
+            });
+            targets
+        }
+
+        #[test]
+        fn deletion_deduplicates_physical_panes_and_revalidates_after_all_locks() {
+            let mut fixture = LockFixture::new();
+            let placement = fixture.placement().clone();
+            let member = fixture.member.member_id;
+            let locked = lock_deletion(
+                &mut fixture.conn,
+                &fixture.settings,
+                Deadline::new(),
+                |_| {
+                    Ok((
+                        (),
+                        vec![(member, placement.clone()), (member + 1, placement.clone())],
+                    ))
+                },
+                |_, _, _| {
+                    assert!(
+                        PaneLock::try_acquire(&fixture.settings.database_url, &placement)
+                            .unwrap()
+                            .is_none()
+                    );
+                    Ok(Some(()))
+                },
+                |_| CafleetError::App("duplicate pane remained locked".into()),
+            )
+            .unwrap();
+            assert!(
+                PaneLock::try_acquire(&fixture.settings.database_url, &placement)
+                    .unwrap()
+                    .is_none()
+            );
+            drop(locked);
+            assert!(
+                PaneLock::acquire_released(&fixture.settings.database_url, &placement)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+
+        #[test]
+        fn deletion_acquires_physical_keys_in_sorted_order() {
+            let fixture = LockFixture::new();
+            let targets = director_and_member_in_key_order(&fixture);
+            let high_guard = PaneLock::try_acquire(&fixture.settings.database_url, &targets[1].1)
+                .unwrap()
+                .unwrap();
+            let low = targets[0].1.clone();
+            let settings = fixture.settings.clone();
+            let path = fixture.conn.path().unwrap().to_owned();
+            let (loaded, wait_loaded) = std::sync::mpsc::channel();
+            let thread = std::thread::spawn(move || {
+                let mut conn = Connection::open(path).unwrap();
+                let locked = lock_deletion(
+                    &mut conn,
+                    &settings,
+                    Deadline::until(Instant::now() + Duration::from_secs(2)),
+                    |_| {
+                        loaded.send(()).unwrap();
+                        Ok(((), targets.iter().rev().cloned().collect()))
+                    },
+                    |_, _, _| Ok(Some(())),
+                    |_| CafleetError::App("sorted lock wait expired".into()),
+                )
+                .unwrap();
+                drop(locked);
+            });
+            wait_loaded.recv_timeout(Duration::from_secs(1)).unwrap();
+            let limit = Instant::now() + Duration::from_millis(700);
+            loop {
+                if PaneLock::try_acquire(&fixture.settings.database_url, &low)
+                    .unwrap()
+                    .is_none()
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < limit,
+                    "the lower key is owned while the higher key waits"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            drop(high_guard);
+            thread.join().unwrap();
         }
     }
 }

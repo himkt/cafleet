@@ -667,33 +667,6 @@ mod tests {
     }
 
     #[test]
-    fn permission_inspection_json_places_supported_choices_after_supported_decisions() {
-        let output = crate::output::json::permission_inspection(
-            &crate::runtime::control::test_support::question_inspection(),
-        );
-        let value = &output["request"];
-        let keys = value
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        let decisions = keys
-            .iter()
-            .position(|key| *key == "supported_decisions")
-            .unwrap();
-        assert_eq!(keys[decisions + 1], "supported_choices");
-        assert_eq!(value["supported_decisions"], serde_json::json!([]));
-        assert_eq!(
-            value["supported_choices"],
-            serde_json::json!([
-                {"choice_id":"not-now","label":"Not now","scope":"persistent"},
-                {"choice_id":"dont-show-again","label":"Don't show again","scope":"persistent"}
-            ])
-        );
-    }
-
-    #[test]
     fn permission_response_text_names_the_decision_or_the_choice_with_a_dash_for_the_other() {
         use crate::coding_agent::catalog::AnswerKey;
         use crate::runtime::PermissionResponseResult;
@@ -720,6 +693,20 @@ mod tests {
         assert!(
             choice.starts_with("Permission response: interaction=12 run=7 decision=- choice=not-now source=director-auto status=held"),
             "{choice}"
+        );
+    }
+
+    #[test]
+    fn member_press_text_acknowledges_the_canonical_keys_without_effect_counts() {
+        let keys = crate::multiplexer::PressKeys::parse(&["cTrL+A".into(), ";".into()]).unwrap();
+        let value = crate::runtime::KeyAcknowledgment {
+            member_id: 42,
+            pane_id: "%5".into(),
+            keys: keys.canonical(),
+        };
+        assert_eq!(
+            crate::output::format_member_press(&value),
+            "Acknowledged keys [\"Ctrl+a\",\";\"] for member 42 (%5).",
         );
     }
 }

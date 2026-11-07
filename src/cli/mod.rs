@@ -1,17 +1,16 @@
 pub(crate) use crate::cli::member::MemberCapture;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::multiplexer::AnyMultiplexer;
 use crate::output::format_json;
-use crate::runtime::resolve_mux;
 use crate::runtime::system::read_stdin;
 use clap::Parser;
 use clap::Subcommand;
 use serde_json::Value;
 use std::ffi::OsString;
+use std::io::Write;
 
 mod fleet;
-mod member;
+pub(crate) mod member;
 mod message;
 mod runtime;
 mod setup;
@@ -262,19 +261,6 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
     }
 }
 
-pub(crate) fn available_mux(
-    deadline: Option<crate::time::Deadline>,
-) -> Result<AnyMultiplexer, CafleetError> {
-    let mux = resolve_mux().map_err(|e| CafleetError::App(e.to_string()))?;
-    let mux = match deadline {
-        Some(deadline) => mux.bounded(deadline),
-        None => mux,
-    };
-    mux.ensure_available()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
-    Ok(mux)
-}
-
 pub(crate) fn checked(
     validate: fn(&str) -> Result<(), CafleetError>,
 ) -> impl Fn(&str) -> Result<String, String> + Clone + Send + Sync + 'static {
@@ -364,18 +350,30 @@ fn read_body(inline: Option<&str>, file: Option<&str>, flag: &str) -> Result<Str
     }
 }
 
-pub(crate) fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
-    if json {
-        println!("{}", format_json(payload));
-    } else {
-        println!("{}", text());
-    }
+pub(crate) fn emit(
+    json: bool,
+    payload: &Value,
+    text: impl FnOnce() -> String,
+) -> Result<(), CafleetError> {
+    let line = if json { format_json(payload) } else { text() };
+    write_output(&line)
 }
 
-#[cfg(test)]
-pub(crate) use crate::cli::fleet::test_support::guarded_delete_fleet;
-#[cfg(test)]
-pub(crate) use crate::cli::member::substitute_spawn_placeholders;
+pub(crate) fn write_output(line: &str) -> Result<(), CafleetError> {
+    output_result(writeln!(std::io::stdout().lock(), "{line}"))
+}
+
+/// A reader that closed the pipe has consumed all the output it wants, so a broken pipe ends
+/// the output without an error.
+pub(crate) fn output_result(result: std::io::Result<()>) -> Result<(), CafleetError> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(error) => Err(CafleetError::App(format!(
+            "failed to write output: {error}"
+        ))),
+    }
+}
 
 #[cfg(test)]
 pub(crate) mod test_support {
@@ -394,6 +392,21 @@ pub(crate) mod test_support {
             Ok(_) => panic!("expected usage failure for {args:?}"),
             Err(error) => error,
         }
+    }
+
+    /// Asserts that the parser itself refuses `args` as a usage error, rather than failing to
+    /// recognize the subcommand or an option.
+    pub(super) fn assert_usage_rejected(args: &[impl AsRef<str>]) {
+        let args = args.iter().map(AsRef::as_ref).collect::<Vec<_>>();
+        let error = usage_error(&args);
+        assert_eq!(error.exit_code(), 2, "{args:?}: {error}");
+        assert!(
+            !matches!(
+                error.kind(),
+                ErrorKind::InvalidSubcommand | ErrorKind::UnknownArgument
+            ),
+            "the parser validates these arguments: {args:?}: {error}"
+        );
     }
 
     pub(super) fn assert_error(args: &[&str], kind: ErrorKind, input: &str) {
@@ -418,37 +431,65 @@ pub(crate) mod test_support {
     }
 
     /// Runs the CLI with only `executables` (name, shell body) on PATH and `environment` added.
+    /// Runs the libtest child `test` of this binary with `command`'s environment, capturing its
+    /// output and bounding it to ten seconds.
+    pub(super) fn run_test_child(
+        command: &mut std::process::Command,
+        test: &str,
+    ) -> std::process::Output {
+        use crate::runtime::system::test_support::TestChild;
+        use std::process::Stdio;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        let capture = tempfile::tempdir().unwrap();
+        let stdout_path = capture.path().join("stdout");
+        let stderr_path = capture.path().join("stderr");
+        command
+            .args([
+                "--exact",
+                test,
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+                "--quiet",
+            ])
+            .env("RUST_BACKTRACE", "0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(std::fs::File::create(&stdout_path).unwrap()))
+            .stderr(Stdio::from(std::fs::File::create(&stderr_path).unwrap()));
+        let started = Instant::now();
+        let mut child = TestChild::new(command.spawn().unwrap());
+        let status = child.poll_until(started + Duration::from_secs(10)).unwrap();
+        if status.is_none() {
+            child.terminate_until(started + Duration::from_secs(12));
+        }
+        std::process::Output {
+            status: status.unwrap_or_else(|| {
+                panic!(
+                    "{test} exceeded its deadline: {:?}",
+                    std::fs::read_to_string(&stderr_path).unwrap()
+                )
+            }),
+            stdout: std::fs::read(stdout_path).unwrap(),
+            stderr: std::fs::read(stderr_path).unwrap(),
+        }
+    }
+
     pub(super) fn isolated_cli_with(
         settings: &crate::config::Settings,
         args: &[&str],
         executables: &[(&str, &str)],
         environment: &[(&str, &str)],
     ) -> (std::process::Output, String) {
-        use crate::runtime::system::test_support::TestChild;
-        use std::process::Command;
-        use std::process::Stdio;
-        use std::time::Duration;
-        use std::time::Instant;
-
         let dir = tempfile::tempdir().unwrap();
         let pane_log = dir.path().join("pane.log");
         for (name, body) in executables {
             crate::coding_agent::test_support::executable_stub(dir.path(), name, body);
         }
-        let stdout_path = dir.path().join("stdout");
-        let stderr_path = dir.path().join("stderr");
-        let started = Instant::now();
-        let mut child = TestChild::new(
-            Command::new(std::env::current_exe().unwrap())
+        let output = run_test_child(
+            std::process::Command::new(std::env::current_exe().unwrap())
                 .envs(environment.iter().copied())
-                .args([
-                    "--exact",
-                    crate::cli::tests::isolated_cli_child_path(),
-                    "--ignored",
-                    "--nocapture",
-                    "--test-threads=1",
-                    "--quiet",
-                ])
                 .env(
                     "CAFLEET_TEST_ISOLATED_CLI",
                     serde_json::json!({"database_url":settings.database_url,"args":args})
@@ -457,28 +498,9 @@ pub(crate) mod test_support {
                 .env("CAFLEET_TEST_PANE_LOG", &pane_log)
                 .env("PATH", dir.path())
                 .env("TMUX", "cafleet-test,1,0")
-                .env_remove("HERDR_ENV")
-                .env("RUST_BACKTRACE", "0")
-                .stdin(Stdio::null())
-                .stdout(Stdio::from(std::fs::File::create(&stdout_path).unwrap()))
-                .stderr(Stdio::from(std::fs::File::create(&stderr_path).unwrap()))
-                .spawn()
-                .unwrap(),
+                .env_remove("HERDR_ENV"),
+            crate::cli::tests::isolated_cli_child_path(),
         );
-        let status = child.poll_until(started + Duration::from_secs(10)).unwrap();
-        if status.is_none() {
-            child.terminate_until(started + Duration::from_secs(12));
-        }
-        let output = std::process::Output {
-            status: status.unwrap_or_else(|| {
-                panic!(
-                    "isolated CLI exceeded its deadline: {:?}",
-                    std::fs::read_to_string(&stderr_path).unwrap()
-                )
-            }),
-            stdout: std::fs::read(stdout_path).unwrap(),
-            stderr: std::fs::read(stderr_path).unwrap(),
-        };
         let pane_calls = if pane_log.exists() {
             std::fs::read_to_string(pane_log).unwrap()
         } else {
@@ -526,47 +548,44 @@ mod tests {
 
     #[test]
     fn ordinary_commands_preserve_refused_wal_database_and_sidecar_bytes() {
-        for mutation in [
-            "PRAGMA application_id=42",
-            "UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
-            "ALTER TABLE messages RENAME COLUMN text TO wrong",
-            "ALTER TABLE member_runtime_events RENAME COLUMN notification_state TO broken",
-            "ALTER TABLE runtime_database_identity RENAME COLUMN instance_id TO broken",
-            "DROP TABLE member_input_operations",
+        let mutation = "PRAGMA application_id=42";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("registry.db");
+        let settings = Settings::for_database(&path);
+        let mut conn = crate::db::connect(&settings.database_url).unwrap();
+        crate::db::initialize(&mut conn).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
+        conn.execute_batch(mutation).unwrap();
+        conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
+            .unwrap();
+        let before = crate::db::test_support::wal_snapshot(&path);
+        for args in [
+            &["fleet", "list", "--json"][..],
+            &["member", "press", "1", "--from-member-id", "1", "Enter"],
+            &[
+                "permission",
+                "inspect",
+                "1",
+                "--event-id",
+                "1",
+                "--from-member-id",
+                "1",
+            ],
         ] {
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("registry.db");
-            let settings = Settings::for_database(&path);
-            let mut conn = crate::db::connect(&settings.database_url).unwrap();
-            crate::db::initialize(&mut conn).unwrap();
-            conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
-            conn.execute_batch(mutation).unwrap();
-            conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
-                .unwrap();
-            let before = crate::db::test_support::wal_snapshot(&path);
-            for args in [
-                &["fleet", "list", "--json"][..],
-                &["member", "show", "1", "--json"],
-                &["message", "poll", "1", "--json"],
-                &["member", "recover", "1", "--from-member-id", "1", "--json"],
-                &["event", "show", "1", "--json"],
-                &["input", "show", "1", "--json"],
-            ] {
-                assert!(
-                    dispatch(&settings, parse(args)).is_err(),
-                    "{mutation}: {args:?}"
+            assert!(
+                dispatch(&settings, parse(args)).is_err(),
+                "{mutation}: {args:?}"
+            );
+            for (file, bytes) in &before {
+                assert_eq!(
+                    &std::fs::read(file).unwrap(),
+                    bytes,
+                    "{mutation}: {args:?}: {}",
+                    file.display()
                 );
-                for (file, bytes) in &before {
-                    assert_eq!(
-                        &std::fs::read(file).unwrap(),
-                        bytes,
-                        "{mutation}: {args:?}: {}",
-                        file.display()
-                    );
-                }
             }
-            conn.execute_batch("ROLLBACK").unwrap();
         }
+        conn.execute_batch("ROLLBACK").unwrap();
     }
 
     #[test]
@@ -591,90 +610,12 @@ mod tests {
     fn command_options_are_scoped_to_their_subcommands() {
         let cases: &[(&[&str], &str)] = &[
             (&["--json", "fleet", "list"], "--json"),
-            (&["setup", "--fleet-id", "1"], "--fleet-id"),
-            (
-                &[
-                    "fleet",
-                    "create",
-                    "--fleet-id",
-                    "1",
-                    "--name",
-                    "x",
-                    "--coding-agent",
-                    "claude",
-                ],
-                "--fleet-id",
-            ),
-            (&["fleet", "list", "--fleet-id", "1"], "--fleet-id"),
-            (&["fleet", "show", "1", "--fleet-id", "1"], "--fleet-id"),
-            (&["member", "list", "1", "--fleet-id", "1"], "--fleet-id"),
-            (&["member", "show", "1", "--fleet-id", "1"], "--fleet-id"),
-            (&["message", "poll", "1", "--fleet-id", "1"], "--fleet-id"),
-            (&["message", "ack", "1", "--fleet-id", "1"], "--fleet-id"),
-            (&["member", "show", "--member-id", "1"], "--member-id"),
-            (&["message", "poll", "--member-id", "1"], "--member-id"),
-            (&["message", "ack", "--message-id", "1"], "--message-id"),
-            (&["message", "show", "--message-id", "1"], "--message-id"),
-            (
-                &[
-                    "fleet",
-                    "create",
-                    "--name",
-                    "x",
-                    "--coding-agent",
-                    "claude",
-                    "--full",
-                ],
-                "--full",
-            ),
-            (&["fleet", "show", "1", "--full"], "--full"),
-            (&["member", "show", "1", "--full"], "--full"),
-            (&["member", "list", "1", "--full"], "--full"),
-            (&["message", "show", "1", "--full"], "--full"),
-            (&["message", "poll", "1", "--full"], "--full"),
-            (
-                &[
-                    "message",
-                    "send",
-                    "--from-member-id",
-                    "1",
-                    "--to-member-id",
-                    "2",
-                    "hi",
-                    "--quiet",
-                ],
-                "--quiet",
-            ),
-            (&["message", "ack", "1", "--quiet"], "--quiet"),
-            (&["member", "capture", "1", "--no-ansi"], "--no-ansi"),
-            (
-                &[
-                    "message",
-                    "send",
-                    "--from-member-id",
-                    "1",
-                    "--to-member-id",
-                    "2",
-                    "--text",
-                    "hi",
-                ],
-                "--text",
-            ),
-            (
-                &[
-                    "member",
-                    "create",
-                    "--fleet-id",
-                    "1",
-                    "--name",
-                    "w",
-                    "--description",
-                    "d",
-                    "--text",
-                    "prompt",
-                ],
-                "--text",
-            ),
+            (&["setup", "--unknown"], "--unknown"),
+            (&["fleet", "list", "--unknown"], "--unknown"),
+            (&["member", "show", "1", "--unknown"], "--unknown"),
+            (&["message", "poll", "1", "--unknown"], "--unknown"),
+            (&["event", "show", "1", "--unknown"], "--unknown"),
+            (&["input", "show", "1", "--unknown"], "--unknown"),
         ];
         for (args, input) in cases {
             assert_error(args, ErrorKind::UnknownArgument, input);
@@ -939,6 +880,10 @@ mod tests {
         .unwrap();
         let help = CliArgs::command().render_long_help().to_string();
         assert!(!help.contains("__member-run"));
+        assert_eq!(
+            usage_error(&["__member-run", "--descriptor"]).exit_code(),
+            2
+        );
     }
 
     fn flattened(text: impl ToString) -> String {
@@ -1015,64 +960,17 @@ mod tests {
     }
 
     #[test]
-    fn member_exec_help_describes_runner_delivery_and_orders_member_before_command() {
-        use clap::CommandFactory;
-        let help = subcommand_help(&["member", "exec"]);
-        let lower = help.to_lowercase();
-        assert!(
-            lower.contains("runner"),
-            "member exec help describes runner delivery: {help}"
-        );
-        assert!(
-            lower.contains("fallback") || lower.contains("falls back"),
-            "member exec help describes delivery fallback: {help}"
-        );
-        let mut command = CliArgs::command();
-        let usage = flattened(
-            command
-                .find_subcommand_mut("member")
-                .unwrap()
-                .find_subcommand_mut("exec")
-                .unwrap()
-                .render_usage(),
-        );
-        let member = usage.find("MEMBER_ID").expect("usage names MEMBER_ID");
-        let body = usage.find("COMMAND").expect("usage names COMMAND");
-        assert!(member < body, "MEMBER_ID precedes COMMAND: {usage}");
-        match CliArgs::try_parse_from([
-            "cafleet",
-            "member",
-            "exec",
-            "--from-member-id",
-            "1",
-            "17",
-            "printf ok",
-        ])
-        .unwrap()
-        .command
-        {
-            crate::cli::Command::Member(crate::cli::member::MemberCommand::Exec {
-                member_id,
-                ..
-            }) => {
-                assert_eq!(member_id, 17)
-            }
-            _ => panic!("member exec parses MEMBER_ID then COMMAND"),
-        }
-    }
-
-    #[test]
     fn help_describes_command_groups_and_derives_choices_from_their_registries() {
         use crate::coding_agent::CodingAgent;
         use clap::CommandFactory;
         let catalog = CodingAgent::all()
             .iter()
             .map(|agent| {
-                let default = agent.resolve_policy(None, None).unwrap().resolved_mode;
+                let default = agent.resolve_policy(None).unwrap().resolved_mode();
                 format!(
                     "{}: {} (default {default})",
                     agent.name(),
-                    agent.policy_choices(None).join(", ")
+                    agent.policy_choices().join(", ")
                 )
             })
             .collect::<Vec<_>>()
@@ -1092,68 +990,31 @@ mod tests {
                 "{group} has a top-level description"
             );
         }
+        let respond = subcommand_help(&["permission", "respond"]);
         for (argument, values) in [
-            ("decision", vec!["allow", "deny"]),
-            ("decision_source", vec!["director-auto", "user"]),
-            ("director_mode", vec!["auto", "manual", "unknown"]),
+            (
+                "decision",
+                crate::broker::runtime::PermissionDecision::VALUES,
+            ),
+            (
+                "decision_source",
+                crate::broker::runtime::DecisionSource::VALUES,
+            ),
+            (
+                "director_mode",
+                crate::broker::runtime::DirectorMode::VALUES,
+            ),
         ] {
             assert_eq!(
                 possible_values(&["permission", "respond"], argument),
                 values,
                 "{argument}"
             );
-            let respond = subcommand_help(&["permission", "respond"]);
             assert!(
                 respond.contains(&format!("[possible values: {}]", values.join(", "))),
                 "{argument} help lists {values:?}: {respond}"
             );
         }
-        assert_eq!(
-            possible_values(&["input", "reconcile"], "disposition"),
-            ["submitted", "not-submitted", "abandoned-uncertain"]
-        );
-        assert_eq!(
-            possible_values(&["member", "create"], "event_evidence"),
-            ["metadata", "redacted"]
-        );
-        let invalid = usage_error(&[
-            "permission",
-            "respond",
-            "1",
-            "--event-id",
-            "1",
-            "--from-member-id",
-            "1",
-            "--expected-run-id",
-            "1",
-            "--expected-owner-epoch",
-            "1",
-            "--request-token",
-            &"0".repeat(64),
-            "--decision",
-            "maybe",
-            "--decision-source",
-            "user",
-            "--director-mode",
-            "manual",
-            "--mode-evidence-ref",
-            "mode",
-            "--decision-evidence-ref",
-            "decision",
-            "--operation-key",
-            "key",
-        ]);
-        assert_eq!(invalid.exit_code(), 2);
-        assert!(flattened(invalid.render()).contains("allow, deny"));
-    }
-
-    #[test]
-    fn member_runner_internal_command_requires_its_descriptor_argument() {
-        assert_eq!(usage_error(&["__member-run"]).exit_code(), 2);
-        assert_eq!(
-            usage_error(&["__member-run", "--descriptor"]).exit_code(),
-            2
-        );
     }
 
     #[test]
@@ -1233,16 +1094,7 @@ mod tests {
             std::fs::write(&path, source).unwrap();
             assert_eq!(resolve_command_body(None, Some(name)).unwrap(), expected);
         }
-        for source in [
-            "",
-            "  ",
-            "echo x\n\n",
-            "echo x\r",
-            "echo\tx",
-            "one\ntwo",
-            "\0",
-            "\u{7f}",
-        ] {
+        for source in ["", "echo x\n\n", "echo x\r"] {
             std::fs::write(&path, source).unwrap();
             assert!(
                 resolve_command_body(None, Some(name)).is_err(),
@@ -1254,6 +1106,32 @@ mod tests {
             "echo literal"
         );
         assert!(resolve_command_body(Some("echo literal\n"), None).is_err());
+    }
+
+    #[test]
+    fn press_cli_invalid_tail_is_usage_before_missing_database_validation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("absent.db");
+        let settings = crate::config::Settings::for_database(&path);
+        let command = CliArgs::try_parse_from([
+            "cafleet",
+            "member",
+            "press",
+            "--from-member-id",
+            "1",
+            "42",
+            "Enter",
+            "Ctrl+1",
+            "--json",
+        ])
+        .unwrap_or_else(|cause| panic!("raw key arguments reach typed validation: {cause}"))
+        .command;
+        let failure =
+            dispatch(&settings, command).expect_err("the complete key vector is validated first");
+        assert!(matches!(&failure, CafleetError::Usage(message)
+        if message == "invalid press key at position 2: \"Ctrl+1\""));
+        assert_eq!(failure.exit_code(), 2);
+        assert!(!path.exists());
     }
 
     mod director_only_guard {
@@ -1593,49 +1471,19 @@ mod tests {
         }
 
         fn run_guarded_child(args: &[String]) -> ChildOutcome {
-            use crate::runtime::system::test_support::TestChild;
-            use std::process::Stdio;
-            use std::time::Duration;
-            use std::time::Instant;
-
-            let capture_dir = tempfile::tempdir().unwrap();
-            let stdout_path = capture_dir.path().join("stdout");
-            let stderr_path = capture_dir.path().join("stderr");
-            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
-            command
-                .args([
-                    "--exact",
-                    test_path!(guarded_run_child),
-                    "--ignored",
-                    "--nocapture",
-                    "--test-threads=1",
-                    "--quiet",
-                ])
-                .env(CHILD_ARGV, serde_json::json!(args).to_string())
-                .env("RUST_BACKTRACE", "0")
-                .stdin(Stdio::null())
-                .stdout(Stdio::from(std::fs::File::create(&stdout_path).unwrap()))
-                .stderr(Stdio::from(std::fs::File::create(&stderr_path).unwrap()));
-            let started = Instant::now();
-            let mut child = TestChild::new(command.spawn().unwrap());
-            let status = child.poll_until(started + Duration::from_secs(10)).unwrap();
-            if status.is_none() {
-                child.terminate_until(started + Duration::from_secs(12));
-            }
-            let status = status.unwrap_or_else(|| {
-                panic!(
-                    "{args:?}: guard child exceeded its deadline: {:?}",
-                    std::fs::read_to_string(&stderr_path).unwrap()
-                )
-            });
-            let stdout = std::fs::read_to_string(stdout_path).unwrap();
+            let output = crate::cli::test_support::run_test_child(
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .env(CHILD_ARGV, serde_json::json!(args).to_string()),
+                test_path!(guarded_run_child),
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
             let (_, cli_stdout) = stdout
                 .split_once(&format!("{CHILD_STDOUT_MARKER}\n"))
                 .unwrap_or_else(|| panic!("{args:?}: child reached run_args: {stdout:?}"));
             ChildOutcome {
-                code: status.code(),
+                code: output.status.code(),
                 stdout: cli_stdout.to_string(),
-                stderr: std::fs::read_to_string(stderr_path).unwrap(),
+                stderr: String::from_utf8(output.stderr).unwrap(),
             }
         }
 

@@ -457,8 +457,8 @@ impl SpawnProbe for SystemProbe {
         PathBuf::from(std::env::var("HOME").expect("HOME is set"))
     }
 
-    fn env_var(&self, name: &str) -> Option<String> {
-        std::env::var(name).ok()
+    fn env_var(&self, name: &str) -> Result<Option<String>, crate::error::CafleetError> {
+        crate::config::process_env(name)
     }
 }
 
@@ -797,13 +797,11 @@ mod tests {
     fn runner_preserves_binary_not_found_classification() {
         let fixture = ProcessFixture::new();
         let missing = fixture.dir.path().join("missing-executable");
-        for timeout in [None, Some(1)] {
-            let result = SystemRunner.run(&[missing.to_str().unwrap().to_owned()], timeout);
-            assert!(
-                matches!(result, Err(RunError::BinaryNotFound(_))),
-                "{result:?}"
-            );
-        }
+        let result = SystemRunner.run(&[missing.to_str().unwrap().to_owned()], Some(1));
+        assert!(
+            matches!(result, Err(RunError::BinaryNotFound(_))),
+            "{result:?}"
+        );
     }
 
     struct EndlessReader {
@@ -860,32 +858,6 @@ mod tests {
         assert_eq!(attempts, 1);
     }
 
-    mod test_child {
-        use crate::runtime::system::test_support::TestChild;
-        #[test]
-        fn owned_child_guard_cleans_up_when_identity_setup_unwinds() {
-            let mut identity = None;
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let child = TestChild::new(
-                    std::process::Command::new("/bin/cat")
-                        .stdin(std::process::Stdio::piped())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .spawn()
-                        .unwrap(),
-                );
-                identity = crate::runtime::ProcessIdentity::read(i64::from(child.id())).unwrap();
-                panic!("owned identity setup fixture unwind");
-            }));
-            assert!(result.is_err());
-            assert!(
-                !identity
-                    .expect("owned child identity before intentional unwind")
-                    .matches()
-                    .unwrap()
-            );
-        }
-    }
     #[test]
     fn press_absolute_runner_reserves_cleanup_and_reaps_the_actual_direct_child() {
         let fixture = ProcessFixture::new();

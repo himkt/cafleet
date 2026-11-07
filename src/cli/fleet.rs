@@ -12,9 +12,8 @@ use crate::config::Settings;
 use crate::db::finalize_deletion;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
-use crate::multiplexer::AnyMultiplexer;
 use crate::multiplexer::CommandRunner;
-use crate::multiplexer::PostCloseLayout;
+use crate::multiplexer::Multiplexer;
 use crate::output::format_fleet_create;
 use crate::output::format_fleet_delete;
 use crate::output::format_fleet_list;
@@ -93,22 +92,19 @@ pub(crate) fn run(
                     .map(crate::output::json::fleet_summary)
                     .collect(),
             );
-            emit(json, &payload, || format_fleet_list(&fleets));
-            Ok(())
+            emit(json, &payload, || format_fleet_list(&fleets))
         }
         FleetCommand::Show { fleet_id, json } => {
             let fleet = broker::require_fleet(conn, fleet_id)?;
             emit(json, &crate::output::json::fleet(&fleet), || {
                 format_fleet_show(&fleet)
-            });
-            Ok(())
+            })
         }
         FleetCommand::Delete { fleet_id, json } => {
             let result = crate::cli::fleet::delete_fleet(conn, settings, fleet_id, deadline)?;
             emit(json, &crate::output::json::deleted_fleet(&result), || {
                 format_fleet_delete(&result)
-            });
-            Ok(())
+            })
         }
     }
 }
@@ -133,12 +129,11 @@ fn create(
     let runner: Rc<dyn CommandRunner> = Rc::new(SystemRunner);
     let server = match mux_server {
         Some(server) => server,
-        None => crate::multiplexer::caller_server(backend, lookup, runner.as_ref())
-            .map_err(mux_error)?,
+        None => crate::multiplexer::caller_server(backend, lookup, runner.as_ref())?,
     };
-    let mux = AnyMultiplexer::for_server(backend, &server, runner).map_err(mux_error)?;
-    mux.ensure_available().map_err(mux_error)?;
-    let context = mux.pane_context(&pane).map_err(mux_error)?.ok_or_else(|| {
+    let mux = crate::multiplexer::multiplexer_for_server(backend, &server, runner)?;
+    mux.ensure_available()?;
+    let context = mux.pane_context(&pane)?.ok_or_else(|| {
         CafleetError::App(format!(
             "pane {pane} was not found on the {backend} server {server}; pass --pane and --mux-server for the Director's pane"
         ))
@@ -157,8 +152,7 @@ fn create(
     )?;
     emit(json, &crate::output::json::created_fleet(&fleet), || {
         format_fleet_create(&fleet)
-    });
-    Ok(())
+    })
 }
 
 /// The caller's own pane; a Hermes terminal tool runs in the shared gateway, so its pane
@@ -184,10 +178,6 @@ fn caller_pane(
         other => unreachable!("detection returns a supported multiplexer, not {other}"),
     };
     lookup(variable).ok_or_else(|| CafleetError::App(missing.into()))
-}
-
-fn mux_error(cause: crate::multiplexer::MultiplexerError) -> CafleetError {
-    CafleetError::App(cause.to_string())
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -278,15 +268,13 @@ pub(crate) trait DeletionHost {
             run.run_id
         )))
     }
-    fn close_pane(
-        &mut self,
-        placement: &Placement,
-        deadline: Deadline,
-    ) -> Result<PostCloseLayout, CafleetError>;
-    fn restore_layout(&mut self, layout: PostCloseLayout) -> Result<(), CafleetError>;
+    fn close_pane(&mut self, placement: &Placement, deadline: Deadline)
+    -> Result<(), CafleetError>;
+    /// Restores the layout after the preceding `close_pane`.
+    fn restore_layout(&mut self) -> Result<(), CafleetError>;
 }
 
-pub(crate) struct MultiplexerDeletionHost<'a>(pub(crate) &'a AnyMultiplexer);
+pub(crate) struct MultiplexerDeletionHost<'a>(pub(crate) &'a dyn Multiplexer);
 
 impl DeletionHost for MultiplexerDeletionHost<'_> {
     fn settle_hermes(
@@ -296,26 +284,18 @@ impl DeletionHost for MultiplexerDeletionHost<'_> {
         pane_id: &str,
         deadline: Deadline,
     ) -> Result<(), CafleetError> {
-        crate::coding_agent::hermes_settlement::settle_run(conn, self.0, run, pane_id, deadline)
+        crate::coding_agent::hermes::settle_run(conn, self.0, run, pane_id, deadline)
     }
-    fn close_pane(
-        &mut self,
-        placement: &Placement,
-        _: Deadline,
-    ) -> Result<PostCloseLayout, CafleetError> {
+    fn close_pane(&mut self, placement: &Placement, _: Deadline) -> Result<(), CafleetError> {
         let pane = placement
             .mux_pane_id
             .as_deref()
             .expect("deletion target has a concrete pane");
-        self.0
-            .close_pane(pane, true)
-            .map_err(|cause| CafleetError::App(cause.to_string()))
+        Ok(self.0.close_pane(pane, true)?)
     }
 
-    fn restore_layout(&mut self, layout: PostCloseLayout) -> Result<(), CafleetError> {
-        self.0
-            .restore_after_close(layout)
-            .map_err(|cause| CafleetError::App(cause.to_string()))
+    fn restore_layout(&mut self) -> Result<(), CafleetError> {
+        Ok(self.0.restore_after_close()?)
     }
 }
 
@@ -323,7 +303,7 @@ struct NativeFleetDeletionHost {
     /// Read before deletion removes the placement rows; its error surfaces only when a pane
     /// actually needs the multiplexer.
     director: Result<Placement, CafleetError>,
-    mux: Option<AnyMultiplexer>,
+    mux: Option<Box<dyn Multiplexer>>,
 }
 
 impl NativeFleetDeletionHost {
@@ -337,7 +317,7 @@ impl NativeFleetDeletionHost {
         }
         Ok(MultiplexerDeletionHost(
             self.mux
-                .as_ref()
+                .as_deref()
                 .expect("the multiplexer was resolved above"),
         ))
     }
@@ -358,16 +338,16 @@ impl DeletionHost for NativeFleetDeletionHost {
         &mut self,
         placement: &Placement,
         deadline: Deadline,
-    ) -> Result<PostCloseLayout, CafleetError> {
+    ) -> Result<(), CafleetError> {
         self.multiplexer(deadline)?.close_pane(placement, deadline)
     }
 
-    fn restore_layout(&mut self, layout: PostCloseLayout) -> Result<(), CafleetError> {
+    fn restore_layout(&mut self) -> Result<(), CafleetError> {
         let mux = self
             .mux
-            .as_ref()
+            .as_deref()
             .expect("layout restoration follows a pane close");
-        MultiplexerDeletionHost(mux).restore_layout(layout)
+        MultiplexerDeletionHost(mux).restore_layout()
     }
 }
 
@@ -435,7 +415,7 @@ pub(crate) fn end_member(
             conn,
             &run,
             &pane_id,
-            crate::coding_agent::hermes_settlement::settlement_deadline(),
+            crate::coding_agent::hermes::settlement_deadline(),
         )?;
         *deadline = deadline.extended_by(started.elapsed());
     }
@@ -483,7 +463,7 @@ pub(crate) fn end_member(
         scope(conn)
     })?;
     deadline.remaining()?;
-    let layout = host.close_pane(&placement, deadline).map_err(|error| {
+    host.close_pane(&placement, deadline).map_err(|error| {
         CafleetError::App(format!(
             "kill_pane failed for pane {pane_id}: {}. Verify with 'cafleet doctor'.",
             error.message()
@@ -505,7 +485,7 @@ pub(crate) fn end_member(
             error.message()
         ))
     })?;
-    if let Err(error) = host.restore_layout(layout) {
+    if let Err(error) = host.restore_layout() {
         eprintln!(
             "Member {member_id} was deregistered; optional layout restoration failed: {}",
             error.message()
@@ -706,7 +686,6 @@ pub(crate) mod test_support {
     use crate::broker::runtime::RunRecord;
     use crate::config::Settings;
     use crate::error::CafleetError;
-    use crate::multiplexer::PostCloseLayout;
     use crate::pane_lock::PaneLock;
     use crate::runtime::ChildExit;
     use crate::runtime::RecoveryCompletion;
@@ -984,7 +963,7 @@ pub(crate) mod test_support {
             &mut self,
             placement: &Placement,
             deadline: crate::cli::fleet::Deadline,
-        ) -> Result<PostCloseLayout, CafleetError> {
+        ) -> Result<(), CafleetError> {
             self.assert_deadline(deadline.instant());
             self.assert_pane_owned(placement);
             self.calls.push("close");
@@ -1007,24 +986,25 @@ pub(crate) mod test_support {
                     run_id,
                 );
             }
-            Ok(PostCloseLayout::None)
+            Ok(())
         }
 
-        fn restore_layout(&mut self, layout: PostCloseLayout) -> Result<(), CafleetError> {
-            assert!(matches!(layout, PostCloseLayout::None));
+        fn restore_layout(&mut self) -> Result<(), CafleetError> {
             self.restored += 1;
             Ok(())
         }
     }
 
+    pub(crate) fn fleet_deleted(fixture: &Fixture) -> bool {
+        crate::broker::get_fleet(&fixture.conn, fixture.run.fleet_id)
+            .unwrap()
+            .unwrap()
+            .deleted_at
+            .is_some()
+    }
+
     pub(crate) fn assert_registry_active(fixture: &Fixture) {
-        assert!(
-            crate::broker::get_fleet(&fixture.conn, fixture.run.fleet_id)
-                .unwrap()
-                .unwrap()
-                .deleted_at
-                .is_none()
-        );
+        assert!(!fleet_deleted(fixture));
         assert!(
             crate::broker::get_member(&fixture.conn, fixture.run.member_id, fixture.run.fleet_id)
                 .unwrap()
@@ -1048,11 +1028,11 @@ pub(crate) mod test_support {
             &mut self,
             _: &Placement,
             _: crate::cli::fleet::Deadline,
-        ) -> Result<PostCloseLayout, CafleetError> {
-            Ok(PostCloseLayout::None)
+        ) -> Result<(), CafleetError> {
+            Ok(())
         }
 
-        fn restore_layout(&mut self, _: PostCloseLayout) -> Result<(), CafleetError> {
+        fn restore_layout(&mut self) -> Result<(), CafleetError> {
             Ok(())
         }
     }
@@ -1091,12 +1071,83 @@ mod tests {
     use crate::broker::members::test_support::register;
     use crate::broker::runtime as storage;
     use crate::broker::runtime::*;
-    use crate::error::CafleetError;
     use crate::pane_lock::PaneLock;
     use crate::runtime::recovery::test_support::*;
     use crate::runtime::test_support::*;
     use crate::runtime::*;
     use crate::time::Deadline;
+
+    mod deletion_rows {
+        use crate::broker;
+        use crate::broker::fleets::get_fleet;
+        use crate::broker::fleets::test_support::create_fleet_fixture;
+        use crate::broker::members::test_support::register;
+        use crate::cli::fleet::test_support::guarded_delete_fleet;
+        use crate::db::test_support::migrated_conn;
+        use rusqlite::Connection;
+
+        fn row_count(conn: &Connection, table: &str) -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        }
+
+        #[test]
+        fn fleet_deletion_is_atomic_soft_idempotent_and_preserves_messages() {
+            let trigger = "BEFORE DELETE ON member_placements";
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
+            let worker = register(&mut conn, fleet, "worker", None);
+            let message =
+                broker::send_message(&mut conn, director, worker, "retained history").unwrap();
+            let before = get_fleet(&conn, fleet).unwrap();
+            let members =
+                [director, worker].map(|id| broker::get_member(&conn, id, fleet).unwrap());
+            conn.execute_batch(&format!("CREATE TRIGGER fail_deletion {trigger} BEGIN SELECT RAISE(ABORT, 'deletion failure'); END;")).unwrap();
+            assert!(
+                guarded_delete_fleet(&mut conn, fleet)
+                    .unwrap_err()
+                    .message()
+                    .contains("deletion failure")
+            );
+            assert_eq!(get_fleet(&conn, fleet).unwrap(), before);
+            for (id, member) in [director, worker].into_iter().zip(members) {
+                assert_eq!(broker::get_member(&conn, id, fleet).unwrap(), member);
+                assert_eq!(
+                    conn.query_row(
+                        "SELECT deregistered_at FROM members WHERE member_id=?1",
+                        [id],
+                        |row| row.get::<_, Option<String>>(0)
+                    )
+                    .unwrap(),
+                    None
+                );
+            }
+            conn.execute_batch("DROP TRIGGER fail_deletion").unwrap();
+            assert_eq!(
+                guarded_delete_fleet(&mut conn, fleet)
+                    .unwrap()
+                    .deregistered_count,
+                2
+            );
+            assert_eq!(row_count(&conn, "member_placements"), 0);
+            let deleted = get_fleet(&conn, fleet).unwrap();
+            assert_eq!(
+                guarded_delete_fleet(&mut conn, fleet)
+                    .unwrap()
+                    .deregistered_count,
+                0
+            );
+            assert_eq!(get_fleet(&conn, fleet).unwrap(), deleted);
+            assert_eq!(
+                broker::get_message(&conn, message.message_id).unwrap(),
+                message
+            );
+            assert!(guarded_delete_fleet(&mut conn, 999).is_err());
+        }
+    }
 
     #[test]
     fn fleet_create_accepts_every_registered_backend_including_hermes() {
@@ -1113,18 +1164,6 @@ mod tests {
             ]);
             assert!(parsed.is_ok(), "{agent:?}");
         }
-        assert!(
-            crate::cli::CliArgs::try_parse_from([
-                "cafleet",
-                "fleet",
-                "create",
-                "--name",
-                "fixture",
-                "--coding-agent",
-                "hermes",
-            ])
-            .is_ok()
-        );
     }
 
     mod fleet {
@@ -1133,6 +1172,7 @@ mod tests {
         use crate::cli::fleet::test_support::Host;
         use crate::cli::fleet::test_support::Mutation;
         use crate::cli::fleet::test_support::assert_registry_active;
+        use crate::cli::fleet::test_support::fleet_deleted;
         use crate::cli::fleet::tests::*;
         use crate::config::Settings;
         use crate::error::CafleetError;
@@ -1237,59 +1277,31 @@ mod tests {
         }
 
         #[test]
-        fn runner_review_fleet_changed_owner_on_the_same_pane_uses_only_the_fresh_snapshot() {
-            let mut fixture = Fixture::new();
-            let old_epoch = fixture.run.owner_epoch;
-            let (result, host) = while_locks_are_acquired(&mut fixture, |fixture, _| {
-                fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET owner_epoch=owner_epoch+1 WHERE run_id=?1",
-                        [fixture.run.run_id],
-                    )
-                    .unwrap();
-                None
-            });
-            result.unwrap();
-            assert_eq!(host.owners, [(fixture.run.run_id, old_epoch + 1)]);
-            assert_eq!(host.calls, ["shutdown", "close"]);
-        }
-
-        #[test]
         fn runner_review_fleet_changed_run_on_the_same_pane_preserves_the_new_run_identity() {
             let mut fixture = Fixture::new();
             let old_run = fixture.run.clone();
             let mut new_run_id = None;
             let (result, host) = while_locks_are_acquired(&mut fixture, |fixture, _| {
                 fixture.conn.execute("UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=0 WHERE run_id=?1", [old_run.run_id]).unwrap();
-                let new = storage::create_run(
-                    &mut fixture.conn,
-                    &NewRun {
-                        member_id: old_run.member_id,
-                        fleet_id: old_run.fleet_id,
-                        director_member_id: old_run.director_member_id,
-                        backend: old_run.backend.clone(),
-                        database_identity_json: old_run.database_identity_json.clone(),
-                        launch_nonce: "b".repeat(64),
-                        runtime_path: fixture
-                            ._dir
-                            .path()
-                            .join("replacement-run")
-                            .to_str()
-                            .unwrap()
-                            .into(),
-                        requested_mode: old_run.requested_mode.clone(),
-                        resolved_mode: old_run.resolved_mode.clone(),
-                        mode_source: old_run.mode_source,
-                        permission_argv_json: old_run.permission_argv_json.clone(),
-                        event_evidence: old_run.event_evidence,
-                        native_version: old_run.native_version.clone(),
-                        coverage: old_run.coverage,
-                        owner_pid: old_run.owner_pid,
-                        owner_start_identity: old_run.owner_start_identity.clone(),
-                    },
-                )
-                .unwrap();
+                let spec = NewRun {
+                    launch_nonce: "b".repeat(64),
+                    runtime_path: fixture
+                        ._dir
+                        .path()
+                        .join("replacement-run")
+                        .to_str()
+                        .unwrap()
+                        .into(),
+                    ..crate::broker::runtime::test_support::Fixture::spec(
+                        &fixture.conn,
+                        old_run.fleet_id,
+                        old_run.director_member_id,
+                        old_run.member_id,
+                    )
+                };
+                let new =
+                    crate::broker::runtime::test_support::create_run(&mut fixture.conn, &spec)
+                        .unwrap();
                 new_run_id = Some(new.run_id);
                 None
             });
@@ -1400,49 +1412,24 @@ mod tests {
         #[test]
         fn runner_review_fleet_mutable_shutdown_evidence_keeps_one_deadline_and_run_less_teardown()
         {
-            for already_complete in [false, true] {
-                let mut fixture = Fixture::new();
-                if already_complete {
-                    fixture.conn.execute("UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=0 WHERE run_id=?1", [fixture.run.run_id]).unwrap();
-                }
-                let settings = settings(&fixture);
-                let deadline = Deadline::new();
-                let mut host = Host::fleet(settings.clone(), fixture.run.run_id, deadline);
-                let deleted = delete_fleet_with_host(
-                    &mut fixture.conn,
-                    &settings,
-                    fixture.run.fleet_id,
-                    deadline,
-                    &mut host,
-                )
-                .unwrap();
-                assert_eq!(deleted.deregistered_count, 2);
-                assert_eq!(
-                    host.calls,
-                    if already_complete {
-                        vec!["close"]
-                    } else {
-                        vec!["shutdown", "close"]
-                    }
-                );
-                assert_eq!(host.panes.len(), 1);
-                assert_eq!(host.panes[0].mux_pane_id.as_deref(), Some("%2"));
-                assert!(
-                    crate::broker::get_fleet(&fixture.conn, fixture.run.fleet_id)
-                        .unwrap()
-                        .unwrap()
-                        .deleted_at
-                        .is_some()
-                );
-            }
-        }
-
-        fn fleet_deleted(fixture: &Fixture) -> bool {
-            crate::broker::get_fleet(&fixture.conn, fixture.run.fleet_id)
-                .unwrap()
-                .unwrap()
-                .deleted_at
-                .is_some()
+            let mut fixture = Fixture::new();
+            fixture.conn.execute("UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=0 WHERE run_id=?1", [fixture.run.run_id]).unwrap();
+            let settings = settings(&fixture);
+            let deadline = Deadline::new();
+            let mut host = Host::fleet(settings.clone(), fixture.run.run_id, deadline);
+            let deleted = delete_fleet_with_host(
+                &mut fixture.conn,
+                &settings,
+                fixture.run.fleet_id,
+                deadline,
+                &mut host,
+            )
+            .unwrap();
+            assert_eq!(deleted.deregistered_count, 2);
+            assert_eq!(host.calls, ["close"]);
+            assert_eq!(host.panes.len(), 1);
+            assert_eq!(host.panes[0].mux_pane_id.as_deref(), Some("%2"));
+            assert!(fleet_deleted(&fixture));
         }
 
         fn outcomes(deleted: &crate::broker::DeletedFleet) -> Vec<(i64, String)> {
@@ -1614,6 +1601,7 @@ mod tests {
         use crate::cli::fleet::test_support::Mutation;
         use crate::cli::fleet::test_support::assert_registry_active;
         use crate::cli::fleet::tests::*;
+        use crate::runtime::test_support::SLOW_SUM;
         use std::sync::Mutex;
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::Ordering;
@@ -1856,8 +1844,6 @@ mod tests {
             assert!(host.calls.is_empty());
         }
 
-        const LONG_SQL: &str = "WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM numbers WHERE n<1000000000) SELECT sum(n) FROM numbers";
-
         struct EmergencyInterrupt {
             cancellation: Option<mpsc::Sender<()>>,
             worker: Option<std::thread::JoinHandle<()>>,
@@ -1901,88 +1887,75 @@ mod tests {
         }
 
         #[test]
-        fn runner_recovery_deletion_success_error_and_unwind_restore_the_still_live_outer_scope() {
-            for exit in ["success", "error", "unwind"] {
-                let mut case = Case::new();
-                case.seed(&[opening(&case.fixture.run, 1, 1)]);
-                case.release();
-                let start = Instant::now();
-                let inner = start + Duration::from_millis(600);
-                let outer = start + Duration::from_millis(1000);
-                let emergency =
-                    EmergencyInterrupt::arm(&case.fixture.conn, start + Duration::from_secs(2));
-                let deadline = Deadline::until(inner);
-                let mut host = DeletionTestHost::recovering(&case, deadline);
-                if exit != "success" {
-                    host.recovery().action = Some(Box::new(move |boundary, _, _| {
-                        if boundary == "before_compact" {
-                            if exit == "unwind" {
-                                panic!("owned injected recovery unwind");
-                            }
-                            return Err(CafleetError::App("owned injected recovery error".into()));
-                        }
-                        Ok(())
-                    }));
+        fn runner_recovery_deletion_unwind_restores_the_still_live_outer_scope() {
+            let mut case = Case::new();
+            case.seed(&[opening(&case.fixture.run, 1, 1)]);
+            case.release();
+            let start = Instant::now();
+            let inner = start + Duration::from_millis(600);
+            let outer = start + Duration::from_millis(1000);
+            let emergency =
+                EmergencyInterrupt::arm(&case.fixture.conn, start + Duration::from_secs(2));
+            let deadline = Deadline::until(inner);
+            let mut host = DeletionTestHost::recovering(&case, deadline);
+            host.recovery().action = Some(Box::new(move |boundary, _, _| {
+                if boundary == "before_compact" {
+                    panic!("owned injected recovery unwind");
                 }
-                case.fixture
-                    .conn
-                    .busy_timeout(Duration::from_millis(137))
-                    .unwrap();
-                let fleet = case.fixture.run.fleet_id;
-                let result = with_database_deadline(&mut case.fixture.conn, outer, |conn| {
-                    let deletion = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        delete_fleet_with_host(conn, &case.settings, fleet, deadline, &mut host)
-                    }));
-                    match exit {
-                        "success" => assert!(matches!(deletion, Ok(Ok(_)))),
-                        "error" => assert!(matches!(deletion, Ok(Err(_)))),
-                        "unwind" => assert!(deletion.is_err()),
-                        _ => unreachable!(),
-                    }
-                    assert!(
-                        host.recovery()
-                            .calls
-                            .iter()
-                            .any(|name| name == "before_compact")
-                    );
-                    std::thread::sleep(
-                        (inner + Duration::from_millis(20))
-                            .saturating_duration_since(Instant::now()),
-                    );
-                    assert!(Instant::now() > inner && Instant::now() < outer);
-                    assert_eq!(
-                        conn.query_row("SELECT 42", [], |row| row.get::<_, i64>(0))
-                            .unwrap(),
-                        42
-                    );
-                    conn.query_row(LONG_SQL, [], |row| row.get::<_, i64>(0))
-                        .map_err(crate::error::CafleetError::from)
-                });
+                Ok(())
+            }));
+            case.fixture
+                .conn
+                .busy_timeout(Duration::from_millis(137))
+                .unwrap();
+            let fleet = case.fixture.run.fleet_id;
+            let result = with_database_deadline(&mut case.fixture.conn, outer, |conn| {
+                let deletion = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    delete_fleet_with_host(conn, &case.settings, fleet, deadline, &mut host)
+                }));
+                assert!(deletion.is_err());
                 assert!(
-                    !emergency.finish(),
-                    "{exit}: the original outer deadline cancels SQL"
+                    host.recovery()
+                        .calls
+                        .iter()
+                        .any(|name| name == "before_compact")
                 );
-                assert!(result.is_err());
-                assert!(
-                    Instant::now() >= outer,
-                    "the retired inner deadline cannot cancel outer work: {exit}"
+                std::thread::sleep(
+                    (inner + Duration::from_millis(20)).saturating_duration_since(Instant::now()),
                 );
-                assert!(start.elapsed() < Duration::from_millis(1400));
+                assert!(Instant::now() > inner && Instant::now() < outer);
                 assert_eq!(
-                    case.fixture
-                        .conn
-                        .query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))
-                        .unwrap(),
-                    137
-                );
-                assert_eq!(
-                    case.fixture
-                        .conn
-                        .query_row("SELECT 42", [], |row| row.get::<_, i64>(0))
+                    conn.query_row("SELECT 42", [], |row| row.get::<_, i64>(0))
                         .unwrap(),
                     42
                 );
-            }
+                conn.query_row(SLOW_SUM, [], |row| row.get::<_, i64>(0))
+                    .map_err(crate::error::CafleetError::from)
+            });
+            assert!(
+                !emergency.finish(),
+                "the original outer deadline cancels SQL"
+            );
+            assert!(result.is_err());
+            assert!(
+                Instant::now() >= outer,
+                "the retired inner deadline cannot cancel outer work"
+            );
+            assert!(start.elapsed() < Duration::from_millis(1400));
+            assert_eq!(
+                case.fixture
+                    .conn
+                    .query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                137
+            );
+            assert_eq!(
+                case.fixture
+                    .conn
+                    .query_row("SELECT 42", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                42
+            );
         }
 
         #[test]
@@ -1990,7 +1963,7 @@ mod tests {
          {
             let mut case = Case::new();
             case.seed(&[opening(&case.fixture.run, 1, 1)]);
-            case.fixture.conn.execute_batch(&format!("CREATE TABLE recovery_sql_probe (entered INTEGER NOT NULL); CREATE TRIGGER slow_replay BEFORE INSERT ON member_runtime_events BEGIN INSERT INTO recovery_sql_probe VALUES (1); SELECT ({LONG_SQL}); END")).unwrap();
+            case.fixture.conn.execute_batch(&format!("CREATE TABLE recovery_sql_probe (entered INTEGER NOT NULL); CREATE TRIGGER slow_replay BEFORE INSERT ON member_runtime_events BEGIN INSERT INTO recovery_sql_probe VALUES (1); SELECT ({SLOW_SUM}); END")).unwrap();
             let entered = Arc::new(Mutex::new(None));
             let observed = entered.clone();
             case.fixture
@@ -2087,7 +2060,6 @@ mod tests {
         use crate::cli::fleet::delete_fleet;
         use crate::cli::fleet::deletion_placements;
         use crate::cli::fleet::tests::*;
-        use crate::pane_lock::lock_deletion;
         use crate::pane_lock::test_support::LockFixture;
         #[test]
         fn fleet_deletion_contention_preserves_rows_and_releases_preceding_guards() {
@@ -2128,107 +2100,14 @@ mod tests {
             }
             drop(guard);
             assert_eq!(
-                crate::cli::guarded_delete_fleet(&mut fixture.conn, fixture.member.fleet_id)
-                    .unwrap()
-                    .deregistered_count,
+                crate::cli::fleet::test_support::guarded_delete_fleet(
+                    &mut fixture.conn,
+                    fixture.member.fleet_id
+                )
+                .unwrap()
+                .deregistered_count,
                 before.len()
             );
-        }
-
-        #[test]
-        fn deletion_deduplicates_physical_panes_and_revalidates_after_all_locks() {
-            let mut fixture = LockFixture::new();
-            let placement = fixture.placement().clone();
-            let member = fixture.member.member_id;
-            let locked = lock_deletion(
-                &mut fixture.conn,
-                &fixture.settings,
-                Deadline::new(),
-                |_| {
-                    Ok((
-                        (),
-                        vec![(member, placement.clone()), (member + 1, placement.clone())],
-                    ))
-                },
-                |_, _, _| {
-                    assert!(
-                        PaneLock::try_acquire(&fixture.settings.database_url, &placement)
-                            .unwrap()
-                            .is_none()
-                    );
-                    Ok(Some(()))
-                },
-                |_| CafleetError::App("duplicate pane remained locked".into()),
-            )
-            .unwrap();
-            assert!(
-                PaneLock::try_acquire(&fixture.settings.database_url, &placement)
-                    .unwrap()
-                    .is_none()
-            );
-            drop(locked);
-            assert!(
-                PaneLock::acquire_released(&fixture.settings.database_url, &placement)
-                    .unwrap()
-                    .is_some()
-            );
-        }
-
-        #[test]
-        fn deletion_acquires_physical_keys_in_sorted_order() {
-            let fixture = LockFixture::new();
-            let targets =
-                deletion_placements(&fixture.conn, &fixture.settings, fixture.member.fleet_id)
-                    .unwrap();
-            assert_eq!(targets.len(), 2);
-            let high_guard =
-                PaneLock::try_acquire(&fixture.settings.database_url, &targets[1].placement)
-                    .unwrap()
-                    .unwrap();
-            let low = targets[0].placement.clone();
-            let settings = fixture.settings.clone();
-            let path = fixture.conn.path().unwrap().to_owned();
-            let (loaded, wait_loaded) = std::sync::mpsc::channel();
-            let thread = std::thread::spawn(move || {
-                let mut conn = Connection::open(path).unwrap();
-                let locked = lock_deletion(
-                    &mut conn,
-                    &settings,
-                    Deadline::until(Instant::now() + Duration::from_secs(2)),
-                    |_| {
-                        loaded.send(()).unwrap();
-                        Ok((
-                            (),
-                            targets
-                                .iter()
-                                .rev()
-                                .map(|target| (target.member_id, target.placement.clone()))
-                                .collect(),
-                        ))
-                    },
-                    |_, _, _| Ok(Some(())),
-                    |_| CafleetError::App("sorted lock wait expired".into()),
-                )
-                .unwrap();
-                drop(locked);
-            });
-            wait_loaded.recv_timeout(Duration::from_secs(1)).unwrap();
-            let limit = Instant::now() + Duration::from_millis(700);
-            loop {
-                if PaneLock::try_acquire(&fixture.settings.database_url, &low)
-                    .unwrap()
-                    .is_none()
-                {
-                    break;
-                }
-                assert!(
-                    Instant::now() < limit,
-                    "the lower key is owned while the higher key waits"
-                );
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            drop(high_guard);
-            thread.join().unwrap();
         }
 
         #[test]

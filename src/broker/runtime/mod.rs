@@ -1,43 +1,12 @@
 mod events;
 pub(crate) mod evidence;
 mod inputs;
-pub(crate) use inputs::UnpublishedDeliveryResult;
 
 use crate::broker::MemberStatus;
-pub(crate) use crate::broker::runtime::events::get_event;
-pub(crate) use crate::broker::runtime::events::input_delivery_result_cause;
-pub(crate) use crate::broker::runtime::events::latest_event_seq;
 pub(crate) use crate::broker::runtime::events::original as original_transition;
-pub(crate) use crate::broker::runtime::events::persist_transition;
-pub(crate) use crate::broker::runtime::events::persist_transition_in_transaction;
-pub(crate) use crate::broker::runtime::events::persist_transition_with_effective_policy;
-pub(crate) use crate::broker::runtime::events::record_effective_policy;
-pub(crate) use crate::broker::runtime::events::update_interaction_evidence;
 pub(crate) use crate::broker::runtime::events::validate_transition as validate_observed_transition;
-pub(crate) use crate::broker::runtime::inputs::InputReservation;
-pub(crate) use crate::broker::runtime::inputs::NewReservation;
-pub(crate) use crate::broker::runtime::inputs::UNRESOLVED_INPUT;
-pub(crate) use crate::broker::runtime::inputs::ZeroByteRetirement;
-pub(crate) use crate::broker::runtime::inputs::begin_deferred_attempt;
-pub(crate) use crate::broker::runtime::inputs::find_input;
-pub(crate) use crate::broker::runtime::inputs::get_input;
-pub(crate) use crate::broker::runtime::inputs::get_permission_response;
-pub(crate) use crate::broker::runtime::inputs::has_unresolved_ordinary_attempt;
-pub(crate) use crate::broker::runtime::inputs::input_payload_digest;
-pub(crate) use crate::broker::runtime::inputs::lookup_permission_response;
-pub(crate) use crate::broker::runtime::inputs::permission_response_digest;
-pub(crate) use crate::broker::runtime::inputs::rearm_permission_response;
-pub(crate) use crate::broker::runtime::inputs::record_input_state;
-pub(crate) use crate::broker::runtime::inputs::record_input_uncertain;
-pub(crate) use crate::broker::runtime::inputs::requeue_zero_byte_immediate;
-pub(crate) use crate::broker::runtime::inputs::reserve_input_with_provenance;
-pub(crate) use crate::broker::runtime::inputs::reserve_permission_response;
-pub(crate) use crate::broker::runtime::inputs::settle_any_input_in_transaction;
-pub(crate) use crate::broker::runtime::inputs::settle_lost_deferred;
-pub(crate) use crate::broker::runtime::inputs::settle_lost_deferred_in_transaction;
-pub(crate) use crate::broker::runtime::inputs::settle_preview;
-pub(crate) use crate::broker::runtime::inputs::settle_zero_byte_deferred;
-pub(crate) use crate::broker::runtime::inputs::unpublished_delivery_results;
+pub(crate) use crate::broker::runtime::events::*;
+pub(crate) use crate::broker::runtime::inputs::*;
 use crate::broker::stored_enum;
 use crate::coding_agent::catalog::AnswerKey;
 use crate::db::with_database_budget;
@@ -54,20 +23,6 @@ use serde_json::Value;
 use serde_json::json;
 use std::ops::RangeInclusive;
 use std::os::unix::fs::MetadataExt;
-
-#[cfg(test)]
-pub(crate) use crate::broker::runtime::events::persist_event_with_effective_policy;
-
-#[cfg(test)]
-pub(crate) use crate::broker::runtime::events::persist_event;
-
-#[cfg(test)]
-pub(crate) use crate::broker::runtime::inputs::reserve_input;
-#[cfg(test)]
-pub(crate) use crate::broker::runtime::inputs::settle_input;
-
-#[cfg(test)]
-pub(crate) use crate::broker::runtime::inputs::release_permission_claim;
 
 pub(super) fn invalid(field: &str, description: impl Into<String>) -> CafleetError {
     CafleetError::InvalidStoredValue {
@@ -334,18 +289,6 @@ pub(super) fn owned_transaction<T>(
     })
 }
 
-#[cfg(test)]
-pub(crate) fn create_run(conn: &mut Connection, new: &NewRun) -> Result<RunRecord, CafleetError> {
-    let deadline = Deadline::inherited_or_new();
-    with_database_budget(conn, deadline, |conn| {
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run = insert_run(&tx, new)?;
-        deadline.remaining()?;
-        tx.commit()?;
-        Ok(run)
-    })
-}
-
 pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, CafleetError> {
     validate_identity(&new.database_identity_json)?;
     nonblank(&new.owner_start_identity, "owner_start_identity")?;
@@ -394,7 +337,7 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
 pub(crate) fn native_session(
     conn: &Connection,
     run_id: i64,
-) -> Result<Option<crate::coding_agent::hermes_settlement::NativeSession>, CafleetError> {
+) -> Result<Option<crate::coding_agent::hermes::NativeSession>, CafleetError> {
     let stored: Option<String> = conn.query_row(
         "SELECT native_session_json FROM member_runs WHERE run_id=?1",
         [run_id],
@@ -414,7 +357,7 @@ pub(crate) fn native_session(
 pub(crate) fn set_native_session(
     conn: &Connection,
     run_id: i64,
-    session: &crate::coding_agent::hermes_settlement::NativeSession,
+    session: &crate::coding_agent::hermes::NativeSession,
 ) -> Result<(), CafleetError> {
     let changed = conn.execute(
         "UPDATE member_runs SET native_session_json=?1 WHERE run_id=?2",
@@ -546,11 +489,11 @@ stored_enum!(CleanupState, "member_runs.cleanup_state", { Complete => "complete"
 stored_enum!(Coverage, "member_runs.coverage", { Tested => "tested", Unknown => "unknown" });
 stored_enum!(EventEvidence, "member_runs.event_evidence", { Metadata => "metadata", Redacted => "redacted" });
 stored_enum!(AutomaticReview, "effective_policy.automatic_review", { Available => "available", Unavailable => "unavailable" });
-stored_enum!(InteractionClass, "member_interactions.classification", {
+stored_enum!(test_values InteractionClass, "member_interactions.classification", {
     PermissionRequest => "permission_request", Question => "question", Trust => "trust",
     Update => "update", UnknownInteraction => "unknown_interaction"
 });
-stored_enum!(InteractionCloseReason, "member_interactions.close_reason", {
+stored_enum!(test_values InteractionCloseReason, "member_interactions.close_reason", {
     NotVisible => "not_visible", Superseded => "superseded",
     ProcessExited => "process_exited", MonitorLost => "monitor_lost"
 });
@@ -570,7 +513,7 @@ stored_enum!(RuntimeCauseKind, "cause.kind", {
     RuntimePathMissing => "runtime_path_missing"
 });
 stored_enum!(NotificationState, "member_runtime_events.notification_state", { Inbox => "inbox", Archived => "archived" });
-stored_enum!(ArchiveReason, "member_runtime_events.archive_reason", {
+stored_enum!(test_values ArchiveReason, "member_runtime_events.archive_reason", {
     MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive"
 });
 stored_enum!(InputKind, "member_input_operations.kind", { Preview => "preview", Prompt => "prompt", Exec => "exec", PermissionResponse => "permission_response" });
@@ -578,7 +521,7 @@ stored_enum!(InputState, "member_input_operations.state", {
     Ready => "ready", InProgress => "in_progress", Accepted => "accepted",
     Uncertain => "uncertain", Settled => "settled"
 });
-stored_enum!(InputDisposition, "member_input_operations.disposition", {
+stored_enum!(test_values InputDisposition, "member_input_operations.disposition", {
     Submitted => "submitted", NotSubmitted => "not_submitted", AbandonedUncertain => "abandoned_uncertain"
 });
 stored_enum!(UncertainCause, "member_input_operations.uncertain_cause", {
@@ -676,6 +619,29 @@ impl RunRecord {
             owner_pid: self.owner_pid,
             owner_start_identity: self.owner_start_identity.clone(),
         }
+    }
+    pub(crate) fn owner_process(&self) -> crate::runtime::ProcessIdentity {
+        crate::runtime::ProcessIdentity {
+            pid: self.owner_pid,
+            start_identity: self.owner_start_identity.clone(),
+        }
+    }
+    pub(crate) fn child_process(
+        &self,
+    ) -> Result<Option<crate::runtime::ProcessIdentity>, CafleetError> {
+        match (self.child_pid, &self.child_start_identity) {
+            (None, None) => Ok(None),
+            (Some(pid), Some(start_identity)) => Ok(Some(crate::runtime::ProcessIdentity {
+                pid,
+                start_identity: start_identity.clone(),
+            })),
+            _ => Err(CafleetError::App(
+                "recorded child generation is incomplete".into(),
+            )),
+        }
+    }
+    pub(crate) fn is_settled(&self) -> bool {
+        self.status.terminal() && self.cleanup_state == CleanupState::Complete
     }
 }
 
@@ -901,6 +867,59 @@ pub(crate) mod test_support {
     pub(crate) const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
     pub(crate) const SECRET: &str = "fixture-secret-194-unique";
 
+    pub(crate) fn create_run(
+        conn: &mut Connection,
+        new: &NewRun,
+    ) -> Result<RunRecord, CafleetError> {
+        let deadline = Deadline::inherited_or_new();
+        with_database_budget(conn, deadline, |conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let run = insert_run(&tx, new)?;
+            deadline.remaining()?;
+            tx.commit()?;
+            Ok(run)
+        })
+    }
+
+    pub(crate) fn reserve_input(
+        conn: &mut Connection,
+        owner: &RunOwner,
+        new: &NewInput,
+    ) -> Result<InputOperation, CafleetError> {
+        match reserve_input_with_provenance(conn, owner, new, NewReservation::PLAIN)? {
+            InputReservation::Inserted(operation) | InputReservation::Existing(operation) => {
+                Ok(operation)
+            }
+        }
+    }
+
+    pub(crate) fn settle_input(
+        conn: &mut Connection,
+        owner: &RunOwner,
+        input_id: i64,
+        expected: InputState,
+        disposition: InputDisposition,
+        evidence_ref: &str,
+    ) -> Result<InputOperation, CafleetError> {
+        owned_transaction(conn, owner, |conn, _run| {
+            settle_input_in_transaction(conn, owner, input_id, expected, disposition, evidence_ref)
+        })
+    }
+
+    pub(crate) fn release_permission_claim(
+        conn: &mut Connection,
+        owner: &RunOwner,
+        input_id: i64,
+        proof: &ZeroByteRetirement<'_>,
+        deadline: std::time::Instant,
+    ) -> Result<PermissionReceipt, CafleetError> {
+        crate::runtime::with_database_deadline(conn, deadline, |conn| {
+            owned_transaction(conn, owner, |conn, _| {
+                release_permission_claim_in_transaction(conn, owner, input_id, proof, deadline)
+            })
+        })
+    }
+
     pub(crate) struct Fixture {
         pub(crate) _dir: TempDir,
         pub(crate) conn: Connection,
@@ -917,7 +936,7 @@ pub(crate) mod test_support {
             let (fleet, director) = create_fleet_fixture(&mut conn, "runtime-contract");
             let member = register(&mut conn, fleet, "worker", Some("%2"));
             let spec = Self::spec(&conn, fleet, director, member);
-            let run = storage::create_run(&mut conn, &spec).unwrap();
+            let run = create_run(&mut conn, &spec).unwrap();
             Self {
                 _dir: dir,
                 conn,
@@ -958,6 +977,43 @@ pub(crate) mod test_support {
                 owner_pid: i64::from(std::process::id()),
                 owner_start_identity: "fixture-start-identity".into(),
             }
+        }
+
+        /// A second running, tested run for a new member `name` of this fleet, owned by its
+        /// runner at epoch 2 with reserved event sequences.
+        pub(crate) fn running_sibling(&mut self, name: &str) -> RunOwner {
+            let member = crate::broker::members::test_support::register(
+                &mut self.conn,
+                self.fleet,
+                name,
+                Some("%3"),
+            );
+            let spec = Self::spec(&self.conn, self.fleet, self.director, member);
+            let run = create_run(&mut self.conn, &spec).unwrap();
+            self.conn
+                .execute(
+                    "UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2,coverage='tested' WHERE run_id=?1",
+                    [run.run_id],
+                )
+                .unwrap();
+            let owner = crate::broker::runtime::get_run(&self.conn, run.run_id)
+                .unwrap()
+                .owner();
+            crate::broker::runtime::reserve_event_sequences(&mut self.conn, &owner).unwrap();
+            owner
+        }
+
+        /// A fixture whose run records redacted event evidence.
+        pub(crate) fn redacted() -> Self {
+            let fixture = Self::new();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
+                    [fixture.run.run_id],
+                )
+                .unwrap();
+            fixture
         }
 
         pub(crate) fn activate(&mut self) -> RunOwner {
@@ -1001,8 +1057,9 @@ pub(crate) mod test_support {
                 classification: Some(classification),
                 ..opening(self.run.run_id, 1, 1, metadata())
             };
-            storage::persist_event(&mut self.conn, owner, &transition, PersistenceMode::Live)
+            storage::persist_transition(&mut self.conn, owner, &transition, PersistenceMode::Live)
                 .unwrap()
+                .0
         }
 
         pub(crate) fn input(
@@ -1012,7 +1069,7 @@ pub(crate) mod test_support {
             kind: InputKind,
             message_id: Option<i64>,
         ) -> InputOperation {
-            storage::reserve_input(
+            reserve_input(
                 &mut self.conn,
                 owner,
                 &NewInput {
@@ -1159,7 +1216,7 @@ pub(crate) mod test_support {
                 .to_str()
                 .unwrap()
                 .into();
-        storage::create_run(conn, &spec).unwrap()
+        create_run(conn, &spec).unwrap()
     }
 
     use crate::coding_agent::AnswerCapability;
@@ -1280,6 +1337,15 @@ pub(crate) mod test_support {
         })
     }
 
+    /// The redaction policy for `patterns` that recognizes the native permission request.
+    pub(crate) fn redacted_policy(patterns: &[&str]) -> evidence::EvidencePolicy {
+        evidence::EvidencePolicy::redacted(
+            &json!({"schema_version":1,"patterns":patterns,"sensitive_rules":[]}),
+            &["native-tool-permission"],
+        )
+        .unwrap()
+    }
+
     pub(crate) fn store_effective_policy(fixture: &Fixture, record: &Value) {
         fixture
             .conn
@@ -1308,130 +1374,6 @@ pub(crate) mod test_support {
             .unwrap();
         }
         tx.commit().unwrap();
-    }
-
-    pub(crate) mod automatic_review {
-        use crate::broker::runtime::test_support::*;
-        pub(crate) fn annotation_raw(rule: &str, operation: Option<&str>) -> Value {
-            json!({
-                "backend":"codex","native_version":"0.163.0",
-                "rule_id":rule,"screen_seq":140,
-                "operation":operation,"operation_rows":operation.map(|text| text.split('\n').count()),
-                "choices":null,"native_request_id":null,
-                "excerpt":format!("notice {SECRET}"),
-                "truncated":false,"sensitive":false,
-            })
-        }
-
-        pub(crate) fn refusal_raw(operation: &str) -> Value {
-            annotation_raw("codex-auto-review-refusal", Some(operation))
-        }
-
-        pub(crate) fn unavailable_raw() -> Value {
-            annotation_raw("codex-auto-review-unavailable", None)
-        }
-
-        pub(crate) fn redacted(raw: &Value) -> Value {
-            evidence::EvidencePolicy::redacted(
-                &json!({"schema_version":1,"patterns":[SECRET],"sensitive_rules":[]}),
-                &["codex-auto-review-refusal", "codex-auto-review-unavailable"],
-            )
-            .unwrap()
-            .apply(raw)
-            .unwrap()
-        }
-
-        pub(crate) fn annotation_event(
-            run: i64,
-            event_seq: i64,
-            kind: RuntimeEventKind,
-            evidence: Value,
-        ) -> ObservedTransition {
-            ObservedTransition {
-                run_id: run,
-                event_seq,
-                episode_seq: None,
-                kind,
-                classification: None,
-                observed_at: NOW.into(),
-                evidence_json: evidence,
-                close_reason: None,
-                cause_json: None,
-            }
-        }
-
-        pub(crate) fn persisted(
-            fixture: &mut Fixture,
-            kind: RuntimeEventKind,
-            evidence: Value,
-        ) -> RuntimeEventRecord {
-            let owner = fixture.activate();
-            fixture.reserve(&owner);
-            storage::persist_event(
-                &mut fixture.conn,
-                &owner,
-                &annotation_event(owner.run_id, 1, kind, evidence),
-                PersistenceMode::Live,
-            )
-            .unwrap()
-        }
-
-        pub(crate) fn redacted_fixture() -> Fixture {
-            let fixture = Fixture::new();
-            fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                    [fixture.run.run_id],
-                )
-                .unwrap();
-            fixture
-        }
-
-        pub(crate) fn inspect_argv(event: &RuntimeEventRecord) -> Value {
-            json!([
-                "cafleet",
-                "event",
-                "show",
-                event.event_id.to_string(),
-                "--json"
-            ])
-        }
-
-        pub(crate) fn assert_runner_screen_event_without_interaction(
-            fixture: &Fixture,
-            event: &RuntimeEventRecord,
-            kind: &str,
-        ) {
-            let payload = &event.payload_json;
-            assert_eq!(payload["schema_version"], 2);
-            assert_eq!(payload["kind"], kind);
-            assert_eq!(payload["interaction_id"], Value::Null);
-            assert_eq!(payload["classification"], Value::Null);
-            assert_eq!(payload["source"], "runner_screen");
-            assert_eq!(payload["native_request_id"], Value::Null);
-            assert_eq!(payload["decision_outcome"], "unknown");
-            assert_eq!(event.interaction_id, None);
-            assert_eq!(event.notification_state, NotificationState::Inbox);
-            assert_key_order(
-                &payload["director_action"],
-                &["kind", "instruction", "inspect_argv"],
-            );
-            assert_eq!(
-                payload["director_action"]["inspect_argv"],
-                inspect_argv(event)
-            );
-            let message =
-                crate::broker::get_message(&fixture.conn, event.message_id.unwrap()).unwrap();
-            assert_eq!(message.from_member_id, fixture.member);
-            assert_eq!(message.to_member_id, fixture.director);
-            assert_eq!(message.text, payload.to_string());
-            assert!(rows(&fixture.conn, "member_interactions").is_empty());
-            assert!(rows(&fixture.conn, "member_input_operations").is_empty());
-            let view = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
-            assert!(view.interaction.is_none());
-            assert_eq!(view.event.payload_json, *payload);
-        }
     }
 }
 
@@ -1468,10 +1410,10 @@ mod tests {
 
     #[test]
     fn run_creation_validates_member_fleet_and_pinned_director_before_allocating() {
+        let mut fixture = Fixture::new();
+        let (other_fleet, other_director) = create_fleet_fixture(&mut fixture.conn, "foreign");
+        let member = register(&mut fixture.conn, fixture.fleet, "new-worker", None);
         for mismatch in ["member", "fleet", "director", "database"] {
-            let mut fixture = Fixture::new();
-            let (other_fleet, other_director) = create_fleet_fixture(&mut fixture.conn, "foreign");
-            let member = register(&mut fixture.conn, fixture.fleet, "new-worker", None);
             let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
             match mismatch {
                 "member" => spec.member_id = other_director,
@@ -1482,7 +1424,7 @@ mod tests {
             }
             let before = durable_state(&fixture.conn);
             assert!(
-                storage::create_run(&mut fixture.conn, &spec).is_err(),
+                crate::broker::runtime::test_support::create_run(&mut fixture.conn, &spec).is_err(),
                 "{mismatch}"
             );
             assert_eq!(durable_state(&fixture.conn), before, "{mismatch}");
@@ -1503,7 +1445,8 @@ mod tests {
             "--sandbox",
             "workspace-write"
         ]);
-        let run = storage::create_run(&mut fixture.conn, &spec).unwrap();
+        let run =
+            crate::broker::runtime::test_support::create_run(&mut fixture.conn, &spec).unwrap();
         assert_eq!(run.requested_mode.as_deref(), Some("on-request"));
         assert_eq!(run.mode_source, ModeSource::Explicit);
         assert_eq!(run.permission_argv_json, spec.permission_argv_json);
@@ -1514,10 +1457,7 @@ mod tests {
     fn typed_runtime_readers_fail_on_corrupt_required_values() {
         for (field, value) in [
             ("status", "invented"),
-            ("owner_kind", "model"),
-            ("coverage", "guaranteed"),
             ("database_identity_json", "[]"),
-            ("permission_argv_json", "{}"),
             ("owner_start_identity", ""),
         ] {
             let fixture = Fixture::new();
@@ -1555,16 +1495,17 @@ mod tests {
         );
         let transition = opening(owner.run_id, 257, 1, metadata());
         assert!(
-            storage::persist_event(&mut other, &owner, &transition, PersistenceMode::Live).is_ok()
+            storage::persist_transition(&mut other, &owner, &transition, PersistenceMode::Live)
+                .is_ok()
         );
     }
 
     #[test]
     fn stale_owner_kind_epoch_or_database_identity_fences_every_mutation() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        fixture.reserve(&owner);
         for mismatch in ["epoch", "kind", "database"] {
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            fixture.reserve(&owner);
             let mut stale = owner.clone();
             match mismatch {
                 "epoch" => stale.owner_epoch += 1,
@@ -1578,7 +1519,7 @@ mod tests {
                 "{mismatch}"
             );
             assert!(
-                storage::persist_event(
+                storage::persist_transition(
                     &mut fixture.conn,
                     &stale,
                     &opening(owner.run_id, 1, 1, metadata()),
@@ -1588,7 +1529,7 @@ mod tests {
                 "{mismatch}"
             );
             assert!(
-                storage::reserve_input(
+                crate::broker::runtime::test_support::reserve_input(
                     &mut fixture.conn,
                     &stale,
                     &NewInput {
@@ -1656,5 +1597,148 @@ mod tests {
             .execute("DELETE FROM runtime_database_identity", [])
             .unwrap();
         assert!(storage::database_identity(&fixture.conn).is_err());
+    }
+
+    mod runner_registry {
+        use crate::broker::runtime as storage;
+        use crate::broker::runtime::RunStatus;
+        use crate::runtime::control::test_support::SilentServer;
+        use crate::runtime::control::test_support::activate;
+        use crate::runtime::test_support::Fixture;
+        use rusqlite::Connection;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        fn counts(conn: &Connection) -> (i64, i64, i64) {
+            let scalar = |table| {
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+            };
+            (
+                scalar("member_interactions"),
+                scalar("member_runtime_events"),
+                scalar("messages"),
+            )
+        }
+        #[test]
+        fn member_runtime_returns_historical_health_without_contacting_a_live_endpoint() {
+            let mut fixture = Fixture::new();
+            let (artifacts, _held) = activate(&mut fixture);
+            let _server = SilentServer::start(&artifacts.paths.control_socket);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1",
+                    [fixture.run.run_id],
+                )
+                .unwrap();
+            let before = counts(&fixture.conn);
+            let start = Instant::now();
+            let snapshot = storage::member_runtime(&fixture.conn, fixture.run.member_id)
+                .unwrap()
+                .expect("the member has a recorded run");
+            assert!(start.elapsed() < Duration::from_millis(750));
+            assert_eq!(
+                snapshot.run.last_health_at.as_deref(),
+                Some("2000-01-01T00:00:00Z")
+            );
+            assert_eq!(counts(&fixture.conn), before);
+            assert_eq!(
+                storage::get_run(&fixture.conn, fixture.run.run_id)
+                    .unwrap()
+                    .status,
+                RunStatus::Running
+            );
+        }
+    }
+
+    #[test]
+    fn historical_ownership_requires_one_fleet_relationship_and_selects_the_archive_reason() {
+        let mut fixture = Fixture::new();
+        let run = fixture.run.clone();
+        assert_eq!(historical_ownership(&fixture.conn, &run).unwrap(), None);
+        let (other_fleet, other_director) = create_fleet_fixture(&mut fixture.conn, "other");
+        let foreign_member = register(&mut fixture.conn, other_fleet, "foreign", None);
+        let peer = register(&mut fixture.conn, run.fleet_id, "peer", None);
+        for (conjunct, change) in [
+            (
+                "member fleet",
+                RunRecord {
+                    member_id: foreign_member,
+                    ..run.clone()
+                },
+            ),
+            (
+                "director fleet",
+                RunRecord {
+                    director_member_id: other_director,
+                    ..run.clone()
+                },
+            ),
+            (
+                "fleet director",
+                RunRecord {
+                    director_member_id: peer,
+                    ..run.clone()
+                },
+            ),
+            (
+                "member is director",
+                RunRecord {
+                    member_id: run.director_member_id,
+                    ..run.clone()
+                },
+            ),
+        ] {
+            let failure = historical_ownership(&fixture.conn, &change).unwrap_err();
+            assert!(
+                failure.message().contains("member/fleet/Director mismatch"),
+                "{conjunct}: {}",
+                failure.message()
+            );
+        }
+        for (sql, reason) in [
+            (
+                "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                (run.director_member_id, ArchiveReason::DirectorInactive),
+            ),
+            (
+                "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                (run.member_id, ArchiveReason::MemberInactive),
+            ),
+            (
+                "UPDATE fleets SET deleted_at=created_at WHERE fleet_id=?1",
+                (run.fleet_id, ArchiveReason::FleetDeleted),
+            ),
+        ] {
+            fixture.conn.execute(sql, [reason.0]).unwrap();
+            assert_eq!(
+                historical_ownership(&fixture.conn, &run).unwrap(),
+                Some(reason.1)
+            );
+        }
+    }
+
+    #[test]
+    fn validate_owner_requires_the_current_token_and_database_identity() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        assert_eq!(
+            validate_owner(&fixture.conn, &owner).unwrap().run_id,
+            owner.run_id
+        );
+        let mut stale = owner.clone();
+        stale.owner_epoch += 1;
+        assert!(
+            validate_owner(&fixture.conn, &stale)
+                .unwrap_err()
+                .message()
+                .contains("stale ownership token")
+        );
+        let mut foreign = owner.clone();
+        foreign.database_identity_json["instance_id"] = json!("0".repeat(32));
+        assert!(validate_owner(&fixture.conn, &foreign).is_err());
     }
 }

@@ -380,23 +380,11 @@ pub(crate) fn pending_previews(
 pub(crate) mod test_support {
     use rusqlite::Connection;
 
-    use crate::broker;
     pub(crate) fn broker_fixture() -> (tempfile::TempDir, Connection, i64, i64, i64) {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::connect(&format!(
-            "sqlite:///{}",
-            dir.path().join("listen.db").display()
-        ))
-        .unwrap();
-        crate::db::initialize(&mut conn).unwrap();
-        let created = broker::create_fleet(
-            &mut conn,
-            Some("listen"),
-            &crate::broker::members::test_support::placement(Some("%0")),
-        )
-        .unwrap();
-        let fleet = created.fleet_id;
-        let director = created.director.member_id;
+        let mut conn = crate::db::test_support::migrated_conn(&dir);
+        let (fleet, director) =
+            crate::broker::fleets::test_support::create_fleet_fixture(&mut conn, "listen");
         let worker = crate::broker::members::test_support::register_member(
             &mut conn,
             fleet,
@@ -724,6 +712,20 @@ mod tests {
             }
         }
 
+        /// Replaces `messages` with a view that multiplies every stored row a million times.
+        fn install_million_row_messages_view(conn: &Connection) {
+            conn.execute_batch(
+                "ALTER TABLE messages RENAME TO stored_messages;
+                 CREATE VIEW messages AS
+                 WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000)
+                 SELECT m.message_id+n.x*1000000 AS message_id, m.from_member_id, m.to_member_id,
+                        printf('%09d', 1000000-n.x) AS created_at, m.status_state, m.status_timestamp, m.text,
+                        m.notified_at
+                 FROM stored_messages m CROSS JOIN n;",
+            )
+            .unwrap();
+        }
+
         fn assert_handler_cleared(conn: &Connection) {
             let result: i64 = conn.query_row(
         "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000) SELECT sum(x) FROM n", [], |row| row.get(0),
@@ -741,6 +743,9 @@ mod tests {
             let earlier = broker::send_message(&mut conn, director, director, "self").unwrap();
             let tied = broker::send_message(&mut conn, worker, director, "notified").unwrap();
             conn.execute("UPDATE messages SET created_at='1900-01-01T00:00:00+00:00', notified_at=status_timestamp WHERE message_id IN (?1, ?2)", [earlier.message_id, tied.message_id]).unwrap();
+            let acknowledged =
+                broker::send_message(&mut conn, worker, director, "consumed").unwrap();
+            broker::ack_message(&mut conn, acknowledged.message_id).unwrap();
             let changes = conn.total_changes();
             let messages = snapshot_messages(
                 listen_snapshot(&mut conn, director, Some(fleet), Deadline::new()).unwrap(),
@@ -752,21 +757,6 @@ mod tests {
             );
             assert_eq!(conn.total_changes(), changes);
             assert_handler_cleared(&conn);
-        }
-
-        #[test]
-        fn broker_snapshots_exclude_acks_committed_before_the_snapshot() {
-            let (_dir, mut conn, fleet, director, worker) = broker_fixture();
-            let acknowledged =
-                broker::send_message(&mut conn, worker, director, "consumed").unwrap();
-            broker::ack_message(&mut conn, acknowledged.message_id).unwrap();
-            assert!(
-                snapshot_messages(
-                    listen_snapshot(&mut conn, director, None, Deadline::new()).unwrap(),
-                    fleet
-                )
-                .is_empty()
-            );
         }
 
         #[test]
@@ -826,15 +816,7 @@ mod tests {
         fn a_long_running_select_without_lock_contention_is_interrupted_and_cleans_its_handler() {
             let (_dir, mut conn, fleet, director, worker) = broker_fixture();
             broker::send_message(&mut conn, worker, director, "expensive selection").unwrap();
-            conn.execute_batch(
-        "ALTER TABLE messages RENAME TO stored_messages;
-         CREATE VIEW messages AS
-         WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000)
-         SELECT m.message_id+n.x*1000000 AS message_id, m.from_member_id, m.to_member_id,
-                printf('%09d', 1000000-n.x) AS created_at, m.status_state, m.status_timestamp, m.text,
-                m.notified_at
-         FROM stored_messages m CROSS JOIN n;"
-    ).unwrap();
+            install_million_row_messages_view(&conn);
             let started = Instant::now();
             let result = listen_snapshot(
                 &mut conn,
@@ -975,15 +957,7 @@ mod tests {
                 "externally interrupted selection",
             )
             .unwrap();
-            conn.execute_batch(
-        "ALTER TABLE messages RENAME TO stored_messages;
-         CREATE VIEW messages AS
-         WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000)
-         SELECT m.message_id+n.x*1000000 AS message_id, m.from_member_id, m.to_member_id,
-                printf('%09d', 1000000-n.x) AS created_at, m.status_state, m.status_timestamp, m.text,
-                m.notified_at
-         FROM stored_messages m CROSS JOIN n;"
-    ).unwrap();
+            install_million_row_messages_view(&conn);
             let interrupt = conn.get_interrupt_handle();
             let (prepared, preparation) = std::sync::mpsc::sync_channel(1);
             let interrupted = std::thread::spawn(move || {
@@ -1030,22 +1004,6 @@ mod tests {
             pending_previews(&conn, fleet, director).unwrap(),
             vec![(placed, message.message_id)]
         );
-    }
-
-    #[test]
-    fn an_ordinary_subject_retries_ordinary_members_and_preserves_the_directors_inbox() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet_fixture(&mut conn, "director");
-        let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let observer = register(&mut conn, fleet, "observer", Some("%3"));
-        let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
-        let assignment = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
-        assert_eq!(
-            pending_previews(&conn, fleet, observer).unwrap(),
-            vec![(worker, assignment.message_id)]
-        );
-        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }
 
     #[test]

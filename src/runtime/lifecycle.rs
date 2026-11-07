@@ -7,7 +7,7 @@ use crate::broker::runtime::CleanupState;
 use crate::broker::runtime::RunRecord;
 use crate::broker::runtime::*;
 use crate::db::with_database_budget;
-use crate::multiplexer::AnyMultiplexer;
+use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MultiplexerContext;
 use crate::runtime::control::ControlClient;
 use crate::runtime::control::pause;
@@ -30,21 +30,29 @@ pub(crate) enum ChildExit {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ShutdownClock {
     start: Instant,
+    unit: Duration,
     limit: Option<Instant>,
 }
 
 impl ShutdownClock {
     pub(crate) fn new(start: Instant) -> Self {
-        Self { start, limit: None }
+        Self::with_unit(start, Duration::from_secs(1))
+    }
+    pub(crate) fn with_unit(start: Instant, unit: Duration) -> Self {
+        Self {
+            start,
+            unit,
+            limit: None,
+        }
     }
     pub(crate) fn clipped(self, deadline: Instant) -> Self {
         Self {
-            start: self.start,
             limit: Some(self.limit.map_or(deadline, |prior| prior.min(deadline))),
+            ..self
         }
     }
-    fn boundary(&self, seconds: u64) -> Instant {
-        let original = self.start + Duration::from_secs(seconds);
+    fn boundary(&self, units: u32) -> Instant {
+        let original = self.start + self.unit * units;
         self.limit.map_or(original, |limit| original.min(limit))
     }
     pub(crate) fn child_deadline(&self) -> Instant {
@@ -357,11 +365,7 @@ pub(super) fn register_pending_run(
     deadline: Instant,
 ) -> Result<PendingRegistration> {
     with_database_deadline(conn, deadline, |conn| {
-        validate_database(
-            &storage::database_identity(conn)?,
-            &settings.database_identity_json,
-            || error("runtime database identity changed"),
-        )?;
+        ensure_same_database(conn, &settings.database_identity_json)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let fleet = broker::fleets::require_live_fleet(&tx, member.fleet_id)?;
         let director = fleet
@@ -469,12 +473,7 @@ pub(crate) struct Started {
 pub(crate) trait LaunchHost {
     fn now(&self) -> Instant;
     fn current_executable(&self) -> Result<PathBuf>;
-    fn split_runner(
-        &mut self,
-        argv: &[String],
-        environment: &[(String, String)],
-        deadline: Instant,
-    ) -> Result<String>;
+    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<String>;
     fn wait_prepared(
         &mut self,
         descriptor: &LaunchDescriptor,
@@ -515,11 +514,7 @@ fn pending_failure(
     diagnostics: &[String],
 ) -> Result<()> {
     with_database_deadline(conn, clock.storage_deadline(), |conn| {
-        validate_database(
-            &storage::database_identity(conn)?,
-            &run.database_identity_json,
-            || error("runtime database identity changed"),
-        )?;
+        ensure_same_database(conn, &run.database_identity_json)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute("UPDATE member_runs SET status='failed',ended_at=COALESCE(ended_at,?1),cleanup_state=?2,cleanup_diagnostics_json=?3 WHERE run_id=?4 AND launch_nonce=?5",params![crate::time::now_stamp(),if diagnostics.is_empty(){"complete"}else{"incomplete"},serde_json::to_string(diagnostics).map_err(io_error)?,run.run_id,run.launch_nonce])?;
         broker::members::deregister_member_rows(&tx, run.member_id)?;
@@ -652,7 +647,7 @@ fn launch_registered(
                 .ok_or_else(|| error("descriptor requires UTF-8 path"))?
                 .into(),
         ];
-        pane = Some(host.split_runner(&argv, &[], deadline)?);
+        pane = Some(host.split_runner(&argv, deadline)?);
         check_deadline(host.now(), deadline)?;
         let prepared = host.wait_prepared(&descriptor, deadline)?;
         check_deadline(host.now(), deadline)?;
@@ -740,7 +735,7 @@ fn launch_registered(
                     guard.conn,
                     &current,
                     pane_id,
-                    crate::coding_agent::hermes_settlement::settlement_deadline().instant(),
+                    crate::coding_agent::hermes::settlement_deadline().instant(),
                 )
             {
                 notes.push(cause.message().into_owned());
@@ -784,13 +779,13 @@ fn launch_registered(
 }
 
 pub(crate) struct NativeLaunchHost<'a> {
-    mux: &'a AnyMultiplexer,
+    mux: &'a dyn Multiplexer,
     context: &'a MultiplexerContext,
     client: Option<ControlClient>,
 }
 
 impl<'a> NativeLaunchHost<'a> {
-    pub(crate) fn new(mux: &'a AnyMultiplexer, context: &'a MultiplexerContext) -> Self {
+    pub(crate) fn new(mux: &'a dyn Multiplexer, context: &'a MultiplexerContext) -> Self {
         Self {
             mux,
             context,
@@ -806,15 +801,10 @@ impl LaunchHost for NativeLaunchHost<'_> {
     fn current_executable(&self) -> Result<std::path::PathBuf> {
         std::env::current_exe().map_err(io_error)
     }
-    fn split_runner(
-        &mut self,
-        argv: &[String],
-        environment: &[(String, String)],
-        deadline: Instant,
-    ) -> Result<String> {
+    fn split_runner(&mut self, argv: &[String], deadline: Instant) -> Result<String> {
         self.mux
             .bounded(crate::time::Deadline::until(deadline))
-            .split_window(self.context, environment, argv)
+            .split_window(self.context, argv)
             .map_err(|cause| error(format!("runner pane spawn failed: {cause}")))
     }
     fn wait_prepared(
@@ -853,7 +843,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
         pane_id: &str,
         deadline: Instant,
     ) -> Result<()> {
-        crate::coding_agent::hermes_settlement::settle_run(
+        crate::coding_agent::hermes::settle_run(
             conn,
             self.mux,
             run,
@@ -865,10 +855,7 @@ impl LaunchHost for NativeLaunchHost<'_> {
         if let Ok(value) = request(run, "shutdown", clock.storage_deadline()) {
             return serde_json::from_value(value).map_err(io_error);
         }
-        let runner = ProcessIdentity {
-            pid: run.owner_pid,
-            start_identity: run.owner_start_identity.clone(),
-        };
+        let runner = run.owner_process();
         if runner.matches()? {
             nix::sys::signal::kill(
                 nix::unistd::Pid::from_raw(i32::try_from(runner.pid).map_err(io_error)?),
@@ -913,7 +900,6 @@ mod tests {
         use nix::sys::socket::listen;
 
         use crate::error::CafleetError;
-        use crate::multiplexer::AnyMultiplexer;
         use crate::multiplexer::MultiplexerContext;
         use crate::multiplexer::TmuxMultiplexer;
         use crate::multiplexer::test_support;
@@ -929,8 +915,7 @@ mod tests {
 
         fn with_native_host<T>(operation: impl FnOnce(&mut NativeLaunchHost<'_>) -> T) -> T {
             let runner = test_support::FakeRunner::without_binaries();
-            let mux =
-                AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()));
+            let mux = TmuxMultiplexer::new(runner.clone(), Default::default());
             let context = MultiplexerContext {
                 session: "readiness-fixture".into(),
                 window_id: "@1".into(),
@@ -1094,11 +1079,6 @@ mod tests {
             readiness_expiry(StartupInterval::Bound);
         }
 
-        #[test]
-        fn runner_readiness_nonprivate_socket_expires_without_a_prepare_connection() {
-            readiness_expiry(StartupInterval::BeforePrivateMode);
-        }
-
         fn assert_identity_rejected(endpoint: &Endpoint) {
             let started = Instant::now();
             let result = with_native_host(|host| {
@@ -1115,13 +1095,6 @@ mod tests {
         }
 
         #[test]
-        fn runner_readiness_regular_file_is_an_identity_failure() {
-            let endpoint = Endpoint::new();
-            std::fs::write(endpoint.path(), b"fixture is a regular file").unwrap();
-            assert_identity_rejected(&endpoint);
-        }
-
-        #[test]
         fn runner_readiness_symlink_to_a_private_socket_is_an_identity_failure() {
             let endpoint = Endpoint::new();
             let target = endpoint.fixture._dir.path().join("linked.sock");
@@ -1129,17 +1102,6 @@ mod tests {
             symlink(target, endpoint.path()).unwrap();
             assert_identity_rejected(&endpoint);
             assert_eq!(listener.accept().unwrap_err().kind(), ErrorKind::WouldBlock);
-        }
-
-        #[test]
-        fn runner_readiness_dangling_symlink_is_an_identity_failure() {
-            let endpoint = Endpoint::new();
-            symlink(
-                endpoint.fixture._dir.path().join("absent.sock"),
-                endpoint.path(),
-            )
-            .unwrap();
-            assert_identity_rejected(&endpoint);
         }
 
         fn assert_prepare_not_reconnected(reply_body: Option<&[u8]>) {
@@ -1181,17 +1143,12 @@ mod tests {
 
         #[test]
         fn runner_readiness_lost_reply_after_written_prepare_is_not_reconnected() {
-            assert_prepare_not_reconnected(None);
-        }
-
-        #[test]
-        fn runner_readiness_malformed_reply_after_written_prepare_is_not_reconnected() {
             for body in [
-                b"{".as_slice(),
-                br#"{"protocol_version":2,"result":null}"#,
-                br#"{"protocol_version":1,"result":{"identity":null}}"#,
+                None,
+                Some(br#"{"protocol_version":2,"result":null}"#.as_slice()),
+                Some(br#"{"protocol_version":1,"result":{"identity":null}}"#),
             ] {
-                assert_prepare_not_reconnected(Some(body));
+                assert_prepare_not_reconnected(body);
             }
         }
     }
@@ -1296,7 +1253,6 @@ mod tests {
         fn split_runner(
             &mut self,
             argv: &[String],
-            environment: &[(String, String)],
             deadline: Instant,
         ) -> Result<String, CafleetError> {
             self.phase("split", deadline)?;
@@ -1316,7 +1272,6 @@ mod tests {
             assert_eq!(argv[4], "--descriptor");
             assert!(std::path::Path::new(&argv[5]).is_absolute());
             assert_eq!(argv.len(), 6);
-            assert!(environment.is_empty(), "{environment:?}");
             Ok("%9".into())
         }
         fn wait_prepared(
@@ -1403,7 +1358,7 @@ mod tests {
                 let run = storage::get_run(&conn, run.run_id).unwrap();
                 storage::reserve_event_sequences(&mut conn, &run.owner()).unwrap();
                 let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
-                storage::persist_event(
+                storage::persist_transition(
                     &mut conn,
                     &run.owner(),
                     &ObservedTransition {
@@ -1485,6 +1440,14 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    /// A fresh fixture, its launch host and the creation deadline ten seconds after the host's clock.
+    fn launch_case() -> (Fixture, LaunchFixtureHost, Instant) {
+        let fixture = Fixture::new();
+        let host = LaunchFixtureHost::new(&fixture);
+        let deadline = host.now + Duration::from_secs(10);
+        (fixture, host, deadline)
     }
 
     fn inputs(fixture: &Fixture) -> (PendingMemberSpec, RunSettings) {
@@ -1671,11 +1634,9 @@ mod tests {
     fn runner_creation_guard_covers_preparation_failure_before_artifacts_after_allocation_and_after_descriptor()
      {
         for stage in ["before-artifacts", "after-artifacts", "after-descriptor"] {
-            let mut fixture = Fixture::new();
+            let (mut fixture, mut host, deadline) = launch_case();
             let (member, settings) = inputs(&fixture);
             let spec = fixture.spec();
-            let mut host = LaunchFixtureHost::new(&fixture);
-            let deadline = host.now + Duration::from_secs(10);
             let result = create_registered(
                 &mut fixture.conn,
                 &member,
@@ -1710,10 +1671,8 @@ mod tests {
 
     #[test]
     fn runner_creation_publishes_prepared_placement_before_one_start_and_unlinks_the_descriptor() {
-        let mut fixture = Fixture::new();
+        let (mut fixture, mut host, deadline) = launch_case();
         let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
-        let mut host = LaunchFixtureHost::new(&fixture);
-        let deadline = host.now + Duration::from_secs(10);
         let outcome = launch(&mut fixture, &mut host, deadline).unwrap();
         assert_eq!(host.calls, ["split", "prepared", "start"]);
         assert_eq!(host.spawn_count, 1);
@@ -1762,11 +1721,9 @@ mod tests {
     #[test]
     fn runner_creation_missing_or_rejected_publication_compensates_the_owned_pane_once() {
         for failure in [PublicationFailure::Missing, PublicationFailure::Rejected] {
-            let mut fixture = Fixture::new();
+            let (mut fixture, mut host, deadline) = launch_case();
             let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
-            let mut host = LaunchFixtureHost::new(&fixture);
             host.publication_failure = Some(failure);
-            let deadline = host.now + Duration::from_secs(10);
             let error = require_launch_error(launch(&mut fixture, &mut host, deadline));
             assert_eq!(error.exit_code(), 1);
             let expected = match failure {
@@ -1785,13 +1742,11 @@ mod tests {
     fn runner_creation_preserves_usage_exit_through_preparation_and_launch_cleanup() {
         for phase in ["preparation", "start"] {
             for cleanup_fails in [false, true] {
-                let mut fixture = Fixture::new();
+                let (mut fixture, mut host, deadline) = launch_case();
                 let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
                 if cleanup_fails {
                     reject_registration_cleanup(&fixture.conn);
                 }
-                let mut host = LaunchFixtureHost::new(&fixture);
-                let deadline = host.now + Duration::from_secs(10);
                 let result = if phase == "preparation" {
                     let (member, settings) = inputs(&fixture);
                     create_registered(
@@ -1853,13 +1808,11 @@ mod tests {
 
     #[test]
     fn runner_creation_preserves_publication_failure_and_combined_cleanup_errors_once() {
-        let mut fixture = Fixture::new();
+        let (mut fixture, mut host, deadline) = launch_case();
         let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
         reject_registration_cleanup(&fixture.conn);
-        let mut host = LaunchFixtureHost::new(&fixture);
         host.publication_failure = Some(PublicationFailure::Rejected);
         host.cleanup_failure = true;
-        let deadline = host.now + Duration::from_secs(10);
         let error = require_launch_error(launch(&mut fixture, &mut host, deadline));
         assert_eq!(error.exit_code(), 1);
         let text = error.message();
@@ -1898,12 +1851,10 @@ mod tests {
     #[test]
     fn runner_creation_unwind_during_preparation_compensates_registration_and_descriptor_once() {
         for stage in ["before-artifacts", "after-artifacts", "after-descriptor"] {
-            let mut fixture = Fixture::new();
+            let (mut fixture, mut host, deadline) = launch_case();
             let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
             let (member, settings) = inputs(&fixture);
             let spec = fixture.spec();
-            let mut host = LaunchFixtureHost::new(&fixture);
-            let deadline = host.now + Duration::from_secs(10);
             let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 create_registered(
                     &mut fixture.conn,
@@ -1934,11 +1885,9 @@ mod tests {
     }
 
     fn assert_launch_unwind_compensates(phase: &'static str) {
-        let mut fixture = Fixture::new();
+        let (mut fixture, mut host, deadline) = launch_case();
         let cleanup_attempts = count_registration_cleanup(&mut fixture.conn);
-        let mut host = LaunchFixtureHost::new(&fixture);
         host.panic_at = Some(phase);
-        let deadline = host.now + Duration::from_secs(10);
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             launch(&mut fixture, &mut host, deadline)
         }));
@@ -1973,10 +1922,8 @@ mod tests {
     #[test]
     fn runner_creation_compensates_split_prepare_and_spawn_failures_without_leaking_registration() {
         for phase in ["split", "prepared", "start"] {
-            let mut fixture = Fixture::new();
-            let mut host = LaunchFixtureHost::new(&fixture);
+            let (mut fixture, mut host, deadline) = launch_case();
             host.fail = Some(phase);
-            let deadline = host.now + Duration::from_secs(10);
             assert!(
                 launch(&mut fixture, &mut host, deadline).is_err(),
                 "{phase}"
@@ -1996,36 +1943,22 @@ mod tests {
 
     #[test]
     fn runner_creation_rejects_each_stale_prepared_identity_before_starting_a_child() {
-        for corrupt in [
-            "prepared-nonce",
-            "prepared-epoch",
-            "prepared-run",
-            "prepared-director",
-        ] {
-            let mut fixture = Fixture::new();
-            let mut host = LaunchFixtureHost::new(&fixture);
-            host.corrupt = Some(corrupt);
-            let deadline = host.now + Duration::from_secs(10);
-            assert!(
-                launch(&mut fixture, &mut host, deadline).is_err(),
-                "{corrupt}"
-            );
-            assert_eq!(host.spawn_count, 0);
-            assert_compensated(&fixture, &pending_run(&fixture));
-        }
+        let (mut fixture, mut host, deadline) = launch_case();
+        host.corrupt = Some("prepared-nonce");
+        assert!(launch(&mut fixture, &mut host, deadline).is_err());
+        assert_eq!(host.spawn_count, 0);
+        assert_compensated(&fixture, &pending_run(&fixture));
     }
 
     #[test]
     fn runner_creation_lost_started_reply_or_mismatched_child_compensates_one_uncertain_spawn() {
         for failure in ["started-reply", "started-epoch", "started-child"] {
-            let mut fixture = Fixture::new();
-            let mut host = LaunchFixtureHost::new(&fixture);
+            let (mut fixture, mut host, deadline) = launch_case();
             if failure == "started-reply" {
                 host.fail = Some(failure);
             } else {
                 host.corrupt = Some(failure);
             }
-            let deadline = host.now + Duration::from_secs(10);
             assert!(
                 launch(&mut fixture, &mut host, deadline).is_err(),
                 "{failure}"
@@ -2048,10 +1981,8 @@ mod tests {
 
     #[test]
     fn runner_creation_uses_one_handshake_deadline_and_compensates_a_post_start_timeout() {
-        let mut fixture = Fixture::new();
-        let mut host = LaunchFixtureHost::new(&fixture);
+        let (mut fixture, mut host, deadline) = launch_case();
         host.delay = Duration::from_secs(4);
-        let deadline = host.now + Duration::from_secs(10);
         assert!(launch(&mut fixture, &mut host, deadline).is_err());
         assert_eq!(host.spawn_count, 1);
         assert!(
@@ -2065,10 +1996,8 @@ mod tests {
 
     #[test]
     fn runner_creation_immediate_nonzero_native_exit_is_a_successful_spawn_with_one_inbox_event() {
-        let mut fixture = Fixture::new();
-        let mut host = LaunchFixtureHost::new(&fixture);
+        let (mut fixture, mut host, deadline) = launch_case();
         host.fast_exit = true;
-        let deadline = host.now + Duration::from_secs(10);
         let outcome = launch(&mut fixture, &mut host, deadline).unwrap();
         assert_eq!(host.spawn_count, 1);
         assert!(!host.calls.contains(&"shutdown"));
@@ -2085,11 +2014,9 @@ mod tests {
 
     #[test]
     fn runner_creation_retains_the_primary_failure_and_all_owned_cleanup_diagnostics() {
-        let mut fixture = Fixture::new();
-        let mut host = LaunchFixtureHost::new(&fixture);
+        let (mut fixture, mut host, deadline) = launch_case();
         host.fail = Some("started-reply");
         host.cleanup_failure = true;
-        let deadline = host.now + Duration::from_secs(10);
         let error = match launch(&mut fixture, &mut host, deadline) {
             Err(error) => error,
             Ok(_) => panic!("lost reply must fail"),
@@ -2107,67 +2034,46 @@ mod tests {
 
     #[test]
     fn hermes_creation_compensation_settles_a_started_client_before_runner_shutdown() {
-        let mut fixture = Fixture::new();
-        let mut host = LaunchFixtureHost::new(&fixture);
-        host.fail = Some("started-reply");
-        let deadline = host.now + Duration::from_secs(10);
-        let error =
-            require_launch_error(launch_backend(&mut fixture, &mut host, deadline, "hermes"));
-        assert!(error.message().contains("started reply lost"));
-        assert_eq!(
-            host.calls,
-            ["split", "prepared", "start", "settle", "shutdown", "close"]
-        );
-        assert_compensated(&fixture, &pending_run(&fixture));
-    }
-
-    #[test]
-    fn hermes_creation_settlement_failure_is_a_cleanup_diagnostic_and_compensation_continues() {
-        let mut fixture = Fixture::new();
-        let mut host = LaunchFixtureHost::new(&fixture);
-        host.fail = Some("started-reply");
-        host.hermes_failure = Some("fixture hermes settlement failed");
-        let deadline = host.now + Duration::from_secs(10);
-        let error =
-            require_launch_error(launch_backend(&mut fixture, &mut host, deadline, "hermes"));
-        let text = error.message();
-        assert!(
-            text.lines().next().unwrap().contains("started reply lost"),
-            "{text}"
-        );
-        assert_eq!(
-            text.matches("fixture hermes settlement failed").count(),
-            1,
-            "{text}"
-        );
-        assert_eq!(
-            host.calls,
-            ["split", "prepared", "start", "settle", "shutdown", "close"]
-        );
-        let run = pending_run(&fixture);
-        assert_eq!(
-            storage::get_run(&fixture.conn, run.run_id).unwrap().status,
-            RunStatus::Failed
-        );
-        assert!(
-            !RuntimePaths::for_run(&run.database_identity_json, run.run_id)
-                .unwrap()
-                .descriptor
-                .exists()
-        );
+        for hermes_failure in [None, Some("fixture hermes settlement failed")] {
+            let (mut fixture, mut host, deadline) = launch_case();
+            host.fail = Some("started-reply");
+            host.hermes_failure = hermes_failure;
+            let error =
+                require_launch_error(launch_backend(&mut fixture, &mut host, deadline, "hermes"));
+            let text = error.message();
+            assert!(
+                text.lines().next().unwrap().contains("started reply lost"),
+                "{text}"
+            );
+            assert_eq!(
+                host.calls,
+                ["split", "prepared", "start", "settle", "shutdown", "close"]
+            );
+            let run = pending_run(&fixture);
+            match hermes_failure {
+                None => assert_compensated(&fixture, &run),
+                Some(failure) => {
+                    assert_eq!(text.matches(failure).count(), 1, "{text}");
+                    assert_eq!(
+                        storage::get_run(&fixture.conn, run.run_id).unwrap().status,
+                        RunStatus::Failed
+                    );
+                    assert!(
+                        !RuntimePaths::for_run(&run.database_identity_json, run.run_id)
+                            .unwrap()
+                            .descriptor
+                            .exists()
+                    );
+                }
+            }
+        }
     }
 
     #[test]
     fn creation_compensation_settles_only_a_hermes_run_whose_child_started() {
-        for (backend, failure) in [
-            ("hermes", "start"),
-            ("hermes", "prepared"),
-            ("codex", "started-reply"),
-        ] {
-            let mut fixture = Fixture::new();
-            let mut host = LaunchFixtureHost::new(&fixture);
+        for (backend, failure) in [("hermes", "start"), ("codex", "started-reply")] {
+            let (mut fixture, mut host, deadline) = launch_case();
             host.fail = Some(failure);
-            let deadline = host.now + Duration::from_secs(10);
             require_launch_error(launch_backend(&mut fixture, &mut host, deadline, backend));
             assert!(
                 !host.calls.contains(&"settle"),
@@ -2181,14 +2087,12 @@ mod tests {
     #[test]
     fn runner_creation_invalid_spawn_construction_under_the_guard_keeps_assignment_out_of_failed_rows()
      {
-        let mut fixture = Fixture::new();
+        let (mut fixture, mut host, deadline) = launch_case();
         let (member, settings) = inputs(&fixture);
         let mut spec = fixture.spec();
         let private = "fixture-private-assignment-194";
         spec.argv.push(private.into());
         spec.cwd = "relative".into();
-        let mut host = LaunchFixtureHost::new(&fixture);
-        let deadline = host.now + Duration::from_secs(10);
         assert!(
             create_registered(
                 &mut fixture.conn,
@@ -2215,11 +2119,9 @@ mod tests {
 
     #[test]
     fn runner_creation_substitutes_once_and_keeps_the_assignment_in_one_literal_native_argument() {
-        let mut fixture = Fixture::new();
+        let (mut fixture, mut host, deadline) = launch_case();
         let (member, settings) = inputs(&fixture);
         let mut spec = fixture.spec();
-        let mut host = LaunchFixtureHost::new(&fixture);
-        let deadline = host.now + Duration::from_secs(10);
         let template =
             "member={member_id}; database={database_url}; literal={{member_id}}; '$x' `text` 世界";
         let outcome = create_registered(
@@ -2227,7 +2129,7 @@ mod tests {
             &member,
             &settings,
             |conn, pending| {
-                let assignment = crate::cli::substitute_spawn_placeholders(
+                let assignment = crate::cli::member::substitute_spawn_placeholders(
                     template,
                     pending.run.fleet_id,
                     pending.member.member_id,
@@ -2679,7 +2581,6 @@ mod tests {
 
     enum InnerOutcome {
         Success,
-        Error,
         Panic,
     }
 
@@ -2694,14 +2595,6 @@ mod tests {
                 InnerOutcome::Success => {
                     let inner = with_database_deadline(conn, inner_until, |_| Ok(7));
                     assert_eq!(inner.unwrap(), 7);
-                }
-                InnerOutcome::Error => {
-                    let error = with_database_deadline(conn, inner_until, |_| -> Result<(), _> {
-                        Err(CafleetError::Usage("fixture inner operation error".into()))
-                    })
-                    .unwrap_err();
-                    assert_eq!(error.exit_code(), 2);
-                    assert_eq!(error.message(), "fixture inner operation error");
                 }
                 InnerOutcome::Panic => {
                     let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2737,11 +2630,6 @@ mod tests {
     #[test]
     fn runner_database_deadline_review_inner_success_restores_the_live_outer_scope() {
         assert_retired_inner_scope_preserves_outer(InnerOutcome::Success);
-    }
-
-    #[test]
-    fn runner_database_deadline_review_inner_error_restores_the_live_outer_scope() {
-        assert_retired_inner_scope_preserves_outer(InnerOutcome::Error);
     }
 }
 

@@ -24,6 +24,20 @@ macro_rules! assert_no_debug_or_serialize {
         $(let _ = <$type as AmbiguousIfImplemented<_>>::check;)+
     }};
 }
+#[cfg(test)]
+macro_rules! assert_not_impl {
+    ($type:ty: $($bound:path),+ $(,)?) => {{
+        $({
+            trait AmbiguousIfImplemented<Marker> {
+                fn check() {}
+            }
+            struct Implemented;
+            impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
+            impl<T: ?Sized + $bound> AmbiguousIfImplemented<Implemented> for T {}
+            let _ = <$type as AmbiguousIfImplemented<_>>::check;
+        })+
+    }};
+}
 
 pub(crate) mod assets;
 pub(crate) mod broker;

@@ -141,6 +141,7 @@ struct NativeIo<'a> {
     controller: &'a mut ObservationController,
     writer: &'a EventWriter,
     clock: &'a dyn ObservationClock,
+    shutdown_unit: Duration,
 }
 impl NativeIo<'_> {
     fn quiesce(
@@ -172,7 +173,10 @@ impl NativeIo<'_> {
         before_exit(self.controller)?;
         self.controller
             .child_exited(exit, &self.transport.snapshot(), self.writer, self.clock)?;
-        Ok(Some(ShutdownClock::new(Instant::now())))
+        Ok(Some(ShutdownClock::with_unit(
+            Instant::now(),
+            self.shutdown_unit,
+        )))
     }
 }
 
@@ -199,13 +203,15 @@ impl InputRequest<'_, '_> {
         let interaction_id = input.interaction_id;
         let run_id = self.run.run_id;
         self.inspect_within_deadline(request).map_err(|source| {
-            CafleetError::from(InputFailure {
-                source,
-                run_id: Some(run_id),
-                interaction_id: Some(interaction_id),
-                input_id: None,
-                operation_key: None,
-            })
+            CafleetError::from(
+                InputContext {
+                    run_id: Some(run_id),
+                    interaction_id: Some(interaction_id),
+                    input_id: None,
+                    operation_key: None,
+                }
+                .failure(source),
+            )
         })
     }
     fn inspect_within_deadline(self, request: InputControlRequest) -> Result<InputControlReply> {
@@ -243,13 +249,15 @@ impl InputRequest<'_, '_> {
         let run_id = self.run.run_id;
         self.submit_within_deadline(request, response_context.is_some(), pending, client_id)
             .map_err(|source| match response_context {
-                Some((interaction_id, operation_key)) => CafleetError::from(InputFailure {
-                    source,
-                    run_id: Some(run_id),
-                    interaction_id: Some(interaction_id),
-                    input_id: None,
-                    operation_key: Some(operation_key),
-                }),
+                Some((interaction_id, operation_key)) => CafleetError::from(
+                    InputContext {
+                        run_id: Some(run_id),
+                        interaction_id: Some(interaction_id),
+                        input_id: None,
+                        operation_key: Some(operation_key),
+                    }
+                    .failure(source),
+                ),
                 None => source,
             })
     }
@@ -567,10 +575,13 @@ pub(crate) struct RunnerDependencies {
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
 
     #[cfg(test)]
-    pub(crate) capture: Option<NativeCapturePort>,
+    pub(crate) capture: Option<crate::runtime::observation::native_capture::NativeCapturePort>,
 
     #[cfg(test)]
     pub(crate) observation_hooks: Option<Arc<dyn ObservationHooks>>,
+
+    #[cfg(test)]
+    pub(crate) shutdown_unit: Duration,
 }
 pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
     run_service(
@@ -587,6 +598,9 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
 
             #[cfg(test)]
             observation_hooks: None,
+
+            #[cfg(test)]
+            shutdown_unit: Duration::from_secs(1),
         },
     )
 }
@@ -597,15 +611,17 @@ pub(crate) fn run_service(
 ) -> Result<i32> {
     #[cfg(test)]
     let mut services = services;
+    #[cfg(not(test))]
+    let shutdown_unit = Duration::from_secs(1);
+    #[cfg(test)]
+    let shutdown_unit = services.shutdown_unit;
+    let shutdown_clock = || ShutdownClock::with_unit(Instant::now(), shutdown_unit);
 
     let mut conn = crate::db::connect(&settings.database_url)?;
     crate::db::classify_selected_schema(&conn, &settings.database_url).require_current()?;
     let descriptor = load_descriptor(&conn, descriptor_path)?;
     let original = storage::get_run(&conn, descriptor.run_id)?;
-    let creator = ProcessIdentity {
-        pid: original.owner_pid,
-        start_identity: original.owner_start_identity.clone(),
-    };
+    let creator = original.owner_process();
     ensure(
         creator.matches()?,
         "launch creator process identity changed",
@@ -727,11 +743,12 @@ pub(crate) fn run_service(
                 controller: &mut controller,
                 writer: &writer,
                 clock: services.clock.as_ref(),
+                shutdown_unit,
             };
             loop {
                 let mut tick_progress = TransportProgress::default();
                 if terminate.load(Ordering::Acquire) {
-                    return Ok(ShutdownClock::new(Instant::now()));
+                    return Ok(shutdown_clock());
                 }
                 if !started {
                     check_deadline(Instant::now(), handshake_deadline)?;
@@ -987,23 +1004,20 @@ hooks: crate::runtime::input::test_support::default_input_hooks(),
                                     })
                                     .map_err(io_error)
                                 }
-                                "health" => serde_json::to_value(HealthSnapshot {
-                                    identity: ControlIdentity::from_run(&run),
-                                    runner: process.clone(),
-                                    child: run.child_pid.zip(run.child_start_identity.clone()).map(
-                                        |(pid, start_identity)| ProcessIdentity {
-                                            pid,
-                                            start_identity,
+                                "health" => run.child_process().and_then(|child| {
+                                    serde_json::to_value(HealthSnapshot {
+                                        identity: ControlIdentity::from_run(&run),
+                                        runner: process.clone(),
+                                        child,
+                                        output_seq: native.transport.snapshot().screen_seq,
+                                        observation: if started {
+                                            Some(native.controller.health(native.writer))
+                                        } else {
+                                            None
                                         },
-                                    ),
-                                    output_seq: native.transport.snapshot().screen_seq,
-                                    observation: if started {
-                                        Some(native.controller.health(native.writer))
-                                    } else {
-                                        None
-                                    },
-                                })
-                                .map_err(io_error),
+                                    })
+                                    .map_err(io_error)
+                                }),
                                 "shutdown" => {
                                     shutdown_client = Some(client.id);
                                     Ok(Value::Null)
@@ -1012,7 +1026,7 @@ hooks: crate::runtime::input::test_support::default_input_hooks(),
                             }
                         })();
                         if shutdown_client == Some(client.id) {
-                            return Ok(ShutdownClock::new(Instant::now()));
+                            return Ok(shutdown_clock());
                         }
                         let startup_failure = if accepted_startup {
                             result
@@ -1078,7 +1092,7 @@ hooks: crate::runtime::input::test_support::default_input_hooks(),
                         native.clock,
                     )?;
                     if progress.outer_eof {
-                        return Ok(ShutdownClock::new(Instant::now()));
+                        return Ok(shutdown_clock());
                     }
                     tick_progress = progress;
                     if let Some(clock) = native.observe_exit(&mut native_exit, |controller| {
@@ -1093,7 +1107,7 @@ hooks: crate::runtime::input::test_support::default_input_hooks(),
                             Ok(InputDrain::Pending) => Ok(None),
                             Ok(InputDrain::Quiescent { .. }) => {
                                 if terminate.load(Ordering::Acquire) {
-                                    return Ok(ShutdownClock::new(Instant::now()));
+                                    return Ok(shutdown_clock());
                                 }
                                 if let Some(clock) =
                                     native.observe_exit(&mut native_exit, |controller| {
@@ -1185,7 +1199,7 @@ hooks: crate::runtime::input::test_support::default_input_hooks(),
     let clock = match loop_result {
         Ok(clock) => clock,
         Err(cause) => {
-            let clock = ShutdownClock::new(Instant::now());
+            let clock = shutdown_clock();
             let mut message = cause.message().into_owned();
             if started {
                 let degraded = with_database_deadline(
@@ -1463,6 +1477,10 @@ pub(crate) mod test_support {
     }
 
     impl ServiceFixture {
+        /// A path inside the fixture's private directory.
+        pub(crate) fn path(&self, name: impl AsRef<std::path::Path>) -> PathBuf {
+            self.fixture._dir.path().join(name)
+        }
         pub(crate) fn assert_selected_config(&self, path: &Path) {
             let selected: Value = serde_json::from_slice(
                 &std::fs::read(self.fixture._dir.path().join("config-selected.json"))
@@ -1610,8 +1628,8 @@ pub(crate) mod test_support {
                 );
                 Some(
                     match std::fs::read_to_string(collector_entry).unwrap().as_str() {
-                        "resize" => runner_collector_resize_child_path(),
-                        "export" => runner_collector_export_child_path(),
+                        "resize" => crate::runtime::observation::native_capture::runner_collector_resize_child_path(),
+                        "export" => crate::runtime::observation::native_capture::runner_collector_export_child_path(),
                         other => panic!("unknown owned collector entry: {other}"),
                     },
                 )
@@ -1630,7 +1648,7 @@ pub(crate) mod test_support {
                 if let Some(entry) = capture_review {
                     entry
                 } else if capture {
-                    native_capture_service_child_path()
+                    crate::runtime::observation::native_capture::native_capture_service_child_path()
                 } else {
                     crate::runtime::service::tests::control_service::service_child_path()
                 },
@@ -2538,11 +2556,38 @@ pub(crate) mod test_support {
     pub(crate) mod observation_services {
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
-        use crate::runtime::observation::test_support::synthetic;
         use crate::runtime::service::test_support::*;
         use std::os::unix::fs::OpenOptionsExt;
         use std::os::unix::fs::PermissionsExt;
         use std::sync::Arc;
+
+        pub(crate) fn synthetic(
+            fixture: &mut crate::runtime::test_support::Fixture,
+            spec: &mut crate::runtime::SpawnSpec,
+        ) {
+            spec.environment.push((
+                "CAFLEET_REVIEW_NATIVE_START".into(),
+                fixture
+                    ._dir
+                    .path()
+                    .join("native-started")
+                    .to_str()
+                    .unwrap()
+                    .into(),
+            ));
+            fixture.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            fixture.run =
+                crate::broker::runtime::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            let script = fixture._dir.path().join("owned-observation-process");
+            private_write(&script,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf '0.0.1-synthetic\\n'; exit 0; fi\n/usr/bin/touch \"$CAFLEET_REVIEW_NATIVE_START\"\nprintf 'review-native-ready\\n'\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; form*) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write %s.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: ' \"$line\" ;; transient) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write transient.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: \\033[2J\\033[Hworking' ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done\n");
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+            spec.argv = vec![script.to_str().unwrap().into(), "--approve-for-me".into()];
+            let definitions = crate::coding_agent::catalog::test_support::synthetic_definitions();
+            private_write(
+                &fixture._dir.path().join("observation-services.json"),
+                &serde_json::to_vec(&json!({"catalog":definitions})).unwrap(),
+            );
+        }
 
         pub(crate) struct Clock;
         impl ObservationClock for Clock {
@@ -2600,7 +2645,7 @@ pub(crate) mod test_support {
                 .map_err(io_error)?;
             let catalog = ProfileCatalog::from_definitions(&value["catalog"])?;
             private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
-            let services = RunnerDependencies {
+            let services = crate::runtime::service::RunnerDependencies {
                 catalog: Box::leak(Box::new(catalog)),
                 clock: Arc::new(Clock),
                 writer_hooks: Arc::new(Hooks {
@@ -2611,8 +2656,9 @@ pub(crate) mod test_support {
                     &value,
                     config.parent().unwrap(),
                 )?,
+                shutdown_unit: Duration::from_secs(1),
             };
-            run_service(settings, descriptor, services)
+            crate::runtime::service::run_service(settings, descriptor, services)
         }
         pub(crate) use crate::runtime::observation::native_capture::test_support::private_write;
         pub(crate) fn wait_until(ready: impl FnMut() -> bool) {
@@ -2693,7 +2739,7 @@ pub(crate) mod test_support {
             let paths =
                 RuntimePaths::for_run(&fixture.run.database_identity_json, fixture.run.run_id)
                     .unwrap();
-            let config = NativeCaptureConfig {
+            let config = crate::runtime::observation::native_capture::NativeCaptureConfig {
                 schema_version: 1,
                 database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
                 descriptor_path: paths.descriptor,
@@ -2713,10 +2759,10 @@ pub(crate) mod test_support {
 
     pub(crate) mod injected_failures {
         use crate::error::CafleetError;
-        use crate::runtime::observation::test_support::synthetic;
         use crate::runtime::service::test_support::observation_services::count;
         use crate::runtime::service::test_support::observation_services::health;
         use crate::runtime::service::test_support::observation_services::private_write;
+        use crate::runtime::service::test_support::observation_services::synthetic;
         use crate::runtime::service::test_support::observation_services::wait_until;
         use crate::runtime::service::test_support::*;
         use std::sync::Arc;
@@ -3042,27 +3088,6 @@ mod tests {
             }
         }
         #[test]
-        fn control_stale_start_preserves_running_child_health_and_manual_io() {
-            for stale in ["nonce", "epoch"] {
-                let mut fixture = ServiceFixture::new(false);
-                let started = fixture.start_running();
-                let mut identity = fixture.prepared.as_ref().unwrap().clone();
-                if stale == "nonce" {
-                    identity.launch_nonce = "b".repeat(64);
-                } else {
-                    identity.owner_epoch += 1;
-                }
-                let mut request = fixture.request("start", &identity);
-                request["pane_id"] = json!("%9");
-                let mut client = fixture.connect("stale start");
-                assert_rejected(&client.exchange(&request));
-                assert_eq!(fixture.health().child, Some(started.child));
-                fixture.assert_manual_io();
-                fixture.finish();
-            }
-        }
-
-        #[test]
         fn control_invalid_protocol_versions_leave_the_running_child_available() {
             let mut fixture = ServiceFixture::new(false);
             let started = fixture.start_running();
@@ -3077,6 +3102,25 @@ mod tests {
                 assert_rejected(&client.exchange(&request));
                 assert_eq!(fixture.health().child, Some(started.child.clone()));
             }
+            for stale in ["nonce", "epoch"] {
+                let mut identity = fixture.prepared.as_ref().unwrap().clone();
+                if stale == "nonce" {
+                    identity.launch_nonce = "b".repeat(64);
+                } else {
+                    identity.owner_epoch += 1;
+                }
+                let mut request = fixture.request("start", &identity);
+                request["pane_id"] = json!("%9");
+                let mut client = fixture.connect("stale start");
+                assert_rejected(&client.exchange(&request));
+                assert_eq!(
+                    fixture.health().child,
+                    Some(started.child.clone()),
+                    "{stale}"
+                );
+            }
+            assert_rejected(&fixture.start());
+            assert_eq!(fixture.health().child, Some(started.child));
             fixture.assert_manual_io();
             fixture.finish();
         }
@@ -3097,16 +3141,6 @@ mod tests {
             fixture.read_until("review-native-ready");
             let mut second = fixture.connect("noncreator after start");
             assert_rejected(&second.exchange(&request));
-            assert_eq!(fixture.health().child, Some(started.child));
-            fixture.assert_manual_io();
-            fixture.finish();
-        }
-
-        #[test]
-        fn control_repeated_creator_start_preserves_child_health_and_manual_io() {
-            let mut fixture = ServiceFixture::new(false);
-            let started = fixture.start_running();
-            assert_rejected(&fixture.start());
             assert_eq!(fixture.health().child, Some(started.child));
             fixture.assert_manual_io();
             fixture.finish();
@@ -3687,10 +3721,10 @@ mod tests {
     }
 
     mod observation_contract {
-        use crate::runtime::observation::test_support::synthetic;
         use crate::runtime::service::test_support::observation_services::count;
         use crate::runtime::service::test_support::observation_services::health;
         use crate::runtime::service::test_support::observation_services::private_write;
+        use crate::runtime::service::test_support::observation_services::synthetic;
         use crate::runtime::service::test_support::observation_services::wait_until;
         use crate::runtime::service::tests::*;
         #[test]
@@ -3807,34 +3841,12 @@ mod tests {
                 assert_eq!(Some(retained), seeded);
             }
         }
-
-        #[test]
-        fn service_started_health_reports_observation_without_composer_authority() {
-            let mut fixture = ServiceFixture::new(false);
-            fixture.start_running();
-            let mut client = fixture.connect("observation health");
-            let reply = client
-                .exchange(&fixture.request("health", fixture.prepared.as_ref().unwrap()))
-                .unwrap();
-            fixture.assert_manual_io();
-            fixture.finish();
-            assert!(reply.get("error").is_none(), "{reply}");
-            let status = &reply["result"]["observation"];
-            assert!(
-                status.is_object(),
-                "started health requires bounded observation status: {reply}"
-            );
-            assert_eq!(status["eligibility"]["state"], "hold");
-            assert!(status["pending_count"].as_u64().unwrap() <= 130);
-            assert!(status.get("operation").is_none());
-            assert!(status.get("semantic_fingerprint").is_none());
-        }
     }
 
     mod injected_failures {
-        use crate::runtime::observation::test_support::synthetic;
         use crate::runtime::service::test_support::injected_failures::*;
         use crate::runtime::service::test_support::observation_services::count;
+        use crate::runtime::service::test_support::observation_services::synthetic;
         use crate::runtime::service::tests::*;
         #[test]
         fn runner_failure_with_a_live_native_child_persists_degraded_before_owned_cleanup_confirms_exit()
@@ -4180,21 +4192,6 @@ mod tests {
                 "this actual poll consumed the first header byte"
             );
             (before, after)
-        }
-
-        #[test]
-        fn client_poll_proves_first_byte_before_later_completion() {
-            let (mut client, mut peer) = pair();
-            let deadline = Instant::now() + Duration::from_secs(1);
-            let body = br#"{"protocol_version":1,"kind":"health"}"#;
-            let bytes = frame(body);
-            let (before, first_after) = first(&mut client, &mut peer, bytes[0], deadline);
-            after(first_after, deadline);
-            send(&mut peer, &bytes[1..], deadline);
-            let frames = collect(&mut client, 1, deadline);
-            assert_eq!(frames[0].body(), body);
-            assert!(before <= frames[0].admitted_at() && frames[0].admitted_at() <= first_after);
-            client.decoder.finish().unwrap();
         }
         #[test]
         fn client_empty_poll_supplies_no_admission_time() {

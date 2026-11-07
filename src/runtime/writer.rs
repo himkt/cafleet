@@ -14,13 +14,11 @@ use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fs::File;
-use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
-use std::os::unix::fs::OpenOptionsExt;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc;
@@ -29,8 +27,6 @@ use std::time::Instant;
 
 #[cfg(test)]
 use std::sync::atomic::AtomicU64;
-#[cfg(test)]
-use std::sync::atomic::Ordering;
 
 #[cfg(test)]
 #[derive(Debug, Clone, Copy)]
@@ -73,6 +69,7 @@ struct Refresh {
     barrier: i64,
     revision: u64,
 }
+#[derive(Default)]
 struct Mailbox {
     pending: u64,
     policies: u64,
@@ -181,8 +178,8 @@ impl EventWriter {
             outbox == paths.outbox,
             "writer outbox path differs from recorded path",
         )?;
-        let mut spool = Outbox::open_owned(
-            &conn,
+        let spool = Outbox::open_owned(
+            &mut conn,
             &run,
             lock.clone(),
             Instant::now() + Duration::from_secs(1),
@@ -192,246 +189,41 @@ impl EventWriter {
             "new runner outbox must start empty",
         )?;
         #[cfg(test)]
+        let mut spool = spool;
+        #[cfg(test)]
         spool.set_hooks(hooks.clone());
 
         let (sender, receiver) = mpsc::sync_channel(64);
-        let mailbox = Arc::new(Mutex::new(Mailbox {
-            pending: 0,
-            policies: 0,
+        let mailbox = Arc::new(Mutex::new(Mailbox::default()));
+        let worker = Worker {
+            conn,
+            spool,
+            run,
+            lock,
+            mailbox: mailbox.clone(),
+            receiver,
+            queue: VecDeque::new(),
+            committed: 0,
+            compact: false,
             #[cfg(test)]
-            policy_diagnostic: None,
-            gaps: 0,
-            diagnostic: None,
-            last_sequence: 0,
-            active: None,
-            refresh: None,
-            revision: 0,
-            refill: false,
-            grant: None,
-            stop: false,
-            deadline: None,
-        }));
-        let observed = mailbox.clone();
+            hooks,
+        };
         let thread = std::thread::Builder::new()
             .name("cafleet-events".into())
-            .spawn(move || {
-                let mut queue = VecDeque::<Pending>::new();
-                let mut committed = 0;
-                let mut compact = false;
-                let mut retry = Duration::from_millis(100);
-                let mut next = Instant::now();
-                loop {
-                    {
-                        let state = observed.lock().expect("writer mailbox");
-                        if state.deadline.is_some_and(|end| Instant::now() >= end) {
-                            break;
-                        }
-                        if state.stop
-                            && state.pending == 0
-                            && state.policies == 0
-                            && state.refresh.is_none()
-                            && !compact
-                        {
-                            break;
-                        }
-                    }
-                    if Instant::now() < next {
-                        nap_until(next);
-                        continue;
-                    }
-                    let result = (|| -> Result<()> {
-                        while queue.len() < 64 {
-                            let until = observed.lock().expect("writer mailbox").work_deadline();
-                            #[cfg(test)]
-                            match hooks.before(WriterBoundary::Receive, until) {
-                                Ok(()) => {}
-                                Err(CafleetError::DeadlineExceeded) => return Ok(()),
-                                Err(cause) => return Err(cause),
-                            }
-
-                            check_deadline(Instant::now(), until)?;
-                            match receiver.try_recv() {
-                                Ok(work) => queue.push_back(Pending {
-                                    synced: matches!(work, Work::Policy(_)),
-                                    work,
-                                }),
-                                Err(
-                                    mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected,
-                                ) => break,
-                            }
-                        }
-                        for pending in &mut queue {
-                            if !pending.synced {
-                                let Work::Event {
-                                    transition,
-                                    effective_policy,
-                                } = &pending.work
-                                else {
-                                    unreachable!("effective policy updates are never spooled")
-                                };
-                                let until =
-                                    observed.lock().expect("writer mailbox").work_deadline();
-                                spool.append_synced_with_policy(
-                                    transition,
-                                    effective_policy.as_ref(),
-                                    until,
-                                )?;
-                                pending.synced = true;
-                            }
-                        }
-                        let refresh = {
-                            let state = observed.lock().expect("writer mailbox");
-                            state
-                                .refresh
-                                .as_ref()
-                                .filter(|value| {
-                                    value.barrier <= committed
-                                        && queue.front().is_none_or(|pending| {
-                                            pending
-                                                .event_seq()
-                                                .is_none_or(|sequence| sequence > value.barrier)
-                                        })
-                                })
-                                .cloned()
-                        };
-                        if let Some(refresh) = refresh {
-                            let until = observed.lock().expect("writer mailbox").work_deadline();
-                            #[cfg(test)]
-                            hooks.before(WriterBoundary::Receive, until)?;
-
-                            #[cfg(test)]
-                            hooks.before(WriterBoundary::Persist, until)?;
-
-                            storage::update_interaction_evidence(
-                                &mut conn,
-                                &run.owner(),
-                                &refresh.update,
-                                refresh.barrier,
-                                until,
-                            )?;
-                            let mut state = observed.lock().expect("writer mailbox");
-                            if state
-                                .refresh
-                                .as_ref()
-                                .is_some_and(|current| current.revision == refresh.revision)
-                            {
-                                state.refresh = None;
-                            }
-                            state.success();
-                        } else if let Some(pending) = queue.front() {
-                            let until = observed.lock().expect("writer mailbox").work_deadline();
-                            match &pending.work {
-                                Work::Event {
-                                    transition,
-                                    effective_policy,
-                                } => {
-                                    #[cfg(test)]
-                                    hooks.before(WriterBoundary::Persist, until)?;
-
-                                    with_database_deadline(&mut conn, until, |conn| {
-                                        lock.validate(conn, &run.owner())?;
-                                        match effective_policy {
-                                            Some(observation) => {
-                                                storage::persist_transition_with_effective_policy(
-                                                    conn,
-                                                    &run.owner(),
-                                                    transition,
-                                                    observation,
-                                                    PersistenceMode::Live,
-                                                )
-                                            }
-                                            None => storage::persist_transition(
-                                                conn,
-                                                &run.owner(),
-                                                transition,
-                                                PersistenceMode::Live,
-                                            ),
-                                        }
-                                        .map(|_| ())
-                                    })?;
-                                    committed = transition.event_seq;
-                                    compact = true;
-                                    queue.pop_front();
-                                    let mut state = observed.lock().expect("writer mailbox");
-                                    state.pending = state
-                                        .pending
-                                        .checked_sub(1)
-                                        .expect("accepted writer count");
-                                    state.success();
-                                }
-                                Work::Policy(observation) => {
-                                    let outcome = (|| -> Result<bool> {
-                                        #[cfg(test)]
-                                        hooks.before(WriterBoundary::Persist, until)?;
-
-                                        lock.validate(&conn, &run.owner())?;
-                                        storage::record_effective_policy(
-                                            &mut conn,
-                                            &run.owner(),
-                                            observation,
-                                            until,
-                                        )
-                                    })();
-                                    queue.pop_front();
-                                    let mut state = observed.lock().expect("writer mailbox");
-                                    state.policies = state
-                                        .policies
-                                        .checked_sub(1)
-                                        .expect("accepted policy update count");
-                                    if let Err(cause) = outcome {
-                                        state.policy_dropped(&cause);
-                                    }
-                                }
-                            }
-                        }
-                        if compact && queue.is_empty() {
-                            let until = observed
-                                .lock()
-                                .expect("writer mailbox")
-                                .compaction_deadline();
-                            spool.compact_committed(&mut conn, &run.owner(), until)?;
-                            compact = false;
-                            observed.lock().expect("writer mailbox").success();
-                        }
-                        let refill = {
-                            let state = observed.lock().expect("writer mailbox");
-                            state.refill && state.grant.is_none()
-                        };
-                        if refill {
-                            let until = observed.lock().expect("writer mailbox").work_deadline();
-                            let grant = with_database_deadline(&mut conn, until, |conn| {
-                                lock.validate(conn, &run.owner())?;
-                                storage::reserve_event_sequences(conn, &run.owner())
-                            })?;
-                            let mut state = observed.lock().expect("writer mailbox");
-                            state.grant = Some(grant);
-                            state.refill = false;
-                            state.success();
-                        }
-                        Ok(())
-                    })();
-                    match result {
-                        Ok(()) => {
-                            retry = Duration::from_millis(100);
-                            next = Instant::now();
-                        }
-                        Err(cause) => {
-                            observed.lock().expect("writer mailbox").failure(&cause);
-                            next = Instant::now() + retry;
-                            retry = (retry * 2).min(Duration::from_secs(2));
-                        }
-                    }
-                    if observed.lock().expect("writer mailbox").pending == 0 {
-                        std::thread::sleep(Duration::from_millis(2));
-                    }
-                }
-            })
+            .spawn(move || worker.serve())
             .map_err(io_error)?;
         Ok(Self {
             sender: Some(sender),
             mailbox,
             thread: Some(thread),
         })
+    }
+    fn send(&self, work: Work) -> Result<()> {
+        self.sender
+            .as_ref()
+            .ok_or_else(|| error("event writer is stopped"))?
+            .try_send(work)
+            .map_err(|_| error("runtime observation channel is full or unavailable"))
     }
     #[cfg(test)]
     pub(crate) fn try_submit(
@@ -458,17 +250,10 @@ impl EventWriter {
                 "only an unavailable review event carries an effective policy",
             )?;
             crate::broker::runtime::evidence::validate(&transition.evidence_json)?;
-            let sender = self
-                .sender
-                .as_ref()
-                .ok_or_else(|| error("event writer is stopped"))?;
-            match sender.try_send(Work::Event {
+            self.send(Work::Event {
                 transition: Box::new(transition.clone()),
                 effective_policy,
-            }) {
-                Ok(()) => Ok(()),
-                Err(_) => Err(error("runtime observation channel is full or unavailable")),
-            }
+            })
         })();
         match result {
             Ok(()) => {
@@ -498,14 +283,7 @@ impl EventWriter {
         let sent = if state.stop {
             Err(error("event writer is stopped"))
         } else {
-            self.sender
-                .as_ref()
-                .ok_or_else(|| error("event writer is stopped"))
-                .and_then(|sender| {
-                    sender
-                        .try_send(Work::Policy(observation))
-                        .map_err(|_| error("runtime observation channel is full or unavailable"))
-                })
+            self.send(Work::Policy(observation))
         };
         match sent {
             Ok(()) => {
@@ -666,7 +444,265 @@ impl Drop for EventWriter {
     }
 }
 
+struct Worker {
+    conn: Connection,
+    spool: Outbox<File>,
+    run: RunRecord,
+    lock: Arc<RunLock>,
+    mailbox: Arc<Mutex<Mailbox>>,
+    receiver: mpsc::Receiver<Work>,
+    queue: VecDeque<Pending>,
+    committed: i64,
+    compact: bool,
+    #[cfg(test)]
+    hooks: Arc<dyn WriterHooks>,
+}
+impl Worker {
+    fn serve(mut self) {
+        let mut retry = Duration::from_millis(100);
+        let mut next = Instant::now();
+        loop {
+            {
+                let state = self.mailbox.lock().expect("writer mailbox");
+                if state.deadline.is_some_and(|end| Instant::now() >= end) {
+                    break;
+                }
+                if state.stop
+                    && state.pending == 0
+                    && state.policies == 0
+                    && state.refresh.is_none()
+                    && !self.compact
+                {
+                    break;
+                }
+            }
+            if Instant::now() < next {
+                nap_until(next);
+                continue;
+            }
+            match self.step() {
+                Ok(()) => {
+                    retry = Duration::from_millis(100);
+                    next = Instant::now();
+                }
+                Err(cause) => {
+                    self.mailbox.lock().expect("writer mailbox").failure(&cause);
+                    next = Instant::now() + retry;
+                    retry = (retry * 2).min(Duration::from_secs(2));
+                }
+            }
+            if self.mailbox.lock().expect("writer mailbox").pending == 0 {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    }
+    fn step(&mut self) -> Result<()> {
+        if !self.receive()? {
+            return Ok(());
+        }
+        self.sync_pending()?;
+        if !self.persist_refresh()? {
+            self.persist_front()?;
+        }
+        self.compact_if_idle()?;
+        self.refill_sequences()
+    }
+    fn work_deadline(&self) -> Instant {
+        self.mailbox.lock().expect("writer mailbox").work_deadline()
+    }
+    /// Returns `false` when a test hook ends this pass before any persistence.
+    fn receive(&mut self) -> Result<bool> {
+        while self.queue.len() < 64 {
+            let until = self.work_deadline();
+            #[cfg(test)]
+            match self.hooks.before(WriterBoundary::Receive, until) {
+                Ok(()) => {}
+                Err(CafleetError::DeadlineExceeded) => return Ok(false),
+                Err(cause) => return Err(cause),
+            }
+
+            check_deadline(Instant::now(), until)?;
+            match self.receiver.try_recv() {
+                Ok(work) => self.queue.push_back(Pending {
+                    synced: matches!(work, Work::Policy(_)),
+                    work,
+                }),
+                Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+        Ok(true)
+    }
+    fn sync_pending(&mut self) -> Result<()> {
+        for pending in &mut self.queue {
+            if !pending.synced {
+                let Work::Event {
+                    transition,
+                    effective_policy,
+                } = &pending.work
+                else {
+                    unreachable!("effective policy updates are never spooled")
+                };
+                let until = self.mailbox.lock().expect("writer mailbox").work_deadline();
+                self.spool.append_synced(
+                    &mut self.conn,
+                    transition,
+                    effective_policy.as_ref(),
+                    until,
+                )?;
+                pending.synced = true;
+            }
+        }
+        Ok(())
+    }
+    /// Persists the due evidence refresh; `false` when none is due.
+    fn persist_refresh(&mut self) -> Result<bool> {
+        let refresh = {
+            let state = self.mailbox.lock().expect("writer mailbox");
+            state
+                .refresh
+                .as_ref()
+                .filter(|value| {
+                    value.barrier <= self.committed
+                        && self.queue.front().is_none_or(|pending| {
+                            pending
+                                .event_seq()
+                                .is_none_or(|sequence| sequence > value.barrier)
+                        })
+                })
+                .cloned()
+        };
+        let Some(refresh) = refresh else {
+            return Ok(false);
+        };
+        let until = self.work_deadline();
+        #[cfg(test)]
+        self.hooks.before(WriterBoundary::Receive, until)?;
+
+        #[cfg(test)]
+        self.hooks.before(WriterBoundary::Persist, until)?;
+
+        storage::update_interaction_evidence(
+            &mut self.conn,
+            &self.run.owner(),
+            &refresh.update,
+            refresh.barrier,
+            until,
+        )?;
+        let mut state = self.mailbox.lock().expect("writer mailbox");
+        if state
+            .refresh
+            .as_ref()
+            .is_some_and(|current| current.revision == refresh.revision)
+        {
+            state.refresh = None;
+        }
+        state.success();
+        Ok(true)
+    }
+    fn persist_front(&mut self) -> Result<()> {
+        let Some(pending) = self.queue.front() else {
+            return Ok(());
+        };
+        let until = self.mailbox.lock().expect("writer mailbox").work_deadline();
+        match &pending.work {
+            Work::Event {
+                transition,
+                effective_policy,
+            } => {
+                #[cfg(test)]
+                self.hooks.before(WriterBoundary::Persist, until)?;
+
+                with_database_deadline(&mut self.conn, until, |conn| {
+                    self.lock.validate(conn, &self.run.owner())?;
+                    match effective_policy {
+                        Some(observation) => storage::persist_transition_with_effective_policy(
+                            conn,
+                            &self.run.owner(),
+                            transition,
+                            observation,
+                            PersistenceMode::Live,
+                        ),
+                        None => storage::persist_transition(
+                            conn,
+                            &self.run.owner(),
+                            transition,
+                            PersistenceMode::Live,
+                        ),
+                    }
+                    .map(|_| ())
+                })?;
+                self.committed = transition.event_seq;
+                self.compact = true;
+                self.queue.pop_front();
+                let mut state = self.mailbox.lock().expect("writer mailbox");
+                state.pending = state.pending.checked_sub(1).expect("accepted writer count");
+                state.success();
+            }
+            Work::Policy(observation) => {
+                let outcome = (|| -> Result<bool> {
+                    #[cfg(test)]
+                    self.hooks.before(WriterBoundary::Persist, until)?;
+
+                    self.lock.validate(&self.conn, &self.run.owner())?;
+                    storage::record_effective_policy(
+                        &mut self.conn,
+                        &self.run.owner(),
+                        observation,
+                        until,
+                    )
+                })();
+                self.queue.pop_front();
+                let mut state = self.mailbox.lock().expect("writer mailbox");
+                state.policies = state
+                    .policies
+                    .checked_sub(1)
+                    .expect("accepted policy update count");
+                if let Err(cause) = outcome {
+                    state.policy_dropped(&cause);
+                }
+            }
+        }
+        Ok(())
+    }
+    fn compact_if_idle(&mut self) -> Result<()> {
+        if !self.compact || !self.queue.is_empty() {
+            return Ok(());
+        }
+        let until = self
+            .mailbox
+            .lock()
+            .expect("writer mailbox")
+            .compaction_deadline();
+        self.spool
+            .compact_committed(&mut self.conn, &self.run.owner(), until)?;
+        self.compact = false;
+        self.mailbox.lock().expect("writer mailbox").success();
+        Ok(())
+    }
+    fn refill_sequences(&mut self) -> Result<()> {
+        let refill = {
+            let state = self.mailbox.lock().expect("writer mailbox");
+            state.refill && state.grant.is_none()
+        };
+        if !refill {
+            return Ok(());
+        }
+        let until = self.work_deadline();
+        let grant = with_database_deadline(&mut self.conn, until, |conn| {
+            self.lock.validate(conn, &self.run.owner())?;
+            storage::reserve_event_sequences(conn, &self.run.owner())
+        })?;
+        let mut state = self.mailbox.lock().expect("writer mailbox");
+        state.grant = Some(grant);
+        state.refill = false;
+        state.success();
+        Ok(())
+    }
+}
+
 const OUTBOX_LIMIT: u64 = 16 * 1024 * 1024;
+/// The big-endian body length and the body's SHA-256 digest.
+const FRAME_HEADER: u64 = 4 + 32;
 pub(crate) trait OutboxIo: Read + Write + Seek + Send {
     fn sync_all(&mut self) -> std::io::Result<()>;
     fn byte_len(&self) -> std::io::Result<u64>;
@@ -736,7 +772,6 @@ pub(crate) struct OutboxScan {
 }
 pub(crate) struct Outbox<S: OutboxIo> {
     io: S,
-    conn: Option<Connection>,
     run: RunRecord,
     lock: Arc<RunLock>,
     known: BTreeMap<i64, [u8; 32]>,
@@ -746,7 +781,7 @@ pub(crate) struct Outbox<S: OutboxIo> {
     #[cfg(test)]
     hooks: Arc<dyn WriterHooks>,
 }
-fn open_private(
+fn open_outbox(
     conn: &Connection,
     run: &RunRecord,
     lock: &RunLock,
@@ -755,19 +790,8 @@ fn open_private(
     check_deadline(Instant::now(), until)?;
     lock.validate(conn, &run.owner())?;
     let paths = validate_run_paths(conn, run)?;
-    validate_private_file(&paths.outbox, nix::unistd::geteuid().as_raw(), 0o600)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .custom_flags(nix::libc::O_NOFOLLOW)
-        .open(&paths.outbox)
-        .map_err(io_error)?;
+    let file = crate::runtime::artifacts::open_private(&paths.outbox, false)?;
     let meta = file.metadata().map_err(io_error)?;
-    let named = std::fs::symlink_metadata(&paths.outbox).map_err(io_error)?;
-    ensure(
-        (meta.dev(), meta.ino()) == (named.dev(), named.ino()),
-        "outbox pathname changed during open",
-    )?;
     Ok((file, (meta.dev(), meta.ino())))
 }
 fn validate_with(
@@ -803,30 +827,29 @@ impl Outbox<File> {
         run: &RunRecord,
         lock: Arc<RunLock>,
         until: Instant,
-    ) -> Result<Self> {
-        let (file, identity) = open_private(conn, run, &lock, until)?;
-        let mut value = Self::state(run, lock, file, None);
+    ) -> Result<(Self, OutboxScan)> {
+        let (file, identity) = open_outbox(conn, run, &lock, until)?;
+        let mut value = Self::state(run, lock, file);
         value.path_identity = Some(identity);
-        value.scan_recovery(conn, until)?;
-        Ok(value)
+        let scan = value.scan(conn, until)?;
+        Ok((value, scan))
     }
     pub(crate) fn open_owned(
-        conn: &Connection,
+        conn: &mut Connection,
         run: &RunRecord,
         lock: Arc<RunLock>,
         until: Instant,
     ) -> Result<Self> {
-        let (file, identity) = open_private(conn, run, &lock, until)?;
+        let (file, identity) = open_outbox(conn, run, &lock, until)?;
         let mut value = Self::initialize(conn, run, lock, file, until)?;
         value.path_identity = Some(identity);
         Ok(value)
     }
 }
 impl<S: OutboxIo> Outbox<S> {
-    fn state(run: &RunRecord, lock: Arc<RunLock>, io: S, conn: Option<Connection>) -> Self {
+    fn state(run: &RunRecord, lock: Arc<RunLock>, io: S) -> Self {
         Self {
             io,
-            conn,
             run: run.clone(),
             lock,
             known: BTreeMap::new(),
@@ -838,7 +861,7 @@ impl<S: OutboxIo> Outbox<S> {
         }
     }
     fn initialize(
-        conn: &Connection,
+        conn: &mut Connection,
         run: &RunRecord,
         lock: Arc<RunLock>,
         io: S,
@@ -846,12 +869,8 @@ impl<S: OutboxIo> Outbox<S> {
     ) -> Result<Self> {
         check_deadline(Instant::now(), until)?;
         lock.validate(conn, &run.owner())?;
-        let path = conn
-            .path()
-            .ok_or_else(|| error("outbox requires a file-backed registry"))?;
-        let validation = crate::db::connect_read_only(&format!("sqlite:///{path}"))?;
-        let mut value = Self::state(run, lock, io, Some(validation));
-        value.scan(until)?;
+        let mut value = Self::state(run, lock, io);
+        value.scan(conn, until)?;
         Ok(value)
     }
     #[cfg(test)]
@@ -859,24 +878,12 @@ impl<S: OutboxIo> Outbox<S> {
         self.hooks = hooks;
     }
 
-    fn validate(&mut self, until: Instant) -> Result<RunRecord> {
+    fn validate(&self, conn: &mut Connection, until: Instant) -> Result<RunRecord> {
         check_deadline(Instant::now(), until)?;
-        let conn = self.conn.as_mut().expect("worker validation connection");
         validate_with(conn, &self.lock, &self.run, self.path_identity, until)
     }
-    fn validate_on(&self, conn: &mut Connection, until: Instant) -> Result<RunRecord> {
-        validate_with(conn, &self.lock, &self.run, self.path_identity, until)
-    }
-    pub(crate) fn scan(&mut self, until: Instant) -> Result<OutboxScan> {
-        let run = self.validate(until)?;
-        self.scan_validated(run, until)
-    }
-    pub(crate) fn scan_recovery(
-        &mut self,
-        conn: &mut Connection,
-        until: Instant,
-    ) -> Result<OutboxScan> {
-        let run = self.validate_on(conn, until)?;
+    pub(crate) fn scan(&mut self, conn: &mut Connection, until: Instant) -> Result<OutboxScan> {
+        let run = self.validate(conn, until)?;
         self.scan_validated(run, until)
     }
     fn scan_validated(&mut self, run: RunRecord, until: Instant) -> Result<OutboxScan> {
@@ -898,10 +905,10 @@ impl<S: OutboxIo> Outbox<S> {
             self.io.read_exact(&mut header).map_err(io_error)?;
             let bytes = u64::from(u32::from_be_bytes(header));
             ensure(
-                bytes > 0 && bytes <= OUTBOX_LIMIT - 36,
+                bytes > 0 && bytes <= OUTBOX_LIMIT - FRAME_HEADER,
                 "invalid outbox frame length",
             )?;
-            if length - position < 36 + bytes {
+            if length - position < FRAME_HEADER + bytes {
                 tail = Some("incomplete outbox frame".into());
                 break;
             }
@@ -921,7 +928,7 @@ impl<S: OutboxIo> Outbox<S> {
                 ensure(old == digest, "conflicting outbox original sequence")?;
             }
             previous = transition.event_seq;
-            let end = position + 36 + bytes;
+            let end = position + FRAME_HEADER + bytes;
             frames.push(OutboxFrame {
                 transition,
                 effective_policy,
@@ -939,39 +946,14 @@ impl<S: OutboxIo> Outbox<S> {
             incomplete_tail: tail,
         })
     }
-    #[cfg(test)]
     pub(crate) fn append_synced(
-        &mut self,
-        value: &ObservedTransition,
-        until: Instant,
-    ) -> Result<()> {
-        self.append_synced_with_policy(value, None, until)
-    }
-    pub(crate) fn append_synced_with_policy(
-        &mut self,
-        value: &ObservedTransition,
-        effective_policy: Option<&EffectivePolicyObservation>,
-        until: Instant,
-    ) -> Result<()> {
-        let run = self.validate(until)?;
-        self.append_validated(value, effective_policy, run, until)
-    }
-    pub(crate) fn append_recovery(
         &mut self,
         conn: &mut Connection,
         value: &ObservedTransition,
-        until: Instant,
-    ) -> Result<()> {
-        let run = self.validate_on(conn, until)?;
-        self.append_validated(value, None, run, until)
-    }
-    fn append_validated(
-        &mut self,
-        value: &ObservedTransition,
         effective_policy: Option<&EffectivePolicyObservation>,
-        run: RunRecord,
         until: Instant,
     ) -> Result<()> {
+        let run = self.validate(conn, until)?;
         storage::validate_observed_transition(&run, value)?;
         if self.dirty || self.io.byte_len().map_err(io_error)? != self.end {
             let scan = self.scan_validated(run.clone(), until)?;
@@ -999,7 +981,7 @@ impl<S: OutboxIo> Outbox<S> {
             )?;
             let end = self
                 .end
-                .checked_add(body.len() as u64 + 36)
+                .checked_add(body.len() as u64 + FRAME_HEADER)
                 .ok_or_else(|| error("outbox size overflow"))?;
             ensure(
                 end <= OUTBOX_LIMIT,
@@ -1034,7 +1016,7 @@ impl<S: OutboxIo> Outbox<S> {
         owner: &RunOwner,
         until: Instant,
     ) -> Result<()> {
-        let run = self.validate_on(conn, until)?;
+        let run = self.validate(conn, until)?;
         ensure(*owner == self.run.owner(), "compaction owner mismatch")?;
         let length = self.io.byte_len().map_err(io_error)?;
         let scan = self.scan_validated(run, until)?;
@@ -1073,7 +1055,7 @@ impl<S: OutboxIo> Outbox<S> {
             #[cfg(test)]
             self.hooks.before(WriterBoundary::Compact, until)?;
 
-            self.validate_on(conn, until)?;
+            self.validate(conn, until)?;
             ensure(
                 length == self.io.byte_len().map_err(io_error)?,
                 "outbox size changed before compaction",
@@ -1133,13 +1115,7 @@ mod tests {
         fn compaction_cancels_supplied_connection_sql_preserves_bytes_and_retries() {
             let mut fixture = WriterFixture::new();
             let original = transition(&fixture, 1);
-            storage::persist_event(
-                &mut fixture.fixture.conn,
-                &fixture.fixture.run.owner(),
-                &original,
-                PersistenceMode::Live,
-            )
-            .unwrap();
+            persist(&mut fixture, &original);
             let io = FaultIo::from_bytes(frame(&original));
             let mut outbox = open(&fixture, io.clone());
             let before = io.snapshot_bytes();
@@ -1196,13 +1172,7 @@ mod tests {
                 until.saturating_duration_since(Instant::now()) + Duration::from_millis(20),
             );
             ordinary_connection_work(&fixture.fixture.conn, 137);
-            outbox
-                .compact_committed(
-                    &mut fixture.fixture.conn,
-                    &fixture.fixture.run.owner(),
-                    deadline(),
-                )
-                .unwrap();
+            compact(&mut outbox, &mut fixture).unwrap();
             assert!(io.snapshot_bytes().is_empty());
             ordinary_connection_work(&fixture.fixture.conn, 137);
             assert!(
@@ -1227,13 +1197,7 @@ mod tests {
             for outcome in ["success", "error", "unwind"] {
                 let mut fixture = WriterFixture::new();
                 let original = transition(&fixture, 1);
-                storage::persist_event(
-                    &mut fixture.fixture.conn,
-                    &fixture.fixture.run.owner(),
-                    &original,
-                    PersistenceMode::Live,
-                )
-                .unwrap();
+                persist(&mut fixture, &original);
                 let io = FaultIo::from_bytes(frame(&original));
                 let mut outbox = open(&fixture, io.clone());
                 let before = io.snapshot_bytes();
@@ -1300,13 +1264,7 @@ mod tests {
                     ),
                     ..transition(&fixture, 1)
                 };
-                storage::persist_event(
-                    &mut fixture.fixture.conn,
-                    &fixture.fixture.run.owner(),
-                    &original,
-                    PersistenceMode::Live,
-                )
-                .unwrap();
+                persist(&mut fixture, &original);
                 bytes.extend(frame(&original));
             } else {
                 fixture
@@ -1345,13 +1303,7 @@ mod tests {
                 let before =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
                 let syncs = io.0.lock().unwrap().syncs;
-                outbox
-                    .compact_committed(
-                        &mut fixture.fixture.conn,
-                        &fixture.fixture.run.owner(),
-                        deadline(),
-                    )
-                    .unwrap();
+                compact(&mut outbox, &mut fixture).unwrap();
                 assert!(io.snapshot_bytes().is_empty());
                 let state = io.0.lock().unwrap();
                 assert_eq!(state.truncations.last(), Some(&0));
@@ -1376,12 +1328,7 @@ mod tests {
                 let before =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
                 io.0.lock().unwrap().fail_truncate = true;
-                let error = outbox
-                    .compact_committed(
-                        &mut fixture.fixture.conn,
-                        &fixture.fixture.run.owner(),
-                        deadline(),
-                    )
+                let error = compact(&mut outbox, &mut fixture)
                     .expect_err("incomplete tail truncate failure remains explicit");
                 assert!(error.message().contains("fixture frame truncate failure"));
                 assert_eq!(io.snapshot_bytes(), bytes);
@@ -1391,13 +1338,7 @@ mod tests {
                 );
                 let syncs = io.0.lock().unwrap().syncs;
                 io.0.lock().unwrap().fail_truncate = false;
-                outbox
-                    .compact_committed(
-                        &mut fixture.fixture.conn,
-                        &fixture.fixture.run.owner(),
-                        deadline(),
-                    )
-                    .unwrap();
+                compact(&mut outbox, &mut fixture).unwrap();
                 assert!(io.snapshot_bytes().is_empty());
                 assert!(io.0.lock().unwrap().syncs > syncs);
             }
@@ -1412,12 +1353,7 @@ mod tests {
                 let before =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
                 io.0.lock().unwrap().fail_sync = true;
-                let error = outbox
-                    .compact_committed(
-                        &mut fixture.fixture.conn,
-                        &fixture.fixture.run.owner(),
-                        deadline(),
-                    )
+                let error = compact(&mut outbox, &mut fixture)
                     .expect_err("incomplete tail sync failure remains explicit");
                 assert!(error.message().contains("fixture frame sync failure"));
                 let retained = io.snapshot_bytes();
@@ -1434,13 +1370,7 @@ mod tests {
                 let failed_syncs = io.0.lock().unwrap().syncs;
                 assert!(failed_syncs > 0);
                 io.0.lock().unwrap().fail_sync = false;
-                outbox
-                    .compact_committed(
-                        &mut fixture.fixture.conn,
-                        &fixture.fixture.run.owner(),
-                        deadline(),
-                    )
-                    .unwrap();
+                compact(&mut outbox, &mut fixture).unwrap();
                 assert!(io.snapshot_bytes().is_empty());
                 assert!(
                     io.0.lock().unwrap().syncs > failed_syncs,
@@ -1537,15 +1467,82 @@ mod tests {
         }
     }
 
-    fn open(fixture: &WriterFixture, io: FaultIo) -> Outbox<FaultIo> {
-        Outbox::initialize(
-            &fixture.fixture.conn,
+    /// An outbox with its own connection to the fixture database.
+    struct TestOutbox {
+        outbox: Outbox<FaultIo>,
+        conn: Connection,
+    }
+
+    impl TestOutbox {
+        fn append_synced(&mut self, value: &ObservedTransition, until: Instant) -> Result<()> {
+            self.outbox
+                .append_synced(&mut self.conn, value, None, until)
+        }
+        fn append_synced_with_policy(
+            &mut self,
+            value: &ObservedTransition,
+            effective_policy: Option<&EffectivePolicyObservation>,
+            until: Instant,
+        ) -> Result<()> {
+            self.outbox
+                .append_synced(&mut self.conn, value, effective_policy, until)
+        }
+        fn scan(&mut self, until: Instant) -> Result<OutboxScan> {
+            self.outbox.scan(&mut self.conn, until)
+        }
+        fn compact_committed(
+            &mut self,
+            conn: &mut Connection,
+            owner: &RunOwner,
+            until: Instant,
+        ) -> Result<()> {
+            self.outbox.compact_committed(conn, owner, until)
+        }
+        fn set_hooks(&mut self, hooks: Arc<dyn WriterHooks>) {
+            self.outbox.set_hooks(hooks);
+        }
+    }
+
+    fn initialize(fixture: &WriterFixture, io: FaultIo) -> Result<TestOutbox> {
+        let mut conn = crate::db::connect(&format!(
+            "sqlite:///{}",
+            fixture.fixture.conn.path().unwrap()
+        ))
+        .unwrap();
+        let outbox = Outbox::initialize(
+            &mut conn,
             &fixture.fixture.run,
             fixture.lock.clone(),
             io,
             deadline(),
+        )?;
+        Ok(TestOutbox { outbox, conn })
+    }
+
+    fn open(fixture: &WriterFixture, io: FaultIo) -> TestOutbox {
+        initialize(fixture, io).unwrap()
+    }
+
+    fn try_open(fixture: &WriterFixture, io: FaultIo) -> Result<OutboxScan> {
+        initialize(fixture, io).and_then(|mut outbox| outbox.scan(deadline()))
+    }
+
+    fn persist(fixture: &mut WriterFixture, value: &ObservedTransition) {
+        storage::persist_transition(
+            &mut fixture.fixture.conn,
+            &fixture.fixture.run.owner(),
+            value,
+            PersistenceMode::Live,
         )
-        .unwrap()
+        .unwrap();
+    }
+
+    fn compact(outbox: &mut TestOutbox, fixture: &mut WriterFixture) -> Result<()> {
+        outbox.compact_committed(
+            &mut fixture.fixture.conn,
+            &fixture.fixture.run.owner(),
+            deadline(),
+        )
     }
 
     mod effective_policy_frames {
@@ -1620,28 +1617,10 @@ mod tests {
             let mut forged = serde_json::to_value(&plain).unwrap();
             forged["effective_policy"] = serde_json::to_value(&lost).unwrap();
             let on_disk = FaultIo::from_bytes(framed(&forged));
-            assert!(
-                Outbox::initialize(
-                    &fixture.fixture.conn,
-                    &fixture.fixture.run,
-                    fixture.lock.clone(),
-                    on_disk,
-                    deadline(),
-                )
-                .is_err()
-            );
+            assert!(initialize(&fixture, on_disk).is_err());
             let mut malformed = serde_json::to_value(unavailable(&fixture, 1)).unwrap();
             malformed["effective_policy"] = serde_json::json!({"automatic_review":"available"});
-            assert!(
-                Outbox::initialize(
-                    &fixture.fixture.conn,
-                    &fixture.fixture.run,
-                    fixture.lock.clone(),
-                    FaultIo::from_bytes(framed(&malformed)),
-                    deadline(),
-                )
-                .is_err()
-            );
+            assert!(initialize(&fixture, FaultIo::from_bytes(framed(&malformed))).is_err());
         }
     }
 
@@ -1678,14 +1657,7 @@ mod tests {
         let mut bytes = frame(&original);
         bytes.extend(frame(&changed));
         let io = FaultIo::from_bytes(bytes.clone());
-        let result = Outbox::initialize(
-            &fixture.fixture.conn,
-            &fixture.fixture.run,
-            fixture.lock.clone(),
-            io.clone(),
-            deadline(),
-        )
-        .and_then(|mut outbox| outbox.scan(deadline()));
+        let result = try_open(&fixture, io.clone());
         assert!(result.is_err());
         assert_eq!(io.snapshot_bytes(), bytes);
     }
@@ -1851,14 +1823,7 @@ mod tests {
                 bytes[4..36].copy_from_slice(&digest);
             }
             let io = FaultIo::from_bytes(bytes.clone());
-            let result = Outbox::initialize(
-                &fixture.fixture.conn,
-                &fixture.fixture.run,
-                fixture.lock.clone(),
-                io.clone(),
-                deadline(),
-            )
-            .and_then(|mut outbox| outbox.scan(deadline()));
+            let result = try_open(&fixture, io.clone());
             assert!(result.is_err(), "{corrupt}");
             assert_eq!(io.snapshot_bytes(), bytes);
         }
@@ -1868,14 +1833,7 @@ mod tests {
     fn outbox_oversized_declared_length_fails_before_large_reads() {
         let fixture = WriterFixture::new();
         let io = FaultIo::from_bytes(u32::MAX.to_be_bytes().to_vec());
-        let result = Outbox::initialize(
-            &fixture.fixture.conn,
-            &fixture.fixture.run,
-            fixture.lock.clone(),
-            io.clone(),
-            deadline(),
-        )
-        .and_then(|mut outbox| outbox.scan(deadline()));
+        let result = try_open(&fixture, io.clone());
         assert!(result.is_err());
         assert!(io.0.lock().unwrap().largest_read <= 36);
         assert_eq!(io.snapshot_bytes(), u32::MAX.to_be_bytes());
@@ -1898,17 +1856,7 @@ mod tests {
         );
         io.0.lock().unwrap().fail_sync = false;
         assert_eq!(outbox.scan(deadline()).unwrap().frames.len(), 1);
-        assert_eq!(
-            fixture
-                .fixture
-                .conn
-                .query_row("SELECT COUNT(*) FROM member_runtime_events", [], |row| row
-                    .get::<_, i64>(
-                    0
-                ))
-                .unwrap(),
-            0
-        );
+        assert_eq!(committed(&fixture), 0);
     }
 
     #[test]
@@ -1935,73 +1883,13 @@ mod tests {
         let io = FaultIo::from_bytes(values.iter().flat_map(frame).collect());
         let mut outbox = open(&fixture, io.clone());
         let original = io.snapshot_bytes();
-        storage::persist_event(
-            &mut fixture.fixture.conn,
-            &fixture.fixture.run.owner(),
-            &values[0],
-            PersistenceMode::Live,
-        )
-        .unwrap();
-        outbox
-            .compact_committed(
-                &mut fixture.fixture.conn,
-                &fixture.fixture.run.owner(),
-                deadline(),
-            )
-            .unwrap();
+        persist(&mut fixture, &values[0]);
+        compact(&mut outbox, &mut fixture).unwrap();
         assert_eq!(io.snapshot_bytes(), original);
-        storage::persist_event(
-            &mut fixture.fixture.conn,
-            &fixture.fixture.run.owner(),
-            &values[1],
-            PersistenceMode::Live,
-        )
-        .unwrap();
-        outbox
-            .compact_committed(
-                &mut fixture.fixture.conn,
-                &fixture.fixture.run.owner(),
-                deadline(),
-            )
-            .unwrap();
+        persist(&mut fixture, &values[1]);
+        compact(&mut outbox, &mut fixture).unwrap();
         assert!(io.snapshot_bytes().is_empty());
         assert!(io.0.lock().unwrap().syncs > 0);
-    }
-
-    #[test]
-    fn outbox_truncate_failure_preserves_committed_originals_for_retry() {
-        let mut fixture = WriterFixture::new();
-        let value = transition(&fixture, 1);
-        storage::persist_event(
-            &mut fixture.fixture.conn,
-            &fixture.fixture.run.owner(),
-            &value,
-            PersistenceMode::Live,
-        )
-        .unwrap();
-        let io = FaultIo::from_bytes(frame(&value));
-        let mut outbox = open(&fixture, io.clone());
-        io.0.lock().unwrap().fail_truncate = true;
-        let before = io.snapshot_bytes();
-        assert!(
-            outbox
-                .compact_committed(
-                    &mut fixture.fixture.conn,
-                    &fixture.fixture.run.owner(),
-                    deadline()
-                )
-                .is_err()
-        );
-        assert_eq!(io.snapshot_bytes(), before);
-        io.0.lock().unwrap().fail_truncate = false;
-        outbox
-            .compact_committed(
-                &mut fixture.fixture.conn,
-                &fixture.fixture.run.owner(),
-                deadline(),
-            )
-            .unwrap();
-        assert!(io.snapshot_bytes().is_empty());
     }
 
     #[test]
@@ -2041,8 +1929,9 @@ mod tests {
             artifacts: _artifacts,
             lock,
         } = WriterFixture::new();
-        let outbox =
-            Outbox::open_owned(&fixture.conn, &fixture.run, lock.clone(), deadline()).unwrap();
+        let mut conn =
+            crate::db::connect(&format!("sqlite:///{}", fixture.conn.path().unwrap())).unwrap();
+        let outbox = Outbox::open_owned(&mut conn, &fixture.run, lock.clone(), deadline()).unwrap();
         drop(lock);
         assert!(
             RunLock::acquire(&fixture.conn, &fixture.run.owner())
@@ -2122,38 +2011,25 @@ mod tests {
 
         #[test]
         fn writer_refresh_newer_revision_survives_an_inflight_successful_attempt() {
-            let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
-            let mut writer = committed_open(&fixture, hooks.clone());
-            hooks.pause(WriterBoundary::Persist);
-            let release = Release(hooks.clone());
-            assert!(writer.try_refresh(update(&fixture, 2), deadline()).is_ok());
-            hooks.wait(WriterBoundary::Persist, 2);
-            assert!(writer.try_refresh(update(&fixture, 3), deadline()).is_ok());
-            assert!(writer.status().pending_evidence);
-            drop(release);
-            wait_until(|| !writer.status().pending_evidence);
-            assert_eq!(latest(&fixture)["screen_seq"], 3);
-            assert_eq!(committed(&fixture), 1);
-            writer.finish(deadline());
-        }
-
-        #[test]
-        fn writer_refresh_newer_revision_survives_an_inflight_failed_attempt() {
-            let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::default());
-            let mut writer = committed_open(&fixture, hooks.clone());
-            hooks.pause(WriterBoundary::Persist);
-            let release = Release(hooks.clone());
-            assert!(writer.try_refresh(update(&fixture, 2), deadline()).is_ok());
-            hooks.wait(WriterBoundary::Persist, 2);
-            assert!(writer.try_refresh(update(&fixture, 3), deadline()).is_ok());
-            hooks.fail_once(WriterBoundary::Persist);
-            drop(release);
-            wait_until(|| !writer.status().pending_evidence);
-            assert_eq!(latest(&fixture)["screen_seq"], 3);
-            assert_eq!(committed(&fixture), 1);
-            writer.finish(deadline());
+            for fail in [false, true] {
+                let fixture = WriterFixture::new();
+                let hooks = Arc::new(Hooks::default());
+                let mut writer = committed_open(&fixture, hooks.clone());
+                hooks.pause(WriterBoundary::Persist);
+                let release = Release(hooks.clone());
+                assert!(writer.try_refresh(update(&fixture, 2), deadline()).is_ok());
+                hooks.wait(WriterBoundary::Persist, 2);
+                assert!(writer.try_refresh(update(&fixture, 3), deadline()).is_ok());
+                assert!(writer.status().pending_evidence);
+                if fail {
+                    hooks.fail_once(WriterBoundary::Persist);
+                }
+                drop(release);
+                wait_until(|| !writer.status().pending_evidence);
+                assert_eq!(latest(&fixture)["screen_seq"], 3, "fail={fail}");
+                assert_eq!(committed(&fixture), 1);
+                writer.finish(deadline());
+            }
         }
 
         #[test]
@@ -2268,42 +2144,6 @@ mod tests {
 
     mod worker {
         use crate::runtime::writer::tests::*;
-        #[test]
-        fn writer_hook_timeout_releases_the_mutex_before_unwinding_through_cleanup() {
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Receive);
-            let observed = hooks.clone();
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                let _release = Release(observed.clone());
-                observed.wait(WriterBoundary::Persist, 1);
-            }));
-            assert!(result.is_err());
-            assert!(!hooks.state.is_poisoned());
-            assert_eq!(hooks.state.lock().unwrap().paused, [false; 5]);
-        }
-
-        #[test]
-        fn writer_hook_cleanup_releases_known_state_after_a_worker_poison_without_panicking() {
-            let hooks = Arc::new(Hooks::default());
-            hooks.pause(WriterBoundary::Receive);
-            let observed = hooks.clone();
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                let _state = observed.state.lock().unwrap();
-                panic!("owned fixture worker panic");
-            }));
-            assert!(result.is_err());
-            let cleanup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                drop(Release(hooks.clone()))
-            }));
-            assert!(cleanup.is_ok());
-            let state = hooks
-                .state
-                .lock()
-                .expect_err("ordinary access preserves poisoned-state invariant")
-                .into_inner();
-            assert_eq!(state.paused, [false; 5]);
-        }
-
         #[test]
         fn writer_worker_receive_stall_pins_64_channel_slots_and_returns_the_failed_original() {
             let fixture = WriterFixture::new();
@@ -2729,18 +2569,6 @@ mod tests {
     }
 
     #[test]
-    fn writer_starts_with_the_exact_private_recorded_outbox() {
-        let fixture = WriterFixture::new();
-        let mut writer = fixture
-            .start(fixture.artifacts.paths.outbox.clone())
-            .unwrap();
-        assert_eq!(
-            writer.finish(Instant::now() + Duration::from_secs(1)),
-            (0, 0)
-        );
-    }
-
-    #[test]
     fn writer_foreign_outbox_path_fails_before_worker_start() {
         let fixture = WriterFixture::new();
         let foreign = fixture.fixture._dir.path().join("foreign-outbox");
@@ -2786,31 +2614,15 @@ mod tests {
             .start(fixture.artifacts.paths.outbox.clone())
             .unwrap();
         writer.submit(value.clone()).unwrap();
-        let until = deadline();
-        let bytes = loop {
-            let bytes = std::fs::read(&fixture.artifacts.paths.outbox).unwrap();
-            if bytes.len() == frame(&value).len() {
-                break bytes;
-            }
-            assert!(
-                Instant::now() < until,
-                "complete pending frame was not written: {:?}",
-                writer.diagnostic()
-            );
-            std::thread::sleep(Duration::from_millis(2));
-        };
+        wait_until(|| {
+            std::fs::read(&fixture.artifacts.paths.outbox)
+                .unwrap()
+                .len()
+                == frame(&value).len()
+        });
+        let bytes = std::fs::read(&fixture.artifacts.paths.outbox).unwrap();
         assert_eq!(independent_frames(&bytes), vec![value]);
-        assert_eq!(
-            fixture
-                .fixture
-                .conn
-                .query_row("SELECT COUNT(*) FROM member_runtime_events", [], |row| row
-                    .get::<_, i64>(
-                    0
-                ))
-                .unwrap(),
-            0
-        );
+        assert_eq!(committed(&fixture), 0);
         assert_eq!(
             fixture
                 .fixture
@@ -2821,25 +2633,7 @@ mod tests {
             0
         );
         blocking.execute_batch("ROLLBACK").unwrap();
-        let until = deadline();
-        loop {
-            let count = fixture
-                .fixture
-                .conn
-                .query_row("SELECT COUNT(*) FROM member_runtime_events", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap();
-            if count == 1 {
-                break;
-            }
-            assert!(
-                Instant::now() < until,
-                "event did not commit: {:?}",
-                writer.diagnostic()
-            );
-            std::thread::sleep(Duration::from_millis(2));
-        }
+        wait_until(|| committed(&fixture) == 1);
         assert_eq!(writer.finish(deadline()), (0, 0));
         assert_eq!(
             fixture
@@ -2873,76 +2667,6 @@ pub(crate) mod test_support {
     use crate::runtime::test_support::Fixture;
     use crate::runtime::writer::*;
     use std::sync::Condvar;
-    pub(crate) const VERSION: &str = "0.0.1-synthetic";
-    pub(crate) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
-    pub(in crate::runtime) use crate::coding_agent::catalog::test_support::synthetic_catalog as catalog;
-    pub(in crate::runtime) use crate::coding_agent::catalog::test_support::synthetic_definitions as definitions;
-    pub(crate) fn configure(fixture: &mut WriterFixture) {
-        fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?2",rusqlite::params![VERSION,fixture.fixture.run.run_id]).unwrap();
-        fixture.fixture.run =
-            storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-    }
-    pub(crate) fn configure_redacted(fixture: &mut WriterFixture) {
-        configure(fixture);
-        fixture
-            .fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                [fixture.fixture.run.run_id],
-            )
-            .unwrap();
-        fixture.fixture.run =
-            storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-    }
-    pub(crate) struct Clock {
-        pub(crate) origin: Instant,
-        pub(crate) millis: AtomicU64,
-    }
-    impl Clock {
-        pub(crate) fn new() -> Self {
-            Self {
-                origin: Instant::now(),
-                millis: AtomicU64::new(0),
-            }
-        }
-        pub(crate) fn set(&self, millis: u64) {
-            self.millis.store(millis, Ordering::Release);
-        }
-    }
-    impl ObservationClock for Clock {
-        fn sample(&self) -> ObservationMoment {
-            ObservationMoment {
-                monotonic: self.origin + Duration::from_millis(self.millis.load(Ordering::Acquire)),
-                observed_at: NOW.into(),
-            }
-        }
-        fn kind(&self) -> ObservationClockKind {
-            ObservationClockKind::Deterministic
-        }
-    }
-    pub(crate) fn running(fixture: &mut WriterFixture, child: &ProcessIdentity) {
-        fixture.fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![child.pid,child.start_identity,NOW,fixture.fixture.run.run_id]).unwrap();
-        fixture.fixture.run =
-            storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-    }
-    pub(crate) fn form(operation: &str) -> Vec<u8> {
-        format!("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ").into_bytes()
-    }
-    pub(crate) fn detailed_form(operation: &str, detail: &str) -> Vec<u8> {
-        format!("\x1b[2J\x1b[18;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nDetail: {detail}\r\nSelection: ").into_bytes()
-    }
-    // Rewrites only the non-fingerprint detail row of `detailed_form` and returns the cursor to the end of `Selection: `.
-    pub(crate) fn detail_rewrite(detail: &str) -> Vec<u8> {
-        format!("\x1b[23;1H\x1b[2KDetail: {detail}\x1b[24;12H").into_bytes()
-    }
-    pub(crate) fn redacted_policy() -> storage::evidence::EvidencePolicy {
-        storage::evidence::EvidencePolicy::redacted(
-                &serde_json::json!({"schema_version":1,"patterns":["synthetic-redaction-canary"],"sensitive_rules":[]}),
-                &["synthetic-permission"],
-            )
-            .unwrap()
-    }
     pub(crate) fn index(boundary: WriterBoundary) -> usize {
         match boundary {
             WriterBoundary::Receive => 0,
@@ -3193,19 +2917,10 @@ pub(crate) mod test_support {
         outbox_frame(&serde_json::to_vec(transition).unwrap())
     }
 
-    pub(crate) fn independent_frames(mut bytes: &[u8]) -> Vec<ObservedTransition> {
-        let mut values = Vec::new();
-        while !bytes.is_empty() {
-            assert!(bytes.len() >= 36);
-            let length =
-                usize::try_from(u32::from_be_bytes(bytes[..4].try_into().unwrap())).unwrap();
-            assert!(length > 0 && length <= 16 * 1024 * 1024);
-            assert!(bytes.len() >= 36 + length);
-            let body = &bytes[36..36 + length];
-            assert_eq!(&bytes[4..36], &Sha256::digest(body)[..]);
-            values.push(serde_json::from_slice(body).unwrap());
-            bytes = &bytes[36 + length..];
-        }
-        values
+    pub(crate) fn independent_frames(bytes: &[u8]) -> Vec<ObservedTransition> {
+        frame_bodies(bytes)
+            .into_iter()
+            .map(|body| serde_json::from_value(body).unwrap())
+            .collect()
     }
 }

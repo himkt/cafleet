@@ -133,7 +133,7 @@ fn directory(path: &Path) -> Result<()> {
     private_metadata(path, uid(), 0o700, true)?;
     Ok(())
 }
-fn open_private(path: &Path, create: bool) -> Result<File> {
+pub(super) fn open_private(path: &Path, create: bool) -> Result<File> {
     let mut options = OpenOptions::new();
     options
         .read(true)
@@ -150,16 +150,11 @@ fn open_private(path: &Path, create: bool) -> Result<File> {
     )?;
     Ok(file)
 }
-pub(crate) fn validate_database(
-    actual: &Value,
-    expected: &Value,
-    mismatch: impl FnOnce() -> CafleetError,
-) -> Result<()> {
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(mismatch())
-    }
+pub(crate) fn ensure_same_database(conn: &Connection, expected: &Value) -> Result<()> {
+    ensure(
+        storage::database_identity(conn)? == *expected,
+        "runtime database identity changed",
+    )
 }
 
 pub(super) fn placement_of(
@@ -179,11 +174,7 @@ pub(super) fn placement_of(
     .map_err(CafleetError::from)
 }
 pub(crate) fn validate_run_paths(conn: &Connection, run: &RunRecord) -> Result<RuntimePaths> {
-    validate_database(
-        &storage::database_identity(conn)?,
-        &run.database_identity_json,
-        || error("runtime database identity changed"),
-    )?;
+    ensure_same_database(conn, &run.database_identity_json)?;
     let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)?;
     ensure(
         paths.run_dir == Path::new(&run.runtime_path),
@@ -232,11 +223,7 @@ impl RunArtifacts {
         deadline: Instant,
     ) -> Result<Self> {
         let run = storage::get_run(conn, run_id)?;
-        validate_database(
-            &storage::database_identity(conn)?,
-            &run.database_identity_json,
-            || error("runtime database identity changed"),
-        )?;
+        ensure_same_database(conn, &run.database_identity_json)?;
         ensure(
             run.owner_kind == OwnerKind::Creator && !run.status.terminal(),
             "artifact allocation requires the pending creator",
@@ -277,11 +264,7 @@ impl RunArtifacts {
         let dir_id = identity(&private_metadata(&paths.run_dir, uid(), 0o700, true)?);
         let lock_id = identity(&lock.metadata().map_err(io_error)?);
         with_database_deadline(conn, deadline, |conn| {
-            validate_database(
-                &storage::database_identity(conn)?,
-                &run.database_identity_json,
-                || error("runtime database identity changed"),
-            )?;
+            ensure_same_database(conn, &run.database_identity_json)?;
             let changed=conn.execute("UPDATE member_runs SET runtime_path=?1,runtime_dir_identity_json=?2,run_lock_identity_json=?3 WHERE run_id=?4 AND owner_epoch=?5 AND owner_kind='creator' AND runtime_dir_identity_json IS NULL",params![paths.run_dir.to_string_lossy(),dir_id.to_string(),lock_id.to_string(),run_id,run.owner_epoch])?;
             ensure(changed == 1, "artifact ownership changed during allocation")
         })?;
@@ -441,19 +424,13 @@ impl RunLock {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             check(&tx)?;
             let current = storage::get_run(&tx, expected.run_id)?;
-            validate_database(
-                &storage::database_identity(&tx)?,
-                &expected.database_identity_json,
-                || error("runtime database identity changed"),
-            )?;
+            ensure_same_database(&tx, &expected.database_identity_json)?;
             ensure(
                 crate::runtime::recovery::stable_run_identity(&current)
                     == crate::runtime::recovery::stable_run_identity(expected),
                 "recovery ownership changed before CAS",
             )?;
-            let next = if current.status.terminal()
-                && current.cleanup_state == storage::CleanupState::Complete
-            {
+            let next = if current.is_settled() {
                 current
             } else {
                 self.validate(&tx, &expected.owner())?;
@@ -781,13 +758,7 @@ mod tests {
                 RecoveryDescriptor::pin(&mut case.fixture.conn, &case.fixture.run, &lock, until)
                     .unwrap();
             if changed == "epoch" {
-                case.fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET owner_epoch=owner_epoch+1 WHERE run_id=?1",
-                        [case.fixture.run.run_id],
-                    )
-                    .unwrap();
+                bump_epoch(&case.fixture.conn, case.fixture.run.run_id);
             }
             let deadline = if changed == "deadline" {
                 Instant::now()
@@ -1045,7 +1016,7 @@ mod tests {
         for &agent in crate::coding_agent::CodingAgent::all() {
             spec.environment = agent
                 .forwarded_config(&|name| {
-                    (name == agent.config_variable()).then(|| format!("/cfg/{}", agent.name()))
+                    Ok((name == agent.config_variable()).then(|| format!("/cfg/{}", agent.name())))
                 })
                 .unwrap()
                 .into_iter()
@@ -1298,17 +1269,21 @@ mod tests {
     }
 
     mod lock_transfer {
-        use crate::broker::runtime::Reachability;
         use crate::broker::runtime::RunStatus;
         use crate::runtime::artifacts::tests::*;
 
-        #[test]
-        fn runner_recovery_lock_transfer_commits_fresh_epochs_and_preserves_first_origin_status() {
+        fn locked() -> (Fixture, RunArtifacts, RunLock) {
             let mut fixture = Fixture::new();
-            let _artifacts = fixture.artifacts();
+            let artifacts = fixture.artifacts();
             let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
                 .unwrap()
                 .unwrap();
+            (fixture, artifacts, lock)
+        }
+
+        #[test]
+        fn runner_recovery_lock_transfer_commits_fresh_epochs_and_preserves_first_origin_status() {
+            let (mut fixture, _artifacts, lock) = locked();
             let original = fixture.run.clone();
             let process = ProcessIdentity::current().unwrap();
             for offset in 1..=2 {
@@ -1345,108 +1320,29 @@ mod tests {
 
         #[test]
         fn runner_recovery_lock_transfer_rejects_every_changed_stable_expected_identity() {
-            for changed in [
-                "epoch",
-                "owner",
-                "nonce",
-                "backend",
-                "director",
-                "runtime_path",
-                "directory",
-                "lock",
-                "runner",
-                "child",
-                "database",
-            ] {
-                let mut fixture = Fixture::new();
-                let _artifacts = fixture.artifacts();
-                let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                    .unwrap()
-                    .unwrap();
-                let before = fixture.run.clone();
-                let mut expected = before.clone();
-                match changed {
-                    "epoch" => expected.owner_epoch += 1,
-                    "owner" => expected.owner_start_identity.push_str("-foreign"),
-                    "nonce" => expected.launch_nonce = "b".repeat(64),
-                    "backend" => expected.backend = "claude".into(),
-                    "director" => expected.director_member_id += 1,
-                    "runtime_path" => expected.runtime_path.push_str("-foreign"),
-                    "directory" => {
-                        expected.runtime_dir_identity_json = Some(json!({"device":0,"inode":0}))
-                    }
-                    "lock" => expected.run_lock_identity_json = Some(json!({"device":0,"inode":0})),
-                    "runner" => {
-                        expected.runner_pid = Some(1);
-                        expected.runner_start_identity = Some("foreign".into());
-                    }
-                    "child" => {
-                        expected.child_pid = Some(1);
-                        expected.child_start_identity = Some("foreign".into());
-                    }
-                    "database" => {
-                        expected.database_identity_json["instance_id"] = json!("0".repeat(32))
-                    }
-                    _ => unreachable!(),
-                }
-                assert!(
-                    lock.transfer_to_reconciler_with_deadline(
-                        &mut fixture.conn,
-                        &expected,
-                        ProcessIdentity::current().unwrap(),
-                        Instant::now() + Duration::from_secs(1),
-                    )
-                    .is_err(),
-                    "{changed}"
-                );
-                assert_eq!(
-                    storage::get_run(&fixture.conn, before.run_id).unwrap(),
-                    before,
-                    "{changed}"
-                );
-                lock.validate(&fixture.conn, &before.owner()).unwrap();
-            }
-        }
-
-        #[test]
-        fn runner_recovery_lock_transfer_ignores_mutable_health_diagnostics_and_sequence_snapshots()
-        {
-            let mut fixture = Fixture::new();
-            let _artifacts = fixture.artifacts();
-            let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                .unwrap()
-                .unwrap();
-            let mut expected = fixture.run.clone();
-            expected.last_health_at = Some("2000-01-01T00:00:00Z".into());
-            expected.reachability = Reachability::Suspect;
-            expected.cleanup_diagnostics_json = Some(json!(["old bounded diagnostic"]));
-            expected.event_seq_reserved_through += 256;
-            expected.observation_gap_count += 1;
-            lock.transfer_to_reconciler_with_deadline(
-                &mut fixture.conn,
-                &expected,
-                ProcessIdentity::current().unwrap(),
-                Instant::now() + Duration::from_secs(1),
-            )
-            .unwrap();
-            let current = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-            assert_eq!(
-                current.event_seq_reserved_through,
-                fixture.run.event_seq_reserved_through
+            let (mut fixture, _artifacts, lock) = locked();
+            let before = fixture.run.clone();
+            let mut expected = before.clone();
+            expected.launch_nonce = "b".repeat(64);
+            assert!(
+                lock.transfer_to_reconciler_with_deadline(
+                    &mut fixture.conn,
+                    &expected,
+                    ProcessIdentity::current().unwrap(),
+                    Instant::now() + Duration::from_secs(1),
+                )
+                .is_err()
             );
             assert_eq!(
-                current.observation_gap_count,
-                fixture.run.observation_gap_count
+                storage::get_run(&fixture.conn, before.run_id).unwrap(),
+                before
             );
+            lock.validate(&fixture.conn, &before.owner()).unwrap();
         }
 
         #[test]
         fn runner_recovery_lock_transfer_commit_failure_returns_no_uncommitted_owner() {
-            let mut fixture = Fixture::new();
-            let _artifacts = fixture.artifacts();
-            let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                .unwrap()
-                .unwrap();
+            let (mut fixture, _artifacts, lock) = locked();
             fixture.conn.commit_hook(Some(|| true)).unwrap();
             let result = lock.transfer_to_reconciler_with_deadline(
                 &mut fixture.conn,
@@ -1465,11 +1361,7 @@ mod tests {
 
         #[test]
         fn runner_recovery_lock_transfer_contention_uses_the_original_absolute_deadline() {
-            let mut fixture = Fixture::new();
-            let _artifacts = fixture.artifacts();
-            let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
-                .unwrap()
-                .unwrap();
+            let (mut fixture, _artifacts, lock) = locked();
             let writer = Connection::open(fixture.conn.path().unwrap()).unwrap();
             writer.execute_batch("BEGIN IMMEDIATE").unwrap();
             let started = Instant::now();
@@ -1486,6 +1378,183 @@ mod tests {
                 storage::get_run(&fixture.conn, fixture.run.run_id).unwrap(),
                 fixture.run
             );
+        }
+    }
+
+    mod recovery_descriptor {
+        use crate::error::CafleetError;
+        use crate::runtime::artifacts::*;
+        use crate::runtime::recovery::test_support::Case;
+        use crate::runtime::recovery::test_support::TestResult;
+        use crate::runtime::recovery::test_support::descriptor::described_creator;
+        use crate::runtime::recovery::test_support::descriptor::identity;
+        use crate::runtime::recovery::test_support::descriptor::owned_bytes;
+        use crate::runtime::recovery::test_support::descriptor::secret_free;
+        use crate::runtime::recovery::test_support::descriptor::write_private;
+        use serde_json::Value;
+        use serde_json::json;
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        fn overwrite(path: &std::path::Path, bytes: &[u8]) {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(path)
+                .unwrap();
+            file.write_all(bytes).unwrap();
+            file.sync_all().unwrap();
+        }
+
+        fn pin(case: &mut Case) -> TestResult<RecoveryDescriptor> {
+            let lock = case.held.as_ref().unwrap().clone();
+            RecoveryDescriptor::pin(
+                &mut case.fixture.conn,
+                &case.fixture.run,
+                &lock,
+                Instant::now() + Duration::from_secs(1),
+            )
+        }
+
+        fn remove(case: &mut Case, pinned: &mut RecoveryDescriptor) -> (TestResult<()>, bool) {
+            let lock = case.held.as_ref().unwrap().clone();
+            let mut dispatched = false;
+            let result = pinned.remove(
+                &mut case.fixture.conn,
+                &case.fixture.run,
+                &lock,
+                Instant::now() + Duration::from_secs(1),
+                |path, _| {
+                    dispatched = true;
+                    std::fs::remove_file(path)
+                        .map_err(|_| CafleetError::App("owned descriptor removal failed".into()))
+                },
+            );
+            (result, dispatched)
+        }
+
+        #[derive(Clone, Copy, Debug)]
+        enum Change {
+            Replacement,
+            Symlink,
+            Content,
+            Appeared,
+        }
+
+        #[test]
+        fn recovery_descriptor_remove_preserves_a_descriptor_changed_after_its_pin() {
+            for change in [
+                Change::Replacement,
+                Change::Symlink,
+                Change::Content,
+                Change::Appeared,
+            ] {
+                let mut case = described_creator();
+                let original = owned_bytes(&case);
+                let path = case.artifacts.paths.descriptor.clone();
+                let retained = case.artifacts.paths.run_dir.join("retained-launch.json");
+                if matches!(change, Change::Appeared) {
+                    case.artifacts.remove_descriptor().unwrap();
+                }
+                let mut pinned = pin(&mut case).unwrap();
+                let expected = match change {
+                    Change::Replacement => {
+                        std::fs::rename(&path, &retained).unwrap();
+                        write_private(&path, &original);
+                        assert_ne!(identity(&path).1, identity(&retained).1);
+                        original.clone()
+                    }
+                    Change::Symlink => {
+                        std::fs::rename(&path, &retained).unwrap();
+                        std::os::unix::fs::symlink(&retained, &path).unwrap();
+                        original.clone()
+                    }
+                    Change::Content => {
+                        let mut value: Value = serde_json::from_slice(&original).unwrap();
+                        value["spawn"]["argv"]
+                            .as_array_mut()
+                            .unwrap()
+                            .push(json!("owned-in-place-change"));
+                        let bytes = serde_json::to_vec(&value).unwrap();
+                        let before = identity(&path);
+                        overwrite(&path, &bytes);
+                        assert_eq!((identity(&path).0, identity(&path).1), (before.0, before.1));
+                        bytes
+                    }
+                    Change::Appeared => {
+                        write_private(&path, &original);
+                        original.clone()
+                    }
+                };
+                let named = identity(&path);
+                let (result, dispatched) = remove(&mut case, &mut pinned);
+                let error = result.expect_err("a descriptor changed after its pin is refused");
+                secret_free(&error.message());
+                assert!(!dispatched, "{change:?}");
+                assert_eq!(identity(&path), named, "{change:?}");
+                if matches!(change, Change::Symlink) {
+                    assert!(
+                        std::fs::symlink_metadata(&path)
+                            .unwrap()
+                            .file_type()
+                            .is_symlink()
+                    );
+                    assert_eq!(std::fs::read(&retained).unwrap(), expected);
+                } else {
+                    assert_eq!(std::fs::read(&path).unwrap(), expected, "{change:?}");
+                }
+            }
+        }
+
+        #[test]
+        fn recovery_descriptor_disappearing_after_its_pin_is_a_safe_absence() {
+            let mut case = described_creator();
+            let mut pinned = pin(&mut case).unwrap();
+            std::fs::remove_file(&case.artifacts.paths.descriptor).unwrap();
+            let (result, dispatched) = remove(&mut case, &mut pinned);
+            result.unwrap();
+            assert!(!dispatched);
+            assert!(!case.artifacts.paths.descriptor.exists());
+        }
+
+        #[test]
+        fn recovery_descriptor_pin_refuses_an_invalid_descriptor_privately() {
+            for damage in ["size", "json", "schema", "member", "permissions", "symlink"] {
+                let mut case = described_creator();
+                let path = case.artifacts.paths.descriptor.clone();
+                let mut value: Value = serde_json::from_slice(&owned_bytes(&case)).unwrap();
+                match damage {
+                    "size" => overwrite(&path, &vec![b' '; 1024 * 1024 + 1]),
+                    "json" => overwrite(&path, b"{"),
+                    "schema" => {
+                        value["schema_version"] = json!(2);
+                        overwrite(&path, &serde_json::to_vec(&value).unwrap());
+                    }
+                    "member" => {
+                        value["member_id"] = json!(case.fixture.run.member_id + 1);
+                        overwrite(&path, &serde_json::to_vec(&value).unwrap());
+                    }
+                    "permissions" => {
+                        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+                            .unwrap();
+                    }
+                    "symlink" => {
+                        let retained = case.artifacts.paths.run_dir.join("invalid-target.json");
+                        std::fs::rename(&path, &retained).unwrap();
+                        std::os::unix::fs::symlink(&retained, &path).unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+                let before = identity(&path);
+                let error = match pin(&mut case) {
+                    Err(error) => error,
+                    Ok(_) => panic!("an invalid descriptor is refused at pin: {damage}"),
+                };
+                secret_free(&error.message());
+                assert_eq!(identity(&path), before, "{damage}");
+            }
         }
     }
 }

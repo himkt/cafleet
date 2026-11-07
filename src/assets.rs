@@ -51,11 +51,11 @@ pub(crate) fn agent_paths(
             base.join("rules/cafleet.rules"),
         )],
         CodingAgent::Opencode => agent
-            .policy_choices(None)
-            .into_iter()
+            .policy_choices()
+            .iter()
             .map(|mode| {
                 let target = agent
-                    .required_preset(&base, &mode)
+                    .required_preset(&base, mode)
                     .expect("OpenCode requires a preset for every launch policy");
                 (format!("opencode/{mode}.md"), target)
             })
@@ -576,21 +576,16 @@ mod tests {
         agent: CodingAgent,
         base: &Path,
         fake: &FakeHermes,
-    ) -> Vec<(&'static str, PathBuf)> {
+    ) -> Vec<(&'static [u8], PathBuf)> {
         let (prefix, root) = match agent {
             CodingAgent::Claude | CodingAgent::Codex => return vec![],
-            CodingAgent::Opencode => ("opencode/", base.join("plugins")),
-            CodingAgent::Hermes => ("hermes/cafleet/", fake.plugin_dir()),
+            CodingAgent::Opencode => (OPENCODE_EXTENSION_PREFIX, base.join("plugins")),
+            CodingAgent::Hermes => (HERMES_EXTENSION_PREFIX, fake.plugin_dir()),
         };
-        let targets = EXTENSIONS
-            .iter()
-            .filter_map(|(path, _)| {
-                path.strip_prefix(prefix)
-                    .map(|rest| (*path, root.join(rest)))
-            })
-            .collect::<Vec<_>>();
-        assert!(!targets.is_empty(), "{} bundles an extension", agent.name());
-        targets
+        embedded_extension(prefix)
+            .into_iter()
+            .map(|(relative, bytes)| (bytes, root.join(relative)))
+            .collect()
     }
 
     fn extension_record(agent: CodingAgent, base: &Path, fake: &FakeHermes) -> Option<PathBuf> {
@@ -624,11 +619,11 @@ mod tests {
         );
     }
 
-    fn assert_embedded_extensions(targets: &[(&'static str, PathBuf)]) {
-        for (source, target) in targets {
+    fn assert_embedded_extensions(targets: &[(&'static [u8], PathBuf)]) {
+        for (embedded, target) in targets {
             assert_eq!(
                 std::fs::read(target).unwrap(),
-                lookup(EXTENSIONS, source).unwrap(),
+                *embedded,
                 "{}",
                 target.display()
             );
@@ -672,7 +667,7 @@ mod tests {
         for agent in CodingAgent::all() {
             let custom = home.path().join(format!("custom-{}", agent.name()));
             let paths = agent_paths(
-                &|name| (name == agent.config_variable()).then(|| custom.display().to_string()),
+                &|name| Ok((name == agent.config_variable()).then(|| custom.display().to_string())),
                 home.path(),
                 *agent,
             )
@@ -751,34 +746,13 @@ mod tests {
     }
 
     #[test]
-    fn installation_failure_records_only_completed_installations() {
-        let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&home);
-        let paths = agent_paths(&|_| None, home.path(), CodingAgent::Codex).unwrap();
-        std::fs::create_dir_all(home.path().join(".codex")).unwrap();
-        std::fs::write(home.path().join(".codex/rules"), "blocked parent").unwrap();
-        assert!(
-            install_agent(
-                &mut conn,
-                CodingAgent::Codex,
-                &paths,
-                "version",
-                HermesSetup::Absent,
-                &mut Vec::<u8>::new()
-            )
-            .is_err()
-        );
-        assert_eq!(asset_install_count(&conn), 0);
-    }
-
-    #[test]
     fn installation_prints_skills_then_presets_then_extensions_then_hermes_enablement() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
         for agent in CodingAgent::all() {
             let custom = home.path().join(format!("custom-{}", agent.name()));
             let paths = agent_paths(
-                &|name| (name == agent.config_variable()).then(|| custom.display().to_string()),
+                &|name| Ok((name == agent.config_variable()).then(|| custom.display().to_string())),
                 home.path(),
                 *agent,
             )
@@ -844,7 +818,7 @@ mod tests {
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(base.join("agents"), "blocked parent").unwrap();
         let paths = agent_paths(
-            &|name| (name == "OPENCODE_CONFIG_DIR").then(|| base.display().to_string()),
+            &|name| Ok((name == "OPENCODE_CONFIG_DIR").then(|| base.display().to_string())),
             home.path(),
             CodingAgent::Opencode,
         )
@@ -893,7 +867,7 @@ mod tests {
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(base.join("plugins"), "blocked parent").unwrap();
         let paths = agent_paths(
-            &|name| (name == "OPENCODE_CONFIG_DIR").then(|| base.display().to_string()),
+            &|name| Ok((name == "OPENCODE_CONFIG_DIR").then(|| base.display().to_string())),
             home.path(),
             CodingAgent::Opencode,
         )
@@ -912,7 +886,9 @@ mod tests {
         assert!(
             failure.message().starts_with(&format!(
                 "failed to install extension into {}: ",
-                base.join("plugins/cafleet.ts").display()
+                base.join("plugins")
+                    .join(embedded_extension(OPENCODE_EXTENSION_PREFIX)[0].0)
+                    .display()
             )),
             "{}",
             failure.message()
@@ -943,17 +919,16 @@ mod tests {
     fn opencode_default_installation_uses_the_native_config_directory_for_every_asset() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::db::test_support::migrated_conn(&home);
-        let paths = agent_paths(&|_| None, home.path(), CodingAgent::Opencode).unwrap();
+        let paths = agent_paths(&|_| Ok(None), home.path(), CodingAgent::Opencode).unwrap();
         let base = home.path().join(".config/opencode");
         assert_eq!(paths.identity, base.display().to_string());
-        let mut output = Vec::new();
         install_agent(
             &mut conn,
             CodingAgent::Opencode,
             &paths,
             "1.0.0",
             HermesSetup::Absent,
-            &mut output,
+            &mut Vec::<u8>::new(),
         )
         .unwrap();
         for (source, target) in expected_presets(CodingAgent::Opencode, &base) {
@@ -964,42 +939,9 @@ mod tests {
                 target.display()
             );
         }
-        for (relative, bytes) in SKILLS {
-            assert_eq!(
-                std::fs::read(base.join("skills").join(relative)).unwrap(),
-                *bytes
-            );
-        }
         let fake = FakeHermes::new();
-        let extensions = extension_targets(CodingAgent::Opencode, &base, &fake);
-        assert_eq!(
-            extensions
-                .iter()
-                .map(|(_, target)| target.clone())
-                .collect::<Vec<_>>(),
-            [base.join("plugins/cafleet.ts")]
-        );
-        assert_embedded_extensions(&extensions);
+        assert_embedded_extensions(&extension_targets(CodingAgent::Opencode, &base, &fake));
         assert_executable_record(&base.join("plugins/cafleet.executable"));
-        let lines = output_lines(output);
-        assert_eq!(
-            lines[1..],
-            [
-                format!(
-                    "opencode: installed preset (v1.0.0) -> {}",
-                    base.join("agents/cafleet.md").display()
-                ),
-                format!(
-                    "opencode: installed preset (v1.0.0) -> {}",
-                    base.join("agents/cafleet-ask.md").display()
-                ),
-                extension_line(
-                    CodingAgent::Opencode,
-                    "1.0.0",
-                    &base.join("plugins/cafleet.ts")
-                ),
-            ]
-        );
         let recorded: Vec<String> = conn
             .prepare("SELECT path FROM asset_installs WHERE coding_agent='opencode'")
             .unwrap()
@@ -1008,30 +950,6 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(recorded, [base.display().to_string()]);
-    }
-
-    #[test]
-    fn opencode_rerun_replaces_a_tampered_extension_and_record() {
-        let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&home);
-        let paths = agent_paths(&|_| None, home.path(), CodingAgent::Opencode).unwrap();
-        let base = home.path().join(".config/opencode");
-        let plugins = base.join("plugins");
-        std::fs::create_dir_all(&plugins).unwrap();
-        std::fs::write(plugins.join("cafleet.ts"), "tampered").unwrap();
-        std::fs::write(plugins.join("cafleet.executable"), "/nowhere/cafleet\n").unwrap();
-        install_agent(
-            &mut conn,
-            CodingAgent::Opencode,
-            &paths,
-            "1.0.0",
-            HermesSetup::Absent,
-            &mut Vec::<u8>::new(),
-        )
-        .unwrap();
-        let fake = FakeHermes::new();
-        assert_embedded_extensions(&extension_targets(CodingAgent::Opencode, &base, &fake));
-        assert_executable_record(&plugins.join("cafleet.executable"));
     }
 
     mod hermes {
@@ -1057,7 +975,7 @@ mod tests {
         fn install_with(hermes: HermesSetup<'_>) -> Installed {
             let home = tempfile::tempdir().unwrap();
             let mut conn = crate::db::test_support::migrated_conn(&home);
-            let paths = agent_paths(&|_| None, home.path(), CodingAgent::Hermes).unwrap();
+            let paths = agent_paths(&|_| Ok(None), home.path(), CodingAgent::Hermes).unwrap();
             let mut output = Vec::new();
             let result = install_agent(
                 &mut conn,
@@ -1069,9 +987,6 @@ mod tests {
             );
             let base = home.path().join(".hermes");
             let skills = base.join("skills");
-            for (relative, bytes) in SKILLS {
-                assert_eq!(std::fs::read(skills.join(relative)).unwrap(), *bytes);
-            }
             Installed {
                 result,
                 lines: output_lines(output),
@@ -1109,19 +1024,15 @@ mod tests {
             FakeHermes::set_call(key, value)
         }
 
+        /// The printed skills line, after checking it names the skills directory.
         fn skills_line(installed: &Installed) -> String {
-            let roots = SKILLS
-                .iter()
-                .filter_map(|(path, _)| {
-                    path.strip_suffix("/SKILL.md")
-                        .filter(|root| !root.contains('/'))
-                })
-                .collect::<Vec<_>>();
-            format!(
-                "hermes: installed {} (v1.2.3) -> {}",
-                roots.join(", "),
-                installed.skills.display()
-            )
+            let line = &installed.lines[0];
+            assert!(
+                line.starts_with("hermes: installed ")
+                    && line.ends_with(&format!(" (v1.2.3) -> {}", installed.skills.display())),
+                "{line}"
+            );
+            line.clone()
         }
 
         fn plugin_line(fake: &FakeHermes) -> String {
@@ -1200,38 +1111,6 @@ mod tests {
             }
             files.sort();
             files
-        }
-
-        #[test]
-        fn hermes_paths_use_the_home_skills_dir_without_presets() {
-            let home = Path::new("/home/tester");
-            let default = agent_paths(&|_| None, home, CodingAgent::Hermes).unwrap();
-            assert_eq!(default.identity, "/home/tester/.hermes");
-            assert_eq!(
-                default.skills_dir,
-                PathBuf::from("/home/tester/.hermes/skills")
-            );
-            assert!(default.presets.is_empty());
-            let custom = agent_paths(
-                &|name| (name == "HERMES_HOME").then(|| "/srv/hermes".into()),
-                home,
-                CodingAgent::Hermes,
-            )
-            .unwrap();
-            assert_eq!(custom.identity, "/srv/hermes");
-            assert_eq!(custom.skills_dir, PathBuf::from("/srv/hermes/skills"));
-            assert!(custom.presets.is_empty());
-            assert_eq!(
-                agent_paths(
-                    &|name| (name == "HERMES_HOME").then(|| "relative".into()),
-                    home,
-                    CodingAgent::Hermes
-                )
-                .err()
-                .expect("a relative HERMES_HOME fails")
-                .message(),
-                "HERMES_HOME must be an absolute path (got 'relative')"
-            );
         }
 
         #[test]

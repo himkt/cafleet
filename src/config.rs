@@ -20,12 +20,12 @@ impl Settings {
 }
 
 pub(crate) fn default_database_url() -> Result<String, CafleetError> {
-    let home = home_dir().map_err(|_| {
+    let home = process_env("HOME")?.ok_or_else(|| {
         CafleetError::App("HOME is not set; cannot derive the default database path".into())
     })?;
     Ok(format!(
         "sqlite:///{}/.local/share/cafleet/cafleet_{}.db",
-        home.display(),
+        home,
         crate::cli::VERSION
     ))
 }
@@ -37,7 +37,17 @@ impl Settings {
     }
 }
 
-pub(crate) type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
+pub(crate) type EnvLookup<'a> = &'a dyn Fn(&str) -> Result<Option<String>, CafleetError>;
+
+pub(crate) fn process_env(name: &str) -> Result<Option<String>, CafleetError> {
+    match std::env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(CafleetError::App(format!("{name} is not valid UTF-8")))
+        }
+    }
+}
 
 /// opencode discovers skills only at fixed paths, so the skills base ignores
 /// every variable.
@@ -46,9 +56,9 @@ pub(crate) fn opencode_skills_base(home: &Path) -> PathBuf {
 }
 
 pub(crate) fn home_dir() -> Result<PathBuf, CafleetError> {
-    std::env::var("HOME")
+    process_env("HOME")?
         .map(PathBuf::from)
-        .map_err(|_| CafleetError::App("HOME is not set".into()))
+        .ok_or_else(|| CafleetError::App("HOME is not set".into()))
 }
 
 pub(crate) fn require_absolute(var: &str, value: &str) -> Result<(), CafleetError> {
@@ -66,7 +76,7 @@ pub(crate) fn resolve(
     env: EnvLookup,
     default: PathBuf,
 ) -> Result<PathBuf, CafleetError> {
-    match env(var) {
+    match env(var)? {
         None => Ok(default),
         Some(value) => {
             require_absolute(var, &value)?;
@@ -113,5 +123,18 @@ mod tests {
             opencode_skills_base(Path::new("/home/tester")),
             PathBuf::from("/home/tester/.config/opencode")
         );
+    }
+
+    #[test]
+    fn require_absolute_rejects_non_absolute_values() {
+        require_absolute("HERMES_HOME", "/srv/hermes").unwrap();
+        for value in ["relative", "", "./hermes", "~/hermes"] {
+            assert_eq!(
+                require_absolute("HERMES_HOME", value)
+                    .unwrap_err()
+                    .message(),
+                format!("HERMES_HOME must be an absolute path (got '{value}')")
+            );
+        }
     }
 }

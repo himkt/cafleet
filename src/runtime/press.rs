@@ -4,7 +4,7 @@ use crate::broker::MemberRecord;
 use crate::config::Settings;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
-use crate::multiplexer::AnyMultiplexer;
+use crate::multiplexer::Multiplexer;
 use crate::multiplexer::PressKeys;
 use crate::time::Deadline;
 use rusqlite::Connection;
@@ -52,7 +52,7 @@ pub(crate) fn press_member(
         crate::runtime::mux_for_fleet(conn, member.fleet_id, Some(deadline))
     })
     .map_err(|cause| effect_error(member_id, cause, false))?;
-    press_member_with_mux(conn, settings, member_id, keys, deadline, &mux)
+    press_member_with_mux(conn, settings, member_id, keys, deadline, &*mux)
 }
 
 pub(crate) fn press_member_with_mux(
@@ -61,7 +61,7 @@ pub(crate) fn press_member_with_mux(
     member_id: i64,
     keys: &PressKeys,
     deadline: Deadline,
-    mux: &AnyMultiplexer,
+    mux: &dyn Multiplexer,
 ) -> Result<KeyAcknowledgment, CafleetError> {
     let mut started = false;
     let result = (|| {
@@ -133,8 +133,8 @@ mod tests {
     use crate::broker::Placement;
     use crate::config::Settings;
     use crate::error::CafleetError;
-    use crate::multiplexer::AnyMultiplexer;
     use crate::multiplexer::CommandRunner;
+    use crate::multiplexer::Multiplexer;
     use crate::multiplexer::PressKeys;
     use crate::multiplexer::RunError;
     use crate::multiplexer::TimedRunError;
@@ -269,7 +269,7 @@ mod tests {
         fixture: &Fixture,
         mode: Mode,
         until: Instant,
-    ) -> (Settings, Rc<Probe>, AnyMultiplexer) {
+    ) -> (Settings, Rc<Probe>, Box<dyn Multiplexer>) {
         let settings = settings(fixture);
         let member =
             crate::broker::get_member(&fixture.conn, fixture.run.member_id, fixture.run.fleet_id)
@@ -284,7 +284,8 @@ mod tests {
             mode,
             calls: RefCell::default(),
         });
-        let mux = AnyMultiplexer::for_server("tmux", SERVER, probe.clone()).unwrap();
+        let mux =
+            crate::multiplexer::multiplexer_for_server("tmux", SERVER, probe.clone()).unwrap();
         (settings, probe, mux)
     }
 
@@ -378,7 +379,7 @@ mod tests {
             fixture.run.member_id,
             &keys(),
             Deadline::until(until),
-            &mux,
+            &*mux,
         )
         .unwrap();
         assert_eq!(value.member_id, fixture.run.member_id);
@@ -413,7 +414,7 @@ mod tests {
             fixture.run.director_member_id,
             &keys(),
             Deadline::until(until),
-            &mux,
+            &*mux,
         ));
         assert_eq!(
             primary(&director).message(),
@@ -435,7 +436,7 @@ mod tests {
             fixture.run.member_id,
             &keys(),
             Deadline::until(until),
-            &mux,
+            &*mux,
         ));
         assert_eq!(
             primary(&mismatch).message(),
@@ -461,7 +462,7 @@ mod tests {
             fixture.run.member_id,
             &keys(),
             Deadline::until(busy_until),
-            &mux,
+            &*mux,
         ));
         assert_eq!(
             primary(&busy).message(),
@@ -492,7 +493,7 @@ mod tests {
                 fixture.run.member_id,
                 &keys(),
                 Deadline::until(until),
-                &mux,
+                &*mux,
             ));
             assert_eq!(probe.calls.borrow().len(), 1);
             assert_eq!(probe.writes(), 0);
@@ -530,7 +531,7 @@ mod tests {
                 fixture.run.member_id,
                 &keys(),
                 Deadline::until(until),
-                &mux,
+                &*mux,
             ));
             assert_eq!(probe.calls.borrow().len(), 2);
             assert_eq!(probe.writes(), 1);

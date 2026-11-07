@@ -256,6 +256,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn member_press_json_is_the_canonical_acknowledgment_without_effect_counts() {
+        let keys = crate::multiplexer::PressKeys::parse(&["cTrL+A".into(), ";".into()]).unwrap();
+        let value = crate::runtime::KeyAcknowledgment {
+            member_id: 42,
+            pane_id: "%5".into(),
+            keys: keys.canonical(),
+        };
+        assert_eq!(
+            serde_json::to_string(&crate::output::json::member_press(&value)).unwrap(),
+            "{\"member_id\":42,\"pane_id\":\"%5\",\"keys\":[\"Ctrl+a\",\";\"],\"status\":\"acknowledged\"}",
+        );
+    }
+
     mod delivery_outcomes {
         use crate::broker::MessageRecord;
         use crate::broker::runtime::DeliveryMethod;
@@ -389,32 +403,50 @@ mod tests {
         use rusqlite::params;
         use serde_json::Value;
 
+        const RUNTIME_KEYS: [&str; 17] = [
+            "run_id",
+            "resolved_mode",
+            "status",
+            "reachability",
+            "owner_epoch",
+            "last_health_at",
+            "coverage",
+            "current_interaction_id",
+            "unresolved_input_ids",
+            "owner_kind",
+            "owner_pid",
+            "owner_start_identity",
+            "runner_pid",
+            "runner_start_identity",
+            "child_pid",
+            "child_start_identity",
+            "effective_policy",
+        ];
+        const INPUT_KEYS: [&str; 16] = [
+            "input_id",
+            "run_id",
+            "operation_key",
+            "kind",
+            "payload_digest",
+            "state",
+            "created_at",
+            "updated_at",
+            "message_id",
+            "disposition",
+            "evidence_ref",
+            "permission_response",
+            "delivery",
+            "deferred_at",
+            "defer_reason",
+            "uncertain_cause",
+        ];
+
         #[test]
         fn runtime_permission_presentation_flattens_the_audit_in_shipping_order() {
             let mut fixture = ResponseFixture::new();
             let receipt = fixture.reserve();
             let output = crate::output::json::input_operation(&receipt.input);
-            assert_key_order(
-                &output["input"],
-                &[
-                    "input_id",
-                    "run_id",
-                    "operation_key",
-                    "kind",
-                    "payload_digest",
-                    "state",
-                    "created_at",
-                    "updated_at",
-                    "message_id",
-                    "disposition",
-                    "evidence_ref",
-                    "permission_response",
-                    "delivery",
-                    "deferred_at",
-                    "defer_reason",
-                    "uncertain_cause",
-                ],
-            );
+            assert_key_order(&output["input"], &INPUT_KEYS);
             let audit = &output["input"]["permission_response"];
             assert_key_order(
                 audit,
@@ -518,28 +550,7 @@ mod tests {
                 ],
             );
             let runtime = &output["runtime"];
-            assert_key_order(
-                runtime,
-                &[
-                    "run_id",
-                    "resolved_mode",
-                    "status",
-                    "reachability",
-                    "owner_epoch",
-                    "last_health_at",
-                    "coverage",
-                    "current_interaction_id",
-                    "unresolved_input_ids",
-                    "owner_kind",
-                    "owner_pid",
-                    "owner_start_identity",
-                    "runner_pid",
-                    "runner_start_identity",
-                    "child_pid",
-                    "child_start_identity",
-                    "effective_policy",
-                ],
-            );
+            assert_key_order(runtime, &RUNTIME_KEYS);
             assert_eq!(runtime["run_id"], owner.run_id);
             assert_eq!(runtime["effective_policy"], Value::Null);
             assert_eq!(
@@ -570,32 +581,6 @@ mod tests {
                     fixture.member, owner.run_id
                 )
             );
-        }
-
-        #[test]
-        fn runtime_presentation_renders_a_profiled_run_on_member_and_event_surfaces() {
-            const RUNTIME_KEYS: [&str; 17] = [
-                "run_id",
-                "resolved_mode",
-                "status",
-                "reachability",
-                "owner_epoch",
-                "last_health_at",
-                "coverage",
-                "current_interaction_id",
-                "unresolved_input_ids",
-                "owner_kind",
-                "owner_pid",
-                "owner_start_identity",
-                "runner_pid",
-                "runner_start_identity",
-                "child_pid",
-                "child_start_identity",
-                "effective_policy",
-            ];
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            let event = fixture.open(&owner);
             fixture
                 .conn
                 .execute(
@@ -630,6 +615,7 @@ mod tests {
                 line
             );
         }
+
         #[test]
         fn effective_policy_record_is_rendered_last_in_every_runtime_snapshot_surface() {
             let mut fixture = Fixture::new();
@@ -653,10 +639,7 @@ mod tests {
                         .unwrap()
                         .unwrap();
                 let runtime = &crate::output::json::member(&member)["runtime"];
-                assert_eq!(
-                    runtime.as_object().unwrap().keys().next_back().unwrap(),
-                    "effective_policy"
-                );
+                assert_key_order(runtime, &RUNTIME_KEYS);
                 assert_eq!(runtime["effective_policy"], record);
                 let line = format!(
                     "Runtime: run={} mode=never status=running coverage=unknown review={review}",
@@ -669,15 +652,7 @@ mod tests {
                 let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
                 let shown = crate::output::json::runtime_event(&view);
                 assert_eq!(shown["run"]["effective_policy"], record);
-                assert_eq!(
-                    shown["run"]
-                        .as_object()
-                        .unwrap()
-                        .keys()
-                        .next_back()
-                        .unwrap(),
-                    "effective_policy"
-                );
+                assert_key_order(&shown["run"], &RUNTIME_KEYS);
                 assert_eq!(
                     crate::output::format_runtime_event(&view)
                         .lines()
@@ -737,27 +712,7 @@ mod tests {
             );
             let input = fixture.input(&owner, "exec:lost-output", InputKind::Exec, None);
             let output = crate::output::json::input_operation(&input);
-            assert_key_order(
-                &output["input"],
-                &[
-                    "input_id",
-                    "run_id",
-                    "operation_key",
-                    "kind",
-                    "payload_digest",
-                    "state",
-                    "created_at",
-                    "updated_at",
-                    "message_id",
-                    "disposition",
-                    "evidence_ref",
-                    "permission_response",
-                    "delivery",
-                    "deferred_at",
-                    "defer_reason",
-                    "uncertain_cause",
-                ],
-            );
+            assert_key_order(&output["input"], &INPUT_KEYS);
             assert_eq!(output["input"]["permission_response"], Value::Null);
             assert_eq!(
                 crate::output::format_input_operation(&input),
@@ -765,98 +720,6 @@ mod tests {
                     "Input: {} run={} kind=exec state=in_progress disposition=- message=-",
                     input.input_id, owner.run_id
                 )
-            );
-        }
-
-        #[test]
-        fn input_presentation_projects_delivery_from_the_stored_receipt_state() {
-            const NOW: &str = "2026-10-30T10:00:00.000000+00:00";
-            let mut fixture = Fixture::new();
-            let owner = fixture.activate();
-            for (index, (assignment, delivery, deferred)) in [
-                (
-                    format!("state='ready',deferred_at='{NOW}',defer_reason='interaction_open'"),
-                    json!({"status":"queued","method":null,"reason":"interaction_open"}),
-                    true,
-                ),
-                (
-                    "state='ready'".to_owned(),
-                    json!({"status":"held","method":null,"reason":"zero_bytes_ready"}),
-                    false,
-                ),
-                (
-                    "delivery_method='fallback',delivery_reason='submission_plan_unavailable'".to_owned(),
-                    json!({"status":"uncertain","method":"fallback","reason":"submission_plan_unavailable"}),
-                    false,
-                ),
-                (
-                    "state='accepted',delivery_method='profile'".to_owned(),
-                    json!({"status":"submitted","method":"profile","reason":null}),
-                    false,
-                ),
-                (
-                    "state='settled',disposition='submitted',delivery_method='fallback',delivery_reason='submission_plan_unavailable'".to_owned(),
-                    json!({"status":"submitted","method":"fallback","reason":"submission_plan_unavailable"}),
-                    false,
-                ),
-                (
-                    "state='settled',disposition='not_submitted',delivery_reason='runner_stopped'".to_owned(),
-                    json!({"status":"not_submitted","method":null,"reason":"runner_stopped"}),
-                    false,
-                ),
-                (
-                    "state='settled',disposition='not_submitted',delivery_method='profile'".to_owned(),
-                    json!({"status":"not_submitted","method":"profile","reason":null}),
-                    false,
-                ),
-                (
-                    "state='settled',disposition='abandoned_uncertain',delivery_method='profile'".to_owned(),
-                    json!({"status":"uncertain","method":"profile","reason":null}),
-                    false,
-                ),
-                (
-                    "state='accepted'".to_owned(),
-                    json!({"status":"submitted","method":null,"reason":"method_unrecorded"}),
-                    false,
-                ),
-                (
-                    "state='uncertain'".to_owned(),
-                    json!({"status":"uncertain","method":null,"reason":"method_unrecorded"}),
-                    false,
-                ),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let input = fixture.input(&owner, &format!("prompt:{index}"), InputKind::Prompt, None);
-                fixture
-                    .conn
-                    .execute(
-                        &format!("UPDATE member_input_operations SET {assignment} WHERE input_id=?1"),
-                        [input.input_id],
-                    )
-                    .unwrap_or_else(|error| panic!("{assignment}: {error}"));
-                let stored = storage::get_input(&fixture.conn, input.input_id)
-                    .unwrap_or_else(|error| panic!("{assignment}: {}", error.message()));
-                let output = &crate::output::json::input_operation(&stored)["input"];
-                assert_eq!(output["delivery"], delivery, "{assignment}");
-                assert_key_order(&output["delivery"], &["status", "method", "reason"]);
-                assert_eq!(output["deferred_at"].is_null(), !deferred, "{assignment}");
-                assert_eq!(output["defer_reason"].is_null(), !deferred, "{assignment}");
-            }
-            let queued_with_method = fixture.input(&owner, "exec:invalid", InputKind::Exec, None);
-            fixture
-                .conn
-                .execute(
-                    &format!(
-                        "UPDATE member_input_operations SET state='ready',deferred_at='{NOW}',defer_reason='interaction_open',delivery_method='profile' WHERE input_id=?1"
-                    ),
-                    [queued_with_method.input_id],
-                )
-                .unwrap();
-            assert!(
-                storage::get_input(&fixture.conn, queued_with_method.input_id).is_err(),
-                "a queued receipt with a selected method fails validation"
             );
         }
 
@@ -881,7 +744,7 @@ mod tests {
                     caused.input_id, owner.run_id
                 )
             );
-            let settled = storage::settle_input(
+            let settled = crate::broker::runtime::test_support::settle_input(
                 &mut fixture.conn,
                 &owner,
                 caused.input_id,
@@ -939,64 +802,16 @@ mod tests {
             assert_eq!(request["native_version"], "2.1.4");
             assert_eq!(request["answer_rule_id"], "opencode-shell-allow-enter");
             assert_eq!(request["answer_capability"], "tested");
-        }
-    }
-
-    mod runner_registry {
-        use crate::broker::runtime as storage;
-        use crate::broker::runtime::RunStatus;
-        use crate::runtime::control::test_support::SilentServer;
-        use crate::runtime::control::test_support::activate;
-        use crate::runtime::test_support::Fixture;
-        use rusqlite::Connection;
-        use std::time::Duration;
-        use std::time::Instant;
-
-        fn counts(conn: &Connection) -> (i64, i64, i64) {
-            let scalar = |table| {
-                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap()
-            };
-            (
-                scalar("member_interactions"),
-                scalar("member_runtime_events"),
-                scalar("messages"),
-            )
-        }
-        #[test]
-        fn runner_registry_show_returns_historical_health_without_contacting_a_live_endpoint() {
-            let mut fixture = Fixture::new();
-            let (artifacts, _held) = activate(&mut fixture);
-            let _server = SilentServer::start(&artifacts.paths.control_socket);
-            fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1",
-                    [fixture.run.run_id],
-                )
-                .unwrap();
-            let before = counts(&fixture.conn);
-            let start = Instant::now();
-            let member = crate::broker::get_member(
-                &fixture.conn,
-                fixture.run.member_id,
-                fixture.run.fleet_id,
-            )
-            .unwrap()
-            .unwrap();
-            assert!(start.elapsed() < Duration::from_millis(750));
-            assert_eq!(
-                crate::output::json::member(&member)["runtime"]["last_health_at"],
-                "2000-01-01T00:00:00Z"
+            let question = crate::output::json::permission_inspection(
+                &crate::runtime::control::test_support::question_inspection(),
             );
-            assert_eq!(counts(&fixture.conn), before);
+            assert_eq!(question["request"]["supported_decisions"], json!([]));
             assert_eq!(
-                storage::get_run(&fixture.conn, fixture.run.run_id)
-                    .unwrap()
-                    .status,
-                RunStatus::Running
+                question["request"]["supported_choices"],
+                json!([
+                    {"choice_id":"not-now","label":"Not now","scope":"persistent"},
+                    {"choice_id":"dont-show-again","label":"Don't show again","scope":"persistent"}
+                ])
             );
         }
     }

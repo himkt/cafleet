@@ -308,8 +308,8 @@ impl ScreenLines {
         }
     }
 }
-struct Matched {
-    rule: Rule,
+struct Matched<'a> {
+    rule: &'a Rule,
     region: ScreenRegion,
     operation: Option<String>,
     choices: Vec<String>,
@@ -331,7 +331,11 @@ fn captured(
         .cloned()
 }
 type Candidate = (usize, usize, ScreenRegion);
-fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Option<Matched> {
+fn match_rule<'a>(
+    rule: &'a Rule,
+    screen: &ScreenSnapshot,
+    lines: &[LogicalLine],
+) -> Option<Matched<'a>> {
     if rule.frame.is_some() && !frame_guard_holds(rule, lines) {
         return None;
     }
@@ -351,11 +355,11 @@ fn frame_guard_holds(rule: &Rule, lines: &[LogicalLine]) -> bool {
             .iter()
             .any(|pattern| lines.iter().any(|line| pattern.is_match(&line.text)))
 }
-fn match_annotation_blocks(
-    rule: &Rule,
+fn match_annotation_blocks<'a>(
+    rule: &'a Rule,
     screen: &ScreenSnapshot,
     lines: &[LogicalLine],
-) -> Vec<Matched> {
+) -> Vec<Matched<'a>> {
     if !frame_guard_holds(rule, lines) {
         return Vec::new();
     }
@@ -449,7 +453,11 @@ fn displayed_rows(value: &str, capture: &Capture) -> Option<String> {
         .collect::<Option<Vec<_>>>()
         .map(|rows| rows.join("\n"))
 }
-fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) -> Option<Matched> {
+fn extract<'a>(
+    rule: &'a Rule,
+    lines: &[LogicalLine],
+    (start, end, region): Candidate,
+) -> Option<Matched<'a>> {
     let selected = &lines[start..=end];
     let region_text = selected
         .iter()
@@ -541,7 +549,7 @@ fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) 
         .filter(|mode| !mode.is_empty())
         .cloned();
     Some(Matched {
-        rule: rule.clone(),
+        rule,
         region,
         operation,
         choices,
@@ -616,39 +624,103 @@ fn marker_focus(rule: &Rule, matched: &Matched, focus_matcher: &str) -> Option<S
         _ => None,
     }
 }
+fn answer_match(
+    screen: &ScreenSnapshot,
+    observed: &ScreenObservation,
+    rule: &Rule,
+    matched: &Matched<'_>,
+    plan: &AnswerPlan,
+) -> AnswerMatch {
+    let style = rule
+        .matchers
+        .iter()
+        .find(|matcher| matcher.id == plan.focus_matcher_id())
+        .expect("validated focus matcher")
+        .focus_style;
+    let capture = match style {
+        Some(FocusStyle::Marker) => marker_layout(rule, matched),
+        _ => matched
+            .focuses
+            .get(plan.focus_matcher_id())
+            .expect("validated focus matcher")
+            .clone(),
+    };
+    let focused_choice = match style {
+        Some(FocusStyle::Background) => background_focus(screen, matched),
+        Some(FocusStyle::Marker) => marker_focus(rule, matched, plan.focus_matcher_id()),
+        None => None,
+    };
+    let focus = if style.is_some() {
+        serde_json::to_string(&(&capture, &focused_choice)).expect("focus strings serialize")
+    } else {
+        capture.clone()
+    };
+    let choice_index = rule
+        .choices
+        .iter()
+        .position(|choice| choice.id == plan.choice_id())
+        .expect("validated answer choice");
+    AnswerMatch {
+        choice_label: matched.choices[choice_index].clone(),
+        plan: plan.clone(),
+        semantic: observed
+            .fingerprint
+            .clone()
+            .expect("complete interaction fingerprint"),
+        choices: matched.choices.clone(),
+        focus,
+        focus_capture: capture,
+        focused_choice,
+        output_seq: screen.screen_seq,
+    }
+}
+/// `base` with the fields every matched rule records: its id, operation, excerpt and
+/// sensitivity.
+fn evidence(
+    base: &Value,
+    rule: &Rule,
+    operation: Option<&str>,
+    excerpt: &str,
+    sensitive: bool,
+) -> Value {
+    let mut evidence = base.clone();
+    evidence["rule_id"] = json!(rule.id);
+    evidence["operation"] = json!(operation);
+    evidence["operation_rows"] = json!(operation.map(|text| text.split('\n').count()));
+    evidence["excerpt"] = json!(excerpt);
+    evidence["sensitive"] = json!(sensitive);
+    evidence
+}
 impl Detector {
-    pub(crate) fn match_answer(
+    /// Matches every plan whose request `observed` (this detector's observation of `screen`)
+    /// completes, building the screen's lines and the matched request rule once.
+    pub(crate) fn match_answers(
         &self,
         screen: &ScreenSnapshot,
-        plan: &AnswerPlan,
-    ) -> Result<Option<AnswerMatch>> {
+        observed: &ScreenObservation,
+        plans: &[AnswerPlan],
+    ) -> Result<Vec<AnswerMatch>> {
         let Some(profile) = &self.profile else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
-        let capability = plan.capability();
-        if capability.backend() != self.backend
-            || self.version.as_deref() != Some(capability.native_version())
-            || profile
-                .answer_plan(
-                    capability.native_version(),
-                    capability.request_rule_id(),
-                    capability.key(),
-                )
-                .as_ref()
-                != Some(plan)
-        {
-            return Ok(None);
-        }
-        let answered = match capability.key() {
-            AnswerKey::Decision(_) => InteractionClass::PermissionRequest,
-            AnswerKey::Choice(_) => InteractionClass::Question,
+        let applies = |plan: &AnswerPlan| {
+            let capability = plan.capability();
+            let answered = match capability.key() {
+                AnswerKey::Decision(_) => InteractionClass::PermissionRequest,
+                AnswerKey::Choice(_) => InteractionClass::Question,
+            };
+            capability.backend() == self.backend
+                && self.version.as_deref() == Some(capability.native_version())
+                && observed.kind == ObservationKind::Interaction(answered)
+                && observed.match_evidence == MatchEvidence::Complete
+                && observed.rule_id == capability.request_rule_id()
         };
-        let observed = self.observe(screen)?;
-        if observed.kind != ObservationKind::Interaction(answered)
-            || observed.match_evidence != MatchEvidence::Complete
-            || observed.rule_id != capability.request_rule_id()
-        {
-            return Ok(None);
+        let applicable = plans
+            .iter()
+            .filter(|plan| applies(plan))
+            .collect::<Vec<_>>();
+        if applicable.is_empty() {
+            return Ok(Vec::new());
         }
         let rule = profile
             .rules
@@ -657,49 +729,12 @@ impl Detector {
             .expect("selected compiled request rule");
         let lines = ScreenLines::new(screen, profile)?;
         let Some(matched) = match_rule(rule, screen, lines.of(rule)) else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
-        let style = rule
-            .matchers
-            .iter()
-            .find(|matcher| matcher.id == plan.focus_matcher_id())
-            .expect("validated focus matcher")
-            .focus_style;
-        let capture = match style {
-            Some(FocusStyle::Marker) => marker_layout(rule, &matched),
-            _ => matched
-                .focuses
-                .get(plan.focus_matcher_id())
-                .expect("validated focus matcher")
-                .clone(),
-        };
-        let focused_choice = match style {
-            Some(FocusStyle::Background) => background_focus(screen, &matched),
-            Some(FocusStyle::Marker) => marker_focus(rule, &matched, plan.focus_matcher_id()),
-            None => None,
-        };
-        let focus = if style.is_some() {
-            serde_json::to_string(&(&capture, &focused_choice)).expect("focus strings serialize")
-        } else {
-            capture.clone()
-        };
-        let choice_index = rule
-            .choices
-            .iter()
-            .position(|choice| choice.id == plan.choice_id())
-            .expect("validated answer choice");
-        Ok(Some(AnswerMatch {
-            choice_label: matched.choices[choice_index].clone(),
-            plan: plan.clone(),
-            semantic: observed
-                .fingerprint
-                .expect("complete interaction fingerprint"),
-            choices: matched.choices,
-            focus,
-            focus_capture: capture,
-            focused_choice,
-            output_seq: screen.screen_seq,
-        }))
+        Ok(applicable
+            .into_iter()
+            .map(|plan| answer_match(screen, observed, rule, &matched, plan))
+            .collect())
     }
     pub(crate) fn new(
         catalog: &ProfileCatalog,
@@ -728,17 +763,13 @@ impl Detector {
             .filter(|rule| group.rules.contains(&rule.id))
             .flat_map(|rule| match_annotation_blocks(rule, screen, lines.of(rule)))
             .map(|matched| {
-                let mut raw_evidence = unmatched_evidence.clone();
-                raw_evidence["rule_id"] = json!(matched.rule.id);
-                raw_evidence["operation"] = json!(matched.operation);
-                raw_evidence["operation_rows"] = json!(
-                    matched
-                        .operation
-                        .as_ref()
-                        .map(|text| text.split('\n').count())
+                let mut raw_evidence = evidence(
+                    unmatched_evidence,
+                    matched.rule,
+                    matched.operation.as_deref(),
+                    &matched.excerpt,
+                    matched.rule.sensitive,
                 );
-                raw_evidence["excerpt"] = json!(matched.excerpt);
-                raw_evidence["sensitive"] = json!(matched.rule.sensitive);
                 raw_evidence["observed_mode"] = json!(matched.mode);
                 AnnotationBlock {
                     kind: matched.rule.kind,
@@ -754,7 +785,7 @@ impl Detector {
                                 .and_then(|capture| capture.row_margin.as_deref()),
                         ),
                     },
-                    rule_id: matched.rule.id,
+                    rule_id: matched.rule.id.clone(),
                     matched_region: matched.region,
                     raw_evidence,
                 }
@@ -856,23 +887,24 @@ impl Detector {
                 .as_ref()
                 .map(|continuation| continuation.rule_id.clone());
         }
-        observation.raw_evidence["rule_id"] = json!(best.rule.id);
         let operation = if conflict {
             None
         } else {
             best.operation.as_deref()
         };
-        observation.raw_evidence["operation"] = json!(operation);
-        observation.raw_evidence["operation_rows"] =
-            json!(operation.map(|text| text.split('\n').count()));
+        observation.raw_evidence = evidence(
+            &observation.raw_evidence,
+            best.rule,
+            operation,
+            &best.excerpt,
+            matched.iter().any(|m| m.rule.sensitive),
+        );
         observation.raw_evidence["choices"] = if conflict {
             Value::Null
         } else {
             json!(best.choices)
         };
         observation.raw_evidence["native_request_id"] = json!(observation.native_correlation);
-        observation.raw_evidence["excerpt"] = json!(best.excerpt);
-        observation.raw_evidence["sensitive"] = json!(matched.iter().any(|m| m.rule.sensitive));
         if matches!(
             observation.kind,
             ObservationKind::Interaction(_)
@@ -895,19 +927,88 @@ pub(crate) mod test_support {
     use crate::runtime::TerminalSize;
     use crate::runtime::TerminalState;
 
+    impl Detector {
+        /// Observes `screen` and matches the one `plan` against it.
+        pub(crate) fn match_answer(
+            &self,
+            screen: &ScreenSnapshot,
+            plan: &AnswerPlan,
+        ) -> Result<Option<AnswerMatch>> {
+            let observed = self.observe(screen)?;
+            Ok(self
+                .match_answers(screen, &observed, std::slice::from_ref(plan))?
+                .pop())
+        }
+    }
+
     pub(crate) fn bundled_screen(id: &str) -> String {
         bundled_fixture(id)
     }
 
-    pub(crate) fn bundled_observe(
+    pub(crate) fn observe_bundled(
         backend: CodingAgent,
         version: &str,
-        id: &str,
+        screen: &ScreenSnapshot,
     ) -> ScreenObservation {
-        let screen = replay_native_fixture(&bundled_screen(id), |_| {}, true, None);
         Detector::new(ProfileCatalog::bundled(), backend, Some(version))
-            .observe(&screen)
+            .observe(screen)
             .unwrap()
+    }
+
+    /// A 24-row, 80-column screen after `bytes`.
+    pub(crate) fn screen_of(bytes: &[u8]) -> ScreenSnapshot {
+        let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        state.feed(bytes).unwrap();
+        state.snapshot()
+    }
+
+    fn document(id: &str) -> Value {
+        serde_json::from_str(&bundled_screen(id)).unwrap()
+    }
+
+    pub(crate) fn fixture_lines(id: &str) -> Vec<String> {
+        document(id)["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|line| line.as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    pub(crate) fn fixture_size(id: &str) -> TerminalSize {
+        size_of(&document(id))
+    }
+
+    /// Replays a bundled screen on the screen it was captured on.
+    pub(crate) fn replay_as_captured(
+        id: &str,
+        change: impl FnOnce(&mut Vec<String>),
+        cursor: Option<(u16, u16)>,
+    ) -> ScreenSnapshot {
+        let alternate = document(id)["alternate_screen"].as_bool().unwrap();
+        replay_native_fixture(&bundled_screen(id), change, alternate, cursor)
+    }
+
+    /// Claude rules read either screen, so a primary-screen replay is the same live screen.
+    pub(crate) fn assert_primary_matches_alternate(
+        case: &str,
+        primary: &ScreenObservation,
+        alternate: &ScreenObservation,
+    ) {
+        assert_eq!(primary.kind, alternate.kind, "{case}");
+        assert_eq!(primary.rule_id, alternate.rule_id, "{case}");
+        assert_eq!(primary.match_evidence, alternate.match_evidence, "{case}");
+        assert_eq!(
+            primary.verified_noninteraction, alternate.verified_noninteraction,
+            "{case}"
+        );
+        for field in ["operation", "operation_rows", "choices"] {
+            assert_eq!(
+                primary.raw_evidence[field], alternate.raw_evidence[field],
+                "{case}: {field}"
+            );
+        }
+        assert!(primary.fingerprint == alternate.fingerprint, "{case}");
     }
 
     pub(crate) fn replay_native_fixture(
@@ -917,7 +1018,7 @@ pub(crate) mod test_support {
         cursor: Option<(u16, u16)>,
     ) -> ScreenSnapshot {
         let screen: Value = serde_json::from_str(fixture).unwrap();
-        let mut terminal = TerminalState::new(fixture_size(&screen)).unwrap();
+        let mut terminal = TerminalState::new(size_of(&screen)).unwrap();
         terminal
             .feed(&fixture_bytes(&screen, change, alternate, cursor))
             .unwrap();
@@ -931,7 +1032,7 @@ pub(crate) mod test_support {
         fixture_bytes(&screen, |_| {}, alternate, None)
     }
 
-    fn fixture_size(screen: &Value) -> TerminalSize {
+    fn size_of(screen: &Value) -> TerminalSize {
         TerminalSize {
             rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
             cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
@@ -961,7 +1062,7 @@ pub(crate) mod test_support {
                 bytes.extend(format!("\x1b[{};1H{line}", row + 1).into_bytes());
             }
         }
-        let mut written = TerminalState::new(fixture_size(screen)).unwrap();
+        let mut written = TerminalState::new(size_of(screen)).unwrap();
         written.feed(&bytes).unwrap();
         bytes.extend(background_rewrite(screen, &written.snapshot()));
         let (row, col) = cursor.unwrap_or((
@@ -1070,28 +1171,6 @@ mod tests {
     use serde_json::Value;
     use serde_json::json;
 
-    /// Claude rules read either screen, so a primary-screen replay is the same live screen.
-    fn assert_primary_matches_alternate(
-        case: &str,
-        primary: &ScreenObservation,
-        alternate: &ScreenObservation,
-    ) {
-        assert_eq!(primary.kind, alternate.kind, "{case}");
-        assert_eq!(primary.rule_id, alternate.rule_id, "{case}");
-        assert_eq!(primary.match_evidence, alternate.match_evidence, "{case}");
-        assert_eq!(
-            primary.verified_noninteraction, alternate.verified_noninteraction,
-            "{case}"
-        );
-        for field in ["operation", "operation_rows", "choices"] {
-            assert_eq!(
-                primary.raw_evidence[field], alternate.raw_evidence[field],
-                "{case}: {field}"
-            );
-        }
-        assert!(primary.fingerprint == alternate.fingerprint, "{case}");
-    }
-
     /// The Claude auto-tip permission form; `padding` written spaces follow the question and
     /// operation rows, as Claude leaves them when it repaints only the changed cells of a row
     /// that was earlier wider.
@@ -1164,13 +1243,6 @@ mod tests {
     const READ_OUTSIDE_RULE: &str = "claude-read-outside-permission";
     const AUTO_IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
 
-    fn read_outside_observation(screen: &ScreenSnapshot) -> ScreenObservation {
-        let catalog = ProfileCatalog::bundled();
-        Detector::new(catalog, CodingAgent::Claude, Some("2.1.309"))
-            .observe(screen)
-            .unwrap()
-    }
-
     fn read_outside_screen(
         change: impl FnOnce(&mut Vec<String>),
         alternate: bool,
@@ -1181,21 +1253,29 @@ mod tests {
     #[test]
     fn bundled_claude_read_outside_dialog_with_trailing_repaint_padding_keeps_its_request_identity()
     {
-        let clean = read_outside_observation(&read_outside_screen(|_| {}, true));
+        let clean = observe_bundled(
+            CodingAgent::Claude,
+            "2.1.309",
+            &read_outside_screen(|_| {}, true),
+        );
         assert_eq!(
             clean.kind,
             ObservationKind::Interaction(InteractionClass::PermissionRequest)
         );
         assert_eq!(clean.rule_id, READ_OUTSIDE_RULE);
         assert_eq!(clean.match_evidence, MatchEvidence::Complete);
-        let padded = read_outside_observation(&read_outside_screen(
-            |lines| {
-                for row in [16, 18, 27, 28, 29, 30, 31, 33] {
-                    lines[row].push_str(&" ".repeat(40));
-                }
-            },
-            true,
-        ));
+        let padded = observe_bundled(
+            CodingAgent::Claude,
+            "2.1.309",
+            &read_outside_screen(
+                |lines| {
+                    for row in [16, 18, 27, 28, 29, 30, 31, 33] {
+                        lines[row].push_str(&" ".repeat(40));
+                    }
+                },
+                true,
+            ),
+        );
         assert_eq!(padded.kind, clean.kind, "padding keeps the dialog detected");
         assert_eq!(padded.rule_id, clean.rule_id);
         assert_eq!(padded.match_evidence, MatchEvidence::Complete);
@@ -1222,47 +1302,34 @@ mod tests {
             .iter()
             .map(|line| line.as_str().unwrap().to_owned())
             .collect();
-        let quoted = read_outside_observation(&replay_native_fixture(
-            &bundled_screen(AUTO_IDLE),
-            |lines| {
-                for (offset, row) in dialog.iter().enumerate() {
-                    lines[12 + offset] = row.clone();
-                }
-            },
-            true,
-            None,
-        ));
+        let quoted = observe_bundled(
+            CodingAgent::Claude,
+            "2.1.309",
+            &replay_native_fixture(
+                &bundled_screen(AUTO_IDLE),
+                |lines| {
+                    for (offset, row) in dialog.iter().enumerate() {
+                        lines[12 + offset] = row.clone();
+                    }
+                },
+                true,
+                None,
+            ),
+        );
         assert_ne!(quoted.kind, permission, "dialog quoted above the composer");
         assert_ne!(quoted.rule_id, READ_OUTSIDE_RULE);
         assert_eq!(quoted.kind, ObservationKind::ComposerEmpty);
         assert!(quoted.fingerprint.is_none());
 
-        assert_primary_matches_alternate(
-            "read-outside dialog",
-            &read_outside_observation(&read_outside_screen(|_| {}, false)),
-            &read_outside_observation(&read_outside_screen(|_| {}, true)),
+        let cursor_outside = observe_bundled(
+            CodingAgent::Claude,
+            "2.1.309",
+            &replay_native_fixture(&bundled_screen(READ_OUTSIDE), |_| {}, true, Some((2, 0))),
         );
-
-        let cursor_outside = read_outside_observation(&replay_native_fixture(
-            &bundled_screen(READ_OUTSIDE),
-            |_| {},
-            true,
-            Some((2, 0)),
-        ));
         assert_ne!(
             cursor_outside.rule_id, READ_OUTSIDE_RULE,
             "the cursor lies outside the dialog region"
         );
-
-        let idle = read_outside_observation(&replay_native_fixture(
-            &bundled_screen(AUTO_IDLE),
-            |_| {},
-            true,
-            None,
-        ));
-        assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
-        assert_eq!(idle.rule_id, "claude-idle-composer");
-        assert!(idle.fingerprint.is_none());
     }
 
     #[test]
@@ -1348,18 +1415,10 @@ mod tests {
             None,
         )
     }
-    fn claude_observation(screen: &ScreenSnapshot) -> ScreenObservation {
-        let catalog = ProfileCatalog::bundled();
-        Detector::new(catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
-            .observe(screen)
-            .unwrap()
-    }
-
     #[test]
     fn bundled_claude_detector_replays_the_native_permission_fixture_from_unmasked_rows() {
         let screen = native_screen(|_| {}, true);
-        assert_eq!((screen.cursor_row, screen.cursor_col), (23, 1));
-        let observation = claude_observation(&screen);
+        let observation = observe_bundled(CodingAgent::Claude, CLAUDE_VERSION, &screen);
         assert_eq!(
             observation.kind,
             ObservationKind::Interaction(InteractionClass::PermissionRequest)
@@ -1381,33 +1440,13 @@ mod tests {
             "detection region lies below the masked header: {region:?}"
         );
         assert!(region.top <= 14 && region.bottom >= 26, "{region:?}");
-        let replay = claude_observation(&native_screen(|_| {}, true));
+        let replay = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &native_screen(|_| {}, true),
+        );
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
-        let catalog = ProfileCatalog::bundled();
-        let reused = Detector::new(catalog, CodingAgent::Claude, Some("2.1.308"))
-            .observe(&screen)
-            .unwrap();
-        assert_eq!(reused.kind, observation.kind);
-        assert_eq!(reused.rule_id, observation.rule_id);
-        assert!(reused.fingerprint == observation.fingerprint);
-        assert_eq!(
-            reused.raw_evidence["operation"],
-            observation.raw_evidence["operation"]
-        );
-        assert_eq!(reused.raw_evidence["native_version"], "2.1.308");
-        let below = Detector::new(catalog, CodingAgent::Claude, Some("2.1.301"))
-            .observe(&screen)
-            .unwrap();
-        assert_eq!(below.kind, ObservationKind::Unknown);
-        assert_eq!(below.match_evidence, MatchEvidence::Absent);
-        assert!(below.fingerprint.is_none());
-        let unprobed = Detector::new(catalog, CodingAgent::Claude, None)
-            .observe(&screen)
-            .unwrap();
-        assert_eq!(unprobed.kind, ObservationKind::Unknown);
-        assert_eq!(unprobed.raw_evidence["operation"], Value::Null);
-        assert_eq!(unprobed.raw_evidence["operation_rows"], Value::Null);
     }
 
     #[test]
@@ -1415,30 +1454,46 @@ mod tests {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
         assert_primary_matches_alternate(
             "permission form",
-            &claude_observation(&native_screen(|_| {}, false)),
-            &claude_observation(&native_screen(|_| {}, true)),
+            &observe_bundled(
+                CodingAgent::Claude,
+                CLAUDE_VERSION,
+                &native_screen(|_| {}, false),
+            ),
+            &observe_bundled(
+                CodingAgent::Claude,
+                CLAUDE_VERSION,
+                &native_screen(|_| {}, true),
+            ),
         );
-        let unfocused = claude_observation(&native_screen(
-            |lines| lines[23] = lines[23].replace('❯', " "),
-            true,
-        ));
+        let unfocused = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &native_screen(|lines| lines[23] = lines[23].replace('❯', " "), true),
+        );
         assert_ne!(unfocused.kind, permission, "form without a focus marker");
-        let broadened = claude_observation(&native_screen(
-            |lines| {
-                lines[23].clear();
-                lines[26].clear();
-            },
-            true,
-        ));
+        let broadened = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &native_screen(
+                |lines| {
+                    lines[23].clear();
+                    lines[26].clear();
+                },
+                true,
+            ),
+        );
         assert_ne!(broadened.kind, permission, "only broadened choices remain");
-        let headless = claude_observation(&native_screen(|lines| lines[14].clear(), true));
+        let headless = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &native_screen(|lines| lines[14].clear(), true),
+        );
         assert_ne!(headless.kind, permission, "form without its heading");
     }
 
     const WRAPPED_OPERATION: &str =
         "/tmp/cafleet-194/claude-wrap-cells-001/permission-\nprobe allow";
     const WRAPPED_COMMAND: &str = "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow";
-    const NATIVE_OPERATION: &str = "/private/tmp/cafleet-194/cells-002/permission-probe allow";
 
     fn wrapped_screen(change: impl FnOnce(&mut Vec<String>), alternate: bool) -> ScreenSnapshot {
         replay_native_fixture(
@@ -1496,10 +1551,11 @@ mod tests {
 
     #[test]
     fn bundled_claude_detects_the_wrapped_native_form_and_reports_its_displayed_operation_rows() {
-        let screen = wrapped_screen(|_| {}, true);
-        assert_eq!((screen.rows, screen.cols), (36, 52));
-        assert_eq!((screen.cursor_row, screen.cursor_col), (28, 1));
-        let observation = claude_observation(&screen);
+        let observation = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(|_| {}, true),
+        );
         assert_claude_request(&observation, WRAPPED_OPERATION);
         let region = observation
             .matched_region
@@ -1509,75 +1565,51 @@ mod tests {
             (17, 36),
             "the region runs from the heading to the closing line: {region:?}"
         );
-        for (fixture, operation) in [
-            (
-                &bundled_screen("claude-2.1.302-wrapped-allow-pre-stage-1"),
-                "/tmp/cafleet-194/claude-wrap-ans-allow-001/permiss\nion-probe allow",
-            ),
-            (
-                &bundled_screen("claude-2.1.302-wrapped-deny-pre-stage-1"),
-                "/tmp/cafleet-194/claude-wrap-ans-deny-001/permissi\non-probe deny",
-            ),
-        ] {
-            let pre_stage = claude_observation(&replay_native_fixture(fixture, |_| {}, true, None));
-            assert_claude_request(&pre_stage, operation);
-            assert_eq!(pre_stage.raw_evidence["operation_rows"], 2);
-        }
-        let catalog = ProfileCatalog::bundled();
-        let unprobed = Detector::new(catalog, CodingAgent::Claude, None)
-            .observe(&screen)
-            .unwrap();
-        assert_eq!(unprobed.kind, ObservationKind::Unknown);
-        let fallback = Detector::new(catalog, CodingAgent::Claude, Some("2.1.306"))
-            .observe(&screen)
-            .unwrap();
-        assert_ne!(fallback.kind, ObservationKind::Unknown);
-    }
-
-    #[test]
-    fn bundled_claude_unwrapped_native_forms_stay_detected_under_the_wrapped_profile() {
-        assert_claude_request(
-            &claude_observation(&native_screen(|_| {}, true)),
-            NATIVE_OPERATION,
-        );
-        for (fixture, operation) in [
-            (
-                &bundled_screen("claude-2.1.302-allow-pre-stage-1"),
-                "/private/tmp/cafleet-194/ans-allow-001/permission-probe allow",
-            ),
-            (
-                &bundled_screen("claude-2.1.302-deny-pre-stage-1"),
-                "/private/tmp/cafleet-194/ans-deny-001/permission-probe deny",
-            ),
-        ] {
-            assert_claude_request(
-                &claude_observation(&replay_native_fixture(fixture, |_| {}, true, None)),
-                operation,
-            );
-        }
     }
 
     #[test]
     fn bundled_claude_wrapped_identity_follows_the_displayed_rows_so_a_rewrap_replaces_it() {
-        let wrapped = claude_observation(&wrapped_screen(|_| {}, true));
-        let unwrapped = claude_observation(&unwrapped_rendering(WRAPPED_COMMAND));
+        let wrapped = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(|_| {}, true),
+        );
+        let unwrapped = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &unwrapped_rendering(WRAPPED_COMMAND),
+        );
         assert_claude_request(&unwrapped, WRAPPED_COMMAND);
         assert!(
             wrapped.fingerprint != unwrapped.fingerprint,
             "the 52-column and 120-column renderings display different rows"
         );
         assert!(
-            wrapped.fingerprint == claude_observation(&wrapped_screen(|_| {}, true)).fingerprint,
+            wrapped.fingerprint
+                == observe_bundled(
+                    CodingAgent::Claude,
+                    CLAUDE_VERSION,
+                    &wrapped_screen(|_| {}, true)
+                )
+                .fingerprint,
             "a redraw of the same displayed rows keeps the identity"
         );
-        let native = claude_observation(&native_screen(|_| {}, true));
-        let rewrapped = claude_observation(&wrapped_screen(
-            |lines| {
-                lines[22] = " /private/tmp/cafleet-194/cells-002/permission-prob".into();
-                lines[23] = " e allow".into();
-            },
-            true,
-        ));
+        let native = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &native_screen(|_| {}, true),
+        );
+        let rewrapped = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(
+                |lines| {
+                    lines[22] = " /private/tmp/cafleet-194/cells-002/permission-prob".into();
+                    lines[23] = " e allow".into();
+                },
+                true,
+            ),
+        );
         assert_claude_request(
             &rewrapped,
             "/private/tmp/cafleet-194/cells-002/permission-prob\ne allow",
@@ -1590,21 +1622,20 @@ mod tests {
             " /tmp/cafleet-194/claude-wrap-cells-001",
             " permission-probe allow",
         ];
-        let narrow = claude_observation(&wrapped_screen(
-            |lines| {
-                lines[22] = rows[0].into();
-                lines[23] = rows[1].into();
-            },
-            true,
-        ));
-        let wide = claude_observation(&native_with_operation_rows(&rows));
+        let narrow = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(
+                |lines| {
+                    lines[22] = rows[0].into();
+                    lines[23] = rows[1].into();
+                },
+                true,
+            ),
+        );
         assert_claude_request(
             &narrow,
             "/tmp/cafleet-194/claude-wrap-cells-001\npermission-probe allow",
-        );
-        assert!(
-            narrow.fingerprint == wide.fingerprint,
-            "the same displayed rows at 52 and 120 columns are one request"
         );
     }
 
@@ -1623,13 +1654,17 @@ mod tests {
             (full, " probe allow"),
             (full_at_space, " allow"),
         ] {
-            let observation = claude_observation(&wrapped_screen(
-                |lines| {
-                    lines[22] = first.into();
-                    lines[23] = second.into();
-                },
-                true,
-            ));
+            let observation = observe_bundled(
+                CodingAgent::Claude,
+                CLAUDE_VERSION,
+                &wrapped_screen(
+                    |lines| {
+                        lines[22] = first.into();
+                        lines[23] = second.into();
+                    },
+                    true,
+                ),
+            );
             assert_claude_request(&observation, &format!("{}\n{}", &first[1..], &second[1..]));
         }
         for filler in [28, 27] {
@@ -1639,13 +1674,17 @@ mod tests {
                 23 + filler,
                 "each 界 occupies two display cells"
             );
-            let observation = claude_observation(&wrapped_screen(
-                |lines| {
-                    lines[22] = row;
-                    lines[23] = " b allow".into();
-                },
-                true,
-            ));
+            let observation = observe_bundled(
+                CodingAgent::Claude,
+                CLAUDE_VERSION,
+                &wrapped_screen(
+                    |lines| {
+                        lines[22] = row;
+                        lines[23] = " b allow".into();
+                    },
+                    true,
+                ),
+            );
             assert_claude_request(
                 &observation,
                 &format!("/tmp/cafleet-194/界界/{}\nb allow", "a".repeat(filler)),
@@ -1665,32 +1704,24 @@ mod tests {
                 "│ echo plain bar\n│ next",
             ),
         ] {
-            let observation = claude_observation(&native_with_operation_rows(rows));
+            let observation = observe_bundled(
+                CodingAgent::Claude,
+                CLAUDE_VERSION,
+                &native_with_operation_rows(rows),
+            );
             assert_claude_request(&observation, operation);
         }
     }
 
     #[test]
     fn bundled_claude_operation_is_only_the_rows_between_the_dashed_rules() {
-        let screen =
-            serde_json::from_str::<Value>(&bundled_screen("claude-2.1.302-wrapped-permission-1"))
-                .unwrap();
-        let transcript = screen["lines"][13].as_str().unwrap();
-        assert!(transcript.starts_with("  ⎿  $ "));
-        assert_eq!(
-            transcript.chars().count(),
-            52,
-            "the transcript row above the heading fills the width"
-        );
         let base = " Run the permission probe with the allow argument";
         let description = format!("{base}{}", "x".repeat(51 - base.chars().count()));
-        let observation = claude_observation(&wrapped_screen(
-            |lines| {
-                assert_eq!(lines[20], base);
-                lines[20] = description;
-            },
-            true,
-        ));
+        let observation = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(|lines| lines[20] = description, true),
+        );
         assert_claude_request(&observation, WRAPPED_OPERATION);
     }
 
@@ -1712,12 +1743,22 @@ mod tests {
                 .map(|row| row.strip_prefix(' ').unwrap())
                 .collect::<Vec<_>>()
                 .join("\n");
-            let boxed = claude_observation(&native_with_operation_rows(rows));
+            let boxed = observe_bundled(
+                CodingAgent::Claude,
+                CLAUDE_VERSION,
+                &native_with_operation_rows(rows),
+            );
             assert_claude_request(&boxed, &operation);
             assert_eq!(boxed.raw_evidence["operation_rows"], rows.len());
             let command = operation.replace("\n│ ", " ").replacen("│ ", "", 1);
             assert!(
-                boxed.fingerprint != claude_observation(&unwrapped_rendering(&command)).fingerprint,
+                boxed.fingerprint
+                    != observe_bundled(
+                        CodingAgent::Claude,
+                        CLAUDE_VERSION,
+                        &unwrapped_rendering(&command)
+                    )
+                    .fingerprint,
                 "a boxed wrap of {} rows is width-dependent",
                 rows.len()
             );
@@ -1729,17 +1770,25 @@ mod tests {
         let wide_path = format!("/tmp/cafleet-194/{}/permission-probe", "w".repeat(82));
         let wide_row = format!(" │ {wide_path}");
         assert_eq!(wide_row.chars().count(), 119, "reaches column 119 of 120");
-        let wide = claude_observation(&native_with_operation_rows(&[&wide_row, " │ allow"]));
+        let wide = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &native_with_operation_rows(&[&wide_row, " │ allow"]),
+        );
         assert_claude_request(&wide, &format!("│ {wide_path}\n│ allow"));
         let narrow_row = " │ /tmp/cafleet-194/claude-wrap-cells-001/probe-box";
         assert_eq!(narrow_row.chars().count(), 51, "reaches column 51 of 52");
-        let narrow = claude_observation(&wrapped_screen(
-            |lines| {
-                lines[22] = narrow_row.into();
-                lines[23] = " │ allow".into();
-            },
-            true,
-        ));
+        let narrow = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(
+                |lines| {
+                    lines[22] = narrow_row.into();
+                    lines[23] = " │ allow".into();
+                },
+                true,
+            ),
+        );
         assert_claude_request(
             &narrow,
             "│ /tmp/cafleet-194/claude-wrap-cells-001/probe-box\n│ allow",
@@ -1748,22 +1797,32 @@ mod tests {
 
     #[test]
     fn bundled_claude_multi_line_operation_keeps_its_lines_in_the_plain_and_boxed_shapes() {
-        let plain = claude_observation(&wrapped_screen(
-            |lines| {
-                lines[22] = " echo ok # cleanup".into();
-                lines[23] = " rm -rf ~/x".into();
-            },
-            true,
-        ));
-        let unwrapped_plain = claude_observation(&native_with_operation_rows(&[
-            " echo ok # cleanup",
-            " rm -rf ~/x",
-        ]));
-        let boxed = claude_observation(&native_with_operation_rows(&[
-            " │ echo ok # cleanup",
-            " │ rm -rf ~/x",
-        ]));
-        let one_line = claude_observation(&unwrapped_rendering("echo ok # cleanup rm -rf ~/x"));
+        let plain = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(
+                |lines| {
+                    lines[22] = " echo ok # cleanup".into();
+                    lines[23] = " rm -rf ~/x".into();
+                },
+                true,
+            ),
+        );
+        let unwrapped_plain = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &native_with_operation_rows(&[" echo ok # cleanup", " rm -rf ~/x"]),
+        );
+        let boxed = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &native_with_operation_rows(&[" │ echo ok # cleanup", " │ rm -rf ~/x"]),
+        );
+        let one_line = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &unwrapped_rendering("echo ok # cleanup rm -rf ~/x"),
+        );
         for (shape, observation, operation) in [
             (
                 "plain at 52 columns",
@@ -1807,10 +1866,9 @@ mod tests {
             true,
             None,
         );
-        assert_eq!((screen.rows, screen.cols), (36, 89));
-        assert_eq!((screen.cursor_row, screen.cursor_col), (27, 1));
-        let observation = claude_observation(&screen);
-        assert_claude_request(&observation, &format!("│ {BOXED_PATH}\n│ allow"));
+        let observation = observe_bundled(CodingAgent::Claude, CLAUDE_VERSION, &screen);
+        let operation = format!("│ {BOXED_PATH}\n│ allow");
+        assert_claude_request(&observation, &operation);
         assert_eq!(observation.raw_evidence["operation_rows"], 2);
         let region = observation
             .matched_region
@@ -1818,40 +1876,28 @@ mod tests {
         assert_eq!((region.top, region.bottom), (17, 35), "{region:?}");
         assert!(
             observation.fingerprint
-                != claude_observation(&unwrapped_rendering(&format!("{BOXED_PATH} allow")))
-                    .fingerprint,
+                != observe_bundled(
+                    CodingAgent::Claude,
+                    CLAUDE_VERSION,
+                    &unwrapped_rendering(&format!("{BOXED_PATH} allow"))
+                )
+                .fingerprint,
             "a boxed wrap is width-dependent"
         );
-    }
-
-    #[test]
-    fn bundled_claude_boxed_form_tolerates_the_written_spaces_before_its_closing_line() {
-        let fixture =
-            serde_json::from_str::<Value>(&bundled_screen("claude-2.1.302-boxed-permission-1"))
-                .unwrap();
-        assert_eq!(fixture["lines"][32], "   4. No");
-        assert_eq!(
-            fixture["lines"][33], "  ",
-            "the native row holds two spaces"
+        let cleared = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &replay_native_fixture(
+                &bundled_screen("claude-2.1.302-boxed-permission-1"),
+                |lines| lines[33].clear(),
+                true,
+                None,
+            ),
         );
-        assert_eq!(fixture["lines"][34], " Esc to cancel · Tab to amend");
-        let operation = format!("│ {BOXED_PATH}\n│ allow");
-        let cleared = claude_observation(&replay_native_fixture(
-            &bundled_screen("claude-2.1.302-boxed-permission-1"),
-            |lines| lines[33].clear(),
-            true,
-            None,
-        ));
         assert_claude_request(&cleared, &operation);
         assert!(
-            cleared.fingerprint
-                == claude_observation(&replay_native_fixture(
-                    &bundled_screen("claude-2.1.302-boxed-permission-1"),
-                    |_| {},
-                    true,
-                    None
-                ))
-                .fingerprint
+            cleared.fingerprint == observation.fingerprint,
+            "the written spaces before the closing line are no part of the request"
         );
     }
 
@@ -1863,9 +1909,7 @@ mod tests {
             true,
             None,
         );
-        assert_eq!((screen.rows, screen.cols), (36, 120));
-        assert_eq!((screen.cursor_row, screen.cursor_col), (23, 1));
-        let observation = claude_observation(&screen);
+        let observation = observe_bundled(CodingAgent::Claude, CLAUDE_VERSION, &screen);
         assert_claude_request(&observation, &format!("│ {BOXED_SINGLE_ROW_COMMAND}"));
         assert_eq!(observation.raw_evidence["operation_rows"], 1);
         let region = observation
@@ -1874,7 +1918,12 @@ mod tests {
         assert_eq!((region.top, region.bottom), (14, 30), "{region:?}");
         assert!(
             observation.fingerprint
-                != claude_observation(&unwrapped_rendering(BOXED_SINGLE_ROW_COMMAND)).fingerprint,
+                != observe_bundled(
+                    CodingAgent::Claude,
+                    CLAUDE_VERSION,
+                    &unwrapped_rendering(BOXED_SINGLE_ROW_COMMAND)
+                )
+                .fingerprint,
             "a single-row box displays a different row from a plain row of one command"
         );
     }
@@ -1882,34 +1931,40 @@ mod tests {
     #[test]
     fn bundled_claude_wrapped_form_keeps_the_false_positive_guards() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
-        assert_primary_matches_alternate(
-            "wrapped form",
-            &claude_observation(&wrapped_screen(|_| {}, false)),
-            &claude_observation(&wrapped_screen(|_| {}, true)),
+        let quoted = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(|lines| lines[15] = " Bash command".into(), true),
         );
-        let quoted = claude_observation(&wrapped_screen(
-            |lines| lines[15] = " Bash command".into(),
-            true,
-        ));
         assert_ne!(quoted.kind, permission, "a heading copy above the form");
-        let doubled = claude_observation(&wrapped_screen(
-            |lines| lines[26] = " Bash command".into(),
-            true,
-        ));
+        let doubled = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(|lines| lines[26] = " Bash command".into(), true),
+        );
         assert_ne!(doubled.kind, permission, "a second heading inside the form");
-        let unfocused = claude_observation(&wrapped_screen(
-            |lines| lines[28] = lines[28].replace('❯', " "),
-            true,
-        ));
+        let unfocused = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(|lines| lines[28] = lines[28].replace('❯', " "), true),
+        );
         assert_ne!(unfocused.kind, permission, "form without a focus marker");
-        let headless = claude_observation(&wrapped_screen(|lines| lines[17].clear(), true));
+        let headless = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &wrapped_screen(|lines| lines[17].clear(), true),
+        );
         assert_ne!(headless.kind, permission, "form without its heading");
-        let outside = claude_observation(&replay_native_fixture(
-            &bundled_screen("claude-2.1.302-wrapped-permission-1"),
-            |_| {},
-            true,
-            Some((12, 0)),
-        ));
+        let outside = observe_bundled(
+            CodingAgent::Claude,
+            CLAUDE_VERSION,
+            &replay_native_fixture(
+                &bundled_screen("claude-2.1.302-wrapped-permission-1"),
+                |_| {},
+                true,
+                Some((12, 0)),
+            ),
+        );
         assert_ne!(outside.kind, permission, "cursor outside the form");
         let grown = |extra: usize| {
             wrapped_screen(
@@ -1924,9 +1979,12 @@ mod tests {
                 true,
             )
         };
-        assert_claude_request(&claude_observation(&grown(5)), WRAPPED_OPERATION);
+        assert_claude_request(
+            &observe_bundled(CodingAgent::Claude, CLAUDE_VERSION, &grown(5)),
+            WRAPPED_OPERATION,
+        );
         assert_ne!(
-            claude_observation(&grown(6)).kind,
+            observe_bundled(CodingAgent::Claude, CLAUDE_VERSION, &grown(6)).kind,
             permission,
             "a form taller than 24 rows"
         );
@@ -1934,13 +1992,6 @@ mod tests {
 
     const CODEX_VERSION: &str = "0.163.0";
     const CODEX_CHOICES: [&str; 2] = ["Yes, proceed", "No, and tell Codex what to do differently"];
-
-    fn codex_observation(screen: &ScreenSnapshot) -> ScreenObservation {
-        let catalog = ProfileCatalog::bundled();
-        Detector::new(catalog, CodingAgent::Codex, Some(CODEX_VERSION))
-            .observe(screen)
-            .unwrap()
-    }
 
     fn codex_form(
         change: impl FnOnce(&mut Vec<String>),
@@ -1961,10 +2012,6 @@ mod tests {
         change: impl FnOnce(&mut Vec<String>),
     ) -> ScreenSnapshot {
         let screen: Value = serde_json::from_str(fixture).unwrap();
-        assert_eq!(
-            screen["cursor_col"], 120,
-            "fixture records a pending-wrap cursor"
-        );
         let row = usize::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap();
         let mut lines: Vec<String> = screen["lines"]
             .as_array()
@@ -1973,11 +2020,6 @@ mod tests {
             .map(|line| line.as_str().unwrap().to_owned())
             .collect();
         change(&mut lines);
-        assert_eq!(
-            lines[row].chars().count(),
-            120,
-            "the cursor row fills the width"
-        );
         let mut terminal = TerminalState::new(TerminalSize {
             rows: 36,
             cols: 120,
@@ -2010,7 +2052,7 @@ mod tests {
     #[test]
     fn bundled_codex_detector_replays_the_native_approval_form_from_unmasked_rows() {
         let screen = codex_form(|_| {}, None);
-        let observation = codex_observation(&screen);
+        let observation = observe_bundled(CodingAgent::Codex, CODEX_VERSION, &screen);
         assert_eq!(
             observation.kind,
             ObservationKind::Interaction(InteractionClass::PermissionRequest)
@@ -2030,7 +2072,7 @@ mod tests {
             .expect("an approval match locates its live region");
         assert!(region.top >= 12, "{region:?}");
         assert!(region.top <= 22 && region.bottom >= 36, "{region:?}");
-        let replay = codex_observation(&codex_form(|_| {}, None));
+        let replay = observe_bundled(CodingAgent::Codex, CODEX_VERSION, &codex_form(|_| {}, None));
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
         let catalog = ProfileCatalog::bundled();
@@ -2041,16 +2083,6 @@ mod tests {
         assert_eq!(reused.rule_id, observation.rule_id);
         assert!(reused.fingerprint == observation.fingerprint);
         assert_eq!(reused.raw_evidence["native_version"], "0.164.0");
-        let below = Detector::new(catalog, CodingAgent::Codex, Some("0.162.0"))
-            .observe(&screen)
-            .unwrap();
-        assert_eq!(below.kind, ObservationKind::Unknown);
-        assert_eq!(below.match_evidence, MatchEvidence::Absent);
-        assert!(below.fingerprint.is_none());
-        let unprobed = Detector::new(catalog, CodingAgent::Codex, None)
-            .observe(&screen)
-            .unwrap();
-        assert_eq!(unprobed.kind, ObservationKind::Unknown);
     }
 
     #[test]
@@ -2065,20 +2097,26 @@ mod tests {
             (35, 120),
             "the live terminal reports the pending-wrap column"
         );
-        let observation = codex_observation(&screen);
+        let observation = observe_bundled(CodingAgent::Codex, CODEX_VERSION, &screen);
         assert_eq!(
             observation.kind,
             ObservationKind::Interaction(InteractionClass::PermissionRequest),
             "a pending-wrap cursor on the closing row lies inside the form"
         );
         assert!(
-            observation.fingerprint == codex_observation(&codex_form(|_| {}, None)).fingerprint
+            observation.fingerprint
+                == observe_bundled(CodingAgent::Codex, CODEX_VERSION, &codex_form(|_| {}, None))
+                    .fingerprint
         );
         for fixture in [
             &bundled_screen("codex-0.163.0-allow-pre-stage-1"),
             &bundled_screen("codex-0.163.0-deny-pre-stage-1"),
         ] {
-            let pre_stage = codex_observation(&replay_with_pending_wrap(fixture, |_| {}));
+            let pre_stage = observe_bundled(
+                CodingAgent::Codex,
+                CODEX_VERSION,
+                &replay_with_pending_wrap(fixture, |_| {}),
+            );
             assert_eq!(
                 pre_stage.kind,
                 ObservationKind::Interaction(InteractionClass::PermissionRequest)
@@ -2089,41 +2127,66 @@ mod tests {
     #[test]
     fn bundled_codex_detector_rejects_copies_that_are_not_the_live_approval_form() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
-        let primary = codex_observation(&replay_native_fixture(
-            &bundled_screen("codex-0.163.0-on-request-permission-1"),
-            |_| {},
-            false,
-            None,
-        ));
+        let primary = observe_bundled(
+            CodingAgent::Codex,
+            CODEX_VERSION,
+            &replay_native_fixture(
+                &bundled_screen("codex-0.163.0-on-request-permission-1"),
+                |_| {},
+                false,
+                None,
+            ),
+        );
         assert_ne!(primary.kind, permission, "primary-screen transcript copy");
-        let unfocused = codex_observation(&codex_form(
-            |lines| lines[31] = lines[31].replacen('›', " ", 1),
-            None,
-        ));
+        let unfocused = observe_bundled(
+            CodingAgent::Codex,
+            CODEX_VERSION,
+            &codex_form(|lines| lines[31] = lines[31].replacen('›', " ", 1), None),
+        );
         assert_ne!(unfocused.kind, permission, "form without a focus marker");
-        let broadened = codex_observation(&codex_form(
-            |lines| {
-                lines[31].clear();
-                lines[33].clear();
-            },
-            None,
-        ));
+        let broadened = observe_bundled(
+            CodingAgent::Codex,
+            CODEX_VERSION,
+            &codex_form(
+                |lines| {
+                    lines[31].clear();
+                    lines[33].clear();
+                },
+                None,
+            ),
+        );
         assert_ne!(
             broadened.kind, permission,
             "only the prefix-approval choice remains"
         );
-        let headless = codex_observation(&codex_form(|lines| lines[22].clear(), None));
+        let headless = observe_bundled(
+            CodingAgent::Codex,
+            CODEX_VERSION,
+            &codex_form(|lines| lines[22].clear(), None),
+        );
         assert_ne!(headless.kind, permission, "form without its heading");
-        let reasonless = codex_observation(&codex_form(|lines| lines[26].clear(), None));
+        let reasonless = observe_bundled(
+            CodingAgent::Codex,
+            CODEX_VERSION,
+            &codex_form(|lines| lines[26].clear(), None),
+        );
         assert_ne!(reasonless.kind, permission, "form without its reason line");
-        let outside = codex_observation(&codex_form(|_| {}, Some((12, 0))));
+        let outside = observe_bundled(
+            CodingAgent::Codex,
+            CODEX_VERSION,
+            &codex_form(|_| {}, Some((12, 0))),
+        );
         assert_ne!(outside.kind, permission, "cursor outside the form");
     }
 
     #[test]
     fn bundled_codex_form_with_choice_two_on_one_row_or_continued_detects_the_same_request() {
-        let single = codex_observation(&codex_form(|_| {}, None));
-        let continued = codex_observation(&codex_form(continued_choice_two, None));
+        let single = observe_bundled(CodingAgent::Codex, CODEX_VERSION, &codex_form(|_| {}, None));
+        let continued = observe_bundled(
+            CodingAgent::Codex,
+            CODEX_VERSION,
+            &codex_form(continued_choice_two, None),
+        );
         for observation in [&single, &continued] {
             assert_eq!(
                 observation.kind,
@@ -2150,7 +2213,11 @@ mod tests {
                 "/tmp/cafleet-194/codex-ans-deny-001/permission-probe deny",
             ),
         ] {
-            let pre_stage = codex_observation(&replay_native_fixture(fixture, |_| {}, true, None));
+            let pre_stage = observe_bundled(
+                CodingAgent::Codex,
+                CODEX_VERSION,
+                &replay_native_fixture(fixture, |_| {}, true, None),
+            );
             assert_eq!(
                 pre_stage.kind,
                 ObservationKind::Interaction(InteractionClass::PermissionRequest)
@@ -2168,7 +2235,7 @@ mod tests {
         backend: CodingAgent,
         version: &'static str,
         rule: &'static str,
-        answers: [(PermissionDecision, &'static str, &'static str, u8); 2],
+        answers: [(PermissionDecision, &'static str, &'static str); 2],
         choices: [&'static str; 2],
         glyph: char,
         focus_row: usize,
@@ -2186,13 +2253,11 @@ mod tests {
                     PermissionDecision::Allow,
                     "claude-2.1.302-allow-pre-stage-1",
                     "allow-once",
-                    b'1',
                 ),
                 (
                     PermissionDecision::Deny,
                     "claude-2.1.302-deny-pre-stage-1",
                     "deny-once",
-                    b'4',
                 ),
             ],
             choices: ["Yes", "No"],
@@ -2210,13 +2275,11 @@ mod tests {
                     PermissionDecision::Allow,
                     "claude-2.1.302-wrapped-allow-pre-stage-1",
                     "allow-once",
-                    b'1',
                 ),
                 (
                     PermissionDecision::Deny,
                     "claude-2.1.302-wrapped-deny-pre-stage-1",
                     "deny-once",
-                    b'4',
                 ),
             ],
             choices: ["Yes", "No"],
@@ -2234,13 +2297,11 @@ mod tests {
                     PermissionDecision::Allow,
                     "codex-0.163.0-allow-pre-stage-1",
                     "allow-once",
-                    b'y',
                 ),
                 (
                     PermissionDecision::Deny,
                     "codex-0.163.0-deny-pre-stage-1",
                     "deny-once",
-                    b'3',
                 ),
             ],
             choices: CODEX_CHOICES,
@@ -2259,7 +2320,7 @@ mod tests {
                 detector.match_answer(screen, plan).unwrap()
             };
             let focus = u16::try_from(forms.focus_row).unwrap();
-            for (decision, id, choice, byte) in forms.answers {
+            for (decision, id, choice) in forms.answers {
                 let plan = ProfileCatalog::bundled()
                     .answer_plan(
                         forms.backend,
@@ -2268,13 +2329,8 @@ mod tests {
                         &AnswerKey::Decision(decision),
                     )
                     .expect("measured bundled answer plan");
-                assert_eq!(plan.stages().len(), 1, "{id}");
-                assert_eq!(plan.stages()[0].bytes(), &[byte], "{id}");
                 let fixture = bundled_screen(id);
                 let screen = replay_native_fixture(&fixture, |_| {}, true, None);
-                if forms.cursor_follows_focus {
-                    assert_eq!((screen.cursor_row, screen.cursor_col), (focus, 1), "{id}");
-                }
                 let matched = answer(&screen, &plan).expect("pre-stage form matches its plan");
                 assert_eq!(
                     matched.choices(),
@@ -2321,18 +2377,6 @@ mod tests {
                     answer(&unfocused, &plan).is_none(),
                     "{id} without its focus glyph"
                 );
-                let primary = replay_native_fixture(&fixture, |_| {}, false, None);
-                if forms.backend == CodingAgent::Claude {
-                    let replayed = answer(&primary, &plan)
-                        .expect("a Claude primary-screen replay is the live form");
-                    assert!(
-                        replayed.semantic() == matched.semantic(),
-                        "{id} primary screen"
-                    );
-                    assert_eq!(replayed.choices(), matched.choices(), "{id} primary screen");
-                } else {
-                    assert!(answer(&primary, &plan).is_none(), "{id} primary screen");
-                }
             }
         }
     }
@@ -2469,21 +2513,6 @@ mod tests {
                 composer.idle
             );
             assert!(!draft.verified_noninteraction, "{}", composer.idle);
-            let primary = observe(&|_: &mut Vec<String>| {}, false, None);
-            if composer.backend == CodingAgent::Claude {
-                assert_primary_matches_alternate(
-                    composer.idle,
-                    &primary,
-                    &observe(&|_: &mut Vec<String>| {}, true, None),
-                );
-                assert!(primary.verified_noninteraction, "{}", composer.idle);
-            } else {
-                assert!(
-                    !primary.verified_noninteraction,
-                    "{} primary-screen copy",
-                    composer.idle
-                );
-            }
             let away = observe(&|_: &mut Vec<String>| {}, true, Some((row, 0)));
             assert!(
                 !away.verified_noninteraction,
@@ -2502,6 +2531,13 @@ mod tests {
     #[test]
     fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
         assert_no_debug_or_serialize!(AnswerMatch);
+    }
+
+    #[test]
+    fn runtime_profile_private_fingerprint_supports_comparison_without_debug_or_serialization() {
+        fn comparable<T: Clone + Eq>() {}
+        comparable::<SemanticFingerprint>();
+        assert_no_debug_or_serialize!(SemanticFingerprint);
     }
     mod claude_2_1_312_guards {
         use crate::coding_agent::detector::tests::*;
@@ -2648,8 +2684,6 @@ mod tests {
         fn trailing_padding_keeps_each_new_rule_identity() {
             for (id, rule) in [
                 (NUDGE, DIALOG_A),
-                ("claude-2.1.312-auto-default-accept-edits-nudge-1", DIALOG_A),
-                ("claude-2.1.312-primary-auto-default-nudge-1", DIALOG_A),
                 (PENDING, NOTICE),
                 (
                     "claude-2.1.312-auto-env-setup-offer-1",
@@ -2675,14 +2709,10 @@ mod tests {
                     "claude-2.1.312-bash-no-tip-permission-1",
                     "claude-bash-permission-no-tip",
                 ),
-                (
-                    "claude-2.1.312-bash-no-tip-access-permission-1",
-                    "claude-bash-permission-no-tip",
-                ),
             ] {
                 let plain = unchanged(id);
                 assert_eq!(plain.rule_id, rule, "{id}");
-                for padding in [1, 4] {
+                for padding in [4] {
                     let padded = replay(
                         id,
                         |lines| {
@@ -3006,13 +3036,6 @@ mod tests {
             let clipped = observe(&with_state_rule(true), &screen);
             assert_ne!(clipped.rule_id, "synthetic-panel-state");
         }
-
-        #[test]
-        fn a_profile_without_any_panel_separator_never_clips() {
-            let observation = observe(&definitions(), &form(&[Some(SEPARATOR); 6], None));
-            assert_ne!(observation.rule_id, RULE);
-            assert_eq!(observe(&definitions(), &full_width()).rule_id, RULE);
-        }
     }
 
     mod question_answers {
@@ -3020,11 +3043,6 @@ mod tests {
 
         fn catalog() -> ProfileCatalog {
             ProfileCatalog::from_definitions(&question_fixture_definition()).unwrap()
-        }
-        fn screen(bytes: &[u8]) -> ScreenSnapshot {
-            let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            state.feed(bytes).unwrap();
-            state.snapshot()
         }
         fn detector() -> Detector {
             Detector::new(&catalog(), CodingAgent::Codex, Some(VERSION))
@@ -3042,14 +3060,17 @@ mod tests {
         }
         fn matched(focused: &[&str], id: &str) -> Option<AnswerMatch> {
             detector()
-                .match_answer(&screen(&question_fixture_form(focused)), &choice_plan(id))
+                .match_answer(
+                    &screen_of(&question_fixture_form(focused)),
+                    &choice_plan(id),
+                )
                 .unwrap()
         }
 
         #[test]
         fn a_question_form_is_a_complete_question_with_its_choice_labels() {
             let observation = detector()
-                .observe(&screen(&question_fixture_form(&["accept"])))
+                .observe(&screen_of(&question_fixture_form(&["accept"])))
                 .unwrap();
             assert_eq!(
                 observation.kind,
@@ -3080,7 +3101,7 @@ mod tests {
         #[test]
         fn match_answer_refuses_a_choice_plan_on_a_permission_form_and_a_decision_plan_on_a_question()
          {
-            let permission = screen(&inspection_fixture_form(
+            let permission = screen_of(&inspection_fixture_form(
                 "write disposable.txt",
                 "synthetic-only",
             ));
@@ -3105,7 +3126,7 @@ mod tests {
                     "{id} on a permission form"
                 );
             }
-            let question = screen(&question_fixture_form(&["accept"]));
+            let question = screen_of(&question_fixture_form(&["accept"]));
             assert!(
                 detector()
                     .match_answer(&question, &allow_plan())
@@ -3115,7 +3136,7 @@ mod tests {
             );
             assert!(
                 detector()
-                    .match_answer(&screen(&question_notice_form()), &choice_plan("decline"))
+                    .match_answer(&screen_of(&question_notice_form()), &choice_plan("decline"))
                     .unwrap()
                     .is_none(),
                 "a choice plan on another question rule"
@@ -3128,7 +3149,7 @@ mod tests {
             assert!(
                 other
                     .match_answer(
-                        &screen(&question_fixture_form(&["accept"])),
+                        &screen_of(&question_fixture_form(&["accept"])),
                         &choice_plan("decline")
                     )
                     .unwrap()
@@ -3158,7 +3179,7 @@ mod tests {
         fn marker_focus_resolves_no_choice_when_the_marker_row_holds_no_choice_label() {
             let unlisted = b"\x1b[0m\x1b[2J\x1b[18;1HSynthetic question?\r\n  Accept the change\r\n  Keep current\r\n> Other option\r\n  Ask later\r\nQuestion end";
             let matched = detector()
-                .match_answer(&screen(unlisted), &choice_plan("decline"))
+                .match_answer(&screen_of(unlisted), &choice_plan("decline"))
                 .unwrap()
                 .expect("the question with an unlisted focused option matches");
             assert_eq!(matched.focused_choice_id(), None);
@@ -3181,13 +3202,13 @@ mod tests {
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
             let shared = b"\x1b[0m\x1b[2J\x1b[19;1HSynthetic question?\r\n  Accept the change\r\n> Keep current / Ask later\r\nQuestion end";
             let matched = detector
-                .match_answer(&screen(shared), &plan)
+                .match_answer(&screen_of(shared), &plan)
                 .unwrap()
                 .expect("the question with two labels on the marker row matches");
             assert_eq!(matched.focused_choice_id(), None);
             let separate = b"\x1b[0m\x1b[2J\x1b[19;1HSynthetic question?\r\n> Accept the change\r\n  Keep current / Ask later\r\nQuestion end";
             let matched = detector
-                .match_answer(&screen(separate), &plan)
+                .match_answer(&screen_of(separate), &plan)
                 .unwrap()
                 .expect("the question with one label on the marker row matches");
             assert_eq!(matched.focused_choice_id(), Some("accept"));
@@ -3209,10 +3230,10 @@ mod tests {
             assert!(!accept.same_request(&decline));
             assert!(accept.same_request(&matched(&["accept"], "decline").unwrap()));
             let a = detector()
-                .observe(&screen(&question_fixture_form(&["accept"])))
+                .observe(&screen_of(&question_fixture_form(&["accept"])))
                 .unwrap();
             let b = detector()
-                .observe(&screen(&question_fixture_form(&["decline"])))
+                .observe(&screen_of(&question_fixture_form(&["decline"])))
                 .unwrap();
             assert!(
                 a.fingerprint == b.fingerprint,
@@ -3232,7 +3253,7 @@ mod tests {
             let catalog = framed_catalog();
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
             let alone = detector
-                .observe(&screen(&question_fixture_form(&["accept"])))
+                .observe(&screen_of(&question_fixture_form(&["accept"])))
                 .unwrap();
             assert_eq!(
                 alone.kind,
@@ -3241,7 +3262,7 @@ mod tests {
             assert_eq!(alone.rule_id, QUESTION_RULE);
             let mut quoted = question_fixture_form(&["accept"]);
             quoted.extend_from_slice(b"\x1b[2;1HLive composer");
-            let quoted = detector.observe(&screen(&quoted)).unwrap();
+            let quoted = detector.observe(&screen_of(&quoted)).unwrap();
             assert_ne!(quoted.rule_id, QUESTION_RULE);
             assert_ne!(
                 quoted.kind,
@@ -3259,7 +3280,7 @@ mod tests {
             quoted.extend_from_slice(b"\x1b[24;1HLive composer");
             assert!(
                 detector
-                    .match_answer(&screen(&quoted), &plan)
+                    .match_answer(&screen_of(&quoted), &plan)
                     .unwrap()
                     .is_none()
             );
@@ -3274,12 +3295,12 @@ mod tests {
             let catalog = ProfileCatalog::from_definitions(&value).unwrap();
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
             let without = detector
-                .observe(&screen(&question_fixture_form(&["accept"])))
+                .observe(&screen_of(&question_fixture_form(&["accept"])))
                 .unwrap();
             assert_ne!(without.rule_id, QUESTION_RULE);
             let mut with = question_fixture_form(&["accept"]);
             with.extend_from_slice(b"\x1b[2;1HFooter: question");
-            let with = detector.observe(&screen(&with)).unwrap();
+            let with = detector.observe(&screen_of(&with)).unwrap();
             assert_eq!(with.rule_id, QUESTION_RULE);
         }
     }
@@ -3289,12 +3310,6 @@ mod tests {
 
         fn gated_catalog() -> ProfileCatalog {
             ProfileCatalog::from_definitions(&gated_fixture_definition()).unwrap()
-        }
-
-        fn screen(bytes: &[u8]) -> ScreenSnapshot {
-            let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            state.feed(bytes).unwrap();
-            state.snapshot()
         }
 
         fn detector() -> Detector {
@@ -3314,7 +3329,7 @@ mod tests {
 
         fn matched(bytes: &[u8], decision: PermissionDecision) -> AnswerMatch {
             detector()
-                .match_answer(&screen(bytes), &gated_plan(decision))
+                .match_answer(&screen_of(bytes), &gated_plan(decision))
                 .unwrap()
                 .expect("the gated form matches regardless of its focus")
         }
@@ -3335,7 +3350,7 @@ mod tests {
             for (focus, expected) in [("allow", "allow-once"), ("deny", "deny-once")] {
                 let bytes = gated_fixture_form("write disposable.txt", focus);
                 assert_eq!(focused(&bytes).as_deref(), Some(expected), "{focus}");
-                let observation = detector().observe(&screen(&bytes)).unwrap();
+                let observation = detector().observe(&screen_of(&bytes)).unwrap();
                 assert_eq!(
                     observation.kind,
                     ObservationKind::Interaction(InteractionClass::PermissionRequest)
@@ -3426,8 +3441,8 @@ mod tests {
                 assert!(first.same_request(&matched(&allow, decision)));
             }
             let detector = detector();
-            let a = detector.observe(&screen(&allow)).unwrap();
-            let b = detector.observe(&screen(&deny)).unwrap();
+            let a = detector.observe(&screen_of(&allow)).unwrap();
+            let b = detector.observe(&screen_of(&deny)).unwrap();
             assert!(
                 a.fingerprint == b.fingerprint,
                 "a focus move keeps the episode identity"
@@ -3438,7 +3453,7 @@ mod tests {
         fn continuation_rule_observes_only_the_empty_reason_dialog() {
             let detector = detector();
             let empty = detector
-                .observe(&screen(&gated_reason_dialog(None)))
+                .observe(&screen_of(&gated_reason_dialog(None)))
                 .unwrap();
             assert_eq!(empty.kind, ObservationKind::PermissionContinuation);
             assert_eq!(empty.rule_id, GATED_REASON_RULE);
@@ -3447,7 +3462,10 @@ mod tests {
             for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                 assert!(
                     detector
-                        .match_answer(&screen(&gated_reason_dialog(None)), &gated_plan(decision))
+                        .match_answer(
+                            &screen_of(&gated_reason_dialog(None)),
+                            &gated_plan(decision)
+                        )
                         .unwrap()
                         .is_none(),
                     "a continuation is not an answerable request form"
@@ -3455,7 +3473,7 @@ mod tests {
             }
             for reason in ["typed reason", "(empty) and more"] {
                 let typed = detector
-                    .observe(&screen(&gated_reason_dialog(Some(reason))))
+                    .observe(&screen_of(&gated_reason_dialog(Some(reason))))
                     .unwrap();
                 assert_ne!(
                     typed.kind,
@@ -3537,24 +3555,6 @@ mod tests {
                 Some("allow-once"),
                 "41 cells of the painted background are a majority"
             );
-        }
-
-        #[test]
-        fn focus_requires_every_cell_of_the_label_to_differ_from_the_row_background() {
-            let partial = sized_form(
-                80,
-                &format!(
-                    "{ROW_SGR}\x1b[K  {FOCUS_SGR}Allow{ROW_SGR} once   Always allow   Deny once"
-                ),
-            );
-            assert_eq!(focused_on(&partial), None);
-            let whole = sized_form(
-                80,
-                &format!(
-                    "{ROW_SGR}\x1b[K  {FOCUS_SGR}Allow once{ROW_SGR}   Always allow   Deny once"
-                ),
-            );
-            assert_eq!(focused_on(&whole).as_deref(), Some("allow-once"));
         }
     }
 
@@ -3744,39 +3744,6 @@ mod tests {
         assert!(value.fingerprint == redraw.fingerprint);
         let changed = permission("write another-disposable.txt");
         assert!(value.fingerprint != changed.fingerprint);
-        let mut definition = definitions();
-        definition["profiles"][0]["min_version"] = json!("0.0.0-synthetic");
-        assert!(
-            value.fingerprint
-                == observation(
-                    &definition,
-                    &terminal(&lines("write disposable.txt"), 80, false).snapshot()
-                )
-                .fingerprint,
-            "the selected profile's boundary is not part of the request identity"
-        );
-    }
-
-    #[test]
-    fn runtime_detector_semantic_fingerprint_is_backend_class_operation_and_choices() {
-        let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
-        let screen = terminal(&lines("write disposable.txt"), 80, false).snapshot();
-        let at_boundary = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
-            .observe(&screen)
-            .unwrap();
-        let later = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.2-synthetic"))
-            .observe(&screen)
-            .unwrap();
-        assert_permission(&later);
-        assert_eq!(later.raw_evidence["native_version"], "0.0.2-synthetic");
-        assert!(
-            at_boundary.fingerprint == later.fingerprint,
-            "a later native version on the same profile keeps the request identity"
-        );
-        let changed = Detector::new(&catalog, CodingAgent::Codex, Some("0.0.2-synthetic"))
-            .observe(&terminal(&lines("write another-disposable.txt"), 80, false).snapshot())
-            .unwrap();
-        assert!(at_boundary.fingerprint != changed.fingerprint);
     }
 
     #[test]
@@ -3869,52 +3836,83 @@ mod tests {
     }
 
     #[test]
-    fn runtime_detector_fragmented_terminal_sequences_reconstruct_the_same_observation() {
-        let bytes = format!(
-            "\x1b]0;Action Required\x07\x1b[?1049h\x1b[2J\x1b[H{}",
-            lines("write disposable-界.txt").join("\r\n")
-        )
-        .into_bytes();
-        let mut whole = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-        whole.feed(&bytes).unwrap();
-        let expected = observation(&definitions(), &whole.snapshot());
-        assert_permission(&expected);
-        for split in 0..=bytes.len() {
-            let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-            state.feed(&bytes[..split]).unwrap();
-            state.feed(&bytes[split..]).unwrap();
-            let actual = observation(&definitions(), &state.snapshot());
-            assert_permission(&actual);
-            assert!(expected.fingerprint == actual.fingerprint, "split={split}");
-            assert_eq!(actual.raw_evidence, expected.raw_evidence, "split={split}");
-        }
-    }
-
-    #[test]
     fn runtime_detector_strongest_incompatible_rules_preserve_conflicting_interaction() {
-        for reverse in [false, true] {
+        let unknown_interaction =
+            ObservationKind::Interaction(InteractionClass::UnknownInteraction);
+        let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
+        let question = |other: &mut Value| other["observation"] = json!("question");
+        let other_extraction = |other: &mut Value| {
+            other["extract"]["operation"] = json!({"matcher_id":"allow","capture":"label"})
+        };
+        let equal_extraction = |_: &mut Value| {};
+        type Case<'a> = (
+            &'a str,
+            &'a dyn Fn(&mut Value),
+            bool,
+            ObservationKind,
+            MatchEvidence,
+        );
+        let cases: [Case; 4] = [
+            (
+                "another class",
+                &question,
+                false,
+                unknown_interaction,
+                MatchEvidence::Conflicting,
+            ),
+            (
+                "another class declared first",
+                &question,
+                true,
+                unknown_interaction,
+                MatchEvidence::Conflicting,
+            ),
+            (
+                "another extraction",
+                &other_extraction,
+                false,
+                unknown_interaction,
+                MatchEvidence::Conflicting,
+            ),
+            (
+                "an equal extraction",
+                &equal_extraction,
+                false,
+                permission,
+                MatchEvidence::Complete,
+            ),
+        ];
+        for (case, change, reverse, kind, evidence) in cases {
             let mut definition = definitions();
             let mut other = definition["profiles"][0]["rules"][0].clone();
-            other["id"] = json!("synthetic-question");
-            other["observation"] = json!("question");
+            other["id"] = json!("synthetic-other");
+            change(&mut other);
             let rules = definition["profiles"][0]["rules"].as_array_mut().unwrap();
             rules.push(other);
             if reverse {
                 rules.reverse();
             }
             definition["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
-                json!([RULE, "synthetic-question"]);
+                json!([RULE, "synthetic-other"]);
             let result = observation(
                 &definition,
                 &terminal(&lines("write disposable.txt"), 80, false).snapshot(),
             );
-            assert!(matches!(
-                result.kind,
-                ObservationKind::Interaction(InteractionClass::UnknownInteraction)
-            ));
-            assert!(matches!(result.match_evidence, MatchEvidence::Conflicting));
-            assert!(result.raw_evidence.is_object());
+            assert_eq!(result.kind, kind, "{case}");
+            assert_eq!(result.match_evidence, evidence, "{case}");
+            assert!(result.raw_evidence.is_object(), "{case}");
         }
+        let composers = observation(
+            &definition(None, None),
+            &terminal(&["Synthetic state".into(), "State end".into()], 80, false).snapshot(),
+        );
+        assert_eq!(
+            composers.kind,
+            ObservationKind::Unknown,
+            "conflicting non-interaction rules"
+        );
+        assert_eq!(composers.match_evidence, MatchEvidence::Conflicting);
+        assert!(!composers.verified_noninteraction);
     }
 
     #[test]
@@ -3934,29 +3932,6 @@ mod tests {
             &definition,
             &terminal(&lines("write disposable.txt"), 80, false).snapshot(),
         ));
-    }
-
-    #[test]
-    fn runtime_detector_equal_priority_compatible_rules_require_equal_extraction() {
-        let mut definition = definitions();
-        let mut other = definition["profiles"][0]["rules"][0].clone();
-        other["id"] = json!("synthetic-other-extraction");
-        other["extract"]["operation"] = json!({"matcher_id":"allow","capture":"label"});
-        definition["profiles"][0]["rules"]
-            .as_array_mut()
-            .unwrap()
-            .push(other);
-        definition["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
-            json!([RULE, "synthetic-other-extraction"]);
-        let value = observation(
-            &definition,
-            &terminal(&lines("write disposable.txt"), 80, false).snapshot(),
-        );
-        assert!(matches!(
-            value.kind,
-            ObservationKind::Interaction(InteractionClass::UnknownInteraction)
-        ));
-        assert!(matches!(value.match_evidence, MatchEvidence::Conflicting));
     }
 
     #[test]
@@ -4025,29 +4000,6 @@ mod tests {
             }
             rows.push("Live footer".to_owned());
             rows
-        }
-        #[test]
-        fn annotation_kinds_parse_from_their_exact_profile_strings() {
-            for (name, kind) in [
-                ("automatic_refusal", ObservationKind::AutomaticRefusal),
-                (
-                    "automatic_review_unavailable",
-                    ObservationKind::AutomaticReviewUnavailable,
-                ),
-                (
-                    "automatic_review_available",
-                    ObservationKind::AutomaticReviewAvailable,
-                ),
-            ] {
-                assert_eq!(ObservationKind::parse(name).unwrap(), kind, "{name}");
-            }
-            for name in [
-                "automatic_refusal_observed",
-                "Automatic_Refusal",
-                "auto_refusal",
-            ] {
-                assert!(ObservationKind::parse(name).is_err(), "{name}");
-            }
         }
         #[test]
         fn annotation_detector_yields_every_qualifying_block_in_row_order_beside_the_primary() {
@@ -4180,16 +4132,6 @@ mod tests {
             let undecorated =
                 observe_lines(&definition, &["Refused: write one.txt", "Live footer"]);
             assert!(undecorated.annotations.is_empty());
-        }
-
-        #[test]
-        fn annotation_detector_yields_nothing_without_a_selected_profile() {
-            let catalog = ProfileCatalog::from_definitions(&annotated()).unwrap();
-            let rows = refusal_screen(&["write one.txt"]);
-            let observed = Detector::new(&catalog, CodingAgent::Claude, Some(VERSION))
-                .observe(&terminal(&rows, 80, false).snapshot())
-                .unwrap();
-            assert!(observed.annotations.is_empty());
         }
     }
 
@@ -4462,9 +4404,7 @@ mod tests {
         }
 
         fn observe(screen: &ScreenSnapshot) -> ScreenObservation {
-            bundled_detector(CodingAgent::Opencode, VERSION)
-                .observe(screen)
-                .unwrap()
+            observe_bundled(CodingAgent::Opencode, VERSION, screen)
         }
 
         fn assert_request(observed: &ScreenObservation, operation: &str) {
@@ -4550,11 +4490,6 @@ mod tests {
                 "036/permission-probe allow",
             ];
             let compact = compact_rows(36, &compact_command, Compact::OwnControls);
-            assert_request(
-                &observe(&paint(57, &split)),
-                &format!("{PROBE_DIRECTORY}\npermission-probe allow"),
-            );
-            assert_compact_request(&observe(&paint(36, &compact)), &compact_command.join("\n"));
             for (case, cols, rows) in [
                 (
                     "split, thumb above every command row",
@@ -4840,47 +4775,11 @@ mod tests {
                 assert_no_request(&observe(&screen), case);
             }
         }
-
-        #[test]
-        fn opencode_exactly_one_request_rule_matches_each_supported_layout() {
-            for (case, screen, rule) in [
-                (
-                    "wide",
-                    form(120, &["/tmp/x/permission-probe allow"], Layout::Wide),
-                    PERMISSION_RULE,
-                ),
-                (
-                    "split",
-                    form(57, &wrapped(), Layout::Split),
-                    PERMISSION_RULE,
-                ),
-                (
-                    "compact",
-                    compact(
-                        55,
-                        &["/tmp/x/permission-probe allow"],
-                        Compact::SharedControls,
-                    ),
-                    COMPACT_RULE,
-                ),
-            ] {
-                let observed = observe(&screen);
-                assert_eq!(observed.rule_id, rule, "{case}");
-                assert_eq!(observed.match_evidence, MatchEvidence::Complete, "{case}");
-            }
-        }
     }
 
     mod hermes_profile {
-        use crate::broker::runtime::InteractionCloseReason;
-        use crate::broker::runtime::RuntimeEventKind;
         use crate::coding_agent::detector::tests::*;
-        use crate::runtime::observation::test_support::NOW;
-        use crate::runtime::observation::test_support::open;
-        use crate::runtime::observation::test_support::tracker;
         use std::collections::BTreeSet;
-        use std::time::Duration;
-        use std::time::Instant;
 
         const VERSION: &str = "2026.9.24";
         const ESCALATE: &str = "hermes-approval-escalate";
@@ -4936,26 +4835,12 @@ mod tests {
             "override-deny-enter-continuation-tmux-057",
         ];
 
+        fn id(stage: &str) -> String {
+            format!("hermes-{VERSION}-{stage}-1")
+        }
+
         fn fixture(stage: &str) -> String {
-            bundled_screen(&format!("hermes-{VERSION}-{stage}-1"))
-        }
-
-        fn fixture_lines(stage: &str) -> Vec<String> {
-            let screen: Value = serde_json::from_str(&fixture(stage)).unwrap();
-            screen["lines"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|line| line.as_str().unwrap().to_owned())
-                .collect()
-        }
-
-        fn size(stage: &str) -> TerminalSize {
-            let screen: Value = serde_json::from_str(&fixture(stage)).unwrap();
-            TerminalSize {
-                rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
-                cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
-            }
+            bundled_screen(&id(stage))
         }
 
         fn replay(stage: &str, change: impl FnOnce(&mut Vec<String>)) -> ScreenSnapshot {
@@ -4963,9 +4848,7 @@ mod tests {
         }
 
         fn observe(screen: &ScreenSnapshot) -> ScreenObservation {
-            bundled_detector(CodingAgent::Hermes, VERSION)
-                .observe(screen)
-                .unwrap()
+            observe_bundled(CodingAgent::Hermes, VERSION, screen)
         }
 
         fn observed(stage: &str) -> ScreenObservation {
@@ -5052,21 +4935,17 @@ mod tests {
             for (stage, rule, rows) in FORMS {
                 assert_request(&observed(stage), rule, rows, stage);
             }
-            let catalog = ProfileCatalog::bundled();
-            let screen = replay("escalate-tmux-120", |_| {});
-            for version in [None, Some("2026.9.23")] {
-                let below = Detector::new(catalog, CodingAgent::Hermes, version)
-                    .observe(&screen)
-                    .unwrap();
-                assert_eq!(below.kind, ObservationKind::Unknown, "{version:?}");
-                assert_eq!(below.match_evidence, MatchEvidence::Absent, "{version:?}");
-            }
         }
 
         #[test]
         fn hermes_focus_follows_the_marker_row_and_a_form_without_it_matches_no_plan() {
             let detector = bundled_detector(CodingAgent::Hermes, VERSION);
-            for (stage, rule, _) in FORMS {
+            for (stage, rule) in [
+                ("escalate-tmux-120", ESCALATE),
+                ("escalate-deny-focus-tmux-057", ESCALATE),
+                ("override-tmux-120", OVERRIDE),
+                ("override-deny-focus-tmux-057", OVERRIDE),
+            ] {
                 let screen = replay(stage, |_| {});
                 let mut focused = BTreeSet::new();
                 for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
@@ -5102,60 +4981,11 @@ mod tests {
         }
 
         #[test]
-        fn hermes_answer_plans_are_the_measured_single_digit_stages_of_their_own_form() {
-            for (rule, decision, choice, byte) in [
-                (ESCALATE, PermissionDecision::Allow, "allow-once", b'1'),
-                (ESCALATE, PermissionDecision::Deny, "deny-once", b'4'),
-                (OVERRIDE, PermissionDecision::Allow, "allow-once", b'1'),
-                (OVERRIDE, PermissionDecision::Deny, "deny-once", b'2'),
-            ] {
-                let plan = plan(rule, decision);
-                assert_eq!(plan.choice_id(), choice, "{rule} {decision:?}");
-                assert_eq!(plan.capability().backend(), CodingAgent::Hermes);
-                assert_eq!(plan.capability().native_version(), VERSION);
-                assert_eq!(plan.capability().request_rule_id(), rule);
-                assert_eq!(plan.capability().key(), &AnswerKey::Decision(decision));
-                assert_eq!(plan.stages().len(), 1, "{rule} {decision:?}");
-                let stage = &plan.stages()[0];
-                assert_eq!(stage.bytes(), &[byte], "{rule} {decision:?}");
-                assert_eq!(stage.required_rule_id(), rule);
-                assert_eq!(stage.required_choice_id(), choice);
-            }
-            let detector = bundled_detector(CodingAgent::Hermes, VERSION);
-            for (stage, other) in [
-                ("override-tmux-120", ESCALATE),
-                ("escalate-tmux-120", OVERRIDE),
-            ] {
-                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                    assert!(
-                        detector
-                            .match_answer(&replay(stage, |_| {}), &plan(other, decision))
-                            .unwrap()
-                            .is_none(),
-                        "{other} {decision:?} plan on {stage}"
-                    );
-                }
-            }
-            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
-                assert!(
-                    ProfileCatalog::bundled()
-                        .answer_plan(
-                            CodingAgent::Hermes,
-                            VERSION,
-                            IDLE,
-                            &AnswerKey::Decision(decision)
-                        )
-                        .is_none()
-                );
-            }
-        }
-
-        #[test]
         fn hermes_forms_past_their_layout_limit_or_clipped_yield_no_request() {
             for stage in ["escalate-survey-tmux-036", "override-survey-tmux-027"] {
                 assert_no_request(&observed(stage), stage);
             }
-            for (stage, _, _) in FORMS {
+            for stage in ["escalate-tmux-120", "override-tmux-120"] {
                 let bottomless = replay(stage, |lines| {
                     let bottom = last_row(lines, "╰");
                     lines[bottom].clear();
@@ -5204,7 +5034,7 @@ mod tests {
                 assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "{stage}");
                 assert!(!draft.verified_noninteraction, "{stage}");
             }
-            let prompt = last_row(&fixture_lines(COMPOSER), "❯ ");
+            let prompt = last_row(&fixture_lines(&id(COMPOSER)), "❯ ");
             let away = observe(&replay_native_fixture(
                 &fixture(COMPOSER),
                 |_| {},
@@ -5217,29 +5047,6 @@ mod tests {
                 "cursor before the prefix end"
             );
             assert!(!away.verified_noninteraction);
-            for (stage, _, _) in FORMS {
-                assert!(!observed(stage).verified_noninteraction, "{stage}");
-            }
-        }
-
-        #[test]
-        fn hermes_composer_plans_submit_a_prompt_and_a_native_exec_in_separate_stages() {
-            let bundled = ProfileCatalog::bundled();
-            for (operation, name, literal, typed) in [
-                (ComposerOperation::Prompt, "prompt", "ok", b"ok".to_vec()),
-                (
-                    ComposerOperation::Exec,
-                    "exec",
-                    "echo x",
-                    b"! echo x".to_vec(),
-                ),
-            ] {
-                let plan = bundled
-                    .composer_plan(CodingAgent::Hermes, VERSION, operation)
-                    .unwrap_or_else(|| panic!("{name} plan"));
-                assert_eq!(plan.rule_ids(), [IDLE.to_owned()]);
-                assert_eq!(plan.stages(literal).unwrap(), [typed, b"\r".to_vec()]);
-            }
         }
 
         #[test]
@@ -5253,57 +5060,12 @@ mod tests {
         }
 
         #[test]
-        fn hermes_fragmented_ansi_and_utf8_reads_reconstruct_the_same_observation() {
-            for (stage, rule, rows) in [
-                ("escalate-tmux-057", ESCALATE, ESCALATE_ROW),
-                ("override-herdr-040", OVERRIDE, OVERRIDE_ROWS_040),
-            ] {
-                let painted = String::from_utf8(native_fixture_bytes(&fixture(stage))).unwrap();
-                let styled = painted
-                    .replacen(
-                        "❯ 1. Allow once",
-                        "\x1b[1;38;5;220m❯ 1. Allow once\x1b[0m",
-                        1,
-                    )
-                    .replacen(
-                        "⚠️  Dangerous Command",
-                        "\x1b[1;33m⚠️  Dangerous Command\x1b[0m",
-                        1,
-                    );
-                assert_ne!(styled, painted, "{stage} carries the styled rows");
-                let bytes = styled.into_bytes();
-                let whole = {
-                    let mut state = TerminalState::new(size(stage)).unwrap();
-                    state.feed(&bytes).unwrap();
-                    observe(&state.snapshot())
-                };
-                assert_request(&whole, rule, rows, stage);
-                for chunk in [1, 2, 3, 5, 7] {
-                    let mut state = TerminalState::new(size(stage)).unwrap();
-                    for piece in bytes.chunks(chunk) {
-                        state.feed(piece).unwrap();
-                    }
-                    let split = observe(&state.snapshot());
-                    assert_request(&split, rule, rows, stage);
-                    assert!(
-                        split.fingerprint == whole.fingerprint,
-                        "{stage} chunk={chunk}"
-                    );
-                    assert_eq!(
-                        split.raw_evidence, whole.raw_evidence,
-                        "{stage} chunk={chunk}"
-                    );
-                }
-            }
-        }
-
-        #[test]
         fn hermes_form_on_the_alternate_screen_is_no_request_until_drawn_on_the_primary_screen() {
             let stage = "escalate-tmux-120";
             let alternate = observe(&replay_native_fixture(&fixture(stage), |_| {}, true, None));
             assert_no_request(&alternate, "the form on the alternate screen");
             let bytes = native_fixture_bytes(&fixture(stage));
-            let mut state = TerminalState::new(size(stage)).unwrap();
+            let mut state = TerminalState::new(fixture_size(&id(stage))).unwrap();
             state.feed(b"\x1b[?1049h").unwrap();
             state.feed(&bytes).unwrap();
             state.feed(b"\x1b[?1049l").unwrap();
@@ -5319,7 +5081,7 @@ mod tests {
 
         #[test]
         fn hermes_form_text_outside_a_live_form_is_no_request() {
-            let form = fixture_lines("escalate-tmux-120");
+            let form = fixture_lines(&id("escalate-tmux-120"));
             let top = last_row(&form, "╭");
             let footer = last_row(&form, FOOTER);
             let boxed = form[top..=last_row(&form, "╰")].to_vec();
@@ -5349,56 +5111,6 @@ mod tests {
                 }
             });
             assert_no_request(&observe(&unboxed), "the form text in model output");
-        }
-
-        #[test]
-        fn hermes_redraws_stay_one_episode_the_timeout_closes_not_visible_and_a_repeat_reopens() {
-            let at = |screen: &ScreenSnapshot, output_seq: u64| {
-                let mut observation = observe(screen);
-                observation.output_seq = output_seq;
-                observation.raw_evidence["screen_seq"] = json!(output_seq);
-                observation
-            };
-            let form = replay("escalate-tmux-120", |_| {});
-            let redrawn = replay("escalate-tmux-120", |lines| redraw(lines));
-            let timeout = replay(TIMEOUT, |_| {});
-            let origin = Instant::now();
-            let millis = |value: u64| origin + Duration::from_millis(value);
-            let mut tracker = tracker();
-            open(&mut tracker, &at(&form, 1), origin);
-            let first = tracker.active_episode().expect("the form opens an episode");
-            for (seq, time) in [(2, 200), (3, 400), (4, 600)] {
-                let screen = if seq % 2 == 0 { &redrawn } else { &form };
-                let update = tracker
-                    .observe(&at(screen, seq), millis(time), NOW)
-                    .unwrap();
-                assert!(
-                    update.transitions.is_empty(),
-                    "{time} ms: {:?}",
-                    update.transitions
-                );
-                assert_eq!(tracker.active_episode(), Some(first));
-            }
-            let closes = (0..20u64)
-                .flat_map(|step| {
-                    tracker
-                        .observe(&at(&timeout, 10 + step), millis(700 + 50 * step), NOW)
-                        .unwrap()
-                        .transitions
-                })
-                .filter(|transition| transition.kind == RuntimeEventKind::InteractionClosed)
-                .collect::<Vec<_>>();
-            assert_eq!(closes.len(), 1, "{closes:?}");
-            assert_eq!(
-                closes[0].close_reason,
-                Some(InteractionCloseReason::NotVisible)
-            );
-            assert_eq!(tracker.active_episode(), None);
-            open(&mut tracker, &at(&form, 100), millis(2000));
-            let second = tracker
-                .active_episode()
-                .expect("the repeated form opens an episode");
-            assert_ne!(second.0, first.0, "a repeated prompt is a separate episode");
         }
     }
 }

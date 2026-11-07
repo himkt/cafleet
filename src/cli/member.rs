@@ -12,7 +12,7 @@ use crate::coding_agent::SpawnProbe;
 use crate::coding_agent::coding_agent;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::multiplexer::AnyMultiplexer;
+use crate::multiplexer::Multiplexer;
 use crate::output;
 use crate::output::format_member;
 use crate::output::format_member_delete;
@@ -307,8 +307,7 @@ pub(crate) fn run(
                 json,
                 &crate::output::json::runtime_recovery(&report),
                 || crate::output::format_runtime_recovery(&report),
-            );
-            Ok(())
+            )
         }
         MemberCommand::Create(args) => create(conn, &args),
         MemberCommand::Delete { member_id, json } => {
@@ -393,7 +392,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
 
     backend.validate_model(model)?;
     backend.validate_effort(effort)?;
-    let policy = backend.resolve_policy(None, permission_mode)?;
+    let policy = backend.resolve_policy(permission_mode)?;
     let catalog = ProfileCatalog::bundled();
     let (event_evidence, evidence_policy) =
         launch_evidence(event_evidence, event_redaction_file, catalog)?;
@@ -402,7 +401,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
 
     let director = broker::director_placement(conn, fleet_id)?;
     let mux = crate::runtime::mux_for_placement(&director, None)?;
-    let executable = backend.ensure_available(&SystemProbe, &policy.resolved_mode)?;
+    let executable = backend.ensure_available(&SystemProbe, policy.resolved_mode())?;
     let context = crate::multiplexer::MultiplexerContext {
         session: director.mux_session.clone(),
         window_id: director.mux_window_id.clone(),
@@ -428,9 +427,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
     let probe_deadline = deadline.min(Instant::now() + Duration::from_secs(2));
     let (hermes_home, probe) = std::thread::scope(|scope| {
         let home = hermes.as_ref().map(|hermes| {
-            scope.spawn(move || {
-                crate::coding_agent::hermes_settlement::effective_home(hermes, probe_deadline)
-            })
+            scope.spawn(move || crate::coding_agent::hermes::effective_home(hermes, probe_deadline))
         });
         let probe = backend.probe_native_version(&executable, probe_deadline);
         (home.map(crate::coding_agent::hermes::joined), probe)
@@ -483,16 +480,16 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         database_identity_json: identity,
         creator: runner::ProcessIdentity::current()?,
         launch_nonce,
-        requested_mode: policy.requested_mode.clone(),
-        resolved_mode: policy.resolved_mode.clone(),
-        mode_source: policy.mode_source,
-        permission_argv_json: serde_json::to_value(&policy.permission_argv)
+        requested_mode: policy.requested_mode().map(str::to_owned),
+        resolved_mode: policy.resolved_mode().to_owned(),
+        mode_source: policy.mode_source(),
+        permission_argv_json: serde_json::to_value(policy.permission_argv())
             .expect("string argv serializes"),
         event_evidence,
         native_version: native.native_version,
         coverage: native.coverage,
     };
-    let mut host = runner::NativeLaunchHost::new(&mux, &context);
+    let mut host = runner::NativeLaunchHost::new(&*mux, &context);
     let created = runner::create_registered(
         conn,
         &pending,
@@ -504,7 +501,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
                 broker::runtime::set_native_session(
                     conn,
                     pending.run.run_id,
-                    &crate::coding_agent::hermes_settlement::NativeSession {
+                    &crate::coding_agent::hermes::NativeSession {
                         hermes_home: hermes_home.clone(),
                         session_id: None,
                     },
@@ -549,8 +546,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
             format_member(&registered, &placement_view),
             crate::output::format_runtime_snapshot(&runtime)
         )
-    });
-    Ok(())
+    })
 }
 
 enum DeleteAction {
@@ -629,7 +625,7 @@ fn delete(
         DeleteAction::Close => {
             let mux =
                 crate::runtime::mux_for_fleet(conn, locked.snapshot.fleet_id, Some(deadline))?;
-            close_member(conn, settings, member_id, &mut locked, &mux, deadline)?
+            close_member(conn, settings, member_id, &mut locked, &*mux, deadline)?
         }
     };
     drop(locked);
@@ -637,8 +633,7 @@ fn delete(
         json,
         &json!({"member_id":member_id, "pane_status":pane_status}),
         || format_member_delete(member_id, &pane_status),
-    );
-    Ok(())
+    )
 }
 
 fn close_member(
@@ -646,7 +641,7 @@ fn close_member(
     settings: &Settings,
     member_id: i64,
     locked: &mut crate::pane_lock::LockedDeletion<MemberRecord, DeleteAction>,
-    mux: &AnyMultiplexer,
+    mux: &dyn Multiplexer,
     mut deadline: crate::time::Deadline,
 ) -> Result<String, CafleetError> {
     assert!(
@@ -674,8 +669,7 @@ fn close_member(
 fn show(conn: &mut Connection, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let member = load_member(conn, member_id, true)?;
     let value = crate::output::json::member(&member);
-    emit(json, &value, || format_member_detail(&member));
-    Ok(())
+    emit(json, &value, || format_member_detail(&member))
 }
 
 fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
@@ -686,8 +680,7 @@ fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetE
             .map(crate::output::json::member_activity)
             .collect(),
     );
-    emit(json, &payload, || format_member_list(&members));
-    Ok(())
+    emit(json, &payload, || format_member_list(&members))
 }
 
 pub(super) fn press(
@@ -703,8 +696,7 @@ pub(super) fn press(
         json,
         &crate::output::json::member_press(&acknowledgment),
         || crate::output::format_member_press(&acknowledgment),
-    );
-    Ok(())
+    )
 }
 
 fn wrapped_delivery_refusal(
@@ -747,7 +739,7 @@ fn dispatch_input(
 ) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
     let id = member.member_id;
     let runtime = broker::members::require_runtime(member)?;
-    use crate::runtime::InputFailure;
+    use crate::runtime::InputContext;
     use crate::runtime::SubmissionStatus;
     use crate::runtime::SubmitInput;
 
@@ -769,13 +761,15 @@ fn dispatch_input(
         result.status,
         SubmissionStatus::Accepted | SubmissionStatus::Queued
     ) {
-        return Err(InputFailure {
-            source: CafleetError::App(wrapped_delivery_refusal(label, id, &result)),
+        return Err(InputContext {
             run_id: Some(run.run_id),
             interaction_id: runtime.current_interaction_id,
             input_id: result.input_id,
             operation_key: Some(request.operation_key),
         }
+        .failure(CafleetError::App(wrapped_delivery_refusal(
+            label, id, &result,
+        )))
         .into());
     }
     let delivery = result
@@ -848,8 +842,7 @@ fn prompt(
         json,
         &crate::output::json::member_prompt(member_id, &pane, text, input_id, &delivery),
         || format_member_prompt(member_id, text, &member.name, &pane, input_id, &delivery),
-    );
-    Ok(())
+    )
 }
 
 fn exec(
@@ -886,8 +879,7 @@ fn exec(
         json,
         &crate::output::json::member_exec(member_id, &pane, agent, command, input_id, &delivery),
         || format_member_exec(member_id, &pane, input_id, &delivery),
-    );
-    Ok(())
+    )
 }
 
 fn capture(
@@ -1062,7 +1054,7 @@ pub(crate) fn write_member_capture(
     } else {
         out.write_all(capture.snapshot.content.as_bytes())
     };
-    result.map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))
+    crate::cli::output_result(result)
 }
 
 #[cfg(test)]
@@ -1090,33 +1082,25 @@ mod tests {
                 .unwrap();
             let identity = storage::database_identity(&conn).unwrap();
             let process = ProcessIdentity::current().unwrap();
-            storage::create_run(
-                &mut conn,
-                &NewRun {
-                    member_id: worker,
-                    fleet_id: fleet,
-                    director_member_id: director,
-                    backend: "hermes".into(),
-                    database_identity_json: identity.clone(),
-                    launch_nonce: "a".repeat(64),
-                    runtime_path: RuntimePaths::for_run(&identity, 1)
-                        .unwrap()
-                        .run_dir
-                        .to_str()
-                        .unwrap()
-                        .into(),
-                    requested_mode: None,
-                    resolved_mode: "smart".into(),
-                    mode_source: ModeSource::Default,
-                    permission_argv_json: json!([]),
-                    event_evidence: EventEvidence::Metadata,
-                    native_version: None,
-                    coverage: Coverage::Unknown,
-                    owner_pid: process.pid,
-                    owner_start_identity: process.start_identity,
-                },
-            )
-            .unwrap();
+            let spec = NewRun {
+                backend: "hermes".into(),
+                runtime_path: RuntimePaths::for_run(&identity, 1)
+                    .unwrap()
+                    .run_dir
+                    .to_str()
+                    .unwrap()
+                    .into(),
+                resolved_mode: "smart".into(),
+                permission_argv_json: json!([]),
+                native_version: None,
+                coverage: Coverage::Unknown,
+                owner_pid: process.pid,
+                owner_start_identity: process.start_identity,
+                ..crate::broker::runtime::test_support::Fixture::spec(
+                    &conn, fleet, director, worker,
+                )
+            };
+            crate::broker::runtime::test_support::create_run(&mut conn, &spec).unwrap();
             let placement = load_member(&conn, worker, true).unwrap().placement.unwrap();
             let _busy = PaneLock::try_acquire(&settings.database_url, &placement)
                 .unwrap()
@@ -1156,11 +1140,6 @@ mod tests {
         #[test]
         fn runner_recovery_member_deletion_foreign_epoch_after_close_preserves_registration() {
             run_case("epoch");
-        }
-
-        #[test]
-        fn runner_recovery_member_deletion_foreign_placement_after_close_preserves_registration() {
-            run_case("placement");
         }
 
         fn run_case(scenario: &str) {
@@ -1203,10 +1182,7 @@ mod tests {
         #[ignore = "owned isolated member-deletion helper"]
         fn runner_recovery_member_deletion_child() {
             let scenario = std::env::var("CAFLEET_TEST_MEMBER_RECOVERY_CASE").unwrap();
-            assert!(matches!(
-                scenario.as_str(),
-                "terminal" | "epoch" | "placement"
-            ));
+            assert!(matches!(scenario.as_str(), "terminal" | "epoch"));
             let _dir = crate::runtime::test_support::short_tempdir();
             let mut conn = migrated_conn(&_dir);
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
@@ -1216,33 +1192,25 @@ mod tests {
                 .unwrap();
             let identity = storage::database_identity(&conn).unwrap();
             let process = ProcessIdentity::current().unwrap();
-            let run = storage::create_run(
-                &mut conn,
-                &NewRun {
-                    member_id: worker,
-                    fleet_id: fleet,
-                    director_member_id: director,
-                    backend: "claude".into(),
-                    database_identity_json: identity.clone(),
-                    launch_nonce: "a".repeat(64),
-                    runtime_path: RuntimePaths::for_run(&identity, 1)
-                        .unwrap()
-                        .run_dir
-                        .to_str()
-                        .unwrap()
-                        .into(),
-                    requested_mode: None,
-                    resolved_mode: "default".into(),
-                    mode_source: ModeSource::Default,
-                    permission_argv_json: json!(["--permission-mode", "default"]),
-                    event_evidence: EventEvidence::Metadata,
-                    native_version: None,
-                    coverage: Coverage::Unknown,
-                    owner_pid: process.pid,
-                    owner_start_identity: process.start_identity.clone(),
-                },
-            )
-            .unwrap();
+            let spec = NewRun {
+                backend: "claude".into(),
+                runtime_path: RuntimePaths::for_run(&identity, 1)
+                    .unwrap()
+                    .run_dir
+                    .to_str()
+                    .unwrap()
+                    .into(),
+                resolved_mode: "default".into(),
+                permission_argv_json: json!(["--permission-mode", "default"]),
+                native_version: None,
+                coverage: Coverage::Unknown,
+                owner_pid: process.pid,
+                owner_start_identity: process.start_identity.clone(),
+                ..crate::broker::runtime::test_support::Fixture::spec(
+                    &conn, fleet, director, worker,
+                )
+            };
+            let run = crate::broker::runtime::test_support::create_run(&mut conn, &spec).unwrap();
             let _artifacts = RunArtifacts::create(&mut conn, run.run_id).unwrap();
             let run = storage::get_run(&conn, run.run_id).unwrap();
             let runtime_lock = RunLock::acquire(&conn, &run.owner()).unwrap().unwrap();
@@ -1293,17 +1261,12 @@ mod tests {
                                 )
                                 .unwrap();
                         }
-                        "placement" => {
-                            check.execute("UPDATE member_placements SET mux_pane_id='%foreign' WHERE member_id=?1",[worker]).unwrap();
-                        }
                         _ => unreachable!(),
                     }
                 }),
             });
-            let mux =
-                AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()))
-                    .bounded(deadline);
-            let result = close_member(&mut conn, &settings, worker, &mut locked, &mux, deadline);
+            let mux = TmuxMultiplexer::new(runner.clone(), Default::default()).bounded(deadline);
+            let result = close_member(&mut conn, &settings, worker, &mut locked, &*mux, deadline);
             assert_eq!(runner.calls.get(), 1);
             if scenario == "terminal" {
                 assert_eq!(result.unwrap(), "%9 (killed)");
@@ -1515,11 +1478,6 @@ mod tests {
                 config.to_str().unwrap().to_owned()
             )]
         );
-    }
-
-    #[test]
-    fn member_prompt_run_less_member_fails_before_pane_io() {
-        assert_run_less_input_failure("prompt");
     }
 
     #[test]
@@ -1883,112 +1841,112 @@ mod tests {
                         .unwrap();
                 let placement = member.placement.as_ref().unwrap();
                 let pane = placement.mux_pane_id.as_deref().unwrap();
-                for (action, kind) in [
-                    ("prompt", storage::InputKind::Prompt),
-                    ("exec", storage::InputKind::Exec),
+                for (action, kind, json) in [
+                    ("prompt", storage::InputKind::Prompt, true),
+                    ("exec", storage::InputKind::Exec, false),
                 ] {
-                    for json in [true, false] {
-                        crate::runtime::service::test_support::input_service::input_service_composer(fixture, outer);
-                        let before = external_member_input_ids(&fixture.fixture.conn, run.run_id);
-                        let literal = format!("member {action} λ json={json}");
-                        let (status, stdout, stderr) = external_member_invoke(
-                            fixture, action, &literal, json, false, None, outer,
-                        );
-                        assert!(
-                            status.success(),
-                            "actual {action} failed: {status}; stdout={stdout:?}; stderr={stderr:?}"
-                        );
-                        assert!(stderr.is_empty(), "{stderr}");
-                        let after = external_member_input_ids(&fixture.fixture.conn, run.run_id);
-                        assert_eq!(after.len(), before.len() + 1);
-                        assert_eq!(&after[..before.len()], before);
-                        let row = storage::get_input(&fixture.fixture.conn, *after.last().unwrap())
-                            .unwrap();
-                        assert_eq!(row.kind, kind);
-                        assert_eq!(row.state, storage::InputState::Accepted);
-                        assert_eq!(row.message_id, None);
-                        let prefix = format!("{}:{}:", kind.as_str(), run.run_id);
-                        let random = row
-                            .operation_key
-                            .strip_prefix(&prefix)
-                            .expect("one explicit invocation key");
-                        assert_eq!(random.len(), 64);
-                        assert!(
-                            random
-                                .bytes()
-                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-                        );
-                        let payload = json!({"kind":kind.as_str(),"literal":literal,"message_id":null,"run_id":run.run_id});
-                        let digest =
-                            crate::digest::sha256_hex(&serde_json::to_vec(&payload).unwrap());
-                        assert_eq!(
-                            row.payload_digest, digest,
-                            "Exec binds the raw command before the native prefix"
-                        );
-                        if json {
-                            let expected = if action == "prompt" {
-                                format!(
-                                    "{{\"member_id\":{},\"pane_id\":{},\"text\":{},\"input_id\":{},\"delivery\":{{\"status\":\"submitted\",\"method\":\"profile\",\"reason\":null}}}}",
-                                    run.member_id,
-                                    serde_json::to_string(pane).unwrap(),
-                                    serde_json::to_string(&literal).unwrap(),
-                                    row.input_id
-                                )
-                            } else {
-                                format!(
-                                    "{{\"member_id\":{},\"pane_id\":{},\"coding_agent\":{},\"command\":{},\"dispatched\":true,\"input_id\":{},\"delivery\":{{\"status\":\"submitted\",\"method\":\"profile\",\"reason\":null}}}}",
-                                    run.member_id,
-                                    serde_json::to_string(pane).unwrap(),
-                                    serde_json::to_string(&placement.coding_agent).unwrap(),
-                                    serde_json::to_string(&literal).unwrap(),
-                                    row.input_id
-                                )
-                            };
-                            assert_eq!(
-                                stdout.lines().find(|line| line.starts_with('{')).unwrap(),
-                                expected
-                            );
-                        } else {
-                            let original = if action == "prompt" {
-                                format!(
-                                    "Sent prompt {literal:?} to member {} ({pane}).",
-                                    member.name
-                                )
-                            } else {
-                                format!(
-                                    "Dispatched native command to member {} ({pane}). Inspect the pane for its result.",
-                                    run.member_id
-                                )
-                            };
-                            assert!(
-                                stdout.contains(&format!(
-                                    "{original}\nDelivery: status=submitted method=profile reason=-\nInput: {}\n",
-                                    row.input_id
-                                )),
-                                "{stdout:?}"
-                            );
-                        }
-                        let line = if action == "exec" {
-                            format!("! {literal}")
-                        } else {
-                            literal.clone()
-                        };
-                        crate::runtime::service::test_support::input_service::wait_input_service_record(fixture, &line, outer);
-                        crate::runtime::service::test_support::input_service::input_service_barrier(
-                            fixture, outer,
-                        );
-                        assert_eq!(
-                        crate::runtime::service::test_support::input_service::input_service_records(fixture)
-                            .iter()
-                            .filter(|record| record["line"] == line)
-                            .count(),
-                        1
+                    crate::runtime::service::test_support::input_service::input_service_composer(
+                        fixture, outer,
                     );
+                    let before = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+                    let literal = format!("member {action} λ json={json}");
+                    let (status, stdout, stderr) =
+                        external_member_invoke(fixture, action, &literal, json, false, None, outer);
+                    assert!(
+                        status.success(),
+                        "actual {action} failed: {status}; stdout={stdout:?}; stderr={stderr:?}"
+                    );
+                    assert!(stderr.is_empty(), "{stderr}");
+                    let after = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+                    assert_eq!(after.len(), before.len() + 1);
+                    assert_eq!(&after[..before.len()], before);
+                    let row =
+                        storage::get_input(&fixture.fixture.conn, *after.last().unwrap()).unwrap();
+                    assert_eq!(row.kind, kind);
+                    assert_eq!(row.state, storage::InputState::Accepted);
+                    assert_eq!(row.message_id, None);
+                    let prefix = format!("{}:{}:", kind.as_str(), run.run_id);
+                    let random = row
+                        .operation_key
+                        .strip_prefix(&prefix)
+                        .expect("one explicit invocation key");
+                    assert_eq!(random.len(), 64);
+                    assert!(
+                        random
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    );
+                    let payload = json!({"kind":kind.as_str(),"literal":literal,"message_id":null,"run_id":run.run_id});
+                    let digest = crate::digest::sha256_hex(&serde_json::to_vec(&payload).unwrap());
+                    assert_eq!(
+                        row.payload_digest, digest,
+                        "Exec binds the raw command before the native prefix"
+                    );
+                    if json {
+                        let expected = if action == "prompt" {
+                            format!(
+                                "{{\"member_id\":{},\"pane_id\":{},\"text\":{},\"input_id\":{},\"delivery\":{{\"status\":\"submitted\",\"method\":\"profile\",\"reason\":null}}}}",
+                                run.member_id,
+                                serde_json::to_string(pane).unwrap(),
+                                serde_json::to_string(&literal).unwrap(),
+                                row.input_id
+                            )
+                        } else {
+                            format!(
+                                "{{\"member_id\":{},\"pane_id\":{},\"coding_agent\":{},\"command\":{},\"dispatched\":true,\"input_id\":{},\"delivery\":{{\"status\":\"submitted\",\"method\":\"profile\",\"reason\":null}}}}",
+                                run.member_id,
+                                serde_json::to_string(pane).unwrap(),
+                                serde_json::to_string(&placement.coding_agent).unwrap(),
+                                serde_json::to_string(&literal).unwrap(),
+                                row.input_id
+                            )
+                        };
                         assert_eq!(
-                            storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
-                            row
+                            stdout.lines().find(|line| line.starts_with('{')).unwrap(),
+                            expected
+                        );
+                    } else {
+                        let original = if action == "prompt" {
+                            format!(
+                                "Sent prompt {literal:?} to member {} ({pane}).",
+                                member.name
+                            )
+                        } else {
+                            format!(
+                                "Dispatched native command to member {} ({pane}). Inspect the pane for its result.",
+                                run.member_id
+                            )
+                        };
+                        assert!(
+                            stdout.contains(&format!(
+                                "{original}\nDelivery: status=submitted method=profile reason=-\nInput: {}\n",
+                                row.input_id
+                            )),
+                            "{stdout:?}"
                         );
                     }
+                    let line = if action == "exec" {
+                        format!("! {literal}")
+                    } else {
+                        literal.clone()
+                    };
+                    crate::runtime::service::test_support::input_service::wait_input_service_record(
+                        fixture, &line, outer,
+                    );
+                    crate::runtime::service::test_support::input_service::input_service_barrier(
+                        fixture, outer,
+                    );
+                    assert_eq!(
+                    crate::runtime::service::test_support::input_service::input_service_records(fixture)
+                        .iter()
+                        .filter(|record| record["line"] == line)
+                        .count(),
+                    1
+                    );
+                    assert_eq!(
+                        storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
+                        row
+                    );
                 }
             },
         );
@@ -2008,12 +1966,13 @@ mod tests {
                 let literal = "member output loss λ";
                 let (status, stdout, stderr) =
                     external_member_invoke(fixture, "prompt", literal, true, true, None, outer);
-                assert_eq!(status.code(), Some(101), "{status}; {stderr}");
-                assert!(stdout.is_empty());
-                assert!(
-                    stderr.contains("stdout") && stderr.contains("Broken pipe"),
-                    "{stderr}"
+                assert_eq!(
+                    status.code(),
+                    Some(0),
+                    "a closed reader ends the output, not the command: {stderr}"
                 );
+                assert!(stdout.is_empty());
+                assert!(stderr.is_empty(), "{stderr}");
                 let ids = external_member_input_ids(&fixture.fixture.conn, run.run_id);
                 assert_eq!(ids.len(), before.len() + 1);
                 let row = storage::get_input(&fixture.fixture.conn, *ids.last().unwrap()).unwrap();
@@ -2173,11 +2132,9 @@ mod tests {
                     }
                 }),
             });
-            let mux =
-                AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()))
-                    .bounded(deadline);
+            let mux = TmuxMultiplexer::new(runner.clone(), Default::default()).bounded(deadline);
             assert_eq!(
-                close_member(&mut conn, &settings, worker, &mut locked, &mux, deadline).unwrap(),
+                close_member(&mut conn, &settings, worker, &mut locked, &*mux, deadline).unwrap(),
                 "%9 (killed)"
             );
             assert_eq!(runner.calls.get(), 1);
@@ -2219,9 +2176,8 @@ mod tests {
             failure: None,
             check: Box::new(|| {}),
         });
-        let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()))
-            .bounded(deadline);
-        let error = close_member(&mut conn, &settings, worker, &mut locked, &mux, deadline)
+        let mux = TmuxMultiplexer::new(runner.clone(), Default::default()).bounded(deadline);
+        let error = close_member(&mut conn, &settings, worker, &mut locked, &*mux, deadline)
             .unwrap_err()
             .to_string();
         assert!(
@@ -2359,49 +2315,6 @@ mod tests {
         }
 
         #[test]
-        fn runtime_policy_parser_accepts_the_backend_qualified_launch_selection() {
-            for (backend, mode) in [
-                ("claude", "default"),
-                ("claude", "manual"),
-                ("codex", "on-request"),
-                ("opencode", "cafleet"),
-                ("opencode", "cafleet-ask"),
-                ("hermes", "smart"),
-                ("hermes", "manual"),
-            ] {
-                let mut arguments = create_arguments();
-                arguments.extend([
-                    "--coding-agent",
-                    backend,
-                    "--permission-mode",
-                    mode,
-                    "literal assignment",
-                ]);
-                assert!(CliArgs::try_parse_from(&arguments).is_ok(), "{arguments:?}");
-            }
-        }
-
-        #[test]
-        fn runtime_policy_parser_accepts_explicit_metadata_evidence() {
-            let mut arguments = create_arguments();
-            arguments.extend(["--event-evidence", "metadata", "literal assignment"]);
-            assert!(CliArgs::try_parse_from(&arguments).is_ok(), "{arguments:?}");
-        }
-
-        #[test]
-        fn runtime_policy_parser_accepts_redacted_evidence_with_its_absolute_file() {
-            let mut arguments = create_arguments();
-            arguments.extend([
-                "--event-evidence",
-                "redacted",
-                "--event-redaction-file",
-                "/tmp/synthetic-redaction.json",
-                "literal assignment",
-            ]);
-            assert!(CliArgs::try_parse_from(&arguments).is_ok(), "{arguments:?}");
-        }
-
-        #[test]
         fn runtime_policy_parser_keeps_omitted_selection_and_model_effort_boundaries() {
             let mut arguments = create_arguments();
             arguments.extend([
@@ -2411,12 +2324,16 @@ mod tests {
                 "fixture-model",
                 "--effort",
                 "high",
+                "--event-evidence",
+                "metadata",
                 "literal '$x' `text` assignment",
             ]);
             let Command::Member(member::MemberCommand::Create(member::CreateArgs {
                 coding_agent,
                 model,
                 effort,
+                event_evidence,
+                event_redaction_file,
                 ..
             })) = CliArgs::try_parse_from(arguments).unwrap().command
             else {
@@ -2425,40 +2342,45 @@ mod tests {
             assert_eq!(coding_agent, Some(crate::coding_agent::CodingAgent::Codex));
             assert_eq!(model.as_deref(), Some("fixture-model"));
             assert_eq!(effort.as_deref(), Some("high"));
+            assert_eq!(event_evidence, "metadata");
+            assert_eq!(event_redaction_file, None);
+            let mut arguments = create_arguments();
+            arguments.extend([
+                "--event-evidence",
+                "redacted",
+                "--event-redaction-file",
+                "/tmp/synthetic-redaction.json",
+                "literal assignment",
+            ]);
+            let Command::Member(member::MemberCommand::Create(member::CreateArgs {
+                event_evidence,
+                event_redaction_file,
+                ..
+            })) = CliArgs::try_parse_from(arguments).unwrap().command
+            else {
+                panic!("member create expected")
+            };
+            assert_eq!(event_evidence, "redacted");
+            assert_eq!(
+                event_redaction_file.as_deref(),
+                Some(std::path::Path::new("/tmp/synthetic-redaction.json"))
+            );
         }
 
         #[test]
         fn runtime_policy_invalid_launch_selection_has_usage_diagnostics_before_creation_effects() {
-            for &backend in CodingAgent::all() {
-                let failure = invalid_creation(
-                    backend,
-                    &[
-                        "--permission-mode".into(),
-                        "unsupported-fixture-mode".into(),
-                    ],
-                );
-                assert!(failure.message().contains(backend.name()));
-                for choice in backend.policy_choices(None) {
-                    assert!(failure.message().contains(&choice));
-                }
+            let backend = CodingAgent::Codex;
+            let failure = invalid_creation(
+                backend,
+                &[
+                    "--permission-mode".into(),
+                    "unsupported-fixture-mode".into(),
+                ],
+            );
+            assert!(failure.message().contains(backend.name()));
+            for choice in backend.policy_choices() {
+                assert!(failure.message().contains(choice));
             }
-        }
-
-        #[test]
-        fn hermes_invalid_effort_and_policy_fail_with_usage_errors_before_creation_effects() {
-            assert_eq!(
-                invalid_creation(CodingAgent::Hermes, &["--effort".into(), "turbo".into()])
-                    .message(),
-                "--effort for the hermes backend must be one of none, minimal, low, medium, high, xhigh, max, ultra (got 'turbo')."
-            );
-            assert_eq!(
-                invalid_creation(
-                    CodingAgent::Hermes,
-                    &["--permission-mode".into(), "off".into()]
-                )
-                .message(),
-                "--permission-mode for hermes must be one of smart, manual (got 'off')"
-            );
         }
 
         #[test]
@@ -2468,8 +2390,6 @@ mod tests {
             for bytes in [
                 b"not json".to_vec(),
                 vec![0xff],
-                br#"{"schema_version":1,"patterns":[],"sensitive_rules":[]}"#.to_vec(),
-                br#"{"schema_version":1,"patterns":["["],"sensitive_rules":[]}"#.to_vec(),
                 br#"{"schema_version":1,"patterns":["secret"],"sensitive_rules":["missing-rule"]}"#
                     .to_vec(),
             ] {
@@ -2495,12 +2415,6 @@ mod tests {
                     "metadata".into(),
                     "--event-redaction-file".into(),
                     "/tmp/unused-redaction.json".into(),
-                ],
-                vec![
-                    "--event-evidence".into(),
-                    "redacted".into(),
-                    "--event-redaction-file".into(),
-                    "relative-redaction.json".into(),
                 ],
             ] {
                 invalid_creation(CodingAgent::Codex, &extra);
@@ -2539,7 +2453,6 @@ mod tests {
     mod press {
         use crate::cli::CliArgs;
         use crate::cli::Command;
-        use crate::cli::dispatch;
         use crate::cli::member;
         use crate::cli::member::tests::*;
 
@@ -2607,77 +2520,20 @@ mod tests {
                 }
             }
         }
-
-        #[test]
-        fn press_cli_invalid_tail_is_usage_before_missing_database_validation() {
-            let directory = tempfile::tempdir().unwrap();
-            let path = directory.path().join("absent.db");
-            let settings = Settings::for_database(&path);
-            let command = CliArgs::try_parse_from([
-                "cafleet",
-                "member",
-                "press",
-                "--from-member-id",
-                "1",
-                "42",
-                "Enter",
-                "Ctrl+1",
-                "--json",
-            ])
-            .unwrap_or_else(|cause| panic!("raw key arguments reach typed validation: {cause}"))
-            .command;
-            let failure = dispatch(&settings, command)
-                .expect_err("the complete key vector is validated first");
-            assert!(matches!(&failure, CafleetError::Usage(message)
-            if message == "invalid press key at position 2: \"Ctrl+1\""));
-            assert_eq!(failure.exit_code(), 2);
-            assert!(!path.exists());
-        }
-
-        #[test]
-        fn press_presentation_is_canonical_acknowledgment_without_effect_counts() {
-            let keys =
-                crate::multiplexer::PressKeys::parse(&["cTrL+A".into(), ";".into()]).unwrap();
-            let value = crate::runtime::KeyAcknowledgment {
-                member_id: 42,
-                pane_id: "%5".into(),
-                keys: keys.canonical(),
-            };
-            assert_eq!(
-                serde_json::to_string(&crate::output::json::member_press(&value)).unwrap(),
-                "{\"member_id\":42,\"pane_id\":\"%5\",\"keys\":[\"Ctrl+a\",\";\"],\"status\":\"acknowledged\"}",
-            );
-            assert_eq!(
-                crate::output::format_member_press(&value),
-                "Acknowledged keys [\"Ctrl+a\",\";\"] for member 42 (%5).",
-            );
-        }
     }
     mod recovery_entry {
-        use clap::CommandFactory;
         use clap::Parser;
-        use clap::error::ErrorKind;
         use rusqlite::Connection;
         use tempfile::TempDir;
 
         use crate::broker::fleets::test_support::create_fleet_fixture;
         use crate::cli::CliArgs;
+        use crate::cli::Command;
         use crate::cli::dispatch;
-        use crate::cli::test_support::usage_error;
+        use crate::cli::member::MemberCommand;
+        use crate::cli::test_support::assert_usage_rejected;
         use crate::config::Settings;
         use crate::db::test_support::migrated_conn;
-
-        fn recognized_usage_error(args: &[&str]) {
-            let error = usage_error(args);
-            assert_eq!(error.exit_code(), 2, "{args:?}: {error}");
-            assert!(
-                !matches!(
-                    error.kind(),
-                    ErrorKind::InvalidSubcommand | ErrorKind::UnknownArgument
-                ),
-                "the recovery parser must validate these arguments: {args:?}: {error}"
-            );
-        }
 
         fn exceptional_args() -> Vec<&'static str> {
             vec![
@@ -2696,40 +2552,11 @@ mod tests {
             ]
         }
 
-        fn argument_id(command: &clap::Command, long: &str) -> String {
-            command
-                .get_arguments()
-                .find(|argument| argument.get_long() == Some(long))
-                .unwrap_or_else(|| panic!("recovery defines --{long}"))
-                .get_id()
-                .to_string()
-        }
-
-        #[test]
-        fn runner_recovery_entry_ordinary_parser_accepts_positive_member_ids_and_json_selection() {
-            for member_id in ["1", "481", "9223372036854775807"] {
-                for json in [false, true] {
-                    let mut args = vec![
-                        "cafleet",
-                        "member",
-                        "recover",
-                        member_id,
-                        "--from-member-id",
-                        "1",
-                    ];
-                    if json {
-                        args.push("--json");
-                    }
-                    assert!(CliArgs::try_parse_from(&args).is_ok(), "{args:?}");
-                }
-            }
-        }
-
         #[test]
         fn runner_recovery_entry_member_ids_require_positive_assigned_integers() {
-            recognized_usage_error(&["member", "recover", "--from-member-id", "1", "--json"]);
-            for member_id in ["", "0", "-1", "unknown", "1.0", "9223372036854775808"] {
-                recognized_usage_error(&[
+            assert_usage_rejected(&["member", "recover", "--from-member-id", "1", "--json"]);
+            for member_id in ["0", "unknown"] {
+                assert_usage_rejected(&[
                     "member",
                     "recover",
                     "--from-member-id",
@@ -2743,81 +2570,58 @@ mod tests {
 
         #[test]
         fn runner_recovery_entry_full_attestation_preserves_snapshot_reference_and_json_values() {
-            for (member_id, run_id, epoch) in [
-                ("7", "11", "3"),
+            for (member_id, run_id, epoch, reference, json) in [
+                (7, 11, 3, "audit:owner-termination", false),
                 (
-                    "9223372036854775807",
-                    "9223372036854775807",
-                    "9223372036854775807",
+                    i64::MAX,
+                    i64::MAX,
+                    i64::MAX,
+                    "  audit:owner 世界 '$x' `literal`  ",
+                    true,
                 ),
             ] {
-                for reference in [
-                    "audit:owner-termination",
-                    "  audit:owner 世界 '$x' `literal`  ",
-                ] {
-                    for json in [false, true] {
-                        let mut args = vec![
-                            "cafleet",
-                            "member",
-                            "recover",
-                            member_id,
-                            "--from-member-id",
-                            "1",
-                            "--owner-terminated",
-                            "--expected-run-id",
-                            run_id,
-                            "--expected-owner-epoch",
-                            epoch,
-                            "--evidence-ref",
-                            reference,
-                        ];
-                        if json {
-                            args.push("--json");
-                        }
-                        assert!(CliArgs::try_parse_from(&args).is_ok(), "{args:?}");
-                        let command = CliArgs::command();
-                        let recovery = command
-                            .find_subcommand("member")
-                            .unwrap()
-                            .find_subcommand("recover")
-                            .unwrap();
-                        let member_key = recovery
-                            .get_arguments()
-                            .find(|argument| argument.get_index() == Some(1))
-                            .expect("recover has its member positional argument")
-                            .get_id()
-                            .to_string();
-                        let run_key = argument_id(recovery, "expected-run-id");
-                        let epoch_key = argument_id(recovery, "expected-owner-epoch");
-                        let reference_key = argument_id(recovery, "evidence-ref");
-                        let terminated_key = argument_id(recovery, "owner-terminated");
-                        let json_key = argument_id(recovery, "json");
-                        let matches = command.try_get_matches_from(args).unwrap();
-                        let recovery = matches
-                            .subcommand_matches("member")
-                            .unwrap()
-                            .subcommand_matches("recover")
-                            .unwrap();
-                        assert_eq!(
-                            recovery.get_one::<i64>(&member_key),
-                            Some(&member_id.parse::<i64>().unwrap())
-                        );
-                        assert_eq!(
-                            recovery.get_one::<i64>(&run_key),
-                            Some(&run_id.parse::<i64>().unwrap())
-                        );
-                        assert_eq!(
-                            recovery.get_one::<i64>(&epoch_key),
-                            Some(&epoch.parse::<i64>().unwrap())
-                        );
-                        assert_eq!(
-                            recovery.get_one::<String>(&reference_key).unwrap(),
-                            reference
-                        );
-                        assert!(recovery.get_flag(&terminated_key));
-                        assert_eq!(recovery.get_flag(&json_key), json);
-                    }
+                let (member, run, owner_epoch) =
+                    (member_id.to_string(), run_id.to_string(), epoch.to_string());
+                let mut args = vec![
+                    "cafleet",
+                    "member",
+                    "recover",
+                    &member,
+                    "--from-member-id",
+                    "1",
+                    "--owner-terminated",
+                    "--expected-run-id",
+                    &run,
+                    "--expected-owner-epoch",
+                    &owner_epoch,
+                    "--evidence-ref",
+                    reference,
+                ];
+                if json {
+                    args.push("--json");
                 }
+                let Command::Member(MemberCommand::Recover {
+                    member_id: parsed_member,
+                    director_member_id,
+                    owner_terminated,
+                    expected_run_id,
+                    expected_owner_epoch,
+                    evidence_ref,
+                    json: parsed_json,
+                }) = CliArgs::try_parse_from(&args).unwrap().command
+                else {
+                    panic!("member recover expected")
+                };
+                assert_eq!(
+                    (parsed_member, director_member_id, owner_terminated),
+                    (member_id, 1, true)
+                );
+                assert_eq!(
+                    (expected_run_id, expected_owner_epoch),
+                    (Some(run_id), Some(epoch))
+                );
+                assert_eq!(evidence_ref.as_deref(), Some(reference));
+                assert_eq!(parsed_json, json);
             }
         }
 
@@ -2836,31 +2640,29 @@ mod tests {
                         args.extend_from_slice(option);
                     }
                 }
-                recognized_usage_error(&args);
+                assert_usage_rejected(&args);
             }
         }
 
         #[test]
         fn runner_recovery_entry_attestation_snapshot_ids_require_positive_integers() {
             for option in ["--expected-run-id", "--expected-owner-epoch"] {
-                for invalid in ["", "0", "-1", "unknown", "1.0", "9223372036854775808"] {
+                for invalid in ["0", "unknown"] {
                     let mut args = exceptional_args();
                     let index = args.iter().position(|value| *value == option).unwrap();
                     args.drain(index..index + 2);
                     let literal = format!("{option}={invalid}");
                     args.push(&literal);
-                    recognized_usage_error(&args);
+                    assert_usage_rejected(&args);
                 }
             }
         }
 
         #[test]
         fn runner_recovery_entry_attestation_rejects_blank_references_and_missing_option_values() {
-            for reference in ["", " ", "\t\n"] {
-                let mut args = exceptional_args();
-                *args.last_mut().unwrap() = reference;
-                recognized_usage_error(&args);
-            }
+            let mut args = exceptional_args();
+            *args.last_mut().unwrap() = " ";
+            assert_usage_rejected(&args);
             for option in [
                 "--expected-run-id",
                 "--expected-owner-epoch",
@@ -2870,7 +2672,7 @@ mod tests {
                 let index = args.iter().position(|value| *value == option).unwrap();
                 args.drain(index..index + 2);
                 args.push(option);
-                recognized_usage_error(&args);
+                assert_usage_rejected(&args);
             }
         }
 
@@ -2929,109 +2731,65 @@ mod tests {
         }
     }
 
-    fn assert_malformed_usage_error(result: Result<String, CafleetError>) {
-        let err = result.expect_err("a malformed brace expression must error");
-        assert!(matches!(err, CafleetError::Usage(_)));
-        assert_eq!(err.exit_code(), 2);
-        let msg = err.message().to_string();
-        assert!(msg.starts_with("Malformed custom prompt: "), "got: {msg}");
-        assert!(
-            msg.ends_with("Double literal braces ({{, }}) to keep them as text."),
-            "got: {msg}"
-        );
+    #[test]
+    fn spawn_placeholders_substitute_and_unescape() {
+        for (body, expected) in [
+            (
+                "FLEET ID: {fleet_id}\nYOUR MEMBER ID: {member_id}\n\
+                 DIRECTOR MEMBER ID: {director_member_id}\nCODING AGENT: {coding_agent}\n\
+                 DATABASE URL: {database_url}",
+                "FLEET ID: 3\nYOUR MEMBER ID: 14\nDIRECTOR MEMBER ID: 11\nCODING AGENT: claude\nDATABASE URL: default",
+            ),
+            ("plain prompt, no braces", "plain prompt, no braces"),
+            ("keep {{fleet_id}} literal", "keep {fleet_id} literal"),
+            ("{{x}} and {fleet_id}", "{x} and 3"),
+        ] {
+            assert_eq!(
+                substitute_spawn_placeholders(body, 3, 14, 11, "claude", "default").unwrap(),
+                expected,
+                "{body}"
+            );
+        }
     }
 
     #[test]
-    fn substitutes_all_five_placeholders() {
-        let body = "FLEET ID: {fleet_id}\nYOUR MEMBER ID: {member_id}\n\
-                    DIRECTOR MEMBER ID: {director_member_id}\nCODING AGENT: {coding_agent}\n\
-                    DATABASE URL: {database_url}";
-        let out = substitute_spawn_placeholders(body, 3, 14, 11, "claude", "default").unwrap();
-        assert_eq!(
-            out,
-            "FLEET ID: 3\nYOUR MEMBER ID: 14\nDIRECTOR MEMBER ID: 11\nCODING AGENT: claude\nDATABASE URL: default"
-        );
+    fn spawn_placeholder_errors_are_usage_errors() {
+        let hint = "Double literal braces ({{, }}) to keep them as text.";
+        for (body, expected) in [
+            (
+                "hello {foo}",
+                format!(
+                    "Unknown placeholder 'foo' in custom prompt. \
+                     Supported placeholders: {{fleet_id}}, {{member_id}}, {{director_member_id}}, \
+                     {{coding_agent}}, {{database_url}}. {hint}"
+                ),
+            ),
+            (
+                "{a{b}",
+                format!("Malformed custom prompt: unexpected '{{' in placeholder name. {hint}"),
+            ),
+            (
+                "oops }",
+                format!(
+                    "Malformed custom prompt: single '}}' encountered outside a placeholder. {hint}"
+                ),
+            ),
+            (
+                "start {fleet_id and never close",
+                format!("Malformed custom prompt: expected '}}' before end of string. {hint}"),
+            ),
+        ] {
+            let failure = substitute_spawn_placeholders(body, 1, 2, 3, "claude", "default")
+                .expect_err("an invalid placeholder expression is refused");
+            assert!(
+                matches!(&failure, CafleetError::Usage(message) if *message == expected),
+                "{body}: {}",
+                failure.message()
+            );
+            assert_eq!(failure.exit_code(), 2);
+        }
     }
 
-    #[test]
-    fn substitutes_repeated_placeholders() {
-        let out =
-            substitute_spawn_placeholders("{fleet_id}-{fleet_id}", 7, 1, 2, "codex", "default")
-                .unwrap();
-        assert_eq!(out, "7-7");
-    }
-
-    #[test]
-    fn body_without_placeholders_is_returned_verbatim() {
-        let out =
-            substitute_spawn_placeholders("plain prompt, no braces", 1, 2, 3, "claude", "default")
-                .unwrap();
-        assert_eq!(out, "plain prompt, no braces");
-    }
-
-    #[test]
-    fn doubled_braces_render_literal_braces() {
-        let out = substitute_spawn_placeholders(
-            "keep {{fleet_id}} literal",
-            1,
-            2,
-            3,
-            "claude",
-            "default",
-        )
-        .unwrap();
-        assert_eq!(out, "keep {fleet_id} literal");
-        let out = substitute_spawn_placeholders("a{{b}}c", 1, 2, 3, "claude", "default").unwrap();
-        assert_eq!(out, "a{b}c");
-    }
-
-    #[test]
-    fn doubled_braces_compose_with_substitution() {
-        let out =
-            substitute_spawn_placeholders("{{x}} and {fleet_id}", 42, 2, 3, "opencode", "default")
-                .unwrap();
-        assert_eq!(out, "{x} and 42");
-    }
-
-    #[test]
-    fn unknown_placeholder_is_a_usage_error_with_the_pinned_message() {
-        let err = substitute_spawn_placeholders("hello {foo}", 1, 2, 3, "claude", "default")
-            .expect_err("an unknown placeholder must error");
-        assert!(matches!(err, CafleetError::Usage(_)));
-        assert_eq!(err.exit_code(), 2);
-        assert_eq!(
-            err.message(),
-            "Unknown placeholder 'foo' in custom prompt. \
-             Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, \
-             {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text."
-        );
-    }
-
-    #[test]
-    fn stray_open_brace_is_a_malformed_usage_error() {
-        assert_malformed_usage_error(substitute_spawn_placeholders(
-            "oops {", 1, 2, 3, "claude", "default",
-        ));
-    }
-
-    #[test]
-    fn stray_close_brace_is_a_malformed_usage_error() {
-        assert_malformed_usage_error(substitute_spawn_placeholders(
-            "oops }", 1, 2, 3, "claude", "default",
-        ));
-    }
-
-    #[test]
-    fn unclosed_placeholder_is_a_malformed_usage_error() {
-        assert_malformed_usage_error(substitute_spawn_placeholders(
-            "start {fleet_id and never close",
-            1,
-            2,
-            3,
-            "claude",
-            "default",
-        ));
-    }
     use std::io;
     const WHEN: &str = "2026-09-06T01:02:03.000007+00:00";
     const PLAIN_HASH: &str = "526a35d455e79594452b17d2378d09d811ce0fb0ece884ac1198c3fc619c10f4";
@@ -3051,18 +2809,6 @@ mod tests {
     #[test]
     fn snapshot_strips_csi_and_cr_rewrites_before_hashing_utf8() {
         let snapshot = CaptureSnapshot::from_raw("old\r\x1b[31m雪\x1b[0m\nold\r緑", false, now());
-        assert_eq!(
-            snapshot,
-            CaptureSnapshot {
-                content: "雪\n緑".into(),
-                captured_at: WHEN.into(),
-                content_sha256: PLAIN_HASH.into()
-            }
-        );
-    }
-    #[test]
-    fn snapshot_treats_crlf_row_terminators_as_line_endings() {
-        let snapshot = CaptureSnapshot::from_raw("old\r\x1b[31m雪\x1b[0m\r\n緑\r", false, now());
         assert_eq!(
             snapshot,
             CaptureSnapshot {

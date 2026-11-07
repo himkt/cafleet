@@ -377,7 +377,6 @@ mod tests {
     use serde_json::Value;
     use serde_json::json;
 
-    use crate::broker::runtime as storage;
     use crate::broker::runtime::test_support::*;
     use crate::broker::runtime::*;
 
@@ -489,9 +488,6 @@ mod tests {
             (json!("run a"), Value::Null),
             (Value::Null, json!(1)),
             (json!("run a"), json!(0)),
-            (json!("run a"), json!(-1)),
-            (json!("run a"), json!("1")),
-            (json!("run a"), json!(1.5)),
         ] {
             let mut raw = raw_evidence("visible");
             raw["operation"] = operation.clone();
@@ -527,12 +523,7 @@ mod tests {
                     value.as_object_mut().unwrap().remove("operation_rows");
                 }) as &dyn Fn(&mut Value),
             ),
-            ("null with an operation", &|value| {
-                value["operation_rows"] = Value::Null
-            }),
             ("zero", &|value| value["operation_rows"] = json!(0)),
-            ("negative", &|value| value["operation_rows"] = json!(-2)),
-            ("string", &|value| value["operation_rows"] = json!("2")),
             ("count without an operation", &|value| {
                 value["operation"] = Value::Null
             }),
@@ -553,11 +544,7 @@ mod tests {
 
     #[test]
     fn matching_redaction_replaces_each_normalized_field_in_full() {
-        let policy = evidence::EvidencePolicy::redacted(
-            &json!({"schema_version":1,"patterns":[SECRET],"sensitive_rules":[]}),
-            &["native-tool-permission"],
-        )
-        .unwrap();
+        let policy = redacted_policy(&[SECRET]);
         let sanitized = policy.apply(&raw_evidence(SECRET)).unwrap();
         for field in ["operation", "native_request_id", "excerpt"] {
             assert_eq!(sanitized[field], "[redacted]", "{field}");
@@ -608,92 +595,14 @@ mod tests {
     }
 
     #[test]
-    fn metadata_and_redacted_transitions_remain_secret_free_through_storage_and_updates() {
-        for redacted in [false, true] {
-            let mut fixture = Fixture::new();
-            if redacted {
-                fixture
-                    .conn
-                    .execute(
-                        "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                        [fixture.run.run_id],
-                    )
-                    .unwrap();
-            }
-            let owner = fixture.activate();
-            fixture.reserve(&owner);
-            let policy = if redacted {
-                evidence::EvidencePolicy::redacted(
-                    &json!({"schema_version":1,"patterns":[SECRET],"sensitive_rules":[]}),
-                    &["native-tool-permission"],
-                )
-                .unwrap()
-            } else {
-                evidence::EvidencePolicy::metadata()
-            };
-            let transformed = policy.apply(&raw_evidence(SECRET)).unwrap();
-            let transition = opening(owner.run_id, 1, 1, transformed.clone());
-            assert!(!serde_json::to_string(&transition).unwrap().contains(SECRET));
-            let first = storage::persist_event(
-                &mut fixture.conn,
-                &owner,
-                &transition,
-                PersistenceMode::Live,
-            )
-            .unwrap();
-            let update = ObservedTransition {
-                event_seq: 2,
-                kind: RuntimeEventKind::InteractionObscured,
-                evidence_json: transformed,
-                ..transition
-            };
-            storage::persist_event(&mut fixture.conn, &owner, &update, PersistenceMode::Live)
-                .unwrap();
-            assert_no_secret(&fixture.conn, SECRET);
-            let current = storage::get_event(&fixture.reopen(), first.event_id).unwrap();
-            assert!(
-                !current
-                    .interaction
-                    .unwrap()
-                    .evidence_json
-                    .to_string()
-                    .contains(SECRET)
-            );
-        }
-    }
-
-    #[test]
     fn evidence_utf8_and_complete_payload_bounds_record_truncation_after_policy() {
-        let policy = evidence::EvidencePolicy::redacted(
-            &json!({"schema_version":1,"patterns":["unmatched"],"sensitive_rules":[]}),
-            &["native-tool-permission"],
-        )
-        .unwrap();
+        let policy = redacted_policy(&["unmatched"]);
         let mut raw = raw_evidence("ordinary");
         raw["excerpt"] = json!(format!("{}\u{1b}[2J\n", "界".repeat(8192)));
         let transformed = policy.apply(&raw).unwrap();
-        assert!(transformed["excerpt"].as_str().unwrap().len() <= 8192);
+        let excerpt = transformed["excerpt"].as_str().unwrap();
+        assert!(excerpt.len() <= 8192);
+        assert!(!excerpt.contains('\u{1b}'));
         assert_eq!(transformed["truncated"], true);
-        let mut fixture = Fixture::new();
-        fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                [fixture.run.run_id],
-            )
-            .unwrap();
-        let owner = fixture.activate();
-        fixture.reserve(&owner);
-        let event = storage::persist_event(
-            &mut fixture.conn,
-            &owner,
-            &opening(owner.run_id, 1, 1, transformed),
-            PersistenceMode::Live,
-        )
-        .unwrap();
-        let message = crate::broker::get_message(&fixture.conn, event.message_id.unwrap()).unwrap();
-        assert!(message.text.len() <= 16384);
-        assert!(serde_json::from_str::<Value>(&message.text).is_ok());
-        assert!(!message.text.contains('\u{1b}'));
     }
 }

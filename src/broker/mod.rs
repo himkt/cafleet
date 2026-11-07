@@ -13,6 +13,13 @@ macro_rules! stored_enum {
             pub(crate) const VALUES: &'static [&'static str] = &[$($wire),+];
         }
     };
+    (test_values $name:ident, $field:literal, {$($variant:ident => $wire:literal),+ $(,)?}) => {
+        stored_enum!(@enum $name, $field, {$($variant => $wire),+});
+        #[cfg(test)]
+        impl $name {
+            pub(crate) const VALUES: &'static [&'static str] = &[$($wire),+];
+        }
+    };
     (@enum $name:ident, $field:literal, {$($variant:ident => $wire:literal),+}) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
         pub(crate) enum $name { $(#[serde(rename = $wire)] $variant),+ }
@@ -23,7 +30,7 @@ macro_rules! stored_enum {
         }
         impl TryFrom<&str> for $name {
             type Error = $crate::error::CafleetError;
-            fn try_from(value: &str) -> Result<Self, Self::Error> {
+            fn try_from(value: &str) -> ::std::result::Result<Self, Self::Error> {
                 match value {
                     $($wire => Ok(Self::$variant),)+
                     _ => Err($crate::error::CafleetError::InvalidStoredValue {

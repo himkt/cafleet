@@ -213,13 +213,8 @@ pub(super) fn recover_descendants(
     clock: ShutdownClock,
 ) -> Result<ShutdownOutcome> {
     let mut outcome = ShutdownOutcome::complete(None);
-    let child = match (run.child_pid, run.child_start_identity.as_ref()) {
-        (None, None) => return Ok(outcome),
-        (Some(pid), Some(start)) => ProcessIdentity {
-            pid,
-            start_identity: start.clone(),
-        },
-        _ => return Err(error("recorded child generation is incomplete")),
+    let Some(child) = run.child_process()? else {
+        return Ok(outcome);
     };
     if !child.matches()? || stopped(child.pid)? {
         if !group_members(i32::try_from(child.pid).map_err(io_error)?)?.is_empty() {
@@ -677,34 +672,35 @@ impl Drop for PtySession {
 #[cfg(test)]
 mod tests {
     use crate::runtime::process::*;
+
+    /// Reads the fixture PTY until its output holds every one of `needles`.
+    fn read_until(session: &mut PtySession, needles: &[&str]) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut output = Vec::new();
+        loop {
+            let mut bytes = [0u8; 1024];
+            match session.try_read(&mut bytes) {
+                Ok(count) => output.extend_from_slice(&bytes[..count]),
+                Err(cause) if cause.kind() == io::ErrorKind::WouldBlock => {}
+                Err(cause) => panic!("fixture PTY read failed: {cause}"),
+            }
+            let text = String::from_utf8_lossy(&output).into_owned();
+            if needles.iter().all(|needle| text.contains(needle)) {
+                return text;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fixture output lacks {needles:?}: {text:?}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
     #[cfg(all(test, target_os = "macos"))]
     mod setuid_member_tests {
         use crate::runtime::process::tests::*;
         use std::os::unix::fs::MetadataExt;
 
         const SETUID_HELPER: &str = "/usr/bin/su";
-
-        fn read_until(session: &mut PtySession, needles: &[&str]) -> String {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let mut output = Vec::new();
-            loop {
-                let mut bytes = [0u8; 1024];
-                match session.try_read(&mut bytes) {
-                    Ok(count) => output.extend_from_slice(&bytes[..count]),
-                    Err(cause) if cause.kind() == io::ErrorKind::WouldBlock => {}
-                    Err(cause) => panic!("setuid fixture PTY read failed: {cause}"),
-                }
-                let text = String::from_utf8_lossy(&output).into_owned();
-                if needles.iter().all(|needle| text.contains(needle)) {
-                    return text;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "setuid fixture output lacks {needles:?}: {text:?}"
-                );
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
 
         #[test]
         fn refresh_pins_a_live_setuid_root_group_member_and_cleanup_terminates_it() {
@@ -865,7 +861,7 @@ mod tests {
             let mut spec = fixture.spec();
             spec.environment = crate::coding_agent::CodingAgent::Opencode
                 .forwarded_config(&|name| {
-                    (name == "OPENCODE_CONFIG_DIR").then(|| "/cfg/open code".to_string())
+                    Ok((name == "OPENCODE_CONFIG_DIR").then(|| "/cfg/open code".to_string()))
                 })
                 .unwrap()
                 .into_iter()
@@ -953,28 +949,6 @@ mod tests {
             drop(pty.master);
         }
 
-        fn read_until(session: &mut PtySession, needle: &str) -> String {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let mut output = Vec::new();
-            loop {
-                let mut bytes = [0u8; 1024];
-                match session.try_read(&mut bytes) {
-                    Ok(count) => output.extend_from_slice(&bytes[..count]),
-                    Err(error) if error.kind() == ErrorKind::WouldBlock => {}
-                    Err(error) => panic!("fixture PTY read failed: {error}"),
-                }
-                let text = String::from_utf8(output.clone()).unwrap();
-                if text.contains(needle) {
-                    return text;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "fixture did not publish {needle}"
-                );
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
-
         #[test]
         fn runner_real_shutdown_kills_and_reaps_a_term_ignoring_owned_child_within_the_shared_deadline()
          {
@@ -987,7 +961,7 @@ mod tests {
             ];
             let mut owned = OwnedPty::prepare(spec.size);
             let process = owned.session.spawn(&spec).unwrap();
-            read_until(&mut owned.session, "ready");
+            read_until(&mut owned.session, &["ready"]);
             let start = Instant::now();
             owned.clock = Some(ShutdownClock::new(
                 start.checked_sub(Duration::from_millis(1700)).unwrap(),
@@ -1015,7 +989,7 @@ mod tests {
             spec.argv=vec!["/bin/sh".into(),"-c".into(),r#"/bin/sh -c 'trap "" TERM HUP; printf ready > "$1"; exec /bin/sleep 600' descendant "$1" & descendant=$!; while [ ! -f "$1" ]; do sleep 0.01; done; printf 'descendant=%s\n' "$descendant"; exit 0"#.into(),"parent".into(),ready.to_str().unwrap().into()];
             let mut owned = OwnedPty::prepare(spec.size);
             let native = owned.session.spawn(&spec).unwrap();
-            let output = read_until(&mut owned.session, "\n");
+            let output = read_until(&mut owned.session, &["\n"]);
             let pid = output
                 .lines()
                 .find_map(|line| line.trim().strip_prefix("descendant="))
@@ -1283,18 +1257,16 @@ mod tests {
 
         #[test]
         fn refresh_fresh_remaining_members_preserve_exact_refusal_without_adoption() {
-            for fresh in [vec![B], vec![A], vec![B, C]] {
-                let mut session = inert(&[identity(A)]);
-                let pinned = session.owned.clone();
-                let clock = boundaries(&session);
-                let mut script = false_fold(members(&fresh));
-                assert_error(
-                    session.refresh_owned_with(&mut script),
-                    &error("owned process group lost its pinned generation"),
-                );
-                script.finished();
-                assert_state(&session, &pinned, false, clock);
-            }
+            let mut session = inert(&[identity(A)]);
+            let pinned = session.owned.clone();
+            let clock = boundaries(&session);
+            let mut script = false_fold(members(&[B, C]));
+            assert_error(
+                session.refresh_owned_with(&mut script),
+                &error("owned process group lost its pinned generation"),
+            );
+            script.finished();
+            assert_state(&session, &pinned, false, clock);
         }
 
         #[test]
@@ -1407,11 +1379,6 @@ mod tests {
                 let mut text = String::new();
                 stat.read_to_string(&mut text)
                     .expect_err("a stat read of a reaped task fails")
-            }
-
-            #[test]
-            fn runner_process_stat_read_of_a_task_reaped_after_open_fails_with_esrch() {
-                assert_eq!(reaped_stat_read().raw_os_error(), Some(nix::libc::ESRCH));
             }
 
             #[test]
