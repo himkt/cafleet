@@ -275,7 +275,20 @@ pub(crate) trait DeletionHost {
     fn restore_layout(&mut self) -> Result<(), CafleetError>;
 }
 
-pub(crate) struct MultiplexerDeletionHost<'a>(pub(crate) &'a dyn Multiplexer);
+/// Runs each deletion step through `mux` bounded by that step's deadline, so a Hermes
+/// settlement's budget never shortens the pane close that follows it.
+pub(crate) struct MultiplexerDeletionHost<'a> {
+    mux: &'a dyn Multiplexer,
+    /// The bounded multiplexer of the last pane close; herdr's layout restoration reads the
+    /// closed tab it recorded.
+    closing: Option<Box<dyn Multiplexer>>,
+}
+
+impl<'a> MultiplexerDeletionHost<'a> {
+    pub(crate) fn new(mux: &'a dyn Multiplexer) -> Self {
+        Self { mux, closing: None }
+    }
+}
 
 impl DeletionHost for MultiplexerDeletionHost<'_> {
     fn settle_hermes(
@@ -285,18 +298,30 @@ impl DeletionHost for MultiplexerDeletionHost<'_> {
         pane_id: &str,
         deadline: Deadline,
     ) -> Result<(), CafleetError> {
-        crate::coding_agent::hermes::settle_run(conn, self.0, run, pane_id, deadline)
+        let mux = self.mux.bounded(deadline);
+        crate::coding_agent::hermes::settle_run(conn, &*mux, run, pane_id, deadline)
     }
-    fn close_pane(&mut self, placement: &Placement, _: Deadline) -> Result<(), CafleetError> {
+    fn close_pane(
+        &mut self,
+        placement: &Placement,
+        deadline: Deadline,
+    ) -> Result<(), CafleetError> {
         let pane = placement
             .mux_pane_id
             .as_deref()
             .expect("deletion target has a concrete pane");
-        Ok(self.0.close_pane(pane, true)?)
+        Ok(self
+            .closing
+            .insert(self.mux.bounded(deadline))
+            .close_pane(pane, true)?)
     }
 
     fn restore_layout(&mut self) -> Result<(), CafleetError> {
-        Ok(self.0.restore_after_close()?)
+        Ok(self
+            .closing
+            .as_ref()
+            .expect("layout restoration follows a pane close")
+            .restore_after_close()?)
     }
 }
 
@@ -305,22 +330,22 @@ struct NativeFleetDeletionHost {
     /// actually needs the multiplexer.
     director: Result<Placement, CafleetError>,
     mux: Option<Box<dyn Multiplexer>>,
+    closing: Option<Box<dyn Multiplexer>>,
 }
 
 impl NativeFleetDeletionHost {
-    fn multiplexer(
-        &mut self,
-        deadline: Deadline,
-    ) -> Result<MultiplexerDeletionHost<'_>, CafleetError> {
+    fn multiplexer(&mut self) -> Result<MultiplexerDeletionHost<'_>, CafleetError> {
         if self.mux.is_none() {
             let director = self.director.as_ref().map_err(Clone::clone)?;
-            self.mux = Some(crate::runtime::mux_for_placement(director, Some(deadline))?);
+            self.mux = Some(crate::runtime::mux_for_placement(director, None)?);
         }
-        Ok(MultiplexerDeletionHost(
-            self.mux
+        Ok(MultiplexerDeletionHost {
+            mux: self
+                .mux
                 .as_deref()
                 .expect("the multiplexer was resolved above"),
-        ))
+            closing: self.closing.take(),
+        })
     }
 }
 
@@ -332,7 +357,7 @@ impl DeletionHost for NativeFleetDeletionHost {
         pane_id: &str,
         deadline: Deadline,
     ) -> Result<(), CafleetError> {
-        self.multiplexer(deadline)?
+        self.multiplexer()?
             .settle_hermes(conn, run, pane_id, deadline)
     }
     fn close_pane(
@@ -340,15 +365,15 @@ impl DeletionHost for NativeFleetDeletionHost {
         placement: &Placement,
         deadline: Deadline,
     ) -> Result<(), CafleetError> {
-        self.multiplexer(deadline)?.close_pane(placement, deadline)
+        let mut host = self.multiplexer()?;
+        host.close_pane(placement, deadline)?;
+        self.closing = host.closing;
+        Ok(())
     }
 
     fn restore_layout(&mut self) -> Result<(), CafleetError> {
-        let mux = self
-            .mux
-            .as_deref()
-            .expect("layout restoration follows a pane close");
-        MultiplexerDeletionHost(mux).restore_layout()
+        let mut host = self.multiplexer()?;
+        host.restore_layout()
     }
 }
 
@@ -509,6 +534,7 @@ pub(crate) fn delete_fleet(
         &mut NativeFleetDeletionHost {
             director: broker::director_placement(conn, fleet_id),
             mux: None,
+            closing: None,
         },
     )
 }
@@ -2187,5 +2213,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn multiplexer_deletion_host_bounds_each_pane_close_by_its_own_deadline() {
+        use crate::cli::fleet::DeletionHost;
+        use crate::multiplexer::test_support::FakeRunner;
+        let runner = FakeRunner::with_binary("tmux");
+        runner.succeed(1);
+        let mux =
+            crate::multiplexer::tmux::TmuxMultiplexer::new(runner.clone(), Default::default());
+        let mut host = crate::cli::fleet::MultiplexerDeletionHost::new(&mux);
+        let placement = crate::broker::Placement {
+            backend: "tmux".into(),
+            mux_session: "s".into(),
+            mux_window_id: "@1".into(),
+            mux_pane_id: Some("%9".into()),
+            coding_agent: "hermes".into(),
+            created_at: "2026-11-07T00:00:00Z".into(),
+            mux_server: "default".into(),
+        };
+        let spent = crate::time::Deadline::until(std::time::Instant::now());
+        assert!(host.close_pane(&placement, spent).is_err());
+        assert!(runner.run_argvs().is_empty());
+        let fresh = crate::time::Deadline::until(
+            std::time::Instant::now() + std::time::Duration::from_secs(5),
+        );
+        host.close_pane(&placement, fresh).unwrap();
+        host.restore_layout().unwrap();
+        assert_eq!(runner.run_argvs().len(), 1, "{:?}", runner.run_argvs());
     }
 }

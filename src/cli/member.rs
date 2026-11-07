@@ -625,8 +625,7 @@ fn delete(
     let pane_status = match &locked.value {
         DeleteAction::Deregistered(status) => status.to_string(),
         DeleteAction::Close => {
-            let mux =
-                crate::runtime::mux_for_fleet(conn, locked.snapshot.fleet_id, Some(deadline))?;
+            let mux = crate::runtime::mux_for_fleet(conn, locked.snapshot.fleet_id, None)?;
             close_member(conn, settings, member_id, &mut locked, &*mux, deadline)?
         }
     };
@@ -662,7 +661,7 @@ fn close_member(
         settings,
         snapshot,
         held,
-        &mut crate::cli::fleet::MultiplexerDeletionHost(mux),
+        &mut crate::cli::fleet::MultiplexerDeletionHost::new(mux),
         &mut deadline,
         &mut |_| Ok(()),
     )
