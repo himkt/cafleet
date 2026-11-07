@@ -408,12 +408,9 @@ impl PtySession {
         if self.child.is_none() {
             return Ok(None);
         }
-        let leader = self
-            .native
-            .as_ref()
-            .expect("a spawned child has its native identity")
-            .pid;
-        if !observed.stopped(leader)? {
+        if let Some(native) = &self.native
+            && !observed.stopped(native.pid)?
+        {
             return Ok(None);
         }
         self.refresh_owned_with(observed)?;
@@ -1642,6 +1639,23 @@ mod tests {
                     session.owned,
                     [(native.pid, native.clone())].into_iter().collect()
                 );
+                assert_reaped(&native);
+            }
+
+            #[test]
+            fn try_wait_with_an_unidentified_native_reaps_the_exited_child_without_observing() {
+                let (mut session, native) = exited_leader("exit 5");
+                session.native = None;
+                session.owned.clear();
+                let mut script = Script::new([]);
+                assert_eq!(
+                    session.try_wait_with(&mut script).unwrap(),
+                    Some(ChildExit::Code(5))
+                );
+                script.finished();
+                assert!(session.owned.is_empty());
+                assert!(!session.group_closed);
+                assert!(session.shutdown_clock.is_some());
                 assert_reaped(&native);
             }
         }
