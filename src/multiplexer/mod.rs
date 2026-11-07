@@ -569,7 +569,6 @@ impl MuxBackend {
     }
 }
 
-/// The caller-environment multiplexer that `fleet create` and doctor detect.
 /// The set caller-environment variables multiplexer detection and `fleet create` read; a
 /// non-UTF-8 one fails with its name.
 pub(crate) fn caller_env()
@@ -583,6 +582,7 @@ pub(crate) fn caller_env()
         .collect()
 }
 
+/// The caller-environment multiplexer that `fleet create` and doctor detect.
 pub(crate) fn resolve_multiplexer(
     env: std::collections::HashMap<String, String>,
     runner: Rc<dyn CommandRunner>,
