@@ -14,23 +14,23 @@ Use `cafleet` to register sessions, send and receive durable messages, and disco
 
 ## Required reading
 
-Open your authoritative role first. Use an available non-shell text reader; prerequisite file reads may use shell when it is the only reader. A member sends ready as its first operational broker shell command, before task work.
+Open your authoritative role first. Read prerequisites with an available non-shell text reader, or with shell when it is the only reader. A member sends ready as its first operational broker shell command, before task work.
 
 | # | Read | Responsibility |
 |---|---|---|
-| 1 | Your backend in [coding-agents.md](reference/coding-agents.md) | Resolve Runtime bindings and bound notes using your `CODING AGENT:` identity, or your own identity when standalone. |
+| 1 | Your backend in [coding-agents.md](reference/coding-agents.md) | Resolve Runtime bindings and bound notes for your `CODING AGENT:` identity, or your own identity when standalone. |
 | 2 | Your [member](roles/member.md) or [Director](roles/director.md) role | Follow startup, BASE, command authority and workflow prerequisites; Directors read Recovery/Shutdown immediately before those actions. |
 
-Load skills through your executing backend's supported loader. Backends without a native skill loader read this core, their backend section, each requested skill core and role-required references by absolute path. Assigned members continue their existing workflow when loading its umbrella skill.
+Load skills through your executing backend's supported loader; a backend without one reads this core, its backend section, each requested skill core and role-required references by absolute path. Assigned members continue their existing workflow when loading its umbrella skill.
 
 ## Resolve your overlay
 
 Resolve the overlay read above by the subject of the action:
 
-1. **Select the subject.** For your instructions, use your executing backend's Runtime bindings. Before a spawn, follow [model selection](roles/director.md#model-selection), read the selected backend's Model catalog and Role defaults, confirm its Member eligibility and validate effort/launch capabilities. Retain your own tools and decision surface.
+1. **Select the subject.** Your own instructions use your executing backend's Runtime bindings. Before a spawn, follow [model selection](roles/director.md#model-selection), read the selected backend's Model catalog and Role defaults, confirm its Member eligibility and validate effort/launch capabilities, keeping your own tools and decision surface.
 2. **Materialize values.** Resolve runtime placeholders from Runtime bindings and the role's model/effort from the selected spawn backend's Role defaults.
-3. **Apply notes.** Follow each Note → applies at caveat at its named consuming instruction. Ordinary members resolve their own runtime section without acquiring model-selection duties.
-4. **Self-check at emission.** Emit concrete commands and messages; resolve every runtime `{token}` before emission.
+3. **Apply notes.** Follow each Note → applies at caveat at its named consuming instruction. Ordinary members resolve their own runtime section and take on no model-selection duties.
+4. **Self-check at emission.** Resolve every runtime `{token}` before emitting a concrete command or message.
 
 ### Documented defaults
 
@@ -39,10 +39,8 @@ Use these neutral defaults only when a backend section omits a token or the back
 | Token | Documented default |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message; members always relay |
-| `{reviewer_model}` | the spawning Director's model, inherited |
-| `{reviewer_effort}` | omit `--effort` for the backend default |
-| `{other_model}` | the spawning Director's model, inherited |
-| `{other_effort}` | omit `--effort` for the backend default |
+| `{reviewer_model}`, `{other_model}` | the spawning Director's model, inherited |
+| `{reviewer_effort}`, `{other_effort}` | omit `--effort` for the backend default |
 | `{permission_flags}` | prose only: "host-scoped native permission policy"; spawn-flag construction requires the backend binding |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | read the skill core and your overlay by absolute path |
@@ -50,7 +48,7 @@ Use these neutral defaults only when a backend section omits a token or the back
 
 ## IDs
 
-Pass full database-assigned integers literally. Angle-bracket examples denote values to substitute, and environment variables supply no member identity. Literal IDs preserve host permission-pattern matching.
+Pass full database-assigned integers literally; literal IDs preserve host permission-pattern matching. Angle-bracket examples denote values to substitute (`<my-member-id>` your own ID, `<target-member-id>` a recipient, `<message-id>` the printed delivery ID), and environment variables supply no member identity.
 
 | Position/flag | Subject |
 |---|---|
@@ -61,21 +59,19 @@ Pass full database-assigned integers literally. Angle-bracket examples denote va
 | `--from-member-id` on a Director-only command | The caller, which must be the subject fleet's root Director |
 | `--fleet-id` | Fleet joined by `member create`; Director derives from the fleet |
 
-Read your literal `FLEET ID:`, `DIRECTOR MEMBER ID:`, `YOUR MEMBER ID:` and `DATABASE URL:` spawn lines. Directors use IDs returned by creation. `<my-member-id>` is your own ID; `<target-member-id>` a recipient; `<message-id>` the printed delivery ID.
+Members read their literal `FLEET ID:`, `DIRECTOR MEMBER ID:`, `YOUR MEMBER ID:` and `DATABASE URL:` spawn lines; Directors use IDs returned by creation. Spawn prompts contain exactly the CLI placeholders `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}`: the CLI fills the new member ID, renders `CODING AGENT:` to the selected backend and `DATABASE URL:` as `default` or `sqlite:///<path>`, and `member create` refuses a prompt without `{database_url}` for a non-default database. Supply exactly one positional `PROMPT` or `--file PATH`.
 
-Spawn prompts contain exactly the CLI's placeholders `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}`. The CLI fills the newly allocated member ID, renders `CODING AGENT:` to the selected backend and renders `DATABASE URL:` as `default` or `sqlite:///<path>`; `member create` refuses a prompt without `{database_url}` for a non-default database. Supply exactly one positional `PROMPT` or `--file PATH`.
-
-CAFleet reads no `CAFLEET_*` environment variable. When your `DATABASE URL:` line names a URL rather than `default`, pass `--database-url <url>` on every `cafleet` command, including broker commands (`cafleet message poll 7 --json --database-url <url>`); omitted, the default database applies ([database selection](reference/cli.md#database-selection)).
+CAFleet reads no `CAFLEET_*` environment variable. When `DATABASE URL:` names a URL rather than `default`, pass `--database-url <url>` on every `cafleet` command, broker commands and the ready signal included (`cafleet message poll 7 --json --database-url <url>`); omitted, the default database applies ([database selection](reference/cli.md#database-selection)).
 
 ## Soliciting user reactions
 
-Record approval, choices, confirmation and continue-or-abort decisions through {decision_surface}. Members send questions through the broker to the Director, who relays them. Follow the backend's decision-surface note; free-form invitations to respond record no decision.
+Record approval, choices, confirmation and continue-or-abort decisions through {decision_surface}, following the backend's decision-surface note; a free-form invitation to respond records no decision. Members send questions through the broker to the Director, who relays them.
 
 ## One-shot command isolation
 
-Run every one-shot `cafleet` process as the only command of its shell-tool invocation. Submit sequences as separate calls, preserving host Bash hygiene. Leading `NAME=value` assignments may immediately precede `cafleet`; use the actual executable rather than an `env` helper. Long bodies use a positional argument or `--file PATH`, with `--file -` for tool-provided stdin.
+Run every one-shot `cafleet` process as the only command of its shell-tool invocation, and submit a sequence as separate calls under host Bash hygiene. Leading `NAME=value` assignments may immediately precede `cafleet`; invoke the actual executable, not an `env` helper. Long bodies use a positional argument or `--file PATH` (`--file -` for tool-provided stdin).
 
-For `Operation not permitted` / `Permission denied`, check isolation and the host boundary, retry a combined invocation as an isolated command, then route a still-required denied command through the Director.
+On `Operation not permitted` / `Permission denied`, check isolation and the host boundary, retry a combined invocation as an isolated command, then route a still-required denied command through the Director.
 
 ## Send (Unicast)
 
@@ -83,42 +79,24 @@ For `Operation not permitted` / `Permission denied`, check isolation and the hos
 cafleet message send --from-member-id <my-member-id> --to-member-id <target-member-id> "Assignment or reply"
 ```
 
-Supply one positional body or `--file PATH`; use file input for long/multiline text. Text output truncates bodies at a fixed 200 codepoints; `--json` returns complete payloads.
+Supply one positional body or `--file PATH`, using file input for long/multiline text. Text output truncates bodies at a fixed 200 codepoints; `--json` returns them complete.
 
 Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a `message show ID --json` pointer; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/queue/fallback behavior. The root Director uses native reception or manual broker reads without automatic pane input, and its sends report `notification_sent: false` without a pane diagnostic or multiplexer requirement.
 
-Retain the committed message ID and successful record across a held preview or post-commit delivery error. Send each body once; a later send or `message wait` retries pending ordinary-member notifications. Recipients record deferred actions and ACK consumption. Fan out with one send per recipient and report failed recipients explicitly. [Send outcomes](reference/cli.md#message-send) owns exact diagnostics.
+Retain the committed message ID and successful record across a held preview or post-commit delivery error. Send each body once; a later send or `message wait` retries pending ordinary-member notifications. Recipients record deferred actions and ACK consumption. Fan out one send per recipient and report each failed recipient; [send outcomes](reference/cli.md#message-send) owns exact diagnostics.
 
-## Poll (Check Inbox)
+## Poll and ACK
 
 ```bash
 cafleet message poll <my-member-id> [--json]
 ```
 
-Poll returns unACKed `input_required` deliveries newest first; `--json` includes complete bodies. The printed delivery ID differs from any host task-list ID. Your role file sets when to poll.
-
-## Acknowledge (ACK)
-
 ```bash
 cafleet message ack <message-id>
 ```
 
-ACK changes a delivery from `input_required` to `completed`, removing it from poll output. Track unfinished actions outside the inbox after consumption; use `message show MESSAGE_ID --json` to recover the full record.
+Poll returns unACKed `input_required` deliveries newest first, with complete bodies under `--json`; your role file sets when to poll. The printed delivery ID differs from any host task-list ID. ACK changes a delivery from `input_required` to `completed`, removing it from poll output. Track unfinished actions outside the inbox after consumption; `message show MESSAGE_ID --json` recovers the full record.
 
 ## Command index
 
-Use [cli.md](reference/cli.md) for invocation forms, flags, outputs and errors. Members retain Send/Poll/ACK/show authority; Director actions follow their role.
-
-| Need | Owner |
-|---|---|
-| Registry and subjects | [Subcommand summary](reference/cli.md#subcommand-summary) |
-| Output fields | [Output shapes](reference/cli.md#output-shapes) |
-| Finite receive and preview retries | [Message wait](reference/cli.md#message-wait) |
-| Persistent reception | [Message listen](reference/cli.md#message-listen) |
-| Spawn and compensation | [Member create](reference/cli.md#member-create) |
-| Runtime commands | [Member runtime](reference/cli.md#member-runtime) |
-| Native command input | [Member exec](reference/cli.md#member-exec) |
-| Ordered manual keys | [Member press](reference/cli.md#member-press) |
-| Input exclusion and previews | [Pane input and previews](reference/cli.md#pane-input-and-previews) |
-| Host continuation and evidence | Backend notes in [coding-agents.md](reference/coding-agents.md) |
-| Diagnosis and installation | [Setup and doctor](reference/cli.md#setup-and-doctor) |
+Use [cli.md](reference/cli.md) for invocation forms, flags, outputs and errors; its [subcommand summary](reference/cli.md#subcommand-summary) is the command registry, and per-command sections follow beside the shared output-shape, pane-input and setup/doctor sections. Backend notes in [coding-agents.md](reference/coding-agents.md) own host continuation and evidence. Members retain Send/Poll/ACK/show authority; Director actions follow their role.

@@ -52,12 +52,12 @@
 
 ## Core Principle
 
-**Comprehensive with structured readability.** Write a document complete enough that an agent can implement the feature by reading only this document. Use structured formatting (tables, lists, code blocks) to keep it scannable. Every sentence must earn its place, but prefer completeness over brevity when it prevents implementation guesswork.
+**Comprehensive with structured readability.** Write a document complete enough that an agent can implement the feature from it alone, kept scannable with tables, lists and code blocks. Every sentence must earn its place, but completeness wins over brevity when it prevents implementation guesswork.
 
 ## Formatting Guidelines
 
 | Content Type | Preferred Format |
-|-------------|-----------------|
+|---|---|
 | Enumerated options or states | Table |
 | Sequential steps | Numbered list |
 | Requirements or constraints | Bulleted list |
@@ -75,16 +75,16 @@
 
 ## File Layout
 
-Normalize the design-doc argument to the task folder before [task-scope resolution](#task-scope-resolution): strip a trailing `/design-doc.md`; for a relative argument, strip a leading `design-docs/` if present and prepend `design-docs/` once. For an absolute argument, only strip the trailing filename and use that absolute folder directly. Task-scope resolution owns containment; the Director's [scratch and audit procedure](../../cafleet/roles/director.md#member-create--scratch-and-audit-files) owns guarded writes and disabled-audit behavior. The invoking workflow owns document discovery and its explicit output target.
+Normalize the design-doc argument to the task folder before [task-scope resolution](#task-scope-resolution): strip a trailing `/design-doc.md`; for a relative argument, also strip a leading `design-docs/` if present and prepend `design-docs/` once; an absolute argument loses only the trailing filename and its folder is used directly. Task-scope resolution owns containment; the Director's [scratch and audit procedure](../../cafleet/roles/director.md#member-create--scratch-and-audit-files) owns guarded writes and disabled-audit behavior. The invoking workflow owns document discovery and its explicit output target.
 
-Design documents use `design-docs/NNNNNNN-<slug>/design-doc.md` in every repository using CAFleet. Use a short kebab-case feature description for `<slug>`.
+Design documents live at `design-docs/NNNNNNN-<slug>/design-doc.md` in every repository using CAFleet, with a short kebab-case feature description as `<slug>`.
 
 ### Task-scope resolution
 
 Use this resolver when a consumer operates on a task folder. The Director or consumer resolves BASE; members inherit the supplied absolute BASE or follow the [missing-line disabled-audit state](../../cafleet/roles/member.md#base).
 
 1. Run `git rev-parse --show-toplevel` from CWD. A non-zero exit or empty output means no Git ancestor: stop and tell the user to change to the repository root and retry.
-2. Normalize the consumer's argument to its actual task folder before containment resolution. The resolver receives a relative or absolute folder, not a child filename. Design-doc workflows use the normalization above; other consumers own their bucket conventions.
+2. Normalize the consumer's argument to its actual task folder — a relative or absolute folder, not a child filename — before containment resolution: design-doc workflows use the normalization above, and other consumers own their bucket conventions.
 3. Resolve the folder against the repository root when relative. Reject a relative path that equals the root (`the repo root is not a task folder`) or escapes it (`refusing to create a task folder outside the repo`). Resolve an absolute path directly: if it equals the root or is not strictly below it, return `<unset>` and create nothing.
 4. For a folder strictly below the repository root, return its absolute path as BASE. Create the selected folder lazily on the first consumer write, with audits under the task folder.
 
@@ -92,11 +92,11 @@ The resolver applies containment to the normalized folder without writing files.
 
 ### Numbering
 
-Before choosing a new document's folder, inspect the target repository's `design-docs/` directories. Take the highest existing numeric prefix, add 1, and format it with seven-digit zero-padding. Start at `0000001` when there are no numbered directories. Count existing numbered directories even when their document is unfinished, so their numbers remain reserved.
+For a new document's folder, inspect the target repository's `design-docs/` directories, take the highest existing numeric prefix, add 1 and zero-pad it to seven digits, starting at `0000001` when there are no numbered directories. Count every numbered directory, even one whose document is unfinished, so its number stays reserved.
 
-For fresh creation from a topic or an unnumbered slug such as `my-feature`, choose the next number and use a folder such as `0000001-my-feature`. Resolve that numbered folder through BASE before writing any document or audit artifacts. Recheck availability before creating the folder; if another task has taken the number, select the next available number.
+Fresh creation from a topic or an unnumbered slug such as `my-feature` uses the next number in a folder such as `0000001-my-feature`, resolved through BASE before writing any document or audit artifacts. Recheck availability before creating the folder, and select the next available number if another task has taken it.
 
-The create and execute workflows accept an existing directory name such as `0000001-my-feature` or a document path. Preserve existing targets when resuming or executing. Honor an explicit user-supplied output path; numbering supplies the default location when the workflow chooses a new folder.
+The create and execute workflows accept an existing directory name such as `0000001-my-feature` or a document path, and preserve existing targets when resuming or executing. Honor an explicit user-supplied output path; numbering supplies the default location when the workflow chooses a new folder.
 
 ## What "Comprehensive" Means
 
@@ -108,9 +108,9 @@ The create and execute workflows accept an existing directory name such as `0000
 
 ## Anti-patterns to Avoid
 
-- Restating what is already obvious from the code or context, or repeating the same information across Overview, Background, and Specification.
-- Adding sections just because the template has them; writing long prose where a table or list suffices.
-- Separate "Testing Strategy" / "Error Handling" / "Future Considerations" sections for simple changes — fold into Specification or Implementation. Skip speculative "Future Considerations" unless the current design must accommodate them.
+- Restating what the code or context makes obvious, or repeating information across Overview, Background and Specification.
+- Adding sections only because the template has them, or long prose where a table or list suffices.
+- Separate "Testing Strategy" / "Error Handling" / "Future Considerations" sections for simple changes — fold them into Specification or Implementation; include speculative "Future Considerations" only when the current design must accommodate them.
 
 ## Completeness Check
 

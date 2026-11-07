@@ -14,26 +14,26 @@ Own correctness against the approved specification. Assign bounded paths, shared
 
 ### Step 1: Resolve Design Document Path (Director)
 
-Accept an explicit document, a task folder containing `design-doc.md`, or discovery under the repository's design-doc root. Normalize and resolve BASE before task/audit writes. Preserve an explicit target.
+Accept an explicit document, a task folder containing `design-doc.md`, or discovery under the repository's design-doc root; preserve an explicit target, and normalize and resolve BASE before task/audit writes.
 
-Discovery selects documents whose Status is Approved: select the only match, ask the user when several match, and report an actionable error when none match. For resumed work, verify checked tasks and progress metadata before continuing from the next incomplete task.
+Discovery considers documents whose Status is Approved: select the only match, ask the user when several match, and report an actionable error when none match. For resumed work, verify checked tasks and progress metadata, then continue from the next incomplete task.
 
 ### Step 2: Validate Design Document & Create Branch (Director)
 
 Read the complete design and its existing annotations. Resolve clear requests and route consequential ambiguity before dependent work. Identify implementation order, protected behavior and existing `FIXME(agent)` findings.
 
-Inspect the default/current branch. On the default branch, propose a feature branch and obtain the user's approval before creating it. Preserve an existing feature branch. Host rules govern eligible files and commits.
+Inspect the default/current branch: on the default branch, propose a feature branch and create it only after the user approves; preserve an existing feature branch. Host rules govern eligible files and commits.
 
 ### Team composition
 
 | Work | Composition |
 |---|---|
-| Code implementation | Programmer and Tester with separate source/test ownership. |
-| Documentation/configuration only | Programmer with suitable checks and Director review. |
-| External behavior or explicit live acceptance | Add Verifier for the required observations. |
-| Completed implementation | Add a fresh Reviewer after implementation and verification gates pass. |
+| Code implementation | Programmer and Tester with separate source/test ownership |
+| Documentation/configuration only | Programmer with suitable checks and Director review |
+| External behavior or explicit live acceptance | Add Verifier for the required observations |
+| Completed implementation | Add a fresh Reviewer after implementation and verification gates pass |
 
-Read the assigned roles before spawning: [Programmer](roles/programmer.md), [Tester](roles/tester.md), [Verifier](roles/verifier.md) and [Reviewer](roles/reviewer.md). Each role keeps the responsibilities its role file defines; a Programmer-only team receives the documentation/configuration composition explicitly.
+Read the assigned [Programmer](roles/programmer.md), [Tester](roles/tester.md), [Verifier](roles/verifier.md) and [Reviewer](roles/reviewer.md) role files before spawning; each owns its role's responsibilities. A Programmer-only team receives the documentation/configuration composition explicitly.
 
 ### Step 3: Register & Spawn Members (Director)
 
@@ -42,20 +42,20 @@ Read the assigned roles before spawning: [Programmer](roles/programmer.md), [Tes
 3. Render compact role-by-path prompts with the delta table below, supplying BASE, owned paths and checks.
 4. Receive and ACK ready, then dispatch each member when inputs exist. Resolve uncertain launch/input by inspecting actual evidence before another submission.
 
-Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the CAFleet load purpose `for communication with the Director` and this per-role delta. Each line in the IMPORTANT row is a separate prompt line, rendered verbatim. Spawn the Reviewer only at Step 5.
+Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with ROLE TITLE `the <Role>` (the column heading), TEAM `design document execution`, role-file `roles/<role>.md`, CAFleet load purpose `for communication with the Director`, EXTRA SKILL LOADS `cafleet-design-doc` and this per-role delta. Every role's CONTEXT LINES start with `DESIGN DOCUMENT: [INSERT absolute design-doc path]`. Spawn the Reviewer only at Step 5.
 
 | Slot | Programmer | Tester | Verifier | Reviewer |
 |---|---|---|---|---|
-| ROLE TITLE / TEAM | `the Programmer` / `design document execution` | `the Tester` / `design document execution` | `the Verifier` / `design document execution` | `the Reviewer` / `design document execution` |
-| role-file | `roles/programmer.md` | `roles/tester.md` | `roles/verifier.md` | `roles/reviewer.md` |
-| EXTRA SKILL LOADS | `cafleet-design-doc` | `cafleet-design-doc` | `cafleet-design-doc` | `cafleet-design-doc` |
-| CONTEXT LINES | `DESIGN DOCUMENT: [INSERT absolute design-doc path]`, `TEAM COMPOSITION: [INSERT composition and owned paths]` | `DESIGN DOCUMENT: [INSERT absolute design-doc path]`, `TEAM COMPOSITION: [INSERT composition and owned paths]` | `DESIGN DOCUMENT: [INSERT absolute design-doc path]` | `DESIGN DOCUMENT: [INSERT absolute design-doc path]`, `BASE BRANCH: [INSERT base branch name]` |
-| IMPORTANT / ROLE-CONSTRAINT LINES (verbatim) | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.`, `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`, `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md, including Reconsider, then route), which you load at startup.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` | `IMPORTANT: Write only test code, including inline test regions; do NOT edit implementation code.`, `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.`, `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`, `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md, including Reconsider, then route), which you load at startup.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` | `IMPORTANT: Do NOT commit, and do NOT modify implementation or test files; your only edits are COMMENT(verifier) markers.`, `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`, `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md, including Reconsider, then route), which you load at startup.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` | `IMPORTANT: Your only edits are COMMENT(reviewer) markers; do NOT edit code or commit.`, `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md, including Reconsider, then route), which you load at startup.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
-| start cue (verbatim) | `Read the design document and wait for the Director to assign your first step.` | `Read the design document and wait for the Director to assign your first step.` | `Read the design document, perform tool discovery and send your tool inventory to the Director.` | `Wait for the Director's ready (doc) to start the review.` |
+| Further CONTEXT LINES | `TEAM COMPOSITION: [INSERT composition and owned paths]` | `TEAM COMPOSITION: [INSERT composition and owned paths]` | — | `BASE BRANCH: [INSERT base branch name]` |
+| Role constraint lines | `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` | `IMPORTANT: Write only test code, including inline test regions; do NOT edit implementation code.`, `IMPORTANT: Do NOT commit code yourself. The Director handles all git operations.` | `IMPORTANT: Do NOT commit, and do NOT modify implementation or test files; your only edits are COMMENT(verifier) markers.` | `IMPORTANT: Your only edits are COMMENT(reviewer) markers; do NOT edit code or commit.` |
+| Blocked line | yes | yes | yes | no |
+| START CUE (verbatim) | `Read the design document and wait for the Director to assign your first step.` | `Read the design document and wait for the Director to assign your first step.` | `Read the design document, perform tool discovery and send your tool inventory to the Director.` | `Wait for the Director's ready (doc) to start the review.` |
+
+Render the IMPORTANT / ROLE-CONSTRAINT lines verbatim, one prompt line each, in this order: the role constraint lines; `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` where Blocked line is `yes`; `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md, including Reconsider, then route), which you load at startup.`; `When you see cafleet message poll output with a message from the Director, act on those instructions.`
 
 ### Step 4: Execute Steps with Per-Step TDD Cycle (Director)
 
-For a code step, the Tester writes behavior-focused tests; the Director reviews them against the design and commits eligible tests. The Programmer implements within its source ownership and runs the relevant checks. Suspected test defects return to the Director and Tester for arbitration. In a Programmer-only team, route findings directly to that owner.
+For a code step, the Tester writes behavior-focused tests; the Director reviews them against the design and commits eligible tests. The Programmer implements within its source ownership and runs the relevant checks. Suspected test defects return to the Director and Tester for arbitration; a Programmer-only team routes findings directly to the Programmer.
 
 Review the final change for correctness, scope and maintainability; request fixes and affected checks until the step passes. Keep tests and implementation commits separate in TDD teams, applying host rules to mixed files. Verify the Programmer's checkbox, timestamp and Progress update for each completed task. Preserve completed work when resuming.
 
@@ -71,7 +71,7 @@ Route actionable findings to their source/test owners, arbitrate disputes agains
 
 ### Step 6: User Approval (Director)
 
-Present the reviewed result with the diff command, behavior changes, checks and actual limitations. Request approval through the executing backend's decision surface. Interpret feedback by meaning; preserve questions as questions and route revisions through implementation, checks and review.
+Present the reviewed result with the diff command, behavior changes, checks and actual limitations, requesting approval through the executing backend's decision surface. Interpret feedback by meaning: a question stays a question, and revisions route through implementation, checks and review.
 
 Record publication scope explicitly: local approval finalizes locally; remote approval authorizes push and PR creation. Carry earlier answers forward and resolve only a genuinely new decision.
 
@@ -85,4 +85,4 @@ Authentication/precondition failure leaves the result local. Report exact push/P
 
 Verify final progress and marker resolution, set Status to Complete only when the required work and user gate are satisfied, and preserve existing historical artifacts. Commit only files allowed by host rules. Apply the recorded publication scope to any eligible final push.
 
-Delete the fleet, which ends every owned ordinary member and reports each pane outcome; when it exits 1 and the fleet stays registered, keep native reception active, resolve the reported cause and rerun. Then collect native reception's `fleet_deleted` closure, observe its source-process exit and verify the fleet's absence. Limit cleanup to owned resources.
+Then end the team under the Director [Shutdown](../../cafleet/roles/director.md#shutdown), limiting cleanup to owned resources.
