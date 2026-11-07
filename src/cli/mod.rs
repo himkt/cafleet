@@ -73,61 +73,69 @@ fn run_args(args: impl IntoIterator<Item = OsString>) -> Result<(), CafleetError
     dispatch(&settings, args.command)
 }
 
-enum DirectorSubject {
-    Member(i64),
-    Input(i64),
-    Interaction(i64),
-}
-
+/// A Director-only command: its name, the query from its subject to the subject's fleet, the
+/// subject id and its `--from-member-id`.
 struct DirectorOnly {
     name: &'static str,
-    subject: DirectorSubject,
+    fleet_query: &'static str,
+    subject: i64,
     director_member_id: i64,
 }
 
+const MEMBER_FLEET: &str = "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'";
+const INPUT_FLEET: &str = "SELECT r.fleet_id FROM member_input_operations i JOIN member_runs r ON r.run_id=i.run_id WHERE i.input_id=?1";
+const INTERACTION_FLEET: &str = "SELECT r.fleet_id FROM member_interactions i JOIN member_runs r ON r.run_id=i.run_id WHERE i.interaction_id=?1";
+
 fn director_only(command: &Command) -> Option<DirectorOnly> {
-    use DirectorSubject::*;
-    let (name, subject, director_member_id) = match command {
-        Command::Member(member::MemberCommand::Prompt {
+    use member::MemberCommand as M;
+    let (name, fleet_query, subject, director_member_id) = match command {
+        Command::Member(M::Prompt {
             member_id,
             director_member_id,
             ..
-        }) => ("member prompt", Member(*member_id), *director_member_id),
-        Command::Member(member::MemberCommand::Exec {
+        }) => ("member prompt", MEMBER_FLEET, member_id, director_member_id),
+        Command::Member(M::Exec {
             member_id,
             director_member_id,
             ..
-        }) => ("member exec", Member(*member_id), *director_member_id),
-        Command::Member(member::MemberCommand::Press {
+        }) => ("member exec", MEMBER_FLEET, member_id, director_member_id),
+        Command::Member(M::Press {
             member_id,
             director_member_id,
             ..
-        }) => ("member press", Member(*member_id), *director_member_id),
-        Command::Member(member::MemberCommand::Recover {
+        }) => ("member press", MEMBER_FLEET, member_id, director_member_id),
+        Command::Member(M::Recover {
             member_id,
             director_member_id,
             ..
-        }) => ("member recover", Member(*member_id), *director_member_id),
+        }) => (
+            "member recover",
+            MEMBER_FLEET,
+            member_id,
+            director_member_id,
+        ),
         Command::Permission(runtime::PermissionCommand::Respond {
             interaction_id,
             director_member_id,
             ..
         }) => (
             "permission respond",
-            Interaction(*interaction_id),
-            *director_member_id,
+            INTERACTION_FLEET,
+            interaction_id,
+            director_member_id,
         ),
         Command::Input(runtime::InputCommand::Reconcile {
             input_id,
             director_member_id,
             ..
-        }) => ("input reconcile", Input(*input_id), *director_member_id),
+        }) => ("input reconcile", INPUT_FLEET, input_id, director_member_id),
         _ => return None,
     };
     Some(DirectorOnly {
         name,
-        subject,
-        director_member_id,
+        fleet_query,
+        subject: *subject,
+        director_member_id: *director_member_id,
     })
 }
 
@@ -142,22 +150,10 @@ fn require_director(
     let Some(guarded) = guarded else {
         return Ok(());
     };
-    let (sql, id) = match guarded.subject {
-        DirectorSubject::Member(id) => (
-            "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'",
-            id,
-        ),
-        DirectorSubject::Input(id) => (
-            "SELECT r.fleet_id FROM member_input_operations i JOIN member_runs r ON r.run_id=i.run_id WHERE i.input_id=?1",
-            id,
-        ),
-        DirectorSubject::Interaction(id) => (
-            "SELECT r.fleet_id FROM member_interactions i JOIN member_runs r ON r.run_id=i.run_id WHERE i.interaction_id=?1",
-            id,
-        ),
-    };
     let Some(fleet_id) = conn
-        .query_row(sql, [id], |row| row.get::<_, i64>(0))
+        .query_row(guarded.fleet_query, [guarded.subject], |row| {
+            row.get::<_, i64>(0)
+        })
         .optional()?
     else {
         return Ok(());

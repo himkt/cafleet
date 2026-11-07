@@ -124,6 +124,21 @@ pub(super) fn private_metadata(
 pub(crate) fn validate_private_file(path: &Path, expected_uid: u32, mode: u32) -> Result<()> {
     private_metadata(path, expected_uid, mode, false).map(|_| ())
 }
+fn present(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(cause) => Err(io_error(cause)),
+    }
+}
+fn read_manifest(path: &Path) -> Result<Value> {
+    let mut text = String::new();
+    open_private(path, false)?
+        .take(65537)
+        .read_to_string(&mut text)
+        .map_err(io_error)?;
+    serde_json::from_str(&text).map_err(io_error)
+}
 fn directory(path: &Path) -> Result<()> {
     match DirBuilder::new().mode(0o700).create(path) {
         Ok(()) => {}
@@ -194,15 +209,8 @@ pub(crate) fn validate_run_paths(conn: &Connection, run: &RunRecord) -> Result<R
             && run.run_lock_identity_json.as_ref() == Some(&identity(&lock)),
         "runtime directory or owner lock identity changed; explicit recovery required",
     )?;
-    let manifest = open_private(&paths.namespace_manifest, false)?;
-    let mut text = String::new();
-    manifest
-        .take(65537)
-        .read_to_string(&mut text)
-        .map_err(io_error)?;
-    let value: Value = serde_json::from_str(&text).map_err(io_error)?;
     ensure(
-        value == run.database_identity_json,
+        read_manifest(&paths.namespace_manifest)? == run.database_identity_json,
         "runtime namespace identity collision",
     )?;
     Ok(paths)
@@ -241,12 +249,8 @@ impl RunArtifacts {
                 if !paths.namespace_manifest.exists() {
                     return Err(cause);
                 }
-                let mut file = open_private(&paths.namespace_manifest, false)?;
-                let mut text = String::new();
-                file.read_to_string(&mut text).map_err(io_error)?;
                 ensure(
-                    serde_json::from_str::<Value>(&text).map_err(io_error)?
-                        == run.database_identity_json,
+                    read_manifest(&paths.namespace_manifest)? == run.database_identity_json,
                     "runtime namespace identity collision",
                 )?;
             }
@@ -282,8 +286,11 @@ impl RunArtifacts {
     pub(crate) fn write_descriptor(&self, descriptor: &LaunchDescriptor) -> Result<()> {
         ensure(
             self.paths.run_dir
-                == RuntimePaths::for_run(&descriptor.database_identity_json, descriptor.run_id)?
-                    .run_dir,
+                == RuntimePaths::for_run(
+                    &descriptor.identity.database_identity_json,
+                    descriptor.identity.run_id,
+                )?
+                .run_dir,
             "descriptor path mismatch",
         )?;
         descriptor.spawn.validate()?;
@@ -329,13 +336,7 @@ impl Drop for RunArtifacts {
 #[serde(deny_unknown_fields)]
 pub(crate) struct LaunchDescriptor {
     pub(crate) schema_version: u32,
-    pub(crate) database_identity_json: Value,
-    pub(crate) fleet_id: i64,
-    pub(crate) member_id: i64,
-    pub(crate) director_member_id: i64,
-    pub(crate) run_id: i64,
-    pub(crate) owner_epoch: i64,
-    pub(crate) launch_nonce: String,
+    pub(crate) identity: ControlIdentity,
     pub(crate) spawn: SpawnSpec,
 }
 impl LaunchDescriptor {
@@ -343,13 +344,7 @@ impl LaunchDescriptor {
         spawn.validate()?;
         Ok(Self {
             schema_version: 1,
-            database_identity_json: run.database_identity_json.clone(),
-            fleet_id: run.fleet_id,
-            member_id: run.member_id,
-            director_member_id: run.director_member_id,
-            run_id: run.run_id,
-            owner_epoch: run.owner_epoch,
-            launch_nonce: run.launch_nonce.clone(),
+            identity: ControlIdentity::from_run(run),
             spawn,
         })
     }
@@ -378,7 +373,7 @@ pub(crate) fn load_descriptor(conn: &Connection, path: &Path) -> Result<LaunchDe
     file.read_to_end(&mut bytes).map_err(io_error)?;
     let descriptor = LaunchDescriptor::parse(&bytes)?;
     descriptor.spawn.validate()?;
-    let run = storage::get_run(conn, descriptor.run_id)?;
+    let run = storage::get_run(conn, descriptor.identity.run_id)?;
     let paths = validate_run_paths(conn, &run)?;
     ensure(
         path == paths.descriptor,
@@ -386,12 +381,7 @@ pub(crate) fn load_descriptor(conn: &Connection, path: &Path) -> Result<LaunchDe
     )?;
     ensure(
         run.owner_kind == OwnerKind::Creator
-            && run.owner_epoch == descriptor.owner_epoch
-            && run.launch_nonce == descriptor.launch_nonce
-            && run.database_identity_json == descriptor.database_identity_json
-            && run.fleet_id == descriptor.fleet_id
-            && run.member_id == descriptor.member_id
-            && run.director_member_id == descriptor.director_member_id,
+            && descriptor.identity == ControlIdentity::from_run(&run),
         "launch descriptor identity mismatch",
     )?;
     Ok(descriptor)
@@ -594,26 +584,21 @@ impl RecoveryDescriptor {
         until: Instant,
     ) -> Result<Self> {
         let path = validated_paths(conn, run, lock, until)?.descriptor;
-        match fs::symlink_metadata(&path) {
-            Ok(_) => {}
-            Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Self { path, pinned: None });
-            }
-            Err(cause) => return Err(io_error(cause)),
+        if !present(&path)? {
+            return Ok(Self { path, pinned: None });
         }
         let mut file = open_private(&path, false)?;
         let file_identity = identity(&file.metadata().map_err(io_error)?);
         let bytes = read_bounded(&mut file, until)?;
         let descriptor = LaunchDescriptor::parse(&bytes)?;
+        let recorded = &descriptor.identity;
         ensure(
-            descriptor.database_identity_json == run.database_identity_json
-                && descriptor.fleet_id == run.fleet_id
-                && descriptor.member_id == run.member_id
-                && descriptor.director_member_id == run.director_member_id
-                && descriptor.run_id == run.run_id
-                && descriptor.launch_nonce == run.launch_nonce
-                && descriptor.owner_epoch > 0
-                && descriptor.owner_epoch <= run.owner_epoch,
+            recorded.owner_epoch > 0
+                && recorded.owner_epoch <= run.owner_epoch
+                && ControlIdentity {
+                    owner_epoch: run.owner_epoch,
+                    ..recorded.clone()
+                } == ControlIdentity::from_run(run),
             "launch descriptor identity mismatch",
         )?;
         let pinned = PinnedFile {
@@ -639,13 +624,9 @@ impl RecoveryDescriptor {
     ) -> Result<()> {
         let paths = validated_paths(conn, run, lock, until)?;
         ensure(paths.descriptor == self.path, "descriptor pathname changed")?;
-        match fs::symlink_metadata(&self.path) {
-            Ok(_) => {}
-            Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => {
-                self.pinned = None;
-                return Ok(());
-            }
-            Err(cause) => return Err(io_error(cause)),
+        if !present(&self.path)? {
+            self.pinned = None;
+            return Ok(());
         }
         let pinned = self
             .pinned
@@ -661,11 +642,7 @@ impl RecoveryDescriptor {
         validate_named(&self.path, pinned)?;
         check_deadline(Instant::now(), until)?;
         unlink(&self.path, until)?;
-        match fs::symlink_metadata(&self.path) {
-            Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => {}
-            Err(cause) => return Err(io_error(cause)),
-            Ok(_) => return Err(error("descriptor remains after unlink")),
-        }
+        ensure(!present(&self.path)?, "descriptor remains after unlink")?;
         check_deadline(Instant::now(), until)?;
         self.pinned = None;
         Ok(())
@@ -1000,9 +977,9 @@ mod tests {
         assert_eq!(read.spawn.cwd, spec.cwd);
         assert_eq!(read.spawn.environment, spec.environment);
         assert_eq!(read.spawn.size, spec.size);
-        assert_eq!(read.run_id, fixture.run.run_id);
-        assert_eq!(read.launch_nonce, fixture.run.launch_nonce);
-        assert_eq!(read.owner_epoch, fixture.run.owner_epoch);
+        assert_eq!(read.identity.run_id, fixture.run.run_id);
+        assert_eq!(read.identity.launch_nonce, fixture.run.launch_nonce);
+        assert_eq!(read.identity.owner_epoch, fixture.run.owner_epoch);
         artifacts.remove_descriptor().unwrap();
         artifacts.remove_descriptor().unwrap();
         assert!(!artifacts.paths.descriptor.exists());

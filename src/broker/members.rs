@@ -93,30 +93,29 @@ pub(super) fn insert_placement_row(
     Ok(())
 }
 
-const MEMBER_COLUMNS: &str = "m.name, m.description, m.status, m.registered_at,
-    f.director_member_id=m.member_id,
+const MEMBER_COLUMNS: &str = "m.member_id, m.fleet_id, m.name, m.description, m.status,
+    m.registered_at, f.director_member_id=m.member_id,
     p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at,
     p.mux_server";
 
-fn member_row(
-    row: &rusqlite::Row<'_>,
-    member_id: i64,
-    fleet_id: i64,
-) -> rusqlite::Result<MemberRecord> {
-    let backend: Option<String> = row.get(5)?;
+const MEMBER_FROM: &str = "FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
+    LEFT JOIN member_placements p ON p.member_id=m.member_id";
+
+fn member_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemberRecord> {
+    let backend: Option<String> = row.get(7)?;
     Ok(MemberRecord {
-        member_id,
-        fleet_id,
-        name: row.get(0)?,
-        description: row.get(1)?,
-        status: row.get(2)?,
-        registered_at: row.get(3)?,
-        kind: if row.get(4)? {
+        member_id: row.get(0)?,
+        fleet_id: row.get(1)?,
+        name: row.get(2)?,
+        description: row.get(3)?,
+        status: row.get(4)?,
+        registered_at: row.get(5)?,
+        kind: if row.get(6)? {
             MemberKind::Director
         } else {
             MemberKind::Member
         },
-        placement: backend.map(|_| Placement::from_row(row, 5)).transpose()?,
+        placement: backend.map(|_| Placement::from_row(row, 7)).transpose()?,
         runtime: None,
     })
 }
@@ -130,13 +129,11 @@ pub(crate) fn get_member(
     let mut member = conn
         .query_row(
             &format!(
-                "SELECT {MEMBER_COLUMNS}
-                 FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
-                 LEFT JOIN member_placements p ON p.member_id=m.member_id
+                "SELECT {MEMBER_COLUMNS} {MEMBER_FROM}
                  WHERE m.member_id=?1 AND m.fleet_id=?2 AND m.status='active'"
             ),
             params![member_id, fleet_id],
-            |row| member_row(row, member_id, fleet_id),
+            member_row,
         )
         .optional()?;
     if let Some(member) = &mut member {
@@ -202,30 +199,6 @@ pub(crate) fn deregister_member_rows(
     Ok(true)
 }
 
-fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, CafleetError> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {MEMBER_COLUMNS}, m.member_id,
-                (SELECT MAX(created_at) FROM messages WHERE from_member_id=m.member_id),
-                (SELECT MAX(created_at) FROM messages WHERE to_member_id=m.member_id),
-                (SELECT MAX(status_timestamp) FROM messages WHERE to_member_id=m.member_id AND status_state='completed')
-         FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
-         LEFT JOIN member_placements p ON p.member_id=m.member_id
-         WHERE m.fleet_id=?1 AND m.status='active'
-         ORDER BY m.member_id"
-    ))?;
-    stmt.query_map([fleet_id], |row| {
-        Ok(MemberActivity {
-            member: member_row(row, row.get(12)?, fleet_id)?,
-            last_sent: row.get(13)?,
-            last_recv: row.get(14)?,
-            last_ack: row.get(15)?,
-            idle: None,
-        })
-    })?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(crate::error::CafleetError::from)
-}
-
 fn idle_seconds(
     row: &MemberActivity,
     now: chrono::DateTime<chrono::Utc>,
@@ -254,11 +227,30 @@ pub(crate) fn list_members(
 ) -> Result<Vec<MemberActivity>, CafleetError> {
     crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
     let now = chrono::Utc::now();
-    let mut rows = roster_rows(conn, fleet_id)?;
-    for row in &mut rows {
-        row.idle = idle_seconds(row, now)?;
-    }
-    Ok(rows)
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {MEMBER_COLUMNS},
+                (SELECT MAX(created_at) FROM messages WHERE from_member_id=m.member_id),
+                (SELECT MAX(created_at) FROM messages WHERE to_member_id=m.member_id),
+                (SELECT MAX(status_timestamp) FROM messages WHERE to_member_id=m.member_id AND status_state='completed')
+         {MEMBER_FROM}
+         WHERE m.fleet_id=?1 AND m.status='active'
+         ORDER BY m.member_id"
+    ))?;
+    let rows = stmt.query_map([fleet_id], |row| {
+        Ok(MemberActivity {
+            member: member_row(row)?,
+            last_sent: row.get(14)?,
+            last_recv: row.get(15)?,
+            last_ack: row.get(16)?,
+            idle: None,
+        })
+    })?;
+    rows.map(|row| {
+        let mut activity = row?;
+        activity.idle = idle_seconds(&activity, now)?;
+        Ok(activity)
+    })
+    .collect()
 }
 
 pub(crate) fn active_member(

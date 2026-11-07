@@ -6,17 +6,14 @@ use crate::broker::runtime as storage;
 use crate::broker::runtime::CleanupState;
 use crate::broker::runtime::RunRecord;
 use crate::broker::runtime::*;
-use crate::db::with_database_budget;
 use crate::multiplexer::Multiplexer;
 use crate::multiplexer::MultiplexerContext;
 use crate::runtime::control::ControlClient;
 use crate::runtime::control::pause;
 use crate::runtime::control::request;
 use crate::runtime::*;
-use crate::time::Deadline;
 use rusqlite::Connection;
 use rusqlite::params;
-use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
@@ -89,121 +86,7 @@ pub(crate) fn runner_exit_status(native: Option<ChildExit>, complete: bool) -> R
     Ok(if !complete && status == 0 { 1 } else { status })
 }
 
-thread_local! {
-    /// One deadline per open scope. `with_database_budget`, which encloses every scope,
-    /// already pins the thread's scopes to one connection.
-    static CANCELLATION_DEADLINES: std::cell::RefCell<Vec<Instant>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
-fn database_cancelled() -> bool {
-    CANCELLATION_DEADLINES.with(|deadlines| {
-        let deadlines = deadlines.borrow();
-        let until = deadlines
-            .iter()
-            .min()
-            .expect("a progress handler has an owning scope");
-        Instant::now() >= *until
-    })
-}
-
-struct CancellationScope<'a> {
-    conn: &'a mut Connection,
-    until: Instant,
-    stop: Option<std::sync::mpsc::Sender<()>>,
-    watchdog: Option<std::thread::JoinHandle<()>>,
-    active: bool,
-}
-
-impl<'a> CancellationScope<'a> {
-    fn new(conn: &'a mut Connection) -> Result<Self> {
-        let until = Deadline::inherited_or_new().instant();
-        CANCELLATION_DEADLINES.with(|deadlines| deadlines.borrow_mut().push(until));
-        let mut scope = Self {
-            conn,
-            until,
-            stop: None,
-            watchdog: None,
-            active: true,
-        };
-        scope
-            .conn
-            .progress_handler(1000, Some(database_cancelled))?;
-        let interrupt = scope.conn.get_interrupt_handle();
-        let (stop, receive) = std::sync::mpsc::channel();
-        scope.stop = Some(stop);
-        scope.watchdog = Some(
-            std::thread::Builder::new()
-                .name("cafleet-sql-deadline".into())
-                .spawn(move || {
-                    if matches!(
-                        receive.recv_timeout(until.saturating_duration_since(Instant::now())),
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-                    ) {
-                        interrupt.interrupt();
-                    }
-                })
-                .map_err(io_error)?,
-        );
-        Ok(scope)
-    }
-
-    fn restore(&mut self) -> Result<()> {
-        if !self.active {
-            return Ok(());
-        }
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        let watchdog = self
-            .watchdog
-            .take()
-            .map(|worker| worker.join())
-            .transpose()
-            .map_err(|_| error("SQLite deadline watchdog panicked"));
-        let nested = CANCELLATION_DEADLINES.with(|deadlines| {
-            let mut deadlines = deadlines.borrow_mut();
-            assert_eq!(deadlines.pop(), Some(self.until));
-            !deadlines.is_empty()
-        });
-        self.active = false;
-        let restored = if nested {
-            self.conn.progress_handler(1000, Some(database_cancelled))
-        } else {
-            self.conn.progress_handler(0, None::<fn() -> bool>)
-        }
-        .map_err(crate::error::CafleetError::from);
-        CafleetError::merge_cleanup(watchdog.map(|_| ()), restored)
-    }
-}
-
-impl Drop for CancellationScope<'_> {
-    fn drop(&mut self) {
-        if let Err(cause) = self.restore() {
-            if std::thread::panicking() {
-                eprintln!("SQLite cancellation cleanup failed during unwind: {cause}");
-            } else {
-                panic!("SQLite cancellation cleanup failed: {cause}");
-            }
-        }
-    }
-}
-
-pub(crate) fn with_database_deadline<T>(
-    conn: &mut Connection,
-    until: Instant,
-    operation: impl FnOnce(&mut Connection) -> Result<T>,
-) -> Result<T> {
-    let deadline = Deadline::until(until);
-    with_database_budget(conn, deadline, |conn| {
-        let mut scope = CancellationScope::new(conn)?;
-        let result = operation(scope.conn);
-        let restored = scope.restore();
-        let value = CafleetError::merge_cleanup(result, restored)?;
-        deadline.remaining()?;
-        Ok(value)
-    })
-}
+pub(crate) use crate::db::with_database_deadline;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ShutdownOutcome {
@@ -235,6 +118,34 @@ impl ShutdownOutcome {
     pub(crate) fn complete(native_exit: Option<ChildExit>) -> Self {
         Self::new(native_exit, Vec::new())
     }
+
+    /// Records `diagnostic` and marks the cleanup incomplete.
+    pub(crate) fn fail(&mut self, diagnostic: impl Into<String>) {
+        self.diagnostics.push(diagnostic.into());
+        self.cleanup_state = CleanupState::Incomplete;
+    }
+}
+
+/// Runs `cleanup` through an unwind guard, recording its error or `panicked` in `notes`.
+fn guarded<T>(
+    notes: &mut Vec<String>,
+    panicked: &str,
+    cleanup: impl FnOnce() -> Result<T>,
+) -> Option<T> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup)) {
+        Ok(result) => note(notes, result),
+        Err(_) => {
+            notes.push(panicked.into());
+            None
+        }
+    }
+}
+
+/// The value of `result`, or `None` after recording its error in `diagnostics`.
+pub(crate) fn note<T>(diagnostics: &mut Vec<String>, result: Result<T>) -> Option<T> {
+    result
+        .map_err(|cause| diagnostics.push(cause.message().into_owned()))
+        .ok()
 }
 
 pub(crate) trait ShutdownHost {
@@ -257,15 +168,6 @@ pub(crate) fn shutdown(
     native: Option<ChildExit>,
 ) -> ShutdownOutcome {
     let mut outcome = ShutdownOutcome::complete(native);
-    fn collect<T>(result: Result<T>, outcome: &mut ShutdownOutcome) -> Option<T> {
-        match result {
-            Ok(value) => Some(value),
-            Err(cause) => {
-                outcome.diagnostics.push(cause.message().into_owned());
-                None
-            }
-        }
-    }
     fn reconcile_exit(outcome: &mut ShutdownOutcome, exit: Option<ChildExit>, conflict: &str) {
         let Some(exit) = exit else {
             return;
@@ -277,35 +179,35 @@ pub(crate) fn shutdown(
         }
     }
     host.gate_programmatic_input();
-    collect(host.term_verified_descendants(), &mut outcome);
-    let drained = collect(
+    note(&mut outcome.diagnostics, host.term_verified_descendants());
+    let drained = note(
+        &mut outcome.diagnostics,
         host.drain_and_reap_until(clock.child_deadline()),
-        &mut outcome,
     )
     .flatten();
     reconcile_exit(&mut outcome, drained, "conflicting native exit status");
-    collect(host.kill_verified_survivors(), &mut outcome);
-    collect(host.close_pty(), &mut outcome);
-    let final_exit = collect(host.final_native_exit(), &mut outcome).flatten();
+    note(&mut outcome.diagnostics, host.kill_verified_survivors());
+    note(&mut outcome.diagnostics, host.close_pty());
+    let final_exit = note(&mut outcome.diagnostics, host.final_native_exit()).flatten();
     reconcile_exit(
         &mut outcome,
         final_exit,
         "conflicting final native exit status",
     );
-    if let Some(dropped) = collect(
+    if let Some(dropped) = note(
+        &mut outcome.diagnostics,
         host.flush_display_until(clock.display_deadline()),
-        &mut outcome,
     ) {
         outcome.dropped_display_bytes = dropped;
     }
-    if let Some((pending, gap)) = collect(
+    if let Some((pending, gap)) = note(
+        &mut outcome.diagnostics,
         host.finish_events_until(clock.storage_deadline()),
-        &mut outcome,
     ) {
         outcome.pending_event_frames = pending;
         outcome.unsaved_observation_gap = gap;
     }
-    collect(host.restore_terminal(), &mut outcome);
+    note(&mut outcome.diagnostics, host.restore_terminal());
     if host.now() > clock.storage_deadline() {
         outcome
             .diagnostics
@@ -441,17 +343,6 @@ impl ControlIdentity {
             launch_nonce: run.launch_nonce.clone(),
         }
     }
-    pub(crate) fn from_descriptor(descriptor: &LaunchDescriptor) -> Self {
-        Self {
-            database_identity_json: descriptor.database_identity_json.clone(),
-            fleet_id: descriptor.fleet_id,
-            member_id: descriptor.member_id,
-            director_member_id: descriptor.director_member_id,
-            run_id: descriptor.run_id,
-            owner_epoch: descriptor.owner_epoch,
-            launch_nonce: descriptor.launch_nonce.clone(),
-        }
-    }
     pub(crate) fn validate(&self, run: &RunRecord) -> Result<()> {
         ensure(
             *self == Self::from_run(run),
@@ -540,16 +431,15 @@ impl PendingGuard<'_> {
         mut diagnostics: Vec<String>,
     ) -> CafleetError {
         self.armed = false;
-        let current = match storage::get_run(self.conn, self.run.run_id) {
-            Ok(run) => run,
-            Err(cause) => {
-                diagnostics.push(cause.message().into_owned());
-                self.run.clone()
-            }
-        };
-        if let Err(cause) = remove_pending_descriptor(self.conn, &current) {
-            diagnostics.push(cause.message().into_owned());
-        }
+        let current = note(
+            &mut diagnostics,
+            storage::get_run(self.conn, self.run.run_id),
+        )
+        .unwrap_or_else(|| self.run.clone());
+        note(
+            &mut diagnostics,
+            remove_pending_descriptor(self.conn, &current),
+        );
         if let Err(cause) = pending_failure(self.conn, &current, clock, &diagnostics) {
             diagnostics.push(cause.message().into_owned());
         }
@@ -701,8 +591,10 @@ fn launch_registered(
                 && current.child_start_identity.as_deref()
                     == Some(started.child.start_identity.as_str())
                 && current.started_at.is_some()
-                && (matches!(current.status, RunStatus::Running | RunStatus::Degraded)
-                    || current.status == RunStatus::Exited),
+                && matches!(
+                    current.status,
+                    RunStatus::Running | RunStatus::Degraded | RunStatus::Exited
+                ),
             "started reply lacks a matching completed native spawn",
         )?;
         artifacts.remove_descriptor()?;
@@ -731,44 +623,31 @@ fn launch_registered(
             if current.backend == crate::coding_agent::CodingAgent::Hermes.name()
                 && current.child_pid.is_some()
                 && let Some(pane_id) = pane.as_deref()
-                && let Err(cause) = host.settle_hermes(
-                    guard.conn,
-                    &current,
-                    pane_id,
-                    crate::coding_agent::hermes::settlement_deadline().instant(),
-                )
             {
-                notes.push(cause.message().into_owned());
+                let until = crate::coding_agent::hermes::settlement_deadline().instant();
+                note(
+                    &mut notes,
+                    host.settle_hermes(guard.conn, &current, pane_id, until),
+                );
             }
-            let cleanup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let panicked = "owned child cleanup panicked; explicit reconciliation required";
+            if let Some(outcome) = guarded(&mut notes, panicked, || {
                 host.shutdown_owned(&current, clock)
-            }));
-            match cleanup {
-                Ok(Ok(outcome)) => {
-                    notes.extend(outcome.diagnostics);
-                    if outcome.cleanup_state == CleanupState::Incomplete && notes.is_empty() {
-                        notes.push("owned child cleanup remains unconfirmed".into());
-                    }
+            }) {
+                notes.extend(outcome.diagnostics);
+                if outcome.cleanup_state == CleanupState::Incomplete && notes.is_empty() {
+                    notes.push("owned child cleanup remains unconfirmed".into());
                 }
-                Ok(Err(cause)) => notes.push(cause.message().into_owned()),
-                Err(_) => notes
-                    .push("owned child cleanup panicked; explicit reconciliation required".into()),
             }
         }
         Err(cause) => notes.push(cause.message().into_owned()),
         _ => {}
     }
     if let Some(pane) = pane {
-        let cleanup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let panicked = "owned pane cleanup panicked; explicit reconciliation required";
+        guarded(&mut notes, panicked, || {
             host.close_pane(&pane, clock.storage_deadline())
-        }));
-        match cleanup {
-            Ok(Ok(())) => {}
-            Ok(Err(cause)) => notes.push(cause.message().into_owned()),
-            Err(_) => {
-                notes.push("owned pane cleanup panicked; explicit reconciliation required".into())
-            }
-        }
+        });
     }
     let failure = guard.rollback(primary, clock, notes);
     if let Some(payload) = unwind {
@@ -812,10 +691,20 @@ impl LaunchHost for NativeLaunchHost<'_> {
         descriptor: &LaunchDescriptor,
         deadline: Instant,
     ) -> Result<Prepared> {
-        let paths = RuntimePaths::for_run(&descriptor.database_identity_json, descriptor.run_id)?;
+        let paths = RuntimePaths::for_run(
+            &descriptor.identity.database_identity_json,
+            descriptor.identity.run_id,
+        )?;
         let mut client = ControlClient::connect_starting(&paths.control_socket, deadline)?;
-        let identity = ControlIdentity::from_descriptor(descriptor);
-        let result=client.exchange(&json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"kind":"prepare","identity":identity,"remaining_ms":deadline.saturating_duration_since(Instant::now()).as_millis().min(10000)as u64}),deadline)?;
+        let request = LifecycleRequest::Prepare {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            identity: descriptor.identity.clone(),
+            remaining_ms: deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .min(10000) as u64,
+        };
+        let result = client.exchange(&request, deadline)?;
         let prepared = serde_json::from_value(result).map_err(io_error)?;
         self.client = Some(client);
         Ok(prepared)
@@ -830,10 +719,12 @@ impl LaunchHost for NativeLaunchHost<'_> {
             .client
             .as_mut()
             .ok_or_else(|| error("prepared control connection required"))?;
-        let value = client.exchange(
-            &json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"kind":"start","identity":prepared.identity,"pane_id":placement.mux_pane_id}),
-            deadline,
-        )?;
+        let request = LifecycleRequest::Start {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            identity: prepared.identity.clone(),
+            pane_id: placement.mux_pane_id.clone(),
+        };
+        let value = client.exchange(&request, deadline)?;
         serde_json::from_value(value).map_err(io_error)
     }
     fn settle_hermes(
@@ -852,7 +743,11 @@ impl LaunchHost for NativeLaunchHost<'_> {
         )
     }
     fn shutdown_owned(&mut self, run: &RunRecord, clock: ShutdownClock) -> Result<ShutdownOutcome> {
-        if let Ok(value) = request(run, "shutdown", clock.storage_deadline()) {
+        if let Ok(value) = request(
+            run,
+            LifecycleRequest::shutdown(run),
+            clock.storage_deadline(),
+        ) {
             return serde_json::from_value(value).map_err(io_error);
         }
         let runner = run.owner_process();
@@ -988,7 +883,7 @@ mod tests {
             let ready_at = started + Duration::from_millis(100);
             let path = endpoint.path().to_path_buf();
             let expected_identity = ControlIdentity::from_run(&endpoint.fixture.run);
-            let reply = json!({"protocol_version":1,"result":endpoint.prepared()});
+            let reply = serde_json::json!({"protocol_version":1,"result":endpoint.prepared()});
             let (result, request, premature_connections) = std::thread::scope(|scope| {
                 let server = scope.spawn(|| {
                     let mut premature_connections = 0;
@@ -1283,7 +1178,7 @@ mod tests {
             assert_ne!(self.panic_at, Some("prepared"), "fixture prepared unwind");
             self.child_argv = descriptor.spawn.argv.clone();
             let mut conn = crate::db::connect(&self.database_url).unwrap();
-            let before = storage::get_run(&conn, descriptor.run_id).unwrap();
+            let before = storage::get_run(&conn, descriptor.identity.run_id).unwrap();
             assert_eq!(before.child_pid, None);
             assert_eq!(self.spawn_count, 0);
             let lock = RunLock::acquire(&conn, &before.owner()).unwrap().unwrap();

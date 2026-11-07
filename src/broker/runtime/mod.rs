@@ -43,6 +43,12 @@ pub(super) fn nonblank(value: &str, field: &str) -> Result<(), CafleetError> {
     require(!value.trim().is_empty(), field, "required nonempty value")
 }
 
+pub(super) fn rfc3339(value: &str, field: &str) -> Result<(), CafleetError> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(drop)
+        .map_err(|_| invalid(field, "RFC 3339 timestamp required"))
+}
+
 pub(crate) fn hex(value: &str, length: usize, field: &str) -> Result<(), CafleetError> {
     require(
         value.len() == length && value.bytes().all(|byte| byte.is_ascii_hexdigit()),
@@ -396,46 +402,37 @@ pub(crate) fn reserve_event_sequences_in_transaction(
         !conn.is_autocommit(),
         "sequence reservation requires its caller transaction"
     );
-    let (ceiling, count) = match &reservation {
-        SequenceReservation::CurrentOwnerBlock => (run.event_seq_reserved_through, 256),
-        SequenceReservation::RecoveryRange { ceiling, count } => {
-            assert!(
-                *count > 0,
-                "recovery reservation requires a nonempty result count"
-            );
-            (*ceiling, *count)
-        }
-    };
-    let overflow = || match &reservation {
-        SequenceReservation::CurrentOwnerBlock => {
-            invalid("event_seq_reserved_through", "sequence overflow")
-        }
-        SequenceReservation::RecoveryRange { .. } => {
-            CafleetError::App("recovery sequence overflow".into())
-        }
-    };
-    let first = ceiling.checked_add(1).ok_or_else(overflow)?;
-    let last = ceiling.checked_add(count).ok_or_else(overflow)?;
+    let span =
+        |ceiling: i64, count: i64| Some(ceiling.checked_add(1)?..=ceiling.checked_add(count)?);
     match reservation {
         SequenceReservation::CurrentOwnerBlock => {
+            let range = span(run.event_seq_reserved_through, 256)
+                .ok_or_else(|| invalid("event_seq_reserved_through", "sequence overflow"))?;
             let changed = conn.execute(
                 "UPDATE member_runs SET event_seq_reserved_through=?1 WHERE run_id=?2 AND owner_epoch=?3 AND event_seq_reserved_through=?4",
-                params![last, run.run_id, run.owner_epoch, run.event_seq_reserved_through],
+                params![range.end(), run.run_id, run.owner_epoch, run.event_seq_reserved_through],
             )?;
             require(
                 changed == 1,
                 "member_runs.owner",
                 "sequence reservation lost ownership",
             )?;
+            Ok(range)
         }
-        SequenceReservation::RecoveryRange { .. } => {
+        SequenceReservation::RecoveryRange { ceiling, count } => {
+            assert!(
+                count > 0,
+                "recovery reservation requires a nonempty result count"
+            );
+            let range = span(ceiling, count)
+                .ok_or_else(|| CafleetError::App("recovery sequence overflow".into()))?;
             conn.execute(
                 "UPDATE member_runs SET event_seq_reserved_through=?1 WHERE run_id=?2",
-                params![last, run.run_id],
+                params![range.end(), run.run_id],
             )?;
+            Ok(range)
         }
     }
-    Ok(first..=last)
 }
 
 pub(crate) fn runtime_snapshot(
@@ -901,8 +898,8 @@ pub(crate) mod test_support {
         disposition: InputDisposition,
         evidence_ref: &str,
     ) -> Result<InputOperation, CafleetError> {
-        owned_transaction(conn, owner, |conn, _run| {
-            settle_input_in_transaction(conn, owner, input_id, expected, disposition, evidence_ref)
+        owned_transaction(conn, owner, |conn, run| {
+            settle_input_in_transaction(conn, run, input_id, expected, disposition, evidence_ref)
         })
     }
 

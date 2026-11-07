@@ -23,7 +23,6 @@ use serde::de::SeqAccess;
 use serde::de::Visitor;
 use serde_json::Map;
 use serde_json::Number;
-use serde_json::json;
 use std::fmt;
 use std::io::ErrorKind;
 use std::io::Read;
@@ -199,13 +198,13 @@ impl SubmissionResult {
         }
     }
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct PermissionInspectInput {
     pub(crate) interaction_id: i64,
     pub(crate) event_id: i64,
     pub(crate) director_member_id: i64,
 }
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct PermissionRespondInput {
     pub(crate) interaction_id: i64,
     pub(crate) event_id: i64,
@@ -213,6 +212,7 @@ pub(crate) struct PermissionRespondInput {
     pub(crate) expected_run_id: i64,
     pub(crate) expected_owner_epoch: i64,
     pub(crate) request_token: String,
+    #[serde(flatten, with = "answer_wire")]
     pub(crate) key: AnswerKey,
     pub(crate) decision_source: DecisionSource,
     pub(crate) director_mode: DirectorMode,
@@ -221,15 +221,6 @@ pub(crate) struct PermissionRespondInput {
     pub(crate) operation_key: String,
 }
 impl PermissionRespondInput {
-    fn wire(&self) -> Value {
-        json!({"interaction_id":self.interaction_id,"event_id":self.event_id,
-            "director_member_id":self.director_member_id,"expected_run_id":self.expected_run_id,
-            "expected_owner_epoch":self.expected_owner_epoch,"request_token":self.request_token,
-            "decision":self.key.decision(),"choice":self.key.choice(),
-            "decision_source":self.decision_source,"director_mode":self.director_mode,
-            "mode_evidence_ref":self.mode_evidence_ref,"decision_evidence_ref":self.decision_evidence_ref,
-            "operation_key":self.operation_key})
-    }
     pub(crate) fn inspection(&self) -> PermissionInspectInput {
         PermissionInspectInput {
             interaction_id: self.interaction_id,
@@ -238,15 +229,63 @@ impl PermissionRespondInput {
         }
     }
 }
+#[derive(Deserialize)]
 pub(crate) struct PermissionResponseResult {
+    #[serde(flatten)]
     pub(crate) submission: SubmissionResult,
     pub(crate) member_id: i64,
     pub(crate) run_id: i64,
     pub(crate) owner_epoch: i64,
     pub(crate) interaction_id: i64,
     pub(crate) event_id: i64,
+    #[serde(flatten, with = "answer_wire")]
     pub(crate) key: AnswerKey,
     pub(crate) decision_source: DecisionSource,
+}
+
+/// The wire's separate `decision` and `choice` fields, exactly one of them non-null.
+mod answer_wire {
+    use crate::broker::runtime::PermissionDecision;
+    use crate::coding_agent::catalog::AnswerKey;
+    use serde::Deserialize;
+    use serde::Deserializer;
+    use serde::Serialize;
+    use serde::Serializer;
+
+    #[derive(Serialize, Deserialize)]
+    struct Answer {
+        decision: Option<PermissionDecision>,
+        choice: Option<String>,
+    }
+
+    pub(super) fn serialize<S: Serializer>(
+        key: &AnswerKey,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        Answer {
+            decision: key.decision(),
+            choice: key.choice().map(str::to_owned),
+        }
+        .serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<AnswerKey, D::Error> {
+        match Answer::deserialize(deserializer)? {
+            Answer {
+                decision: Some(decision),
+                choice: None,
+            } => Ok(AnswerKey::Decision(decision)),
+            Answer {
+                decision: None,
+                choice: Some(choice),
+            } => Ok(AnswerKey::Choice(choice)),
+            _ => Err(serde::de::Error::custom(
+                "control answer requires exactly one decision or choice",
+            )),
+        }
+    }
 }
 // Declaration order is also the required reply order.
 stored_enum!(values MissingEvidence, "missing_evidence", {
@@ -291,13 +330,15 @@ pub(crate) struct PermissionInspection {
     pub(crate) evidence: Value,
     pub(crate) missing_evidence: Vec<MissingEvidence>,
 }
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct SubmitInput {
     pub(crate) operation_key: String,
     pub(crate) input_kind: InputKind,
     pub(crate) message_id: Option<i64>,
     pub(crate) literal: String,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
 pub(crate) enum ReceiptAction {
     Query {
         operation_key: String,
@@ -307,16 +348,21 @@ pub(crate) enum ReceiptAction {
     },
     Reconcile {
         input_id: i64,
+        #[serde(rename = "expected_state")]
         expected: InputState,
         disposition: InputDisposition,
         evidence_ref: String,
     },
 }
+#[derive(Serialize, Deserialize)]
 pub(crate) struct InputControlRequest {
     pub(crate) identity: ControlIdentity,
     pub(crate) expires_at_mono_ns: u64,
+    #[serde(flatten)]
     pub(crate) operation: InputControlOperation,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum InputControlOperation {
     SubmitPrompt(SubmitInput),
     SubmitExec(SubmitInput),
@@ -473,367 +519,258 @@ fn routes_input(body: &[u8]) -> Result<bool> {
         .map_err(|_| error("malformed control request object"))
 }
 
-struct Object<'a>(&'a Map<String, Value>);
-impl<'a> Object<'a> {
-    fn new(value: &'a Value, fields: &[&str]) -> Result<Self> {
-        let object = value
-            .as_object()
-            .ok_or_else(|| error("control object required"))?;
-        ensure(
-            object.len() == fields.len() && fields.iter().all(|field| object.contains_key(*field)),
-            "control object requires its exact fields",
-        )?;
-        Ok(Self(object))
-    }
-    fn value(&self, field: &str) -> &Value {
-        self.0
-            .get(field)
-            .expect("validated control field is present")
-    }
-    fn get<T: DeserializeOwned>(&self, field: &str) -> Result<T> {
-        serde_json::from_value(self.value(field).clone())
-            .map_err(|_| error(format!("invalid control {field}")))
-    }
-    fn positive(&self, field: &str) -> Result<i64> {
-        let value: i64 = self.get(field)?;
-        ensure(value > 0, "positive control identity required")?;
-        Ok(value)
-    }
+/// A control frame: `protocol_version` beside the flattened request or reply.
+#[derive(Serialize, Deserialize)]
+struct Frame<T> {
+    protocol_version: u32,
+    #[serde(flatten)]
+    body: T,
 }
 
-fn decode_identity(value: &Value) -> Result<ControlIdentity> {
-    let object = Object::new(
-        value,
-        &[
-            "database_identity_json",
-            "fleet_id",
-            "member_id",
-            "director_member_id",
-            "run_id",
-            "owner_epoch",
-            "launch_nonce",
-        ],
+fn wire<T: Serialize>(value: &T) -> Result<Value> {
+    serde_json::to_value(value).map_err(io_error)
+}
+
+fn public(mut projection: Value, field: &str) -> Value {
+    projection[field].take()
+}
+
+/// Decodes `value` and requires `encode` to reproduce it exactly, so an unknown, missing or
+/// defaulted field is refused like a wrongly typed one.
+fn decode_exact<T: DeserializeOwned>(
+    value: &Value,
+    encode: impl FnOnce(&T) -> Result<Value>,
+) -> Result<T> {
+    let decoded: T =
+        serde_json::from_value(value.clone()).map_err(|_| error("invalid control fields"))?;
+    ensure(
+        encode(&decoded)? == *value,
+        "control object requires its exact fields",
     )?;
-    crate::broker::runtime::validate_identity(object.value("database_identity_json"))
-        .map_err(|_| error("invalid control database identity"))?;
-    let launch_nonce: String = object.get("launch_nonce")?;
-    crate::broker::runtime::hex(&launch_nonce, 64, "launch_nonce")
-        .map_err(|_| error("invalid control launch nonce"))?;
-    Ok(ControlIdentity {
-        database_identity_json: object.value("database_identity_json").clone(),
-        fleet_id: object.positive("fleet_id")?,
-        member_id: object.positive("member_id")?,
-        director_member_id: object.positive("director_member_id")?,
-        run_id: object.positive("run_id")?,
-        owner_epoch: object.positive("owner_epoch")?,
-        launch_nonce,
-    })
+    Ok(decoded)
 }
 
-fn request_fields(kind: &str, value: &Value) -> Result<Vec<&'static str>> {
-    let fields: &[&str] = match kind {
-        "submit_prompt" | "submit_exec" => {
-            &["operation_key", "input_kind", "message_id", "literal"]
-        }
-        "permission_inspect" => &["interaction_id", "event_id", "director_member_id"],
-        "permission_respond" => &[
-            "interaction_id",
-            "event_id",
-            "director_member_id",
-            "expected_run_id",
-            "expected_owner_epoch",
-            "request_token",
-            "decision",
-            "choice",
-            "decision_source",
-            "director_mode",
-            "mode_evidence_ref",
-            "decision_evidence_ref",
-            "operation_key",
-        ],
-        "receipt" => match value.get("action").and_then(Value::as_str) {
-            Some("query") => &["action", "operation_key"],
-            Some("retire") => &["action", "input_id"],
-            Some("reconcile") => &[
-                "action",
-                "input_id",
-                "expected_state",
-                "disposition",
-                "evidence_ref",
-            ],
-            _ => return Err(error("invalid control receipt action")),
-        },
-        _ => return Err(error("unknown input control operation")),
-    };
-    Ok(
-        ["protocol_version", "kind", "identity", "expires_at_mono_ns"]
-            .into_iter()
-            .chain(fields.iter().copied())
-            .collect(),
+fn positive(ids: &[i64]) -> Result<()> {
+    ensure(
+        ids.iter().all(|id| *id > 0),
+        "positive control identity required",
     )
 }
 
-fn decode_request_value(value: &Value) -> Result<InputControlRequest> {
-    let kind = value
-        .get("kind")
-        .and_then(Value::as_str)
-        .ok_or_else(|| error("control kind required"))?;
-    let object = Object::new(value, &request_fields(kind, value)?)?;
-    validate_version(value)?;
-    let identity = decode_identity(object.value("identity"))?;
-    let expires_at_mono_ns: u64 = object.get("expires_at_mono_ns")?;
-    ensure(expires_at_mono_ns > 0, "positive input expiration required")?;
-    let operation = match kind {
-        "submit_prompt" | "submit_exec" => {
-            let input = SubmitInput {
-                operation_key: object.get("operation_key")?,
-                input_kind: object.get("input_kind")?,
-                message_id: object.get("message_id")?,
-                literal: object.get("literal")?,
-            };
-            validate_operation_key(&input.operation_key)?;
-            ensure(
-                crate::pane_lock::valid_input(&input.literal),
-                "valid single-line input literal required",
-            )?;
-            let valid_kind = match (kind, input.input_kind, input.message_id) {
-                ("submit_prompt", InputKind::Preview, Some(id)) => id > 0,
-                ("submit_prompt", InputKind::Prompt, None)
-                | ("submit_exec", InputKind::Exec, None) => true,
-                _ => false,
-            };
-            ensure(
-                valid_kind,
-                "control input kind and message must match the operation",
-            )?;
-            if kind == "submit_prompt" {
-                InputControlOperation::SubmitPrompt(input)
-            } else {
-                InputControlOperation::SubmitExec(input)
-            }
-        }
-        "permission_inspect" => {
-            let input = PermissionInspectInput {
-                interaction_id: object.positive("interaction_id")?,
-                event_id: object.positive("event_id")?,
-                director_member_id: object.positive("director_member_id")?,
-            };
-            ensure(
-                input.director_member_id == identity.director_member_id,
-                "control Director identity mismatch",
-            )?;
-            InputControlOperation::PermissionInspect(input)
-        }
-        "permission_respond" => {
-            let input = PermissionRespondInput {
-                interaction_id: object.positive("interaction_id")?,
-                event_id: object.positive("event_id")?,
-                director_member_id: object.positive("director_member_id")?,
-                expected_run_id: object.positive("expected_run_id")?,
-                expected_owner_epoch: object.positive("expected_owner_epoch")?,
-                request_token: object.get("request_token")?,
-                key: answer_key(&object)?,
-                decision_source: object.get("decision_source")?,
-                director_mode: object.get("director_mode")?,
-                mode_evidence_ref: object.get("mode_evidence_ref")?,
-                decision_evidence_ref: object.get("decision_evidence_ref")?,
-                operation_key: object.get("operation_key")?,
-            };
-            ensure(
-                input.director_member_id == identity.director_member_id
-                    && input.expected_run_id == identity.run_id
-                    && input.expected_owner_epoch == identity.owner_epoch,
-                "control permission identity mismatch",
-            )?;
-            crate::runtime::input_client::validate_respond(&input)?;
-            InputControlOperation::PermissionRespond(input)
-        }
-        "receipt" => {
-            InputControlOperation::Receipt(match object.get::<String>("action")?.as_str() {
-                "query" => {
-                    let operation_key: String = object.get("operation_key")?;
-                    validate_operation_key(&operation_key)?;
-                    ReceiptAction::Query { operation_key }
-                }
-                "retire" => ReceiptAction::Retire {
-                    input_id: object.positive("input_id")?,
-                },
-                "reconcile" => {
-                    let evidence_ref: String = object.get("evidence_ref")?;
-                    validate_permission_reference(&evidence_ref)?;
-                    ReceiptAction::Reconcile {
-                        input_id: object.positive("input_id")?,
-                        expected: object.get("expected_state")?,
-                        disposition: object.get("disposition")?,
-                        evidence_ref,
-                    }
-                }
-                _ => return Err(error("invalid control receipt action")),
-            })
-        }
-        _ => return Err(error("unknown input control operation")),
-    };
-    Ok(InputControlRequest {
-        identity,
-        expires_at_mono_ns,
-        operation,
-    })
+fn validate_choice(key: &AnswerKey) -> Result<()> {
+    ensure(
+        key.choice().is_none_or(valid_choice_id),
+        "control choice requires the choice-id shape",
+    )
 }
 
-fn answer_key(object: &Object<'_>) -> Result<AnswerKey> {
-    let decision: Option<PermissionDecision> = object.get("decision")?;
-    let choice: Option<String> = object.get("choice")?;
-    match (decision, choice) {
-        (Some(decision), None) => Ok(AnswerKey::Decision(decision)),
-        (None, Some(choice)) => {
-            ensure(
-                valid_choice_id(&choice),
-                "control choice requires the choice-id shape",
-            )?;
-            Ok(AnswerKey::Choice(choice))
+impl InputControlRequest {
+    fn validate(&self) -> Result<()> {
+        let identity = &self.identity;
+        crate::broker::runtime::validate_identity(&identity.database_identity_json)
+            .map_err(|_| error("invalid control database identity"))?;
+        crate::broker::runtime::hex(&identity.launch_nonce, 64, "launch_nonce")
+            .map_err(|_| error("invalid control launch nonce"))?;
+        positive(&[
+            identity.fleet_id,
+            identity.member_id,
+            identity.director_member_id,
+            identity.run_id,
+            identity.owner_epoch,
+        ])?;
+        ensure(
+            self.expires_at_mono_ns > 0,
+            "positive input expiration required",
+        )?;
+        match &self.operation {
+            InputControlOperation::SubmitPrompt(input)
+            | InputControlOperation::SubmitExec(input) => {
+                validate_operation_key(&input.operation_key)?;
+                ensure(
+                    crate::pane_lock::valid_input(&input.literal),
+                    "valid single-line input literal required",
+                )?;
+                let prompt = matches!(self.operation, InputControlOperation::SubmitPrompt(_));
+                let valid_kind = match (prompt, input.input_kind, input.message_id) {
+                    (true, InputKind::Preview, Some(id)) => id > 0,
+                    (true, InputKind::Prompt, None) | (false, InputKind::Exec, None) => true,
+                    _ => false,
+                };
+                ensure(
+                    valid_kind,
+                    "control input kind and message must match the operation",
+                )
+            }
+            InputControlOperation::PermissionInspect(input) => {
+                positive(&[
+                    input.interaction_id,
+                    input.event_id,
+                    input.director_member_id,
+                ])?;
+                ensure(
+                    input.director_member_id == identity.director_member_id,
+                    "control Director identity mismatch",
+                )
+            }
+            InputControlOperation::PermissionRespond(input) => {
+                validate_choice(&input.key)?;
+                ensure(
+                    input.director_member_id == identity.director_member_id
+                        && input.expected_run_id == identity.run_id
+                        && input.expected_owner_epoch == identity.owner_epoch,
+                    "control permission identity mismatch",
+                )?;
+                crate::runtime::input_client::validate_respond(input)
+            }
+            InputControlOperation::Receipt(ReceiptAction::Query { operation_key }) => {
+                validate_operation_key(operation_key)
+            }
+            InputControlOperation::Receipt(ReceiptAction::Retire { input_id }) => {
+                positive(&[*input_id])
+            }
+            InputControlOperation::Receipt(ReceiptAction::Reconcile {
+                input_id,
+                evidence_ref,
+                ..
+            }) => {
+                validate_permission_reference(evidence_ref)?;
+                positive(&[*input_id])
+            }
         }
-        _ => Err(error(
-            "control answer requires exactly one decision or choice",
-        )),
     }
 }
 
 fn decode_input_request(body: &[u8]) -> Result<InputControlRequest> {
-    decode_request_value(&decode_strict_json(body)?)
+    let value = decode_strict_json(body)?;
+    validate_version(&value)?;
+    let request = decode_exact(&value, wire::<Frame<InputControlRequest>>)?.body;
+    request.validate()?;
+    Ok(request)
+}
+
+/// A lifecycle control request; each variant carries the frame's `protocol_version`.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum LifecycleRequest {
+    Prepare {
+        protocol_version: u32,
+        identity: ControlIdentity,
+        remaining_ms: u64,
+    },
+    Start {
+        protocol_version: u32,
+        identity: ControlIdentity,
+        pane_id: Option<String>,
+    },
+    Health {
+        protocol_version: u32,
+        identity: ControlIdentity,
+    },
+    Shutdown {
+        protocol_version: u32,
+        identity: ControlIdentity,
+    },
+}
+impl LifecycleRequest {
+    pub(crate) fn health(run: &RunRecord) -> Self {
+        Self::Health {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            identity: ControlIdentity::from_run(run),
+        }
+    }
+    pub(crate) fn shutdown(run: &RunRecord) -> Self {
+        Self::Shutdown {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            identity: ControlIdentity::from_run(run),
+        }
+    }
 }
 
 pub(in crate::runtime) enum ServiceControlRequest {
-    Lifecycle(Value),
+    Lifecycle(LifecycleRequest),
     Input(Box<InputControlRequest>),
 }
 pub(in crate::runtime) fn decode_service_request(body: &[u8]) -> Result<ServiceControlRequest> {
     if routes_input(body)? {
         decode_input_request(body).map(|request| ServiceControlRequest::Input(Box::new(request)))
     } else {
-        decode_lifecycle_control_body(body).map(ServiceControlRequest::Lifecycle)
+        serde_json::from_value(decode_lifecycle_control_body(body)?)
+            .map(ServiceControlRequest::Lifecycle)
+            .map_err(|_| error("invalid lifecycle control fields"))
     }
+}
+
+fn encode_frame<T: Serialize>(body: T) -> Result<Vec<u8>> {
+    let frame = Frame {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        body,
+    };
+    frame_control_body(&serde_json::to_vec(&frame).map_err(io_error)?)
 }
 
 pub(in crate::runtime) fn encode_input_request(request: &InputControlRequest) -> Result<Vec<u8>> {
-    let (kind, fields) = match &request.operation {
-        InputControlOperation::SubmitPrompt(input) | InputControlOperation::SubmitExec(input) => {
-            let kind = if matches!(request.operation, InputControlOperation::SubmitPrompt(_)) {
-                "submit_prompt"
-            } else {
-                "submit_exec"
-            };
-            (
-                kind,
-                json!({"operation_key":input.operation_key,"input_kind":input.input_kind,"message_id":input.message_id,"literal":input.literal}),
-            )
-        }
-        InputControlOperation::PermissionInspect(input) => (
-            "permission_inspect",
-            serde_json::to_value(input).map_err(io_error)?,
-        ),
-        InputControlOperation::PermissionRespond(input) => ("permission_respond", input.wire()),
-        InputControlOperation::Receipt(action) => (
-            "receipt",
-            match action {
-                ReceiptAction::Query { operation_key } => {
-                    json!({"action":"query","operation_key":operation_key})
-                }
-                ReceiptAction::Retire { input_id } => {
-                    json!({"action":"retire","input_id":input_id})
-                }
-                ReceiptAction::Reconcile {
-                    input_id,
-                    expected,
-                    disposition,
-                    evidence_ref,
-                } => json!({"action":"reconcile","input_id":input_id,
-                "expected_state":expected,"disposition":disposition,"evidence_ref":evidence_ref}),
-            },
-        ),
-    };
-    let mut value = json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"kind":kind,"identity":request.identity,"expires_at_mono_ns":request.expires_at_mono_ns});
-    value
-        .as_object_mut()
-        .expect("control envelope is an object")
-        .extend(
-            fields
-                .as_object()
-                .expect("control payload is an object")
-                .clone(),
-        );
-    decode_request_value(&value)?;
-    frame_control_body(&serde_json::to_vec(&value).map_err(io_error)?)
+    request.validate()?;
+    encode_frame(request)
 }
 
-const RESPONSE_SUBMISSION_FIELDS: &[&str] =
-    &["status", "input_id", "stage", "output_seq", "reason"];
-const SUBMISSION_FIELDS: &[&str] = &[
-    "status",
-    "input_id",
-    "stage",
-    "output_seq",
-    "reason",
-    "delivery",
-];
-const RESPONSE_FIELDS: &[&str] = &[
-    "status",
-    "input_id",
-    "member_id",
-    "run_id",
-    "owner_epoch",
-    "interaction_id",
-    "event_id",
-    "decision",
-    "choice",
-    "decision_source",
-    "stage",
-    "output_seq",
-    "reason",
-];
-const INSPECTION_FIELDS: &[&str] = &[
-    "event_id",
-    "message_id",
-    "member_id",
-    "fleet_id",
-    "director_member_id",
-    "run_id",
-    "owner_epoch",
-    "interaction_id",
-    "episode_seq",
-    "classification",
-    "visibility",
-    "backend",
-    "native_version",
-    "answer_rule_id",
-    "answer_capability",
-    "capability_reason",
-    "supported_decisions",
-    "supported_choices",
-    "request_token",
-    "output_seq",
-    "evidence",
-    "missing_evidence",
-];
-
-fn decode_submission(value: &Value) -> Result<SubmissionResult> {
-    let result: SubmissionResult = serde_json::from_value(value.clone())
-        .map_err(|_| error("invalid control submission fields"))?;
-    if let Some(id) = result.input_id {
-        ensure(id > 0, "positive control input ID required")?;
-    }
-    Ok(result)
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ReplyBody<T> {
+    Result(T),
+    Error(String),
 }
 
-fn submission(value: &Value) -> Result<SubmissionResult> {
-    let object = Object::new(value, SUBMISSION_FIELDS)?;
-    if !object.value("delivery").is_null() {
-        Object::new(object.value("delivery"), &["status", "method", "reason"])?;
+/// The `{protocol_version, result | error}` reply envelope.
+pub(in crate::runtime) fn encode_reply<T: Serialize>(
+    reply: std::result::Result<T, &CafleetError>,
+) -> Result<Vec<u8>> {
+    encode_frame(match reply {
+        Ok(result) => ReplyBody::Result(result),
+        Err(cause) => ReplyBody::Error(cause.message().into_owned()),
+    })
+}
+
+/// Decodes an exact reply envelope; a runner error becomes `runner control: <cause>`.
+fn decode_reply<T: Serialize + DeserializeOwned>(body: &[u8]) -> Result<T> {
+    let value = decode_strict_json(body)?;
+    validate_version(&value)?;
+    match decode_exact(&value, wire::<Frame<ReplyBody<T>>>)?.body {
+        ReplyBody::Error(cause) => Err(error(format!("runner control: {cause}"))),
+        ReplyBody::Result(result) => Ok(result),
     }
-    let result = decode_submission(value)?;
-    let queued = result.status == SubmissionStatus::Queued;
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ResultWire {
+    Submission { submission: Value },
+    Inspection { request: Value },
+    PermissionResponse { response: Value },
+    Receipt { receipt: ReceiptWire },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum ReceiptWire {
+    Missing { input_id: (), submission: () },
+    Present { input_id: i64, submission: Value },
+    Retired { input_id: i64, submission: () },
+    Settled { input_id: i64, submission: () },
+}
+
+fn positive_input(submission: &SubmissionResult) -> Result<()> {
+    ensure(
+        submission.input_id.is_none_or(|id| id > 0),
+        "positive control input ID required",
+    )
+}
+
+fn validate_submission(submission: &SubmissionResult) -> Result<()> {
+    positive_input(submission)?;
+    let queued = submission.status == SubmissionStatus::Queued;
     ensure(
         queued
-            == result
+            == submission
                 .delivery
                 .as_ref()
                 .is_some_and(|delivery| delivery.status == DeliveryStatus::Queued),
@@ -841,62 +778,37 @@ fn submission(value: &Value) -> Result<SubmissionResult> {
     )?;
     if queued {
         ensure(
-            result.stage == SubmissionStage::ZeroBytes && result.input_id.is_some(),
+            submission.stage == SubmissionStage::ZeroBytes && submission.input_id.is_some(),
             "queued submission requires zero bytes and a durable input ID",
         )?;
     }
-    Ok(result)
+    Ok(())
 }
 
-fn response(value: &Value) -> Result<PermissionResponseResult> {
-    let object = Object::new(value, RESPONSE_FIELDS)?;
-    let submission_value = Value::Object(
-        RESPONSE_SUBMISSION_FIELDS
-            .iter()
-            .map(|field| ((*field).into(), object.value(field).clone()))
-            .collect(),
-    );
-    Ok(PermissionResponseResult {
-        submission: decode_submission(&submission_value)?,
-        member_id: object.positive("member_id")?,
-        run_id: object.positive("run_id")?,
-        owner_epoch: object.positive("owner_epoch")?,
-        interaction_id: object.positive("interaction_id")?,
-        event_id: object.positive("event_id")?,
-        key: answer_key(&object)?,
-        decision_source: object.get("decision_source")?,
-    })
-}
-
-fn inspection(value: &Value) -> Result<Box<PermissionInspection>> {
-    let object = Object::new(value, INSPECTION_FIELDS)?;
-    for field in [
-        "event_id",
-        "message_id",
-        "member_id",
-        "fleet_id",
-        "director_member_id",
-        "run_id",
-        "owner_epoch",
-        "interaction_id",
-        "episode_seq",
-    ] {
-        object.positive(field)?;
-    }
-    let result: PermissionInspection = serde_json::from_value(value.clone())
-        .map_err(|_| error("invalid control inspection fields"))?;
-    if let Some(token) = &result.request_token {
+fn validate_inspection(inspection: &PermissionInspection) -> Result<()> {
+    positive(&[
+        inspection.event_id,
+        inspection.message_id,
+        inspection.member_id,
+        inspection.fleet_id,
+        inspection.director_member_id,
+        inspection.run_id,
+        inspection.owner_epoch,
+        inspection.interaction_id,
+        inspection.episode_seq,
+    ])?;
+    if let Some(token) = &inspection.request_token {
         validate_request_token(token)?;
     }
     validate_order(
-        result
+        inspection
             .supported_decisions
             .iter()
             .map(|decision| decision.as_str()),
         PermissionDecision::VALUES,
     )?;
     validate_order(
-        result
+        inspection
             .missing_evidence
             .iter()
             .map(|missing| missing.as_str()),
@@ -904,21 +816,20 @@ fn inspection(value: &Value) -> Result<Box<PermissionInspection>> {
     )?;
     let mut choices = std::collections::BTreeSet::new();
     ensure(
-        result
+        inspection
             .supported_choices
             .iter()
             .all(|choice| valid_choice_id(&choice.choice_id) && choices.insert(&choice.choice_id)),
         "control inspection choices require unique shaped choice ids",
     )?;
     ensure(
-        result.supported_choices.is_empty()
-            || (result.supported_decisions.is_empty()
-                && result.classification == Some(InteractionClass::Question)),
+        inspection.supported_choices.is_empty()
+            || (inspection.supported_decisions.is_empty()
+                && inspection.classification == Some(InteractionClass::Question)),
         "control inspection choices belong only to a question",
     )?;
-    crate::broker::runtime::evidence::validate(&result.evidence)
-        .map_err(|_| error("invalid control inspection evidence"))?;
-    Ok(Box::new(result))
+    crate::broker::runtime::evidence::validate(&inspection.evidence)
+        .map_err(|_| error("invalid control inspection evidence"))
 }
 
 fn validate_order<'a>(values: impl Iterator<Item = &'a str>, domain: &[&str]) -> Result<()> {
@@ -937,68 +848,74 @@ fn validate_order<'a>(values: impl Iterator<Item = &'a str>, domain: &[&str]) ->
     Ok(())
 }
 
-fn receipt(value: &Value) -> Result<ReceiptReply> {
-    let object = Object::new(value, &["status", "input_id", "submission"])?;
-    match object.get::<String>("status")?.as_str() {
-        "missing" => {
-            ensure(
-                object.value("input_id").is_null() && object.value("submission").is_null(),
-                "missing receipt requires null input and submission",
-            )?;
-            Ok(ReceiptReply::Missing)
+fn validate_reply(reply: &InputControlReply) -> Result<()> {
+    match reply {
+        InputControlReply::Submission(submission) => validate_submission(submission),
+        InputControlReply::Inspection(inspection) => validate_inspection(inspection),
+        InputControlReply::PermissionResponse(response) => {
+            positive_input(&response.submission)?;
+            positive(&[
+                response.member_id,
+                response.run_id,
+                response.owner_epoch,
+                response.interaction_id,
+                response.event_id,
+            ])?;
+            validate_choice(&response.key)
         }
-        "present" => {
-            let input_id = object.positive("input_id")?;
-            let submission = submission(object.value("submission"))?;
+        InputControlReply::Receipt(ReceiptReply::Missing) => Ok(()),
+        InputControlReply::Receipt(ReceiptReply::Present {
+            input_id,
+            submission,
+        }) => {
+            positive(&[*input_id])?;
+            validate_submission(submission)?;
             ensure(
-                submission.input_id == Some(input_id),
+                submission.input_id == Some(*input_id),
                 "receipt input identity mismatch",
-            )?;
-            Ok(ReceiptReply::Present {
-                input_id,
-                submission,
-            })
+            )
         }
-        "retired" | "settled" => {
-            let input_id = object.positive("input_id")?;
-            ensure(
-                object.value("submission").is_null(),
-                "consumed receipt requires null submission",
-            )?;
-            if object.value("status") == "retired" {
-                Ok(ReceiptReply::Retired { input_id })
-            } else {
-                Ok(ReceiptReply::Settled { input_id })
-            }
-        }
-        _ => Err(error("invalid control receipt status")),
+        InputControlReply::Receipt(
+            ReceiptReply::Retired { input_id } | ReceiptReply::Settled { input_id },
+        ) => positive(&[*input_id]),
     }
 }
 
-fn result(value: &Value) -> Result<InputControlReply> {
-    let kind = value
-        .get("kind")
-        .and_then(Value::as_str)
-        .ok_or_else(|| error("control result kind required"))?;
-    match kind {
-        "submission" => {
-            let object = Object::new(value, &["kind", "submission"])?;
-            submission(object.value("submission")).map(InputControlReply::Submission)
+fn decode_result(result: ResultWire) -> Result<InputControlReply> {
+    let submission = |value: &Value| decode_exact(value, wire::<SubmissionResult>);
+    Ok(match result {
+        ResultWire::Submission { submission: value } => {
+            InputControlReply::Submission(submission(&value)?)
         }
-        "inspection" => {
-            let object = Object::new(value, &["kind", "request"])?;
-            inspection(object.value("request")).map(InputControlReply::Inspection)
+        ResultWire::Inspection { request } => {
+            InputControlReply::Inspection(Box::new(decode_exact(&request, |inspection| {
+                Ok(public(
+                    crate::output::json::permission_inspection(inspection),
+                    "request",
+                ))
+            })?))
         }
-        "permission_response" => {
-            let object = Object::new(value, &["kind", "response"])?;
-            response(object.value("response")).map(InputControlReply::PermissionResponse)
+        ResultWire::PermissionResponse { response } => {
+            InputControlReply::PermissionResponse(decode_exact(&response, |response| {
+                Ok(public(
+                    crate::output::json::permission_response_result(response),
+                    "response",
+                ))
+            })?)
         }
-        "receipt" => {
-            let object = Object::new(value, &["kind", "receipt"])?;
-            receipt(object.value("receipt")).map(InputControlReply::Receipt)
-        }
-        _ => Err(error("invalid control result kind")),
-    }
+        ResultWire::Receipt { receipt } => InputControlReply::Receipt(match receipt {
+            ReceiptWire::Missing { .. } => ReceiptReply::Missing,
+            ReceiptWire::Present {
+                input_id,
+                submission: value,
+            } => ReceiptReply::Present {
+                input_id,
+                submission: submission(&value)?,
+            },
+            ReceiptWire::Retired { input_id, .. } => ReceiptReply::Retired { input_id },
+            ReceiptWire::Settled { input_id, .. } => ReceiptReply::Settled { input_id },
+        }),
+    })
 }
 
 fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) -> Result<()> {
@@ -1060,54 +977,66 @@ pub(in crate::runtime) fn decode_input_reply(
     body: &[u8],
     request: &InputControlRequest,
 ) -> Result<InputControlReply> {
-    let value = decode_strict_json(body)?;
-    if value.get("error").is_some() {
-        let object = Object::new(&value, &["protocol_version", "error"])?;
-        validate_version(&value)?;
-        let cause: String = object.get("error")?;
-        return Err(error(format!("runner control: {cause}")));
-    }
-    let object = Object::new(&value, &["protocol_version", "result"])?;
-    validate_version(&value)?;
-    let result = result(object.value("result"))?;
-    validate_binding(&result, request)?;
-    Ok(result)
+    let reply = decode_result(decode_reply(body)?)?;
+    validate_reply(&reply)?;
+    validate_binding(&reply, request)?;
+    Ok(reply)
 }
 
-fn encode_result(reply: &InputControlReply) -> Value {
-    match reply {
-        InputControlReply::Submission(submission) => {
-            json!({"kind":"submission","submission":submission})
-        }
-        InputControlReply::Inspection(inspection) => {
-            let public = crate::output::json::permission_inspection(inspection);
-            json!({"kind":"inspection","request":public.get("request").expect("inspection projection contains its request")})
-        }
-        InputControlReply::PermissionResponse(response) => {
-            let public = crate::output::json::permission_response_result(response);
-            json!({"kind":"permission_response","response":public.get("response").expect("response projection contains its response")})
-        }
-        InputControlReply::Receipt(receipt) => json!({"kind":"receipt","receipt":match receipt {
-            ReceiptReply::Missing => json!({"status":"missing","input_id":null,"submission":null}),
-            ReceiptReply::Present { input_id, submission } => json!({"status":"present","input_id":input_id,"submission":submission}),
-            ReceiptReply::Retired { input_id } => json!({"status":"retired","input_id":input_id,"submission":null}),
-            ReceiptReply::Settled { input_id } => json!({"status":"settled","input_id":input_id,"submission":null}),
-        }}),
-    }
+fn encode_result(reply: &InputControlReply) -> Result<ResultWire> {
+    Ok(match reply {
+        InputControlReply::Submission(submission) => ResultWire::Submission {
+            submission: wire(submission)?,
+        },
+        InputControlReply::Inspection(inspection) => ResultWire::Inspection {
+            request: public(
+                crate::output::json::permission_inspection(inspection),
+                "request",
+            ),
+        },
+        InputControlReply::PermissionResponse(response) => ResultWire::PermissionResponse {
+            response: public(
+                crate::output::json::permission_response_result(response),
+                "response",
+            ),
+        },
+        InputControlReply::Receipt(receipt) => ResultWire::Receipt {
+            receipt: match receipt {
+                ReceiptReply::Missing => ReceiptWire::Missing {
+                    input_id: (),
+                    submission: (),
+                },
+                ReceiptReply::Present {
+                    input_id,
+                    submission,
+                } => ReceiptWire::Present {
+                    input_id: *input_id,
+                    submission: wire(submission)?,
+                },
+                ReceiptReply::Retired { input_id } => ReceiptWire::Retired {
+                    input_id: *input_id,
+                    submission: (),
+                },
+                ReceiptReply::Settled { input_id } => ReceiptWire::Settled {
+                    input_id: *input_id,
+                    submission: (),
+                },
+            },
+        },
+    })
 }
 
 pub(in crate::runtime) fn encode_input_reply(
     reply: std::result::Result<&InputControlReply, &CafleetError>,
 ) -> Result<Vec<u8>> {
-    let value = match reply {
+    let result = match reply {
         Ok(reply) => {
-            let encoded = encode_result(reply);
-            result(&encoded)?;
-            json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"result":encoded})
+            validate_reply(reply)?;
+            Ok(encode_result(reply)?)
         }
-        Err(cause) => json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"error":cause.message()}),
+        Err(cause) => Err(cause),
     };
-    frame_control_body(&serde_json::to_vec(&value).map_err(io_error)?)
+    encode_reply(result)
 }
 
 pub(super) fn pause(deadline: Instant) -> Result<()> {
@@ -1200,24 +1129,14 @@ impl ControlClient {
             }
         }
     }
-    pub(super) fn exchange(&mut self, request: &Value, deadline: Instant) -> Result<Value> {
-        let bytes = encode_control_frame(request)?;
+    pub(super) fn exchange(
+        &mut self,
+        request: &LifecycleRequest,
+        deadline: Instant,
+    ) -> Result<Value> {
+        let bytes = encode_control_frame(&wire(request)?)?;
         let frame = self.exchange_bytes(&bytes, deadline)?;
-        let value = decode_lifecycle_control_body(frame.body())?;
-        ensure(
-            value.get("result").is_some() ^ value.get("error").is_some(),
-            "control reply requires one result or error",
-        )?;
-        if let Some(cause) = value.get("error") {
-            let cause = cause
-                .as_str()
-                .ok_or_else(|| error("control error requires text"))?;
-            return Err(error(format!("runner control: {cause}")));
-        }
-        Ok(value
-            .get("result")
-            .expect("validated result envelope")
-            .clone())
+        decode_reply(frame.body())
     }
     pub(super) fn exchange_input(
         &mut self,
@@ -1273,13 +1192,13 @@ impl ControlClient {
         }
     }
 }
-pub(super) fn request(run: &RunRecord, kind: &str, deadline: Instant) -> Result<Value> {
+pub(super) fn request(
+    run: &RunRecord,
+    request: LifecycleRequest,
+    deadline: Instant,
+) -> Result<Value> {
     let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)?;
-    let mut client = ControlClient::connect(&paths.control_socket, deadline)?;
-    client.exchange(
-        &json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"kind":kind,"identity":ControlIdentity::from_run(run)}),
-        deadline,
-    )
+    ControlClient::connect(&paths.control_socket, deadline)?.exchange(&request, deadline)
 }
 
 pub(crate) fn request_shutdown(
@@ -1288,7 +1207,7 @@ pub(crate) fn request_shutdown(
     deadline: Instant,
 ) -> Result<ShutdownOutcome> {
     validate_run_paths(conn, run)?;
-    let result = request(run, "shutdown", deadline)?;
+    let result = request(run, LifecycleRequest::shutdown(run), deadline)?;
     let outcome: ShutdownOutcome = serde_json::from_value(result).map_err(io_error)?;
     let current = storage::get_run(conn, run.run_id)?;
     ensure(
@@ -1342,7 +1261,7 @@ impl HealthSnapshot {
     }
 }
 pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
-    let reply = crate::runtime::control::request(run, "health", deadline)?;
+    let reply = request(run, LifecycleRequest::health(run), deadline)?;
     HealthSnapshot::decode(reply, run)
 }
 /// A doctor row's status, ordered by severity.
@@ -3289,12 +3208,25 @@ mod tests {
                 ..
             })
         ));
-        for kind in ["health", "prepare", "start", "shutdown"] {
-            let value = json!({"protocol_version":1,"kind":kind,"identity":case.request("submit_prompt",None)["identity"],"fixture_legacy":true});
-            match decode_service_request(&bytes(&value)).unwrap() {
-                ServiceControlRequest::Lifecycle(actual) => assert_eq!(actual, value),
-                ServiceControlRequest::Input(_) => panic!("legacy routing remains compatible"),
+        let identity = case.request("submit_prompt", None)["identity"].clone();
+        for (kind, field) in [
+            ("health", None),
+            ("prepare", Some(("remaining_ms", json!(5)))),
+            ("start", Some(("pane_id", json!("%1")))),
+            ("shutdown", None),
+        ] {
+            let mut value = json!({"protocol_version":1,"kind":kind,"identity":identity});
+            if let Some((name, field)) = field {
+                value[name] = field;
             }
+            match decode_service_request(&bytes(&value)).unwrap() {
+                ServiceControlRequest::Lifecycle(actual) => {
+                    assert_eq!(serde_json::to_value(&actual).unwrap(), value, "{kind}")
+                }
+                ServiceControlRequest::Input(_) => panic!("{kind} routes to the lifecycle"),
+            }
+            value["fixture_unknown"] = json!(true);
+            assert!(decode_service_request(&bytes(&value)).is_err(), "{kind}");
         }
     }
 
@@ -3345,6 +3277,60 @@ mod tests {
                 rejection(&good, &bytes(&bad));
             }
         }
+    }
+    #[test]
+    fn exact_reencoding_refuses_defaulted_flattened_float_and_duplicated_fields() {
+        let case = Case::new();
+        let prompt = case.request("submit_prompt", None);
+        let respond = case.request("permission_respond", None);
+        let retire = case.request("receipt", Some("retire"));
+
+        let mut float_expiry = prompt.clone();
+        float_expiry["expires_at_mono_ns"] = json!(50_000_000_000.0);
+        rejection(&prompt, &bytes(&float_expiry));
+        let mut absent_choice = respond.clone();
+        absent_choice.as_object_mut().unwrap().remove("choice");
+        rejection(&respond, &bytes(&absent_choice));
+        rejection(&respond, &duplicate(&respond, "decision"));
+
+        let accepted = reply(
+            "submission",
+            "submission",
+            submission("accepted", "submitted", Some(13)),
+        );
+        let mut defaulted_delivery = accepted.clone();
+        defaulted_delivery["result"]["submission"]
+            .as_object_mut()
+            .unwrap()
+            .remove("delivery");
+        reject_reply(&accepted, &bytes(&defaulted_delivery), &prompt);
+        let mut float_input = accepted.clone();
+        float_input["result"]["submission"]["input_id"] = json!(13.0);
+        reject_reply(&accepted, &bytes(&float_input), &prompt);
+
+        let response = reply("permission_response", "response", case.response());
+        let mut flattened_delivery = response.clone();
+        flattened_delivery["result"]["response"]["delivery"] =
+            submission("accepted", "submitted", Some(13))["delivery"].clone();
+        reject_reply(&response, &bytes(&flattened_delivery), &respond);
+        let mut absent_response_choice = response.clone();
+        absent_response_choice["result"]["response"]
+            .as_object_mut()
+            .unwrap()
+            .remove("choice");
+        reject_reply(&response, &bytes(&absent_response_choice), &respond);
+
+        let retired = reply(
+            "receipt",
+            "receipt",
+            json!({"status":"retired","input_id":13,"submission":null}),
+        );
+        let mut absent_unit = retired.clone();
+        absent_unit["result"]["receipt"]
+            .as_object_mut()
+            .unwrap()
+            .remove("submission");
+        reject_reply(&retired, &bytes(&absent_unit), &retire);
     }
     #[test]
     fn request_unknown_fields_and_other_receipt_action_fields_reject() {

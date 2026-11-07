@@ -12,16 +12,15 @@ use crate::runtime::input::RealInputDeadlineClock;
 use crate::runtime::input::RequestTokenSource;
 use crate::runtime::input::receive_input_expiration;
 use crate::runtime::transport::TransportProgress;
-use crate::runtime::writer::EventWriter;
 use crate::runtime::*;
 use filedescriptor::FileDescriptor;
 use rusqlite::Connection;
 use rusqlite::params;
-use serde_json::json;
 use std::collections::VecDeque;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
+use std::ops::ControlFlow;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
@@ -180,54 +179,47 @@ impl NativeIo<'_> {
     }
 }
 
-struct InputRequest<'a, 'n> {
-    native: &'a mut NativeIo<'n>,
-    conn: &'a mut Connection,
-    run: &'a RunRecord,
-    coordinator: &'a mut Option<InputCoordinator>,
-    admitted_at: Instant,
+fn input_deadline(request: &InputControlRequest, admitted_at: Instant) -> Result<Instant> {
+    receive_input_expiration(
+        request.expires_at_mono_ns,
+        admitted_at,
+        None,
+        &mut RealInputDeadlineClock,
+    )
 }
-impl InputRequest<'_, '_> {
-    fn deadline(&self, request: &InputControlRequest) -> Result<Instant> {
-        receive_input_expiration(
-            request.expires_at_mono_ns,
-            self.admitted_at,
-            None,
-            &mut RealInputDeadlineClock,
-        )
-    }
-    fn inspect(self, request: InputControlRequest) -> Result<InputControlReply> {
+impl RunnerLoop<'_> {
+    fn inspect(
+        &mut self,
+        request: InputControlRequest,
+        admitted_at: Instant,
+    ) -> Result<InputControlReply> {
         let InputControlOperation::PermissionInspect(input) = &request.operation else {
             unreachable!("inspection receives an inspection operation");
         };
-        let interaction_id = input.interaction_id;
-        let run_id = self.run.run_id;
-        self.inspect_within_deadline(request).map_err(|source| {
-            CafleetError::from(
-                InputContext {
-                    run_id: Some(run_id),
-                    interaction_id: Some(interaction_id),
-                    input_id: None,
-                    operation_key: None,
-                }
-                .failure(source),
-            )
-        })
+        let context = InputContext {
+            run_id: Some(self.run.run_id),
+            interaction_id: Some(input.interaction_id),
+            ..InputContext::default()
+        };
+        self.inspect_within_deadline(request, admitted_at)
+            .map_err(|source| CafleetError::from(context.failure(source)))
     }
-    fn inspect_within_deadline(self, request: InputControlRequest) -> Result<InputControlReply> {
-        let deadline = self.deadline(&request)?;
-        request.identity.validate(self.run)?;
+    fn inspect_within_deadline(
+        &mut self,
+        request: InputControlRequest,
+        admitted_at: Instant,
+    ) -> Result<InputControlReply> {
+        let deadline = input_deadline(&request, admitted_at)?;
+        request.identity.validate(&self.run)?;
         let coordinator = self
             .coordinator
             .as_mut()
             .ok_or_else(|| error("native input has not started"))?;
-        self.native
-            .quiesce(coordinator, deadline)
-            .map_err(CafleetError::from)?;
+        self.native.quiesce(coordinator, deadline)?;
         coordinator
             .inspect_received(
                 self.conn,
-                self.run,
+                &self.run,
                 request,
                 (&*self.native.controller, &mut *self.native.transport),
                 deadline,
@@ -235,55 +227,45 @@ impl InputRequest<'_, '_> {
             .map_err(CafleetError::from)
     }
     fn submit(
-        self,
+        &mut self,
         request: InputControlRequest,
-        pending: &mut Option<PendingInputClient>,
+        admitted_at: Instant,
         client_id: u64,
     ) -> Result<Option<InputControlReply>> {
-        let response_context = match &request.operation {
-            InputControlOperation::PermissionRespond(input) => {
-                Some((input.interaction_id, input.operation_key.clone()))
-            }
+        let context = match &request.operation {
+            InputControlOperation::PermissionRespond(input) => Some(InputContext {
+                run_id: Some(self.run.run_id),
+                interaction_id: Some(input.interaction_id),
+                input_id: None,
+                operation_key: Some(input.operation_key.clone()),
+            }),
             _ => None,
         };
-        let run_id = self.run.run_id;
-        self.submit_within_deadline(request, response_context.is_some(), pending, client_id)
-            .map_err(|source| match response_context {
-                Some((interaction_id, operation_key)) => CafleetError::from(
-                    InputContext {
-                        run_id: Some(run_id),
-                        interaction_id: Some(interaction_id),
-                        input_id: None,
-                        operation_key: Some(operation_key),
-                    }
-                    .failure(source),
-                ),
+        self.submit_within_deadline(request, context.is_some(), admitted_at, client_id)
+            .map_err(|source| match context {
+                Some(context) => CafleetError::from(context.failure(source)),
                 None => source,
             })
     }
     fn submit_within_deadline(
-        self,
+        &mut self,
         request: InputControlRequest,
         responds: bool,
-        pending: &mut Option<PendingInputClient>,
+        admitted_at: Instant,
         client_id: u64,
     ) -> Result<Option<InputControlReply>> {
-        let deadline = self.deadline(&request)?;
+        let deadline = input_deadline(&request, admitted_at)?;
         let coordinator = self
             .coordinator
             .as_mut()
             .ok_or_else(|| error("native input has not started"))?;
         if responds {
             if let Some(reply) = coordinator
-                .retained_permission_response(self.conn, self.run, &request, deadline)
-                .map_err(CafleetError::from)?
+                .retained_permission_response(self.conn, &self.run, &request, deadline)?
             {
                 return Ok(Some(reply));
             }
-            let admission = self
-                .native
-                .quiesce(coordinator, deadline)
-                .map_err(CafleetError::from)?;
+            let admission = self.native.quiesce(coordinator, deadline)?;
             if matches!(admission, InputDrain::Pending) {
                 return Err(error(format!(
                     "permission request is blocked: {}",
@@ -294,21 +276,19 @@ impl InputRequest<'_, '_> {
                 )));
             }
         }
-        let reply = coordinator
-            .handle_received(
-                self.conn,
-                self.run,
-                request,
-                self.native.controller,
-                deadline,
-            )
-            .map_err(CafleetError::from)?;
+        let reply = coordinator.handle_received(
+            self.conn,
+            &self.run,
+            request,
+            self.native.controller,
+            deadline,
+        )?;
         if reply.is_none() {
             ensure(
-                pending.is_none(),
+                self.pending_input_client.is_none(),
                 "accepted pending input already has a client",
             )?;
-            *pending = Some(PendingInputClient {
+            self.pending_input_client = Some(PendingInputClient {
                 id: client_id,
                 deadline,
             });
@@ -338,21 +318,21 @@ impl Client {
         self.flush()?;
         Ok(requests)
     }
-    fn reply(&mut self, result: Result<Value>) -> Result<()> {
-        let value = match result {
-            Ok(value) => json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"result":value}),
-            Err(cause) => {
-                json!({"protocol_version":CONTROL_PROTOCOL_VERSION,"error":cause.message()})
-            }
-        };
-        let bytes = encode_control_frame(&value)?;
-        self.queue_reply(bytes)
+    /// Queues a lifecycle reply; `false`, with the client closed, when it cannot be queued.
+    fn answer(&mut self, result: Result<Value>) -> bool {
+        let queued = crate::runtime::control::encode_reply(result.as_ref())
+            .and_then(|bytes| self.queue_reply(bytes));
+        self.closed |= queued.is_err();
+        queued.is_ok()
     }
-    fn reply_input(
+    /// Queues an input reply; `false`, with the client closed, when it cannot be queued.
+    fn answer_input(
         &mut self,
         reply: std::result::Result<&InputControlReply, &CafleetError>,
-    ) -> Result<()> {
-        self.queue_reply(encode_input_reply(reply)?)
+    ) -> bool {
+        let queued = encode_input_reply(reply).and_then(|bytes| self.queue_reply(bytes));
+        self.closed |= queued.is_err();
+        queued.is_ok()
     }
     fn queue_reply(&mut self, bytes: Vec<u8>) -> Result<()> {
         ensure(
@@ -472,9 +452,7 @@ impl ShutdownHost for LiveShutdown<'_> {
                 )
             };
             let progress = match self.coordinator.as_mut() {
-                Some(coordinator) => coordinator
-                    .progress_with_manual(self.transport, tick)
-                    .map_err(CafleetError::from)?,
+                Some(coordinator) => coordinator.progress_with_manual(self.transport, tick)?,
                 None => tick(self.transport)?,
             };
             record_observation_failure(self.controller, &progress, self.observation_clock)?;
@@ -551,15 +529,9 @@ impl ShutdownHost for LiveShutdown<'_> {
     }
     fn restore_terminal(&mut self) -> Result<()> {
         let mut errors = Vec::new();
-        if let Err(cause) = self.output.restore() {
-            errors.push(cause.message().into_owned());
-        }
-        if let Err(cause) = self.input.restore() {
-            errors.push(cause.message().into_owned());
-        }
-        if let Err(cause) = self.raw.restore() {
-            errors.push(cause.message().into_owned());
-        }
+        note(&mut errors, self.output.restore());
+        note(&mut errors, self.input.restore());
+        note(&mut errors, self.raw.restore());
         if errors.is_empty() {
             Ok(())
         } else {
@@ -620,7 +592,7 @@ pub(crate) fn run_service(
     let mut conn = crate::db::connect(&settings.database_url)?;
     crate::db::classify_selected_schema(&conn, &settings.database_url).require_current()?;
     let descriptor = load_descriptor(&conn, descriptor_path)?;
-    let original = storage::get_run(&conn, descriptor.run_id)?;
+    let original = storage::get_run(&conn, descriptor.identity.run_id)?;
     let creator = original.owner_process();
     ensure(
         creator.matches()?,
@@ -631,7 +603,7 @@ pub(crate) fn run_service(
             .ok_or_else(|| error("run ownership lock is held"))?,
     );
     let process = ProcessIdentity::current()?;
-    let mut handshake_deadline = Instant::now() + Duration::from_secs(10);
+    let handshake_deadline = Instant::now() + Duration::from_secs(10);
     let owner = lock.transfer_to_runner_with_deadline(
         &mut conn,
         &original.owner(),
@@ -723,475 +695,54 @@ pub(crate) fn run_service(
     let terminate = Arc::new(AtomicBool::new(false));
     let resize = Arc::new(AtomicBool::new(false));
     let _signals = SignalGuards::new(terminate.clone(), resize.clone())?;
-    let mut clients = Vec::<Client>::new();
-    let mut next_client = 1u64;
-    let mut creator_connection = None;
-    let mut started = false;
-    let mut coordinator = None::<InputCoordinator>;
-    let mut pending_input_client = None::<PendingInputClient>;
-    let mut deferred_retry = DeferredRetry::default();
-    let mut shutdown_client = None;
     let mut failure = None;
-    let mut native_exit = None;
-    let loop_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        || -> Result<ShutdownClock> {
-            let mut native = NativeIo {
-                input: &mut input,
-                pty: &mut pty,
-                output: &mut output,
-                transport: &mut transport,
-                controller: &mut controller,
-                writer: &writer,
-                clock: services.clock.as_ref(),
-                shutdown_unit,
-            };
-            loop {
-                let mut tick_progress = TransportProgress::default();
-                if terminate.load(Ordering::Acquire) {
-                    return Ok(shutdown_clock());
-                }
-                if !started {
-                    check_deadline(Instant::now(), handshake_deadline)?;
-                    ensure(
-                        creator.matches()?,
-                        "creator disconnected before native start",
-                    )?;
-                }
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        stream.set_nonblocking(true).map_err(io_error)?;
-                        if clients.len() < 32 {
-                            clients.push(Client {
-                                id: next_client,
-                                stream,
-                                decoder: ControlDecoder::new(),
-                                output: VecDeque::new(),
-                                closed: false,
-                            });
-                            next_client = next_client
-                                .checked_add(1)
-                                .ok_or_else(|| error("control connection sequence exhausted"))?;
-                        }
-                    }
-                    Err(cause) if cause.kind() == ErrorKind::WouldBlock => {}
-                    Err(cause) => return Err(io_error(cause)),
-                }
-                for client in &mut clients {
-                    let requests = match client.poll() {
-                        Ok(requests) => requests,
-                        Err(_) => {
-                            client.closed = true;
-                            Vec::new()
-                        }
-                    };
-                    if client.closed && creator_connection == Some(client.id) && !started {
-                        return Err(error("creator control disconnected before start"));
-                    }
-                    for frame in requests {
-                        let frame = match decode_service_request(frame.body()) {
-                            Ok(ServiceControlRequest::Input(request))
-                                if matches!(
-                                    request.operation,
-                                    InputControlOperation::PermissionInspect(_)
-                                ) =>
-                            {
-                                let result = InputRequest {
-                                    native: &mut native,
-                                    conn: &mut conn,
-                                    run: &run,
-                                    coordinator: &mut coordinator,
-                                    admitted_at: frame.admitted_at(),
-                                }
-                                .inspect(*request);
-                                if client.reply_input(result.as_ref()).is_err() {
-                                    client.closed = true;
-                                    break;
-                                }
-                                continue;
-                            }
-                            Ok(ServiceControlRequest::Input(request)) => {
-                                let result = InputRequest {
-                                    native: &mut native,
-                                    conn: &mut conn,
-                                    run: &run,
-                                    coordinator: &mut coordinator,
-                                    admitted_at: frame.admitted_at(),
-                                }
-                                .submit(
-                                    *request,
-                                    &mut pending_input_client,
-                                    client.id,
-                                );
-                                let replied = match result.as_ref().map(Option::as_ref).transpose()
-                                {
-                                    Some(reply) => client.reply_input(reply),
-                                    None => Ok(()),
-                                };
-                                if replied.is_err() {
-                                    client.closed = true;
-                                    break;
-                                }
-                                continue;
-                            }
-                            Ok(ServiceControlRequest::Lifecycle(frame)) => frame,
-                            Err(cause) => {
-                                if client.reply(Err(cause)).is_err() {
-                                    client.closed = true;
-                                    break;
-                                }
-                                continue;
-                            }
-                        };
-                        let mut accepted_startup = false;
-                        let result = (|| -> Result<Value> {
-                            let kind = frame
-                                .get("kind")
-                                .and_then(Value::as_str)
-                                .ok_or_else(|| error("control kind required"))?;
-                            let identity: ControlIdentity = serde_json::from_value(
-                                frame
-                                    .get("identity")
-                                    .cloned()
-                                    .ok_or_else(|| error("control identity required"))?,
-                            )
-                            .map_err(|_| error("malformed control identity"))?;
-                            if kind == "prepare" {
-                                ensure(
-                                    !started && creator_connection.is_none(),
-                                    "preparation is single-use",
-                                )?;
-                                identity.validate(&original)?;
-                                let remaining = frame
-                                    .get("remaining_ms")
-                                    .and_then(Value::as_u64)
-                                    .ok_or_else(|| {
-                                    error("remaining handshake budget required")
-                                })?;
-                                ensure(
-                                    remaining > 0 && remaining <= 10000,
-                                    "invalid handshake budget",
-                                )?;
-                                handshake_deadline = handshake_deadline
-                                    .min(Instant::now() + Duration::from_millis(remaining));
-                                creator_connection = Some(client.id);
-                                accepted_startup = true;
-                                artifacts.remove_descriptor()?;
-                                return serde_json::to_value(Prepared {
-                                    identity: ControlIdentity::from_run(&run),
-                                    runner: process.clone(),
-                                })
-                                .map_err(io_error);
-                            }
-                            identity.validate(&run)?;
-                            match kind {
-                                "start" => {
-                                    ensure(
-                                        !started && creator_connection == Some(client.id),
-                                        "start requires prepared creator connection",
-                                    )?;
-                                    let pane =
-                                        frame.get("pane_id").and_then(Value::as_str).ok_or_else(
-                                            || error("start requires concrete pane placement"),
-                                        )?;
-                                    accepted_startup = true;
-                                    with_database_deadline(
-                                        &mut conn,
-                                        handshake_deadline,
-                                        |conn| {
-                                            lock.validate(conn, &owner)?;
-                                            let current = storage::get_run(conn, run.run_id)?;
-                                            ensure(
-                                                current.status == RunStatus::Prepared,
-                                                "start requires published prepared state",
-                                            )?;
-                                            let member = broker::get_member(
-                                                conn,
-                                                run.member_id,
-                                                run.fleet_id,
-                                            )?
-                                            .ok_or_else(|| {
-                                                error("prepared member became inactive")
-                                            })?;
-                                            ensure(
-                                                member
-                                                    .placement
-                                                    .and_then(|placement| placement.mux_pane_id)
-                                                    .as_deref()
-                                                    == Some(pane),
-                                                "start placement changed",
-                                            )
-                                        },
-                                    )?;
-                                    #[cfg(test)]
-                                    let capture_placement = match &mut services.capture {
-                                        Some(port) => {
-                                            let (prepared, placement) = with_database_deadline(
-                                                &mut conn,
-                                                handshake_deadline,
-                                                |conn| {
-                                                    let prepared =
-                                                        storage::get_run(conn, run.run_id)?;
-                                                    let placement = broker::get_member(
-                                                        conn,
-                                                        run.member_id,
-                                                        run.fleet_id,
-                                                    )?
-                                                    .and_then(|member| member.placement)
-                                                    .ok_or_else(|| {
-                                                        error("capture prepared placement missing")
-                                                    })?;
-                                                    Ok((prepared, placement))
-                                                },
-                                            )?;
-                                            port.bind_service_prepared(
-                                                &prepared,
-                                                &placement,
-                                                &descriptor.spawn,
-                                                native.clock,
-                                            )?;
-                                            Some(placement)
-                                        }
-                                        None => None,
-                                    };
-
-                                    let child = native.pty.spawn(&descriptor.spawn)?;
-                                    with_database_deadline(
-                                        &mut conn,
-                                        handshake_deadline,
-                                        |conn| {
-                                            lock.validate(conn, &owner)?;
-                                            let changed=conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3,last_health_at=?3 WHERE run_id=?4 AND owner_epoch=?5 AND status='prepared'",params![child.pid,child.start_identity,crate::time::now_stamp(),run.run_id,owner.owner_epoch])?;
-                                            ensure(
-                                                changed == 1,
-                                                "native spawn storage lost ownership",
-                                            )
-                                        },
-                                    )?;
-                                    run = storage::get_run(&conn, run.run_id)?;
-                                    started = true;
-                                    #[cfg(test)]
-                                    if let Some(mut port) = services.capture.take() {
-                                        let placement = capture_placement
-                                            .expect("a bound capture retains its placement");
-                                        port.finalize_source(&run, &placement, &child)?;
-                                        native.controller.attach_capture(port)?;
-                                    }
-
-                                    native.controller.started(
-                                        &run,
-                                        &native.transport.snapshot(),
-                                        native.writer,
-                                        native.clock,
-                                    )?;
-                                    coordinator = Some(InputCoordinator::new(
-                                        &mut conn,
-                                        &run,
-                                        lock.clone(),
-                                        InputServices {
-                                            catalog: services.catalog.clone(),
-                                            token_source: Box::new(SystemRequestTokens),
-                                            stage_settle: crate::runtime::input::STAGE_SETTLE,
-#[cfg(test)]
-hooks: crate::runtime::input::test_support::default_input_hooks(),
-
-                                        },
-                                        handshake_deadline,
-                                    )?);
-                                    serde_json::to_value(Started {
-                                        identity: ControlIdentity::from_run(&run),
-                                        runner: process.clone(),
-                                        child,
-                                    })
-                                    .map_err(io_error)
-                                }
-                                "health" => run.child_process().and_then(|child| {
-                                    serde_json::to_value(HealthSnapshot {
-                                        identity: ControlIdentity::from_run(&run),
-                                        runner: process.clone(),
-                                        child,
-                                        output_seq: native.transport.snapshot().screen_seq,
-                                        observation: if started {
-                                            Some(native.controller.health(native.writer))
-                                        } else {
-                                            None
-                                        },
-                                    })
-                                    .map_err(io_error)
-                                }),
-                                "shutdown" => {
-                                    shutdown_client = Some(client.id);
-                                    Ok(Value::Null)
-                                }
-                                _ => Err(error("unknown runtime control operation")),
-                            }
-                        })();
-                        if shutdown_client == Some(client.id) {
-                            return Ok(shutdown_clock());
-                        }
-                        let startup_failure = if accepted_startup {
-                            result
-                                .as_ref()
-                                .err()
-                                .map(|cause| cause.message().into_owned())
-                        } else {
-                            None
-                        };
-                        if client.reply(result).is_err() {
-                            client.closed = true;
-                        }
-                        if let Some(cause) = startup_failure {
-                            return Err(error(format!(
-                                "native startup failed; owned compensation required: {cause}"
-                            )));
-                        }
-                        if client.closed {
-                            if creator_connection == Some(client.id) && !started {
-                                return Err(error("creator control disconnected before start"));
-                            }
-                            break;
-                        }
-                    }
-                }
-                clients.retain(|client| !client.closed);
-                if started {
-                    let selected = run.database_identity_json["canonical_path"]
-                        .as_str()
-                        .expect("validated database path");
-                    let meta = std::fs::metadata(selected).map_err(io_error)?;
-                    ensure(
-                        Some(meta.dev()) == run.database_identity_json["device"].as_u64()
-                            && Some(meta.ino()) == run.database_identity_json["inode"].as_u64(),
-                        "selected database was replaced; input fenced",
-                    )?;
-                    if resize.swap(false, Ordering::AcqRel) {
-                        native
-                            .transport
-                            .resize(native.pty, terminal_size(&terminal)?)?;
-                        native
-                            .controller
-                            .observer_for(native.writer, native.clock, ObservationPhase::Resize)
-                            .observe(&native.transport.snapshot())?;
-                    }
-                    let coordinator = coordinator
-                        .as_mut()
-                        .ok_or_else(|| error("running service requires input coordinator"))?;
-                    let progress = coordinator
-                        .progress_with_manual(native.transport, |transport| {
-                            transport.tick(
-                                native.input,
-                                native.pty,
-                                native.output,
-                                &mut native.controller.observer(native.writer, native.clock),
-                            )
-                        })
-                        .map_err(CafleetError::from)?;
-                    record_observation_failure(native.controller, &progress, native.clock)?;
-                    native.controller.poll(
-                        &native.transport.snapshot(),
-                        native.writer,
-                        native.clock,
-                    )?;
-                    if progress.outer_eof {
-                        return Ok(shutdown_clock());
-                    }
-                    tick_progress = progress;
-                    if let Some(clock) = native.observe_exit(&mut native_exit, |controller| {
-                        publish_stopped_results(coordinator, &mut conn, run.run_id, controller)
-                    })? {
-                        return Ok(clock);
-                    }
-                    if let Some(pending) = &pending_input_client {
-                        let deadline = pending.deadline;
-                        let result = match native.quiesce(coordinator, deadline) {
-                            Err(failure) => Err(CafleetError::from(failure)),
-                            Ok(InputDrain::Pending) => Ok(None),
-                            Ok(InputDrain::Quiescent { .. }) => {
-                                if terminate.load(Ordering::Acquire) {
-                                    return Ok(shutdown_clock());
-                                }
-                                if let Some(clock) =
-                                    native.observe_exit(&mut native_exit, |controller| {
-                                        publish_stopped_results(
-                                            coordinator,
-                                            &mut conn,
-                                            run.run_id,
-                                            controller,
-                                        )
-                                    })?
-                                {
-                                    return Ok(clock);
-                                }
-                                if resize.load(Ordering::Acquire) {
-                                    Ok(None)
-                                } else {
-                                    coordinator
-                                        .advance(
-                                            &mut conn,
-                                            &run,
-                                            native.transport,
-                                            native.pty,
-                                            native.controller,
-                                            deadline,
-                                        )
-                                        .map_err(CafleetError::from)
-                                }
-                            }
-                        };
-                        if !matches!(result, Ok(None)) {
-                            coordinator.finish_pending_attempt();
-                            deferred_retry.wake();
-                            let pending = pending_input_client
-                                .take()
-                                .expect("completed input retains its original client");
-                            if let Some(client) = clients
-                                .iter_mut()
-                                .find(|client| client.id == pending.id && !client.closed)
-                            {
-                                let reply = result.as_ref().map(|reply| {
-                                    reply.as_ref().expect("completed input has a reply")
-                                });
-                                if client.reply_input(reply).is_err() {
-                                    client.closed = true;
-                                }
-                            }
-                        }
-                    } else if coordinator.has_deferred_work()
-                        && deferred_retry.due(
-                            coordinator.deferred_attempt_writing(),
-                            native.controller.status(),
-                            Instant::now(),
-                        )
-                    {
-                        let deadline = Instant::now() + Duration::from_secs(5);
-                        if let Ok(InputDrain::Quiescent { .. }) =
-                            native.quiesce(coordinator, deadline)
-                            && !terminate.load(Ordering::Acquire)
-                            && !resize.load(Ordering::Acquire)
-                            && let Err(failure) = coordinator.advance(
-                                &mut conn,
-                                &run,
-                                native.transport,
-                                native.pty,
-                                native.controller,
-                                deadline,
-                            )
-                        {
-                            let failure = CafleetError::from(failure);
-                            if coordinator.deferred_failed() {
-                                return Err(failure);
-                            }
-                            eprintln!("member runtime: deferred input: {}", failure.message());
-                        }
-                    }
-                }
-                std::thread::sleep(tick_sleep(
-                    &tick_progress,
-                    native.controller.status().next_deadline,
-                    Instant::now(),
-                ));
-            }
+    let mut runner = RunnerLoop {
+        native: NativeIo {
+            input: &mut input,
+            pty: &mut pty,
+            output: &mut output,
+            transport: &mut transport,
+            controller: &mut controller,
+            writer: &writer,
+            clock: services.clock.as_ref(),
+            shutdown_unit,
         },
-    ));
+        conn: &mut conn,
+        original: &original,
+        run,
+        lock: &lock,
+        artifacts: &artifacts,
+        descriptor: &descriptor,
+        process: &process,
+        creator: &creator,
+        listener: &listener,
+        terminal: &terminal,
+        terminate: &terminate,
+        resize: &resize,
+        catalog: services.catalog,
+        #[cfg(test)]
+        capture: services.capture.take(),
+        handshake_deadline,
+        clients: Vec::new(),
+        next_client: 1,
+        creator_connection: None,
+        started: false,
+        coordinator: None,
+        pending_input_client: None,
+        deferred_retry: DeferredRetry::default(),
+        shutdown_client: None,
+        native_exit: None,
+    };
+    let loop_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runner.serve()));
+    let RunnerLoop {
+        run,
+        started,
+        mut coordinator,
+        mut clients,
+        shutdown_client,
+        native_exit,
+        ..
+    } = runner;
     let (loop_result, unwind) = match loop_result {
         Ok(result) => (result, None),
         Err(payload) => (Err(error("runner loop unwound")), Some(payload)),
@@ -1261,16 +812,13 @@ hooks: crate::runtime::input::test_support::default_input_hooks(),
     };
     let mut outcome = shutdown(&mut live, clock, native_exit);
     if let Some(cause) = failure {
-        outcome.diagnostics.push(cause);
-        outcome.cleanup_state = CleanupState::Incomplete;
+        outcome.fail(cause);
     }
     if let Some(cause) = controller.pending_error() {
-        outcome.diagnostics.push(cause.message().into_owned());
-        outcome.cleanup_state = CleanupState::Incomplete;
+        outcome.fail(cause.message());
     }
     if let Some(cause) = writer.diagnostic() {
-        outcome.diagnostics.push(cause);
-        outcome.cleanup_state = CleanupState::Incomplete;
+        outcome.fail(cause);
     }
     let persisted = with_database_deadline(&mut conn, clock.storage_deadline(), |conn| {
         lock.validate(conn, &owner)?;
@@ -1278,20 +826,12 @@ hooks: crate::runtime::input::test_support::default_input_hooks(),
         Ok(())
     });
     if let Err(cause) = persisted {
-        outcome
-            .diagnostics
-            .push(format!("cleanup evidence pending: {cause}"));
-        outcome.cleanup_state = CleanupState::Incomplete;
+        outcome.fail(format!("cleanup evidence pending: {cause}"));
     }
     if let Some(id) = shutdown_client
         && let Some(client) = clients.iter_mut().find(|client| client.id == id)
     {
-        if client
-            .reply(serde_json::to_value(&outcome).map_err(io_error))
-            .is_err()
-        {
-            client.closed = true;
-        }
+        client.answer(serde_json::to_value(&outcome).map_err(io_error));
         while !client.output.is_empty() && Instant::now() < clock.storage_deadline() {
             if client.closed || client.flush().is_err() {
                 client.closed = true;
@@ -1313,6 +853,502 @@ hooks: crate::runtime::input::test_support::default_input_hooks(),
         outcome.native_exit,
         outcome.cleanup_state == CleanupState::Complete,
     )
+}
+
+fn started(coordinator: &mut Option<InputCoordinator>) -> &mut InputCoordinator {
+    coordinator
+        .as_mut()
+        .expect("a started runner has its input coordinator")
+}
+
+/// The runner's control loop: accepts control clients, serves their requests and, once the
+/// native child runs, ticks its transport and input.
+struct RunnerLoop<'a> {
+    native: NativeIo<'a>,
+    conn: &'a mut Connection,
+    original: &'a RunRecord,
+    run: RunRecord,
+    lock: &'a Arc<RunLock>,
+    artifacts: &'a RunArtifacts,
+    descriptor: &'a LaunchDescriptor,
+    process: &'a ProcessIdentity,
+    creator: &'a ProcessIdentity,
+    listener: &'a UnixListener,
+    terminal: &'a std::fs::File,
+    terminate: &'a AtomicBool,
+    resize: &'a AtomicBool,
+    catalog: &'static crate::coding_agent::ProfileCatalog,
+    #[cfg(test)]
+    capture: Option<crate::runtime::observation::native_capture::NativeCapturePort>,
+    handshake_deadline: Instant,
+    clients: Vec<Client>,
+    next_client: u64,
+    creator_connection: Option<u64>,
+    started: bool,
+    coordinator: Option<InputCoordinator>,
+    pending_input_client: Option<PendingInputClient>,
+    deferred_retry: DeferredRetry,
+    shutdown_client: Option<u64>,
+    native_exit: Option<ChildExit>,
+}
+
+impl RunnerLoop<'_> {
+    fn shutdown_clock(&self) -> ShutdownClock {
+        ShutdownClock::with_unit(Instant::now(), self.native.shutdown_unit)
+    }
+
+    fn serve(&mut self) -> Result<ShutdownClock> {
+        loop {
+            if self.terminate.load(Ordering::Acquire) {
+                return Ok(self.shutdown_clock());
+            }
+            if !self.started {
+                check_deadline(Instant::now(), self.handshake_deadline)?;
+                ensure(
+                    self.creator.matches()?,
+                    "creator disconnected before native start",
+                )?;
+            }
+            self.accept()?;
+            for index in 0..self.clients.len() {
+                if let Some(clock) = self.serve_client(index)? {
+                    return Ok(clock);
+                }
+            }
+            self.clients.retain(|client| !client.closed);
+            let progress = if self.started {
+                match self.tick_running()? {
+                    ControlFlow::Break(clock) => return Ok(clock),
+                    ControlFlow::Continue(progress) => progress,
+                }
+            } else {
+                TransportProgress::default()
+            };
+            std::thread::sleep(tick_sleep(
+                &progress,
+                self.native.controller.status().next_deadline,
+                Instant::now(),
+            ));
+        }
+    }
+
+    fn accept(&mut self) -> Result<()> {
+        let stream = match self.listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(cause) if cause.kind() == ErrorKind::WouldBlock => return Ok(()),
+            Err(cause) => return Err(io_error(cause)),
+        };
+        stream.set_nonblocking(true).map_err(io_error)?;
+        if self.clients.len() < 32 {
+            self.clients.push(Client {
+                id: self.next_client,
+                stream,
+                decoder: ControlDecoder::new(),
+                output: VecDeque::new(),
+                closed: false,
+            });
+            self.next_client = self
+                .next_client
+                .checked_add(1)
+                .ok_or_else(|| error("control connection sequence exhausted"))?;
+        }
+        Ok(())
+    }
+
+    fn creator_lost(&self, client_id: u64) -> bool {
+        self.creator_connection == Some(client_id) && !self.started
+    }
+
+    fn serve_client(&mut self, index: usize) -> Result<Option<ShutdownClock>> {
+        let client_id = self.clients[index].id;
+        let requests = match self.clients[index].poll() {
+            Ok(requests) => requests,
+            Err(_) => {
+                self.clients[index].closed = true;
+                Vec::new()
+            }
+        };
+        if self.clients[index].closed && self.creator_lost(client_id) {
+            return Err(error("creator control disconnected before start"));
+        }
+        for frame in requests {
+            let lifecycle = match decode_service_request(frame.body()) {
+                Ok(ServiceControlRequest::Input(request)) => {
+                    if !self.serve_input(index, *request, frame.admitted_at()) {
+                        break;
+                    }
+                    continue;
+                }
+                Ok(ServiceControlRequest::Lifecycle(lifecycle)) => lifecycle,
+                Err(cause) => {
+                    if !self.clients[index].answer(Err(cause)) {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            let mut accepted_startup = false;
+            let result = self.serve_lifecycle(client_id, &lifecycle, &mut accepted_startup);
+            if self.shutdown_client == Some(client_id) {
+                return Ok(Some(self.shutdown_clock()));
+            }
+            let startup_failure = result
+                .as_ref()
+                .err()
+                .filter(|_| accepted_startup)
+                .map(|cause| cause.message().into_owned());
+            self.clients[index].answer(result);
+            if let Some(cause) = startup_failure {
+                return Err(error(format!(
+                    "native startup failed; owned compensation required: {cause}"
+                )));
+            }
+            if self.clients[index].closed {
+                if self.creator_lost(client_id) {
+                    return Err(error("creator control disconnected before start"));
+                }
+                break;
+            }
+        }
+        Ok(None)
+    }
+
+    /// Serves one input request; `false` when its reply could not be queued.
+    fn serve_input(
+        &mut self,
+        index: usize,
+        request: InputControlRequest,
+        admitted_at: Instant,
+    ) -> bool {
+        let client_id = self.clients[index].id;
+        if matches!(
+            request.operation,
+            InputControlOperation::PermissionInspect(_)
+        ) {
+            let result = self.inspect(request, admitted_at);
+            return self.clients[index].answer_input(result.as_ref());
+        }
+        let result = self.submit(request, admitted_at, client_id);
+        match result.as_ref().map(Option::as_ref).transpose() {
+            Some(reply) => self.clients[index].answer_input(reply),
+            None => true,
+        }
+    }
+
+    fn serve_lifecycle(
+        &mut self,
+        client_id: u64,
+        request: &LifecycleRequest,
+        accepted_startup: &mut bool,
+    ) -> Result<Value> {
+        match request {
+            LifecycleRequest::Prepare {
+                identity,
+                remaining_ms,
+                ..
+            } => self.prepare(client_id, identity, *remaining_ms, accepted_startup),
+            LifecycleRequest::Start {
+                identity, pane_id, ..
+            } => {
+                identity.validate(&self.run)?;
+                self.start(client_id, pane_id.as_deref(), accepted_startup)
+            }
+            LifecycleRequest::Health { identity, .. } => {
+                identity.validate(&self.run)?;
+                self.health()
+            }
+            LifecycleRequest::Shutdown { identity, .. } => {
+                identity.validate(&self.run)?;
+                self.shutdown_client = Some(client_id);
+                Ok(Value::Null)
+            }
+        }
+    }
+
+    fn prepare(
+        &mut self,
+        client_id: u64,
+        identity: &ControlIdentity,
+        remaining: u64,
+        accepted_startup: &mut bool,
+    ) -> Result<Value> {
+        ensure(
+            !self.started && self.creator_connection.is_none(),
+            "preparation is single-use",
+        )?;
+        identity.validate(self.original)?;
+        ensure(
+            remaining > 0 && remaining <= 10000,
+            "invalid handshake budget",
+        )?;
+        self.handshake_deadline = self
+            .handshake_deadline
+            .min(Instant::now() + Duration::from_millis(remaining));
+        self.creator_connection = Some(client_id);
+        *accepted_startup = true;
+        self.artifacts.remove_descriptor()?;
+        serde_json::to_value(Prepared {
+            identity: ControlIdentity::from_run(&self.run),
+            runner: self.process.clone(),
+        })
+        .map_err(io_error)
+    }
+
+    fn start(
+        &mut self,
+        client_id: u64,
+        pane: Option<&str>,
+        accepted_startup: &mut bool,
+    ) -> Result<Value> {
+        ensure(
+            !self.started && self.creator_connection == Some(client_id),
+            "start requires prepared creator connection",
+        )?;
+        let pane = pane.ok_or_else(|| error("start requires concrete pane placement"))?;
+        *accepted_startup = true;
+        with_database_deadline(self.conn, self.handshake_deadline, |conn| {
+            self.lock.validate(conn, &self.run.owner())?;
+            let current = storage::get_run(conn, self.run.run_id)?;
+            ensure(
+                current.status == RunStatus::Prepared,
+                "start requires published prepared state",
+            )?;
+            let member = broker::get_member(conn, self.run.member_id, self.run.fleet_id)?
+                .ok_or_else(|| error("prepared member became inactive"))?;
+            ensure(
+                member
+                    .placement
+                    .and_then(|placement| placement.mux_pane_id)
+                    .as_deref()
+                    == Some(pane),
+                "start placement changed",
+            )
+        })?;
+        #[cfg(test)]
+        let capture_placement = match &mut self.capture {
+            Some(port) => {
+                let (prepared, placement) =
+                    with_database_deadline(self.conn, self.handshake_deadline, |conn| {
+                        let prepared = storage::get_run(conn, self.run.run_id)?;
+                        let placement =
+                            broker::get_member(conn, self.run.member_id, self.run.fleet_id)?
+                                .and_then(|member| member.placement)
+                                .ok_or_else(|| error("capture prepared placement missing"))?;
+                        Ok((prepared, placement))
+                    })?;
+                port.bind_service_prepared(
+                    &prepared,
+                    &placement,
+                    &self.descriptor.spawn,
+                    self.native.clock,
+                )?;
+                Some(placement)
+            }
+            None => None,
+        };
+        let child = self.native.pty.spawn(&self.descriptor.spawn)?;
+        with_database_deadline(self.conn, self.handshake_deadline, |conn| {
+            self.lock.validate(conn, &self.run.owner())?;
+            let changed=conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3,last_health_at=?3 WHERE run_id=?4 AND owner_epoch=?5 AND status='prepared'",params![child.pid,child.start_identity,crate::time::now_stamp(),self.run.run_id,self.run.owner_epoch])?;
+            ensure(changed == 1, "native spawn storage lost ownership")
+        })?;
+        self.run = storage::get_run(self.conn, self.run.run_id)?;
+        self.started = true;
+        #[cfg(test)]
+        if let Some(mut port) = self.capture.take() {
+            let placement = capture_placement.expect("a bound capture retains its placement");
+            port.finalize_source(&self.run, &placement, &child)?;
+            self.native.controller.attach_capture(port)?;
+        }
+
+        self.native.controller.started(
+            &self.run,
+            &self.native.transport.snapshot(),
+            self.native.writer,
+            self.native.clock,
+        )?;
+        self.coordinator = Some(InputCoordinator::new(
+            self.conn,
+            &self.run,
+            self.lock.clone(),
+            InputServices {
+                catalog: self.catalog.clone(),
+                token_source: Box::new(SystemRequestTokens),
+                stage_settle: crate::runtime::input::STAGE_SETTLE,
+                #[cfg(test)]
+                hooks: crate::runtime::input::test_support::default_input_hooks(),
+            },
+            self.handshake_deadline,
+        )?);
+        serde_json::to_value(Started {
+            identity: ControlIdentity::from_run(&self.run),
+            runner: self.process.clone(),
+            child,
+        })
+        .map_err(io_error)
+    }
+
+    fn health(&mut self) -> Result<Value> {
+        let child = self.run.child_process()?;
+        let observation = self
+            .started
+            .then(|| self.native.controller.health(self.native.writer));
+        serde_json::to_value(HealthSnapshot {
+            identity: ControlIdentity::from_run(&self.run),
+            runner: self.process.clone(),
+            child,
+            output_seq: self.native.transport.snapshot().screen_seq,
+            observation,
+        })
+        .map_err(io_error)
+    }
+
+    fn tick_running(&mut self) -> Result<ControlFlow<ShutdownClock, TransportProgress>> {
+        let selected = self.run.database_identity_json["canonical_path"]
+            .as_str()
+            .expect("validated database path");
+        let meta = std::fs::metadata(selected).map_err(io_error)?;
+        ensure(
+            Some(meta.dev()) == self.run.database_identity_json["device"].as_u64()
+                && Some(meta.ino()) == self.run.database_identity_json["inode"].as_u64(),
+            "selected database was replaced; input fenced",
+        )?;
+        let native = &mut self.native;
+        if self.resize.swap(false, Ordering::AcqRel) {
+            native
+                .transport
+                .resize(native.pty, terminal_size(self.terminal)?)?;
+            native
+                .controller
+                .observer_for(native.writer, native.clock, ObservationPhase::Resize)
+                .observe(&native.transport.snapshot())?;
+        }
+        let coordinator = self
+            .coordinator
+            .as_mut()
+            .ok_or_else(|| error("running service requires input coordinator"))?;
+        let progress = coordinator.progress_with_manual(native.transport, |transport| {
+            transport.tick(
+                native.input,
+                native.pty,
+                native.output,
+                &mut native.controller.observer(native.writer, native.clock),
+            )
+        })?;
+        record_observation_failure(native.controller, &progress, native.clock)?;
+        native
+            .controller
+            .poll(&native.transport.snapshot(), native.writer, native.clock)?;
+        if progress.outer_eof {
+            return Ok(ControlFlow::Break(self.shutdown_clock()));
+        }
+        if let Some(clock) = self.observe_exit()? {
+            return Ok(ControlFlow::Break(clock));
+        }
+        if self.pending_input_client.is_some() {
+            if let Some(clock) = self.complete_pending_input()? {
+                return Ok(ControlFlow::Break(clock));
+            }
+        } else {
+            self.retry_deferred()?;
+        }
+        Ok(ControlFlow::Continue(progress))
+    }
+
+    fn observe_exit(&mut self) -> Result<Option<ShutdownClock>> {
+        let coordinator = started(&mut self.coordinator);
+        let (conn, run_id) = (&mut *self.conn, self.run.run_id);
+        self.native
+            .observe_exit(&mut self.native_exit, |controller| {
+                publish_stopped_results(coordinator, conn, run_id, controller)
+            })
+    }
+
+    fn advance(&mut self, deadline: Instant) -> Result<Option<InputControlReply>> {
+        let coordinator = started(&mut self.coordinator);
+        coordinator
+            .advance(
+                self.conn,
+                &self.run,
+                self.native.transport,
+                self.native.pty,
+                self.native.controller,
+                deadline,
+            )
+            .map_err(CafleetError::from)
+    }
+
+    /// Drives the client-owned input and replies once it completes.
+    fn complete_pending_input(&mut self) -> Result<Option<ShutdownClock>> {
+        let deadline = self
+            .pending_input_client
+            .as_ref()
+            .expect("a pending input has its client")
+            .deadline;
+        let coordinator = started(&mut self.coordinator);
+        let result = match self.native.quiesce(coordinator, deadline) {
+            Err(failure) => Err(CafleetError::from(failure)),
+            Ok(InputDrain::Pending) => Ok(None),
+            Ok(InputDrain::Quiescent { .. }) => {
+                if self.terminate.load(Ordering::Acquire) {
+                    return Ok(Some(self.shutdown_clock()));
+                }
+                if let Some(clock) = self.observe_exit()? {
+                    return Ok(Some(clock));
+                }
+                if self.resize.load(Ordering::Acquire) {
+                    Ok(None)
+                } else {
+                    self.advance(deadline)
+                }
+            }
+        };
+        if !matches!(result, Ok(None)) {
+            started(&mut self.coordinator).finish_pending_attempt();
+            self.deferred_retry.wake();
+            let pending = self
+                .pending_input_client
+                .take()
+                .expect("completed input retains its original client");
+            if let Some(client) = self
+                .clients
+                .iter_mut()
+                .find(|client| client.id == pending.id && !client.closed)
+            {
+                client.answer_input(
+                    result
+                        .as_ref()
+                        .map(|reply| reply.as_ref().expect("completed input has a reply")),
+                );
+            }
+        }
+        Ok(None)
+    }
+
+    fn retry_deferred(&mut self) -> Result<()> {
+        let coordinator = started(&mut self.coordinator);
+        if !coordinator.has_deferred_work()
+            || !self.deferred_retry.due(
+                coordinator.deferred_attempt_writing(),
+                self.native.controller.status(),
+                Instant::now(),
+            )
+        {
+            return Ok(());
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        if let Ok(InputDrain::Quiescent { .. }) = self.native.quiesce(coordinator, deadline)
+            && !self.terminate.load(Ordering::Acquire)
+            && !self.resize.load(Ordering::Acquire)
+            && let Err(failure) = self.advance(deadline)
+        {
+            if started(&mut self.coordinator).deferred_failed() {
+                return Err(failure);
+            }
+            eprintln!("member runtime: deferred input: {}", failure.message());
+        }
+        Ok(())
+    }
 }
 
 /// Fences ordinary input after the native exit and queues every durable deferred result that

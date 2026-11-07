@@ -121,113 +121,29 @@ pub(crate) fn get_event(
             "cross-run interaction",
         )?;
     }
-    let payload = &event.payload_json;
-    let mut fields = vec![
-        "schema_version",
-        "event_id",
-        "run_id",
-        "event_seq",
-        "member_id",
-        "fleet_id",
-        "director_member_id",
-        "kind",
-        "interaction_id",
-        "classification",
-        "observed_at",
-        "source",
-        "native_request_id",
-        "decision_outcome",
-        "evidence",
-    ];
+    let view = RuntimeEventView {
+        event,
+        run,
+        interaction,
+    };
+    let transition = original(&view)?;
+    validate_transition(&view.run.run, &transition)?;
+    let event = &view.event;
+    let delivery = (event.kind == RuntimeEventKind::InputDeliveryResult)
+        .then(|| published_delivery(conn, event))
+        .transpose()?;
     require(
-        payload.get("schema_version").and_then(Value::as_u64) == Some(2),
-        "schema_version",
-        "unsupported event schema",
-    )?;
-    let delivery_result = event.kind == RuntimeEventKind::InputDeliveryResult;
-    if event.kind == RuntimeEventKind::InteractionClosed {
-        fields.push("close_reason");
-    }
-    if source(event.kind) == "runner_lifecycle"
-        && (!delivery_result || payload.get("cause").is_some())
-    {
-        fields.push("cause");
-    }
-    if delivery_result {
-        fields.extend(["input_id", "message_id", "delivery", "stage"]);
-    }
-    fields.push("director_action");
-    require(
-        payload
-            .as_object()
-            .expect("decoded event object")
-            .keys()
-            .all(|key| fields.contains(&key.as_str()))
-            && payload.as_object().expect("event object").len() == fields.len(),
+        payload(
+            &view.run.run,
+            &transition,
+            event.event_id,
+            event.interaction_id,
+            delivery.as_ref(),
+        )? == event.payload_json,
         "payload_json",
-        "unknown public event field",
+        "stored payload does not match its event",
     )?;
-    require(
-        event.event_seq > 0,
-        "payload_json",
-        "invalid schema or sequence",
-    )?;
-    for (key, expected) in [
-        ("event_id", event.event_id),
-        ("run_id", event.run_id),
-        ("event_seq", event.event_seq),
-        ("member_id", run.run.member_id),
-        ("fleet_id", run.run.fleet_id),
-        ("director_member_id", run.run.director_member_id),
-    ] {
-        require(
-            payload.get(key).and_then(Value::as_i64) == Some(expected),
-            "payload_json",
-            "public identity mismatch",
-        )?;
-    }
-    require(
-        payload["interaction_id"] == json!(event.interaction_id)
-            && payload["classification"]
-                == json!(
-                    interaction
-                        .as_ref()
-                        .map(|episode| episode.classification.as_str())
-                )
-            && payload["kind"] == event.kind.as_str()
-            && payload["observed_at"] == event.observed_at
-            && payload["source"] == source(event.kind)
-            && payload["decision_outcome"] == "unknown",
-        "payload_json",
-        "event/interaction identity mismatch",
-    )?;
-    evidence::validate(
-        payload
-            .get("evidence")
-            .ok_or_else(|| invalid("payload_json.evidence", "evidence required"))?,
-    )?;
-    require(
-        payload.get("native_request_id") == payload["evidence"].get("native_request_id"),
-        "payload_json.native_request_id",
-        "native request identity must match post-policy evidence",
-    )?;
-    require(
-        payload.get("director_action")
-            == Some(&director_action(
-                &run.run,
-                event.kind,
-                interaction.as_ref().map(|episode| episode.classification),
-                event.event_id,
-                event.interaction_id,
-                &payload["evidence"],
-            )?),
-        "director_action",
-        "invalid bound review action",
-    )?;
-    if delivery_result {
-        validate_delivery_result(conn, &event, payload)?;
-    }
-    let serialized_payload = payload.to_string();
+    let serialized_payload = event.payload_json.to_string();
     require(
         serialized_payload.len() <= PAYLOAD_LIMIT,
         "payload_json",
@@ -245,8 +161,8 @@ pub(crate) fn get_event(
             )?;
             let message = crate::broker::messaging::get_message(conn, message_id)?;
             require(
-                message.from_member_id == run.run.member_id
-                    && message.to_member_id == run.run.director_member_id
+                message.from_member_id == view.run.run.member_id
+                    && message.to_member_id == view.run.run.director_member_id
                     && message.text == serialized_payload,
                 "message_id",
                 "event/message association mismatch",
@@ -258,42 +174,42 @@ pub(crate) fn get_event(
             "archived event requires only an archive reason",
         )?,
     }
-    let view = RuntimeEventView {
-        event,
-        run,
-        interaction,
-    };
-    validate_transition(&view.run.run, &original(&view)?)?;
     Ok(view)
 }
 
 const DELIVERY_RESULT_STAGES: [&str; 4] = ["zero_bytes", "partial", "submitted", "unknown"];
 
-fn validate_delivery_result(
+/// `input_id` as a deferred ordinary input of `run_id`, with its receipt's delivery projection.
+fn deferred_delivery(
+    conn: &Connection,
+    run_id: i64,
+    input_id: i64,
+    field: &str,
+) -> Result<(InputOperation, DeliveryProjection), CafleetError> {
+    let input = get_input(conn, input_id)?;
+    require(
+        input.run_id == run_id && input.deferred_at.is_some(),
+        field,
+        "delivery results describe this run's deferred inputs",
+    )?;
+    let delivery = input
+        .delivery()
+        .ok_or_else(|| invalid(field, "delivery results describe ordinary inputs"))?;
+    Ok((input, delivery))
+}
+
+/// The delivery fields a stored result publishes, checked against its input receipt: an uncertain
+/// result keeps the method it published even after the receipt settles.
+fn published_delivery(
     conn: &Connection,
     event: &RuntimeEventRecord,
-    payload: &Value,
-) -> Result<(), CafleetError> {
+) -> Result<DeliveryFields, CafleetError> {
+    let payload = &event.payload_json;
     let input_id = payload["input_id"]
         .as_i64()
         .ok_or_else(|| invalid("payload_json.input_id", "input identity required"))?;
-    let input = crate::broker::runtime::inputs::get_input(conn, input_id)?;
-    let delivery = input.delivery().ok_or_else(|| {
-        invalid(
-            "payload_json.input_id",
-            "delivery results describe ordinary inputs",
-        )
-    })?;
-    require(
-        input.run_id == event.run_id && input.deferred_at.is_some(),
-        "payload_json.input_id",
-        "delivery results describe this run's deferred inputs",
-    )?;
-    require(
-        payload["message_id"] == json!(input.message_id),
-        "payload_json.message_id",
-        "message identity must match the input receipt",
-    )?;
+    let (input, delivery) =
+        deferred_delivery(conn, event.run_id, input_id, "payload_json.input_id")?;
     let published: DeliveryProjection = serde_json::from_value(payload["delivery"].clone())
         .map_err(|_| invalid("payload_json.delivery", "delivery projection required"))?;
     let consistent = if published.status == DeliveryStatus::Uncertain {
@@ -318,15 +234,15 @@ fn validate_delivery_result(
         "payload_json.stage",
         "stage outside its domain",
     )?;
-    let expected_cause = input
-        .uncertain_cause
-        .filter(|_| published.status == DeliveryStatus::Uncertain)
-        .map(uncertain_cause_payload);
-    require(
-        payload.get("cause") == expected_cause.as_ref(),
-        "payload_json.cause",
-        "an uncertain delivery result carries its receipt's recorded cause",
-    )
+    Ok(DeliveryFields {
+        input_id,
+        message_id: input.message_id,
+        cause: input
+            .uncertain_cause
+            .filter(|_| published.status == DeliveryStatus::Uncertain),
+        delivery: published,
+        stage: payload["stage"].clone(),
+    })
 }
 
 pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, CafleetError> {
@@ -402,8 +318,7 @@ pub(crate) fn validate_transition(
         "event_seq",
         "run or reserved sequence mismatch",
     )?;
-    chrono::DateTime::parse_from_rfc3339(&transition.observed_at)
-        .map_err(|_| invalid("observed_at", "RFC 3339 timestamp required"))?;
+    rfc3339(&transition.observed_at, "observed_at")?;
     evidence::validate(&transition.evidence_json)?;
     let policy = &transition.evidence_json["evidence_policy"];
     require(
@@ -567,8 +482,7 @@ fn validate_cause(transition: &ObservedTransition) -> Result<(), CafleetError> {
             let value = value
                 .as_str()
                 .ok_or_else(|| invalid(key, "timestamp string required"))?;
-            chrono::DateTime::parse_from_rfc3339(value)
-                .map_err(|_| invalid(key, "RFC 3339 timestamp required"))?;
+            rfc3339(value, key)?;
         }
     }
     if kind == RuntimeCauseKind::NativeExit {
@@ -627,11 +541,21 @@ fn apply_interaction(
     Ok(Some(id))
 }
 
+/// The public fields an input delivery result adds from its input receipt.
+struct DeliveryFields {
+    input_id: i64,
+    message_id: Option<i64>,
+    delivery: DeliveryProjection,
+    stage: Value,
+    cause: Option<UncertainCause>,
+}
+
 fn payload(
     run: &RunRecord,
     transition: &ObservedTransition,
     event_id: i64,
     interaction_id: Option<i64>,
+    delivery: Option<&DeliveryFields>,
 ) -> Result<Value, CafleetError> {
     let mut payload = json!({
         "schema_version":2,"event_id":event_id,"run_id":run.run_id,"event_seq":transition.event_seq,
@@ -649,6 +573,15 @@ fn payload(
         && transition.kind != RuntimeEventKind::InputDeliveryResult
     {
         payload["cause"] = cause.clone();
+    }
+    if let Some(fields) = delivery {
+        if let Some(cause) = fields.cause {
+            payload["cause"] = uncertain_cause_payload(cause);
+        }
+        payload["input_id"] = json!(fields.input_id);
+        payload["message_id"] = json!(fields.message_id);
+        payload["delivery"] = fields.delivery.to_json();
+        payload["stage"] = fields.stage.clone();
     }
     payload["director_action"] = director_action(
         run,
@@ -738,19 +671,16 @@ pub(crate) fn persist_transition_in_transaction(
         if let Some(id) = published {
             return Ok((get_event(conn, id)?.event, false));
         }
-        let input = crate::broker::runtime::inputs::get_input(conn, input_id)?;
-        require(
-            input.run_id == run.run_id && input.deferred_at.is_some(),
-            "input_id",
-            "delivery results describe this run's deferred inputs",
-        )?;
-        let delivery = input
-            .delivery()
-            .ok_or_else(|| invalid("input_id", "delivery results describe ordinary inputs"))?;
-        let uncertain_cause = input
-            .uncertain_cause
-            .filter(|_| delivery.status == DeliveryStatus::Uncertain);
-        Some((record.clone(), input.message_id, delivery, uncertain_cause))
+        let (input, delivery) = deferred_delivery(conn, run.run_id, input_id, "input_id")?;
+        Some(DeliveryFields {
+            input_id,
+            message_id: input.message_id,
+            cause: input
+                .uncertain_cause
+                .filter(|_| delivery.status == DeliveryStatus::Uncertain),
+            delivery,
+            stage: record["stage"].clone(),
+        })
     } else {
         None
     };
@@ -761,23 +691,20 @@ pub(crate) fn persist_transition_in_transaction(
         "event sequence is not increasing",
     )?;
     let interaction_id = apply_interaction(conn, transition)?;
-    let message_id = if archive_reason.is_none() {
-        Some(
-            crate::broker::messaging::insert_message_validated(
-                conn,
-                run.member_id,
-                run.director_member_id,
-                "{}",
-            )?
-            .message_id,
-        )
-    } else {
-        None
-    };
-    let notification_state = if archive_reason.is_some() {
-        NotificationState::Archived
-    } else {
-        NotificationState::Inbox
+    let (notification_state, message_id) = match archive_reason {
+        Some(_) => (NotificationState::Archived, None),
+        None => (
+            NotificationState::Inbox,
+            Some(
+                crate::broker::messaging::insert_message_validated(
+                    conn,
+                    run.member_id,
+                    run.director_member_id,
+                    "{}",
+                )?
+                .message_id,
+            ),
+        ),
     };
     conn.execute(
             "INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,payload_json,notification_state,message_id,archive_reason)
@@ -786,22 +713,14 @@ pub(crate) fn persist_transition_in_transaction(
                 now_stamp(),notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
         )?;
     let event_id = conn.last_insert_rowid();
-    let mut payload = payload(run, transition, event_id, interaction_id)?;
-    if let Some((record, message_id, delivery, uncertain_cause)) = delivery_fields {
-        let object = payload.as_object_mut().expect("event payload object");
-        let action = object
-            .remove("director_action")
-            .expect("payload carries its action");
-        if let Some(uncertain_cause) = uncertain_cause {
-            object.insert("cause".into(), uncertain_cause_payload(uncertain_cause));
-        }
-        object.insert("input_id".into(), record["input_id"].clone());
-        object.insert("message_id".into(), json!(message_id));
-        object.insert("delivery".into(), delivery.to_json());
-        object.insert("stage".into(), record["stage"].clone());
-        object.insert("director_action".into(), action);
-    }
-    let payload = payload.to_string();
+    let payload = payload(
+        run,
+        transition,
+        event_id,
+        interaction_id,
+        delivery_fields.as_ref(),
+    )?
+    .to_string();
     require(
         payload.len() <= PAYLOAD_LIMIT,
         "payload_json",
@@ -1025,13 +944,12 @@ pub(super) fn validate(run: &RunRecord) -> Result<(), CafleetError> {
         field,
         "only an unavailable record names its event",
     )?;
-    chrono::DateTime::parse_from_rfc3339(
+    rfc3339(
         record["observed_at"]
             .as_str()
             .ok_or_else(|| invalid(field, "observation time required"))?,
+        field,
     )
-    .map_err(|_| invalid(field, "RFC 3339 observation time required"))?;
-    Ok(())
 }
 
 fn check_observation(
@@ -1050,13 +968,7 @@ fn check_observation(
         "metadata runs record no observed mode",
     )?;
     nonblank(&observation.rule_id, "effective_policy.rule_id")?;
-    chrono::DateTime::parse_from_rfc3339(&observation.observed_at).map_err(|_| {
-        invalid(
-            "effective_policy.observed_at",
-            "RFC 3339 timestamp required",
-        )
-    })?;
-    Ok(())
+    rfc3339(&observation.observed_at, "effective_policy.observed_at")
 }
 
 fn write_if_changed(

@@ -299,9 +299,18 @@ pub(crate) fn classify_selected_schema(conn: &Connection, database_url: &str) ->
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScopeKind {
+    Wait,
+    Completion,
+    Cancellable,
+}
+
 struct DatabaseWait {
     deadline: Deadline,
     completion: bool,
+    /// Statements abort through the progress handler once this passes.
+    cancellation: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -380,6 +389,18 @@ fn remaining_database_wait() -> Option<Duration> {
     })
 }
 
+fn database_cancelled() -> bool {
+    DATABASE_WAITS.with(|waits| {
+        let waits = waits.borrow();
+        let until = waits
+            .frames
+            .iter()
+            .filter_map(|frame| frame.cancellation)
+            .min();
+        Instant::now() >= until.expect("a progress handler has an owning cancellable scope")
+    })
+}
+
 fn wait_for_database_deadline(_: i32) -> bool {
     let Some(remaining) = remaining_database_wait() else {
         return false;
@@ -399,7 +420,7 @@ impl<'a> DatabaseBudget<'a> {
     fn new(
         conn: &'a mut Connection,
         deadline: Deadline,
-        completion: bool,
+        kind: ScopeKind,
     ) -> Result<Self, CafleetError> {
         let identity = std::ptr::from_ref(conn).addr();
         DATABASE_WAITS.with(|waits| {
@@ -415,11 +436,20 @@ impl<'a> DatabaseBudget<'a> {
         DATABASE_WAITS.with(|waits| {
             let mut waits = waits.borrow_mut();
             waits.identity = Some(identity);
+            let inherited = waits
+                .innermost_deadline()
+                .map(|inherited| inherited.instant());
             waits.frames.push(DatabaseWait {
                 deadline,
-                completion,
-            })
+                completion: kind == ScopeKind::Completion,
+                cancellation: (kind == ScopeKind::Cancellable).then(|| {
+                    inherited.map_or(deadline.instant(), |until| until.min(deadline.instant()))
+                }),
+            });
         });
+        if kind == ScopeKind::Cancellable {
+            conn.progress_handler(1000, Some(database_cancelled))?;
+        }
         Ok(Self {
             conn,
             identity,
@@ -432,36 +462,37 @@ impl<'a> DatabaseBudget<'a> {
         if !self.active {
             return Ok(());
         }
-        let nested = DATABASE_WAITS.with(|waits| {
-            let waits = waits.borrow();
-            assert_eq!(waits.identity, Some(self.identity));
-            assert!(
-                !waits.frames.is_empty(),
-                "an active database budget is registered"
-            );
-            waits.frames.len() > 1
-        });
-        let restored = if nested {
-            self.conn
-                .busy_handler(Some(wait_for_database_deadline))
-                .map_err(crate::error::CafleetError::from)
-        } else {
-            self.conn
-                .busy_timeout(self.previous_timeout)
-                .map_err(crate::error::CafleetError::from)
-        };
-        DATABASE_WAITS.with(|waits| {
+        let (nested, cancellable) = DATABASE_WAITS.with(|waits| {
             let mut waits = waits.borrow_mut();
+            assert_eq!(waits.identity, Some(self.identity));
             waits
                 .frames
                 .pop()
-                .expect("the active database scope is registered");
+                .expect("an active database budget is registered");
             if waits.frames.is_empty() {
                 waits.identity = None;
             }
+            let cancellable = waits
+                .frames
+                .iter()
+                .any(|frame| frame.cancellation.is_some());
+            (!waits.frames.is_empty(), cancellable)
         });
         self.active = false;
-        restored
+        let restored = if nested {
+            self.conn.busy_handler(Some(wait_for_database_deadline))
+        } else {
+            self.conn.busy_timeout(self.previous_timeout)
+        };
+        let handler = if cancellable {
+            self.conn.progress_handler(1000, Some(database_cancelled))
+        } else {
+            self.conn.progress_handler(0, None::<fn() -> bool>)
+        };
+        CafleetError::merge_cleanup(
+            restored.map_err(CafleetError::from),
+            handler.map_err(CafleetError::from),
+        )
     }
 }
 
@@ -478,7 +509,20 @@ pub(crate) fn with_database_budget<T>(
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
     deadline.remaining()?;
-    scoped_database_budget(conn, deadline, false, operation)
+    scoped_database_budget(conn, deadline, ScopeKind::Wait, operation)
+}
+
+/// Like [`with_database_budget`] until `until`, and statements also abort once it passes.
+pub(crate) fn with_database_deadline<T>(
+    conn: &mut Connection,
+    until: Instant,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    let deadline = Deadline::until(until);
+    deadline.remaining()?;
+    let value = scoped_database_budget(conn, deadline, ScopeKind::Cancellable, operation)?;
+    deadline.remaining()?;
+    Ok(value)
 }
 
 pub(crate) fn finalize_deletion<T>(
@@ -503,7 +547,12 @@ pub(crate) fn complete_database_budget<T>(
     deadline: Deadline,
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
-    scoped_database_budget(conn, completion_deadline(deadline), true, operation)
+    scoped_database_budget(
+        conn,
+        completion_deadline(deadline),
+        ScopeKind::Completion,
+        operation,
+    )
 }
 
 fn completion_deadline(deadline: Deadline) -> Deadline {
@@ -513,10 +562,10 @@ fn completion_deadline(deadline: Deadline) -> Deadline {
 fn scoped_database_budget<T>(
     conn: &mut Connection,
     deadline: Deadline,
-    completion: bool,
+    kind: ScopeKind,
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
-    let mut budget = DatabaseBudget::new(conn, deadline, completion)?;
+    let mut budget = DatabaseBudget::new(conn, deadline, kind)?;
     let result = operation(budget.conn);
     let restored = budget.restore().map_err(|error| {
         CafleetError::App(format!(

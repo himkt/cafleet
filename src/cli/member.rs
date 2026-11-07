@@ -209,18 +209,15 @@ pub(crate) enum MemberCommand {
     },
 }
 
-fn require_pane(
-    member: &MemberRecord,
-    member_id: i64,
-    action: &str,
-) -> Result<String, CafleetError> {
+fn require_pane(member: &MemberRecord, action: &str) -> Result<String, CafleetError> {
     member
         .placement
         .as_ref()
         .and_then(|placement| placement.mux_pane_id.clone())
         .ok_or_else(|| {
             CafleetError::App(format!(
-                "member {member_id} has no pane yet (pending placement) — nothing to {action}."
+                "member {} has no pane yet (pending placement) — nothing to {action}.",
+                member.member_id
             ))
         })
 }
@@ -326,7 +323,12 @@ pub(crate) fn run(
             director_member_id: _,
             body,
             json,
-        } => exec(conn, settings, member_id, &body, json, deadline),
+        } => {
+            let command = body
+                .command
+                .expect("exec input was resolved before its deadline");
+            exec(conn, settings, member_id, &command, json, deadline)
+        }
         MemberCommand::Press { .. } => unreachable!("press has a dedicated typed dispatch"),
         MemberCommand::Capture {
             member_id,
@@ -367,15 +369,7 @@ fn launch_evidence(
 fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> {
     let fleet_id = args.fleet_id;
     let name = args.name.as_str();
-    let description = args.description.as_str();
-    let explicit_agent = args.coding_agent;
-    let model = args.model.as_deref();
-    let effort = args.effort.as_deref();
-    let permission_mode = args.permission_mode.as_deref();
-    let event_evidence = args.event_evidence.as_str();
-    let event_redaction_file = args.event_redaction_file.as_deref();
-    let body = &args.body;
-    let json = args.json;
+    let (model, effort) = (args.model.as_deref(), args.effort.as_deref());
 
     let fleet = broker::require_fleet(conn, fleet_id)?;
     if fleet.deleted_at.is_some() {
@@ -387,17 +381,24 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
              with 'cafleet fleet create'."
         )));
     };
-    let backend = resolve_coding_agent(conn, fleet_id, director_id, explicit_agent)?;
+    let backend = resolve_coding_agent(conn, fleet_id, director_id, args.coding_agent)?;
     let agent_name = backend.name();
 
     backend.validate_model(model)?;
     backend.validate_effort(effort)?;
-    let policy = backend.resolve_policy(permission_mode)?;
+    let policy = backend.resolve_policy(args.permission_mode.as_deref())?;
     let catalog = ProfileCatalog::bundled();
-    let (event_evidence, evidence_policy) =
-        launch_evidence(event_evidence, event_redaction_file, catalog)?;
+    let (event_evidence, evidence_policy) = launch_evidence(
+        &args.event_evidence,
+        args.event_redaction_file.as_deref(),
+        catalog,
+    )?;
 
-    let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
+    let prompt_body = resolve_body(
+        args.body.prompt.as_deref(),
+        args.body.file.as_deref(),
+        "--file",
+    )?;
 
     let director = broker::director_placement(conn, fleet_id)?;
     let mux = crate::runtime::mux_for_placement(&director, None)?;
@@ -467,7 +468,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
     let pending = runner::PendingMemberSpec {
         fleet_id,
         name: name.into(),
-        description: description.into(),
+        description: args.description.clone(),
         placement: NewPlacement {
             backend: mux.name().into(),
             mux_session: context.session.clone(),
@@ -541,7 +542,7 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
         "placement": crate::output::json::placement(&placement_view),
         "runtime": crate::output::json::runtime_snapshot(&runtime),
     });
-    emit(json, &result, || {
+    emit(args.json, &result, || {
         format!(
             "{}\n{}",
             format_member(&registered, &placement_view),
@@ -800,7 +801,7 @@ fn dispatch_to_member(
     if member.kind == crate::broker::MemberKind::Director {
         return Err(CafleetError::App(dispatch.director_refusal.into()));
     }
-    let pane = require_pane(&member, member_id, dispatch.command)?;
+    let pane = require_pane(&member, dispatch.command)?;
     let (input_id, delivery) = dispatch_input(
         conn,
         settings,
@@ -850,14 +851,10 @@ fn exec(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
-    body: &ExecBodyArgs,
+    command: &str,
     json: bool,
     deadline: crate::time::Deadline,
 ) -> Result<(), CafleetError> {
-    let command = body
-        .command
-        .as_deref()
-        .expect("exec input was resolved before its deadline");
     let (member, pane, input_id, delivery) = dispatch_to_member(
         conn,
         settings,
@@ -891,7 +888,7 @@ fn capture(
     json: bool,
 ) -> Result<(), CafleetError> {
     let member = load_member(conn, member_id, false)?;
-    let pane_id = require_pane(&member, member_id, "capture")?;
+    let pane_id = require_pane(&member, "capture")?;
     let mux = crate::runtime::mux_for_fleet(conn, member.fleet_id, None)?;
     let raw = mux
         .capture_pane(&pane_id, lines)
@@ -1463,7 +1460,7 @@ mod tests {
         );
         let descriptor: crate::runtime::LaunchDescriptor =
             serde_json::from_slice(&std::fs::read(&descriptor_copy).unwrap()).unwrap();
-        let member_id = descriptor.member_id.to_string();
+        let member_id = descriptor.identity.member_id.to_string();
         assert!(
             descriptor
                 .spawn
@@ -2205,16 +2202,12 @@ mod tests {
             .to_string()
             .contains("Director's own pane")
         );
-        let body = ExecBodyArgs {
-            command: Some("echo literal".into()),
-            file: None,
-        };
         assert!(
             exec(
                 &mut conn,
                 &settings,
                 director,
-                &body,
+                "echo literal",
                 false,
                 Deadline::new()
             )
@@ -2235,7 +2228,7 @@ mod tests {
             .is_err()
         );
         let pending = load_member(&conn, worker, false).unwrap();
-        assert!(require_pane(&pending, worker, "capture").is_err());
+        assert!(require_pane(&pending, "capture").is_err());
     }
 
     #[test]

@@ -7,7 +7,9 @@ use crate::coding_agent::detector::ObservationKind;
 use crate::error::CafleetError;
 use crate::error::Result;
 use regex::Regex;
-use serde_json::Map;
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::de::Error as _;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -135,66 +137,236 @@ fn invalid(message: impl Into<String>) -> CafleetError {
 fn require(ok: bool, message: &str) -> Result<()> {
     if ok { Ok(()) } else { Err(invalid(message)) }
 }
-pub(super) fn object<'a>(value: &'a Value, keys: &[&str]) -> Result<&'a Map<String, Value>> {
-    let map = value
-        .as_object()
-        .ok_or_else(|| invalid("object required"))?;
-    require(
-        map.len() == keys.len() && keys.iter().all(|key| map.contains_key(*key)),
-        "exact required object fields expected",
-    )?;
-    Ok(map)
-}
-fn text(value: &Value) -> Result<String> {
-    let text = value.as_str().ok_or_else(|| invalid("text required"))?;
-    require(!text.trim().is_empty(), "nonblank text required")?;
-    Ok(text.into())
-}
-fn array(value: &Value) -> Result<&Vec<Value>> {
-    value.as_array().ok_or_else(|| invalid("array required"))
-}
-fn texts(value: &Value) -> Result<Vec<String>> {
-    let values = array(value)?.iter().map(text).collect::<Result<Vec<_>>>()?;
-    require(
-        values.iter().collect::<BTreeSet<_>>().len() == values.len(),
-        "duplicate string identity",
-    )?;
-    Ok(values)
-}
-fn boolean(value: &Value) -> Result<bool> {
-    value.as_bool().ok_or_else(|| invalid("boolean required"))
-}
-fn backend(value: &Value) -> Result<CodingAgent> {
-    crate::coding_agent::coding_agent(&text(value)?).ok_or_else(|| invalid("unknown backend"))
-}
-fn positive(value: &Value) -> Result<u16> {
-    value
-        .as_u64()
-        .and_then(|n| u16::try_from(n).ok())
-        .filter(|n| *n > 0)
-        .ok_or_else(|| invalid("positive viewport bound required"))
-}
-fn one_of<T: Copy>(value: &Value, choices: &[(&str, T)]) -> Result<T> {
-    let value = text(value)?;
-    choices
-        .iter()
-        .find(|(name, _)| *name == value)
-        .map(|(_, choice)| *choice)
-        .ok_or_else(|| invalid("invalid profile enum"))
-}
-fn expression(value: &Value) -> Result<Regex> {
-    Regex::new(&text(value)?).map_err(|cause| invalid(format!("regex: {cause}")))
-}
 fn unique(ids: &mut BTreeSet<String>, id: &str) -> Result<()> {
     require(ids.insert(id.into()), "duplicate profile identity")
 }
-fn semver(value: &Value) -> Result<NativeVersion> {
-    NativeVersion::parse(&text(value)?).ok_or_else(|| invalid("canonical SemVer version required"))
-}
-fn lower_hex(value: &str) -> bool {
-    value
+/// The bytes of `text` when it is lowercase hexadecimal of at most `max` bytes.
+fn lower_hex_bytes(text: &str, max: usize) -> Option<Vec<u8>> {
+    let lower = text
         .bytes()
-        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    (lower && text.len().is_multiple_of(2) && text.len() / 2 <= max).then(|| {
+        (0..text.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&text[index..index + 2], 16).expect("hex digits"))
+            .collect()
+    })
+}
+
+type Field<T, E> = std::result::Result<T, E>;
+
+/// An optional key that, when present, holds a value rather than `null`.
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Field<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+fn nonblank<'de, D: Deserializer<'de>>(d: D) -> Field<String, D::Error> {
+    NonBlank::deserialize(d).map(|text| text.0)
+}
+fn pattern<'de, D: Deserializer<'de>>(d: D) -> Field<Regex, D::Error> {
+    Regex::new(&nonblank(d)?).map_err(|cause| D::Error::custom(format!("regex: {cause}")))
+}
+fn patterns<'de, D: Deserializer<'de>>(d: D) -> Field<Vec<Regex>, D::Error> {
+    Vec::<NonBlank>::deserialize(d)?
+        .into_iter()
+        .map(|text| {
+            Regex::new(&text.0).map_err(|cause| D::Error::custom(format!("regex: {cause}")))
+        })
+        .collect()
+}
+fn positive_bound<'de, D: Deserializer<'de>>(d: D) -> Field<u16, D::Error> {
+    u64::deserialize(d)
+        .map(u16::try_from)?
+        .ok()
+        .filter(|bound| *bound > 0)
+        .ok_or_else(|| D::Error::custom("positive viewport bound required"))
+}
+fn glyph<'de, D: Deserializer<'de>>(d: D) -> Field<Option<char>, D::Error> {
+    let glyph = String::deserialize(d)?;
+    let mut chars = glyph.chars();
+    match (chars.next(), chars.next()) {
+        (Some(separator), None) if !separator.is_whitespace() => Ok(Some(separator)),
+        _ => Err(D::Error::custom(
+            "panel separator requires one non-whitespace glyph",
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(try_from = "String")]
+struct NonBlank(String);
+impl TryFrom<String> for NonBlank {
+    type Error = &'static str;
+    fn try_from(value: String) -> Field<Self, Self::Error> {
+        if value.trim().is_empty() {
+            Err("nonblank text required")
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+/// Nonblank, pairwise distinct strings.
+#[derive(Deserialize)]
+#[serde(try_from = "Vec<NonBlank>")]
+struct Ids(Vec<String>);
+impl TryFrom<Vec<NonBlank>> for Ids {
+    type Error = &'static str;
+    fn try_from(values: Vec<NonBlank>) -> Field<Self, Self::Error> {
+        let values = values.into_iter().map(|value| value.0).collect::<Vec<_>>();
+        if values.iter().collect::<BTreeSet<_>>().len() == values.len() {
+            Ok(Self(values))
+        } else {
+            Err("duplicate string identity")
+        }
+    }
+}
+
+#[derive(Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum FixtureKind {
+    Synthetic,
+    Native,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCatalog {
+    schema_version: u64,
+    fixtures: Vec<RawFixture>,
+    profiles: Vec<RawProfile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFixture {
+    id: NonBlank,
+    kind: FixtureKind,
+    backend: CodingAgent,
+    native_version: NativeVersion,
+    #[serde(rename = "rows", deserialize_with = "positive_bound")]
+    _rows: u16,
+    #[serde(rename = "cols", deserialize_with = "positive_bound")]
+    _cols: u16,
+    #[serde(rename = "source_ref")]
+    _source_ref: NonBlank,
+    sha256: NonBlank,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProfile {
+    backend: CodingAgent,
+    min_version: NativeVersion,
+    rules: Vec<RawRule>,
+    capabilities: RawCapabilities,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRule {
+    id: NonBlank,
+    priority: i64,
+    observation: ObservationKind,
+    region: Region,
+    matchers: Vec<Matcher>,
+    extract: RawExtract,
+    verified_noninteraction: bool,
+    sensitive: bool,
+    #[serde(default, deserialize_with = "present")]
+    frame: Option<Frame>,
+    #[serde(default, deserialize_with = "present")]
+    continues_rule_id: Option<NonBlank>,
+    #[serde(default, deserialize_with = "present")]
+    continues_choice_id: Option<NonBlank>,
+    #[serde(default, deserialize_with = "present")]
+    fixture_ids: Option<Ids>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawExtract {
+    #[serde(deserialize_with = "Option::deserialize")]
+    operation: Option<RawOperation>,
+    choices: Vec<Choice>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    native_request_id: Option<Capture>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOperation {
+    matcher_id: NonBlank,
+    capture: NonBlank,
+    #[serde(default, deserialize_with = "present")]
+    row_margin: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    margin_rows: Option<MarginRows>,
+    #[serde(default, deserialize_with = "present")]
+    row_trailer: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCapabilities {
+    #[serde(deserialize_with = "Option::deserialize")]
+    detection: Option<RawCapability>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    composer: Option<RawCapability>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    annotations: Option<RawCapability>,
+    answers: Vec<RawAnswer>,
+}
+
+/// One capability group; only the composer group may declare `submission`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCapability {
+    rule_ids: Ids,
+    fixture_ids: Ids,
+    #[serde(default, deserialize_with = "present")]
+    submission: Option<RawSubmissions>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSubmissions {
+    #[serde(deserialize_with = "Option::deserialize")]
+    prompt: Option<RawSubmission>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    exec: Option<RawSubmission>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSubmission {
+    prefix_hex: String,
+    submit_hex: String,
+    fixture_ids: Ids,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAnswer {
+    #[serde(default, deserialize_with = "present")]
+    decision: Option<NonBlank>,
+    request_rule_id: NonBlank,
+    answer_rule_id: NonBlank,
+    choice_id: NonBlank,
+    focus_matcher_id: NonBlank,
+    stages: Vec<RawStage>,
+    fixture_ids: Ids,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawStage {
+    bytes_hex: NonBlank,
+    required_rule_id: NonBlank,
+    required_choice_id: NonBlank,
+    #[serde(default, deserialize_with = "present")]
+    required_focus_choice_id: Option<NonBlank>,
+    #[serde(default, deserialize_with = "present")]
+    required_screen_rule_id: Option<NonBlank>,
 }
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct Fixture {
@@ -203,16 +375,24 @@ pub(super) struct Fixture {
     pub(crate) backend: CodingAgent,
     pub(crate) version: NativeVersion,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Capture {
+    #[serde(rename = "matcher_id", deserialize_with = "nonblank")]
     pub(crate) matcher: String,
+    #[serde(rename = "capture", deserialize_with = "nonblank")]
     pub(crate) name: String,
+    #[serde(skip)]
     pub(crate) row_margin: Option<String>,
+    #[serde(skip)]
     pub(crate) margin_rows: MarginRows,
+    #[serde(skip)]
     pub(crate) row_trailer: Option<String>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum MarginRows {
+    #[default]
     All,
     Continuation,
 }
@@ -223,25 +403,33 @@ pub(crate) enum ChoiceScope {
     Session,
     Persistent,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Choice {
+    #[serde(deserialize_with = "nonblank")]
     pub(crate) id: String,
     pub(crate) label: Capture,
     pub(crate) scope: ChoiceScope,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum MatcherScope {
     Line,
     Region,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Matcher {
+    #[serde(deserialize_with = "nonblank")]
     pub(crate) id: String,
     pub(crate) scope: MatcherScope,
+    #[serde(rename = "pattern", deserialize_with = "pattern")]
     pub(crate) regex: Regex,
+    #[serde(default, deserialize_with = "present")]
     pub(crate) focus_style: Option<FocusStyle>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum FocusStyle {
     Background,
     Marker,
@@ -252,31 +440,41 @@ pub(super) struct Continuation {
     pub(crate) choice_id: String,
     pub(crate) fixtures: Vec<String>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum ScreenSelector {
     Primary,
     Alternate,
     Either,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum CursorRule {
     AtEnd,
     Inside,
     Outside,
     Any,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Region {
     pub(crate) screen: ScreenSelector,
+    #[serde(rename = "start_pattern", deserialize_with = "pattern")]
     pub(crate) start: Regex,
+    #[serde(rename = "end_pattern", deserialize_with = "pattern")]
     pub(crate) end: Regex,
+    #[serde(deserialize_with = "positive_bound")]
     pub(crate) max_rows: u16,
     pub(crate) cursor: CursorRule,
+    #[serde(default, deserialize_with = "glyph")]
     pub(crate) panel_separator: Option<char>,
 }
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Frame {
+    #[serde(rename = "require_patterns", deserialize_with = "patterns")]
     pub(crate) require: Vec<Regex>,
+    #[serde(rename = "reject_patterns", deserialize_with = "patterns")]
     pub(crate) reject: Vec<Regex>,
 }
 #[derive(Clone)]
@@ -447,129 +645,68 @@ pub(crate) struct ProfileCatalog {
     #[cfg(test)]
     capture_origin: &'static str,
 }
-fn capture(value: &Value, matchers: &[Matcher]) -> Result<Capture> {
-    let map = object(value, &["matcher_id", "capture"])?;
-    let matcher = text(&map["matcher_id"])?;
-    let name = text(&map["capture"])?;
+fn validate_capture(capture: &Capture, matchers: &[Matcher]) -> Result<()> {
     let rule = matchers
         .iter()
-        .find(|item| item.id == matcher)
+        .find(|item| item.id == capture.matcher)
         .ok_or_else(|| invalid("unknown capture matcher"))?;
     require(
         rule.regex
             .capture_names()
             .flatten()
-            .any(|candidate| candidate == name),
+            .any(|candidate| candidate == capture.name),
         "unknown named capture",
+    )
+}
+fn operation_capture(raw: RawOperation, matchers: &[Matcher]) -> Result<Capture> {
+    let single_row = |text: &String| !text.is_empty() && !text.contains('\n');
+    require(
+        raw.row_margin.as_ref().is_none_or(single_row),
+        "nonempty single-row margin required",
     )?;
-    Ok(Capture {
-        matcher,
-        name,
-        row_margin: None,
-        margin_rows: MarginRows::All,
-        row_trailer: None,
-    })
-}
-fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
-    if value.is_null() {
-        Ok(None)
-    } else {
-        capture(value, matchers).map(Some)
-    }
-}
-fn operation_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
-    if value.is_null() {
-        return Ok(None);
-    }
-    let mut plain = value
-        .as_object()
-        .ok_or_else(|| invalid("object required"))?
-        .clone();
-    let row_margin = plain
-        .remove("row_margin")
-        .map(|margin| {
-            margin
-                .as_str()
-                .filter(|margin| !margin.is_empty() && !margin.contains('\n'))
-                .map(str::to_owned)
-                .ok_or_else(|| invalid("nonempty single-row margin required"))
-        })
-        .transpose()?;
-    let margin_rows = match plain.remove("margin_rows") {
-        None => MarginRows::All,
-        Some(rows) => {
-            require(row_margin.is_some(), "margin_rows requires row_margin")?;
-            match rows.as_str() {
-                Some("all") => MarginRows::All,
-                Some("continuation") => MarginRows::Continuation,
-                _ => return Err(invalid("margin_rows must be all or continuation")),
-            }
-        }
+    require(
+        raw.margin_rows.is_none() || raw.row_margin.is_some(),
+        "margin_rows requires row_margin",
+    )?;
+    require(
+        raw.row_trailer
+            .as_ref()
+            .is_none_or(|trailer| single_row(trailer) && trailer.trim() == trailer),
+        "trimmed nonempty single-row trailer required",
+    )?;
+    let capture = Capture {
+        matcher: raw.matcher_id.0,
+        name: raw.capture.0,
+        row_margin: raw.row_margin,
+        margin_rows: raw.margin_rows.unwrap_or_default(),
+        row_trailer: raw.row_trailer,
     };
-    let row_trailer = plain
-        .remove("row_trailer")
-        .map(|trailer| {
-            trailer
-                .as_str()
-                .filter(|trailer| {
-                    !trailer.is_empty() && !trailer.contains('\n') && trailer.trim() == *trailer
-                })
-                .map(str::to_owned)
-                .ok_or_else(|| invalid("trimmed nonempty single-row trailer required"))
-        })
-        .transpose()?;
-    Ok(Some(Capture {
-        row_margin,
-        margin_rows,
-        row_trailer,
-        ..capture(&Value::Object(plain), matchers)?
-    }))
+    validate_capture(&capture, matchers)?;
+    Ok(capture)
 }
-const REGION_FIELDS: [&str; 5] = [
-    "screen",
-    "start_pattern",
-    "end_pattern",
-    "max_rows",
-    "cursor",
-];
-const RULE_FIELDS: [&str; 8] = [
-    "id",
-    "priority",
-    "observation",
-    "region",
-    "matchers",
-    "extract",
-    "verified_noninteraction",
-    "sensitive",
-];
-const CONTINUATION_FIELDS: [&str; 3] = ["continues_rule_id", "continues_choice_id", "fixture_ids"];
-fn compile_rule(value: &Value) -> Result<Rule> {
-    let kind = ObservationKind::parse(&text(
-        value
-            .get("observation")
-            .ok_or_else(|| invalid("rule observation required"))?,
-    )?)?;
+fn compile_rule(raw: RawRule) -> Result<Rule> {
+    let kind = raw.observation;
     let continues = kind == ObservationKind::PermissionContinuation;
     let annotation = kind.is_annotation();
-    let interaction_frame =
-        matches!(kind, ObservationKind::Interaction(_)) && value.get("frame").is_some();
-    let fields = if continues {
-        RULE_FIELDS
-            .iter()
-            .chain(&CONTINUATION_FIELDS)
-            .copied()
-            .collect()
-    } else if annotation || interaction_frame {
-        RULE_FIELDS.iter().chain(&["frame"]).copied().collect()
-    } else {
-        RULE_FIELDS.to_vec()
+    let continuation = match (
+        continues,
+        raw.continues_rule_id,
+        raw.continues_choice_id,
+        raw.fixture_ids,
+    ) {
+        (true, Some(rule), Some(choice), Some(fixtures)) => Some(Continuation {
+            rule_id: rule.0,
+            choice_id: choice.0,
+            fixtures: fixtures.0,
+        }),
+        (false, None, None, None) => None,
+        _ => {
+            return Err(invalid(
+                "exactly the permission continuation rules declare continues_rule_id, continues_choice_id and fixture_ids",
+            ));
+        }
     };
-    let m = object(value, &fields)?;
-    let id = text(&m["id"])?;
-    let priority = m["priority"]
-        .as_i64()
-        .ok_or_else(|| invalid("integer priority required"))?;
-    let verified = boolean(&m["verified_noninteraction"])?;
+    let verified = raw.verified_noninteraction;
     require(
         !verified
             || !matches!(
@@ -580,115 +717,32 @@ fn compile_rule(value: &Value) -> Result<Rule> {
             ),
         "interaction/unknown/continuation cannot verify noninteraction",
     )?;
-    let continuation = if continues {
-        Some(Continuation {
-            rule_id: text(&m["continues_rule_id"])?,
-            choice_id: text(&m["continues_choice_id"])?,
-            fixtures: texts(&m["fixture_ids"])?,
-        })
-    } else {
-        None
-    };
-    let separated = m["region"].get("panel_separator").is_some();
-    let region_fields = REGION_FIELDS
-        .iter()
-        .copied()
-        .chain(separated.then_some("panel_separator"))
-        .collect::<Vec<_>>();
-    let r = object(&m["region"], &region_fields)?;
-    let region = Region {
-        screen: one_of(
-            &r["screen"],
-            &[
-                ("primary", ScreenSelector::Primary),
-                ("alternate", ScreenSelector::Alternate),
-                ("either", ScreenSelector::Either),
-            ],
-        )?,
-        start: expression(&r["start_pattern"])?,
-        end: expression(&r["end_pattern"])?,
-        max_rows: positive(&r["max_rows"])?,
-        cursor: one_of(
-            &r["cursor"],
-            &[
-                ("at_end", CursorRule::AtEnd),
-                ("inside", CursorRule::Inside),
-                ("outside", CursorRule::Outside),
-                ("any", CursorRule::Any),
-            ],
-        )?,
-        panel_separator: if separated {
-            Some(panel_separator(&r["panel_separator"])?)
-        } else {
-            None
-        },
-    };
+    let matchers = raw.matchers;
     let mut ids = BTreeSet::new();
-    let mut matchers = Vec::new();
-    for v in array(&m["matchers"])? {
-        let styled = v.get("focus_style").is_some();
-        let m = if styled {
-            object(v, &["id", "scope", "pattern", "focus_style"])?
-        } else {
-            object(v, &["id", "scope", "pattern"])?
-        };
-        let focus_style = if styled {
-            Some(one_of(
-                &m["focus_style"],
-                &[
-                    ("background", FocusStyle::Background),
-                    ("marker", FocusStyle::Marker),
-                ],
-            )?)
-        } else {
-            None
-        };
-        let id = text(&m["id"])?;
-        unique(&mut ids, &id)?;
-        matchers.push(Matcher {
-            id,
-            scope: one_of(
-                &m["scope"],
-                &[
-                    ("line", MatcherScope::Line),
-                    ("region", MatcherScope::Region),
-                ],
-            )?,
-            regex: expression(&m["pattern"])?,
-            focus_style,
-        });
+    for matcher in &matchers {
+        unique(&mut ids, &matcher.id)?;
     }
     require(!matchers.is_empty(), "required matchers cannot be empty")?;
-    let ex = object(
-        &m["extract"],
-        &["operation", "choices", "native_request_id"],
-    )?;
-    let mut choices = Vec::new();
+    let choices = raw.extract.choices;
     let mut ids = BTreeSet::new();
-    for v in array(&ex["choices"])? {
-        let c = object(v, &["id", "label", "scope"])?;
-        let id = text(&c["id"])?;
-        unique(&mut ids, &id)?;
-        choices.push(Choice {
-            id,
-            label: capture(&c["label"], &matchers)?,
-            scope: one_of(
-                &c["scope"],
-                &[
-                    ("single_request", ChoiceScope::SingleRequest),
-                    ("session", ChoiceScope::Session),
-                    ("persistent", ChoiceScope::Persistent),
-                ],
-            )?,
-        });
+    for choice in &choices {
+        unique(&mut ids, &choice.id)?;
+        validate_capture(&choice.label, &matchers)?;
     }
     require(
-        !continues || (ex["operation"].is_null() && choices.is_empty()),
+        !continues || (raw.extract.operation.is_none() && choices.is_empty()),
         "continuation declares no operation or choices",
     )?;
-    let operation = operation_capture(&ex["operation"], &matchers)?;
-    let native = optional_capture(&ex["native_request_id"], &matchers)?;
-    let frame = if annotation {
+    let operation = raw
+        .extract
+        .operation
+        .map(|operation| operation_capture(operation, &matchers))
+        .transpose()?;
+    let native = raw.extract.native_request_id;
+    if let Some(native) = &native {
+        validate_capture(native, &matchers)?;
+    }
+    if annotation {
         require(
             choices.is_empty() && native.is_none() && !verified,
             "annotation rules declare no choices, native request id or verified noninteraction",
@@ -697,106 +751,42 @@ fn compile_rule(value: &Value) -> Result<Rule> {
             operation.is_some() == (kind == ObservationKind::AutomaticRefusal),
             "only automatic refusal annotations capture an operation",
         )?;
-        Some(compile_frame(&m["frame"], FrameOwner::Annotation)?)
-    } else if interaction_frame {
-        Some(compile_frame(&m["frame"], FrameOwner::Interaction)?)
-    } else {
-        None
-    };
+    }
+    match (
+        &raw.frame,
+        annotation,
+        matches!(kind, ObservationKind::Interaction(_)),
+    ) {
+        (None, true, _) => return Err(invalid("annotation rules declare a frame")),
+        (Some(frame), true, _) => require(
+            !frame.require.is_empty(),
+            "annotation frame requires a live-screen pattern",
+        )?,
+        (Some(frame), false, true) => require(
+            !frame.reject.is_empty(),
+            "interaction frame requires a reject pattern",
+        )?,
+        (Some(_), false, false) => {
+            return Err(invalid(
+                "only annotation and interaction rules declare a frame",
+            ));
+        }
+        (None, false, _) => {}
+    }
     Ok(Rule {
-        id,
-        priority,
+        id: raw.id.0,
+        priority: raw.priority,
         kind,
-        region,
+        region: raw.region,
         operation,
         native,
         choices,
         matchers,
         verified,
-        sensitive: boolean(&m["sensitive"])?,
+        sensitive: raw.sensitive,
         continuation,
-        frame,
+        frame: raw.frame,
     })
-}
-fn panel_separator(value: &Value) -> Result<char> {
-    let glyph = value
-        .as_str()
-        .ok_or_else(|| invalid("panel separator text required"))?;
-    let mut chars = glyph.chars();
-    match (chars.next(), chars.next()) {
-        (Some(separator), None) if !separator.is_whitespace() => Ok(separator),
-        _ => Err(invalid("panel separator requires one non-whitespace glyph")),
-    }
-}
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FrameOwner {
-    Annotation,
-    Interaction,
-}
-fn compile_frame(value: &Value, owner: FrameOwner) -> Result<Frame> {
-    let m = object(value, &["require_patterns", "reject_patterns"])?;
-    let patterns = |value: &Value| {
-        array(value)?
-            .iter()
-            .map(expression)
-            .collect::<Result<Vec<_>>>()
-    };
-    let require_patterns = patterns(&m["require_patterns"])?;
-    let reject_patterns = patterns(&m["reject_patterns"])?;
-    match owner {
-        FrameOwner::Annotation => require(
-            !require_patterns.is_empty(),
-            "annotation frame requires a live-screen pattern",
-        )?,
-        FrameOwner::Interaction => require(
-            !reject_patterns.is_empty(),
-            "interaction frame requires a reject pattern",
-        )?,
-    }
-    Ok(Frame {
-        require: require_patterns,
-        reject: reject_patterns,
-    })
-}
-const ANSWER_FIELDS: [&str; 7] = [
-    "decision",
-    "request_rule_id",
-    "answer_rule_id",
-    "choice_id",
-    "focus_matcher_id",
-    "stages",
-    "fixture_ids",
-];
-const STAGE_FIELDS: [&str; 3] = ["bytes_hex", "required_rule_id", "required_choice_id"];
-fn stage_fields(value: &Value) -> Result<(&Map<String, Value>, Option<StageGate>)> {
-    let focus = value.get("required_focus_choice_id").is_some();
-    let screen = value.get("required_screen_rule_id").is_some();
-    require(!(focus && screen), "a stage declares at most one gate")?;
-    let gate_field = if focus {
-        Some("required_focus_choice_id")
-    } else if screen {
-        Some("required_screen_rule_id")
-    } else {
-        None
-    };
-    let fields = STAGE_FIELDS
-        .iter()
-        .copied()
-        .chain(gate_field)
-        .collect::<Vec<_>>();
-    let map = object(value, &fields)?;
-    let gate = match gate_field {
-        Some(field) => {
-            let id = text(&map[field])?;
-            Some(if focus {
-                StageGate::Focus(id)
-            } else {
-                StageGate::Screen(id)
-            })
-        }
-        None => None,
-    };
-    Ok((map, gate))
 }
 fn validate_gates(
     stages: &[AnswerStage],
@@ -878,13 +868,31 @@ fn validate_gates(
     }
     Ok(())
 }
-fn validate_continuation(
-    rule: &Rule,
-    rules: &[Rule],
+/// Where a profile's provenance citations must point: native-captured or synthetic fixtures of
+/// the profile's backend whose capture version lies in the profile's interval.
+struct Scope<'a> {
     backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<()> {
+    interval: Interval<'a>,
+    fixtures: &'a [Fixture],
+}
+impl Scope<'_> {
+    fn cite(&self, ids: &[String]) -> Result<()> {
+        require(!ids.is_empty(), "capability provenance required")?;
+        for id in ids {
+            let fixture = self
+                .fixtures
+                .iter()
+                .find(|f| &f.id == id)
+                .ok_or_else(|| invalid("unknown fixture"))?;
+            require(
+                fixture.backend == self.backend && self.interval.contains(&fixture.version),
+                "fixture backend or capture version outside the profile interval",
+            )?;
+        }
+        Ok(())
+    }
+}
+fn validate_continuation(rule: &Rule, rules: &[Rule], scope: &Scope) -> Result<()> {
     let Some(continuation) = &rule.continuation else {
         return Ok(());
     };
@@ -893,10 +901,7 @@ fn validate_continuation(
         .find(|candidate| candidate.id == continuation.rule_id)
         .ok_or_else(|| invalid("continuation names an unknown rule"))?;
     require(
-        continued.kind
-            == ObservationKind::Interaction(
-                crate::broker::runtime::InteractionClass::PermissionRequest,
-            ),
+        continued.kind == ObservationKind::Interaction(InteractionClass::PermissionRequest),
         "continuation continues a permission request rule",
     )?;
     require(
@@ -906,34 +911,16 @@ fn validate_continuation(
             .any(|choice| choice.id == continuation.choice_id),
         "continuation names an unknown continued choice",
     )?;
-    provenance(&continuation.fixtures, backend, interval, fixtures)?;
+    scope.cite(&continuation.fixtures)?;
     require(
         continuation.fixtures.iter().all(|id| {
-            fixtures
+            scope
+                .fixtures
                 .iter()
                 .any(|fixture| &fixture.id == id && fixture.native)
         }),
         "continuation cites native fixtures",
     )
-}
-fn provenance(
-    ids: &[String],
-    backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<()> {
-    require(!ids.is_empty(), "capability provenance required")?;
-    for id in ids {
-        let f = fixtures
-            .iter()
-            .find(|f| &f.id == id)
-            .ok_or_else(|| invalid("unknown fixture"))?;
-        require(
-            f.backend == backend && interval.contains(&f.version),
-            "fixture backend or capture version outside the profile interval",
-        )?;
-    }
-    Ok(())
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
@@ -956,23 +943,16 @@ impl Group {
     }
 }
 fn capability(
-    value: &Value,
+    raw: &RawCapability,
     group: Group,
     rules: &[Rule],
-    backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<Option<Capability>> {
-    if value.is_null() {
-        return Ok(None);
-    }
-    let fields: &[&str] = if group == Group::Composer && value.get("submission").is_some() {
-        &["rule_ids", "fixture_ids", "submission"]
-    } else {
-        &["rule_ids", "fixture_ids"]
-    };
-    let m = object(value, fields)?;
-    let ids = texts(&m["rule_ids"])?;
+    scope: &Scope,
+) -> Result<Capability> {
+    require(
+        group == Group::Composer || raw.submission.is_none(),
+        "only the composer capability declares a submission",
+    )?;
+    let ids = raw.rule_ids.0.clone();
     require(!ids.is_empty(), "capability rules required")?;
     for id in &ids {
         let rule = rules
@@ -984,79 +964,208 @@ fn capability(
             "capability rule component mismatch",
         )?;
     }
-    provenance(&texts(&m["fixture_ids"])?, backend, interval, fixtures)?;
-    Ok(Some(Capability { rules: ids }))
-}
-
-fn decoded_hex(value: &str) -> Vec<u8> {
-    (0..value.len())
-        .step_by(2)
-        .map(|index| {
-            u8::from_str_radix(&value[index..index + 2], 16)
-                .expect("validated lowercase hexadecimal byte")
-        })
-        .collect()
+    scope.cite(&raw.fixture_ids.0)?;
+    Ok(Capability { rules: ids })
 }
 
 fn composer_submission(
-    value: &Value,
+    raw: RawSubmission,
     operation: ComposerOperation,
-    backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<Option<ComposerSubmission>> {
-    if value.is_null() {
-        return Ok(None);
-    }
-    let m = object(value, &["prefix_hex", "submit_hex", "fixture_ids"])?;
-    let prefix = m["prefix_hex"]
-        .as_str()
-        .ok_or_else(|| invalid("composer prefix string required"))?;
+    scope: &Scope,
+) -> Result<ComposerSubmission> {
     require(
-        prefix.len().is_multiple_of(2)
-            && lower_hex(prefix)
-            && decoded_hex(prefix) == operation.prefix(),
+        lower_hex_bytes(&raw.prefix_hex, usize::MAX).as_deref() == Some(operation.prefix()),
         "composer prefix must match its operation",
     )?;
-    let submit = m["submit_hex"]
-        .as_str()
-        .ok_or_else(|| invalid("composer submit string required"))?;
-    require(
-        (2..=64).contains(&submit.len()) && submit.len().is_multiple_of(2) && lower_hex(submit),
-        "composer submit requires 1–32 lowercase hexadecimal bytes",
-    )?;
-    provenance(&texts(&m["fixture_ids"])?, backend, interval, fixtures)?;
-    Ok(Some(ComposerSubmission {
-        submit: decoded_hex(submit),
-    }))
+    let submit = lower_hex_bytes(&raw.submit_hex, 32)
+        .filter(|submit| !submit.is_empty())
+        .ok_or_else(|| invalid("composer submit requires 1–32 lowercase hexadecimal bytes"))?;
+    scope.cite(&raw.fixture_ids.0)?;
+    Ok(ComposerSubmission { submit })
 }
 
-fn composer_submissions(
-    value: &Value,
-    backend: CodingAgent,
-    interval: &Interval,
-    fixtures: &[Fixture],
-) -> Result<[Option<ComposerSubmission>; 2]> {
-    let Some(submission) = value.get("submission") else {
-        return Ok([None, None]);
+fn compile_answer(
+    raw: RawAnswer,
+    rules: &[Rule],
+    identities: &mut BTreeSet<String>,
+    keys: &mut BTreeSet<String>,
+    scope: &Scope,
+) -> Result<Answer> {
+    let (request, id, choice_id) = (raw.request_rule_id.0, raw.answer_rule_id.0, raw.choice_id.0);
+    unique(identities, &id)?;
+    let rule = rules
+        .iter()
+        .find(|r| r.id == request)
+        .ok_or_else(|| invalid("unknown answer request rule"))?;
+    let decided = raw.decision.is_some();
+    let key = match raw.decision {
+        Some(decision) => {
+            let decision = PermissionDecision::try_from(decision.0.as_str())?;
+            require(
+                rule.kind == ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "answer requires permission form",
+            )?;
+            AnswerKey::Decision(decision)
+        }
+        None => {
+            require(
+                rule.kind == ObservationKind::Interaction(InteractionClass::Question),
+                "choice answer requires question form",
+            )?;
+            require(
+                valid_choice_id(&choice_id),
+                "choice id requires lowercase hyphenated words of at most 64 bytes",
+            )?;
+            AnswerKey::Choice(choice_id.clone())
+        }
     };
-    let m = object(submission, &["prompt", "exec"])?;
-    Ok([
-        composer_submission(
-            &m["prompt"],
-            ComposerOperation::Prompt,
-            backend,
-            interval,
-            fixtures,
-        )?,
-        composer_submission(
-            &m["exec"],
-            ComposerOperation::Exec,
-            backend,
-            interval,
-            fixtures,
-        )?,
-    ])
+    unique(
+        keys,
+        &match &key {
+            AnswerKey::Decision(decision) => format!("{request}:decision:{}", decision.as_str()),
+            AnswerKey::Choice(choice) => format!("{request}:choice:{choice}"),
+        },
+    )?;
+    let choice = rule
+        .choices
+        .iter()
+        .find(|c| c.id == choice_id)
+        .ok_or_else(|| invalid("unknown answer choice"))?;
+    require(
+        !decided || choice.scope == ChoiceScope::SingleRequest,
+        "answer requires single-request scope",
+    )?;
+    let focus = raw.focus_matcher_id.0;
+    require(
+        rule.matchers.iter().any(|m| m.id == focus),
+        "unknown answer focus matcher",
+    )?;
+    require(
+        (1..=16).contains(&raw.stages.len()),
+        "one to sixteen measured answer stages required",
+    )?;
+    let stages = raw
+        .stages
+        .into_iter()
+        .map(|stage| {
+            let bytes = lower_hex_bytes(&stage.bytes_hex.0, 256)
+                .filter(|bytes| !bytes.is_empty())
+                .ok_or_else(|| invalid("one to 256 lowercase hexadecimal stage bytes required"))?;
+            require(!bytes.contains(&0x1b), "answer stages never contain Escape")?;
+            require(
+                stage.required_rule_id.0 == request && stage.required_choice_id.0 == choice_id,
+                "answer stage request/decision mismatch",
+            )?;
+            let gate = match (
+                stage.required_focus_choice_id,
+                stage.required_screen_rule_id,
+            ) {
+                (Some(_), Some(_)) => return Err(invalid("a stage declares at most one gate")),
+                (Some(choice), None) => Some(StageGate::Focus(choice.0)),
+                (None, Some(rule)) => Some(StageGate::Screen(rule.0)),
+                (None, None) => None,
+            };
+            Ok(AnswerStage { bytes, gate })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    validate_gates(&stages, rule, rules, &choice_id, &focus)?;
+    scope.cite(&raw.fixture_ids.0)?;
+    Ok(Answer {
+        key,
+        request,
+        id,
+        fixtures: raw.fixture_ids.0,
+        choice_id,
+        focus_matcher_id: focus,
+        stages,
+    })
+}
+
+fn compile_profile(
+    raw: RawProfile,
+    thresholds: &[(CodingAgent, NativeVersion)],
+    fixtures: &[Fixture],
+) -> Result<Profile> {
+    let (backend, min) = (raw.backend, raw.min_version);
+    let scope = Scope {
+        backend,
+        interval: Interval {
+            min: &min,
+            next: thresholds
+                .iter()
+                .filter(|(other, threshold)| {
+                    *other == backend && threshold.precedence(&min).is_gt()
+                })
+                .map(|(_, threshold)| threshold)
+                .min_by(|a, b| a.precedence(b)),
+        },
+        fixtures,
+    };
+    let rules = raw
+        .rules
+        .into_iter()
+        .map(compile_rule)
+        .collect::<Result<Vec<_>>>()?;
+    let mut identities = BTreeSet::new();
+    for rule in &rules {
+        unique(&mut identities, &rule.id)?;
+    }
+    for rule in &rules {
+        validate_continuation(rule, &rules, &scope)?;
+    }
+    let capabilities = raw.capabilities;
+    let group = |raw: &Option<RawCapability>, group| {
+        raw.as_ref()
+            .map(|raw| capability(raw, group, &rules, &scope))
+            .transpose()
+    };
+    let detection = group(&capabilities.detection, Group::Detection)?;
+    let composer = group(&capabilities.composer, Group::Composer)?;
+    let annotations = group(&capabilities.annotations, Group::Annotations)?;
+    require(
+        rules
+            .iter()
+            .filter(|rule| rule.kind.is_annotation())
+            .all(|rule| {
+                annotations
+                    .as_ref()
+                    .is_some_and(|group| group.rules.contains(&rule.id))
+            }),
+        "every annotation rule belongs to the annotations group",
+    )?;
+    let submissions = match capabilities
+        .composer
+        .and_then(|composer| composer.submission)
+    {
+        Some(submission) => {
+            let compile = |raw: Option<RawSubmission>, operation| {
+                raw.map(|raw| composer_submission(raw, operation, &scope))
+                    .transpose()
+            };
+            [
+                compile(submission.prompt, ComposerOperation::Prompt)?,
+                compile(submission.exec, ComposerOperation::Exec)?,
+            ]
+        }
+        None => [None, None],
+    };
+    let mut keys = BTreeSet::new();
+    let answers = capabilities
+        .answers
+        .into_iter()
+        .map(|answer| compile_answer(answer, &rules, &mut identities, &mut keys, &scope))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Profile {
+        backend,
+        min_version_text: min.0.to_string(),
+        min_version: min.clone(),
+        rules,
+        detection,
+        composer,
+        annotations,
+        submissions,
+        answers,
+    })
 }
 
 const BUNDLED_DEFINITIONS: &str = include_str!("bundled.json");
@@ -1083,233 +1192,44 @@ impl ProfileCatalog {
         self.capture_origin
     }
     pub(crate) fn from_definitions(value: &Value) -> Result<Self> {
-        let root = object(value, &["schema_version", "fixtures", "profiles"])?;
-        require(
-            root["schema_version"].as_u64() == Some(1),
-            "unsupported profile schema",
-        )?;
-        let mut fixtures = Vec::new();
+        let raw = RawCatalog::deserialize(value).map_err(|cause| invalid(cause.to_string()))?;
+        require(raw.schema_version == 1, "unsupported profile schema")?;
         let mut ids = BTreeSet::new();
-        for v in array(&root["fixtures"])? {
-            let m = object(
-                v,
-                &[
-                    "id",
-                    "kind",
-                    "backend",
-                    "native_version",
-                    "rows",
-                    "cols",
-                    "source_ref",
-                    "sha256",
-                ],
-            )?;
-            let id = text(&m["id"])?;
-            unique(&mut ids, &id)?;
-            let native = one_of(&m["kind"], &[("synthetic", false), ("native", true)])?;
-            positive(&m["rows"])?;
-            positive(&m["cols"])?;
-            text(&m["source_ref"])?;
-            let hash = text(&m["sha256"])?;
+        let fixtures = raw
+            .fixtures
+            .into_iter()
+            .map(|fixture| {
+                unique(&mut ids, &fixture.id.0)?;
+                require(
+                    lower_hex_bytes(&fixture.sha256.0, 32).is_some_and(|hash| hash.len() == 32),
+                    "lowercase source digest required",
+                )?;
+                Ok(Fixture {
+                    id: fixture.id.0,
+                    native: fixture.kind == FixtureKind::Native,
+                    backend: fixture.backend,
+                    version: fixture.native_version,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let thresholds = raw
+            .profiles
+            .iter()
+            .map(|profile| (profile.backend, profile.min_version.clone()))
+            .collect::<Vec<_>>();
+        for (index, (backend, min)) in thresholds.iter().enumerate() {
             require(
-                hash.len() == 64 && lower_hex(&hash),
-                "lowercase source digest required",
-            )?;
-            fixtures.push(Fixture {
-                id,
-                native,
-                backend: backend(&m["backend"])?,
-                version: semver(&m["native_version"])?,
-            });
-        }
-        let mut headers = Vec::new();
-        for v in array(&root["profiles"])? {
-            let m = object(v, &["backend", "min_version", "rules", "capabilities"])?;
-            headers.push((m, backend(&m["backend"])?, semver(&m["min_version"])?));
-        }
-        for (index, (_, backend, min)) in headers.iter().enumerate() {
-            require(
-                headers[..index]
+                thresholds[..index]
                     .iter()
-                    .all(|(_, other, earlier)| other != backend || earlier.precedence(min).is_ne()),
+                    .all(|(other, earlier)| other != backend || earlier.precedence(min).is_ne()),
                 "equal-precedence profile thresholds for one backend",
             )?;
         }
-        let mut profiles = Vec::new();
-        for (m, backend, min_version) in &headers {
-            let (m, backend) = (*m, *backend);
-            let interval = Interval {
-                min: min_version,
-                next: headers
-                    .iter()
-                    .filter(|(_, other, threshold)| {
-                        *other == backend && threshold.precedence(min_version).is_gt()
-                    })
-                    .map(|(_, _, threshold)| threshold)
-                    .min_by(|a, b| a.precedence(b)),
-            };
-            let rules = array(&m["rules"])?
-                .iter()
-                .map(compile_rule)
-                .collect::<Result<Vec<_>>>()?;
-            let mut rule_ids = BTreeSet::new();
-            for rule in &rules {
-                unique(&mut rule_ids, &rule.id)?;
-            }
-            for rule in &rules {
-                validate_continuation(rule, &rules, backend, &interval, &fixtures)?;
-            }
-            let c = object(
-                &m["capabilities"],
-                &["detection", "composer", "annotations", "answers"],
-            )?;
-            let detection = capability(
-                &c["detection"],
-                Group::Detection,
-                &rules,
-                backend,
-                &interval,
-                &fixtures,
-            )?;
-            let composer = capability(
-                &c["composer"],
-                Group::Composer,
-                &rules,
-                backend,
-                &interval,
-                &fixtures,
-            )?;
-            let annotations = capability(
-                &c["annotations"],
-                Group::Annotations,
-                &rules,
-                backend,
-                &interval,
-                &fixtures,
-            )?;
-            require(
-                rules
-                    .iter()
-                    .filter(|rule| rule.kind.is_annotation())
-                    .all(|rule| {
-                        annotations
-                            .as_ref()
-                            .is_some_and(|group| group.rules.contains(&rule.id))
-                    }),
-                "every annotation rule belongs to the annotations group",
-            )?;
-            let submissions = composer_submissions(&c["composer"], backend, &interval, &fixtures)?;
-            let mut answers = Vec::new();
-            let mut keys = BTreeSet::new();
-            for v in array(&c["answers"])? {
-                let decided = v.get("decision").is_some();
-                let a = object(
-                    v,
-                    if decided {
-                        &ANSWER_FIELDS
-                    } else {
-                        &ANSWER_FIELDS[1..]
-                    },
-                )?;
-                let request = text(&a["request_rule_id"])?;
-                let id = text(&a["answer_rule_id"])?;
-                unique(&mut rule_ids, &id)?;
-                let rule = rules
-                    .iter()
-                    .find(|r| r.id == request)
-                    .ok_or_else(|| invalid("unknown answer request rule"))?;
-                let choice_id = text(&a["choice_id"])?;
-                let key = if decided {
-                    let decision = PermissionDecision::try_from(text(&a["decision"])?.as_str())?;
-                    require(
-                        rule.kind
-                            == ObservationKind::Interaction(InteractionClass::PermissionRequest),
-                        "answer requires permission form",
-                    )?;
-                    AnswerKey::Decision(decision)
-                } else {
-                    require(
-                        rule.kind == ObservationKind::Interaction(InteractionClass::Question),
-                        "choice answer requires question form",
-                    )?;
-                    require(
-                        valid_choice_id(&choice_id),
-                        "choice id requires lowercase hyphenated words of at most 64 bytes",
-                    )?;
-                    AnswerKey::Choice(choice_id.clone())
-                };
-                unique(
-                    &mut keys,
-                    &match &key {
-                        AnswerKey::Decision(decision) => {
-                            format!("{request}:decision:{}", decision.as_str())
-                        }
-                        AnswerKey::Choice(choice) => format!("{request}:choice:{choice}"),
-                    },
-                )?;
-                let choice = rule
-                    .choices
-                    .iter()
-                    .find(|c| c.id == choice_id)
-                    .ok_or_else(|| invalid("unknown answer choice"))?;
-                require(
-                    !decided || choice.scope == ChoiceScope::SingleRequest,
-                    "answer requires single-request scope",
-                )?;
-                let focus = text(&a["focus_matcher_id"])?;
-                require(
-                    rule.matchers.iter().any(|m| m.id == focus),
-                    "unknown answer focus matcher",
-                )?;
-                let stages = array(&a["stages"])?;
-                require(
-                    (1..=16).contains(&stages.len()),
-                    "one to sixteen measured answer stages required",
-                )?;
-                let mut compiled_stages = Vec::new();
-                for v in stages {
-                    let (s, gate) = stage_fields(v)?;
-                    let bytes = text(&s["bytes_hex"])?;
-                    require(
-                        (2..=512).contains(&bytes.len())
-                            && bytes.len().is_multiple_of(2)
-                            && lower_hex(&bytes),
-                        "one to 256 lowercase hexadecimal stage bytes required",
-                    )?;
-                    let bytes = decoded_hex(&bytes);
-                    require(!bytes.contains(&0x1b), "answer stages never contain Escape")?;
-                    compiled_stages.push(AnswerStage { bytes, gate });
-                    require(
-                        text(&s["required_rule_id"])? == request
-                            && text(&s["required_choice_id"])? == choice_id,
-                        "answer stage request/decision mismatch",
-                    )?;
-                }
-                validate_gates(&compiled_stages, rule, &rules, &choice_id, &focus)?;
-                let fixture_ids = texts(&a["fixture_ids"])?;
-                provenance(&fixture_ids, backend, &interval, &fixtures)?;
-                answers.push(Answer {
-                    key,
-                    request,
-                    id,
-                    fixtures: fixture_ids,
-                    choice_id,
-                    focus_matcher_id: focus,
-                    stages: compiled_stages,
-                });
-            }
-            profiles.push(Profile {
-                backend,
-                min_version: min_version.clone(),
-                min_version_text: text(&m["min_version"])?,
-                rules,
-                detection,
-                composer,
-                annotations,
-                submissions,
-                answers,
-            });
-        }
+        let profiles = raw
+            .profiles
+            .into_iter()
+            .map(|profile| compile_profile(profile, &thresholds, &fixtures))
+            .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             profiles,
             #[cfg(test)]
@@ -1460,7 +1380,40 @@ impl ProfileCatalog {
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::coding_agent::catalog::*;
+    use serde_json::Map;
     use serde_json::json;
+
+    fn object<'a>(value: &'a Value, keys: &[&str]) -> Result<&'a Map<String, Value>> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?;
+        require(
+            map.len() == keys.len() && keys.iter().all(|key| map.contains_key(*key)),
+            "exact required object fields expected",
+        )?;
+        Ok(map)
+    }
+    fn text(value: &Value) -> Result<String> {
+        let text = value.as_str().ok_or_else(|| invalid("text required"))?;
+        require(!text.trim().is_empty(), "nonblank text required")?;
+        Ok(text.into())
+    }
+    fn array(value: &Value) -> Result<&Vec<Value>> {
+        value.as_array().ok_or_else(|| invalid("array required"))
+    }
+    fn boolean(value: &Value) -> Result<bool> {
+        value.as_bool().ok_or_else(|| invalid("boolean required"))
+    }
+    fn backend(value: &Value) -> Result<CodingAgent> {
+        crate::coding_agent::coding_agent(&text(value)?).ok_or_else(|| invalid("unknown backend"))
+    }
+    fn positive(value: &Value) -> Result<u16> {
+        value
+            .as_u64()
+            .and_then(|n| u16::try_from(n).ok())
+            .filter(|n| *n > 0)
+            .ok_or_else(|| invalid("positive viewport bound required"))
+    }
 
     const CLAUDE_FIXTURES: &[u8] = include_bytes!("native/claude.json");
     const CODEX_FIXTURES: &[u8] = include_bytes!("native/codex.json");

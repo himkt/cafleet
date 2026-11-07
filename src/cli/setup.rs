@@ -307,15 +307,12 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
         .find(|backend| backend.agent == CodingAgent::Hermes)
         .expect("the registry includes hermes");
     std::thread::scope(|scope| {
-        let batch = hermes_batch_base(hermes).map(|base| {
+        let batch = hermes_batch_runs(hermes).then(|| {
             let reader = inputs
                 .hermes
                 .expect("doctor builds a Hermes reader whenever hermes and its base resolve");
             let deadline = Instant::now() + HERMES_DOCTOR_BUDGET;
-            (
-                base,
-                scope.spawn(move || crate::coding_agent::hermes::read_batch(reader, deadline)),
-            )
+            scope.spawn(move || crate::coding_agent::hermes::read_batch(reader, deadline))
         });
         let (mut checks, mut summary) = multiplexer_rows((inputs.mux)());
         let (conn, schema) = database(inputs.settings);
@@ -334,16 +331,7 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
                 )],
             ),
         };
-        let hermes_reading = || match batch {
-            Some((_, handle)) => {
-                let (config_path, plugins) = crate::coding_agent::hermes::joined(handle);
-                HermesReading::Read {
-                    config_path,
-                    plugins,
-                }
-            }
-            None => hermes_unavailable(hermes),
-        };
+        let hermes_reading = || batch.map(crate::coding_agent::hermes::joined);
         let backend_checks = agent_checks(conn.as_ref(), &schema, &backends, hermes_reading);
         summary.extend(
             CodingAgent::all()
@@ -360,105 +348,76 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
 const HERMES_DOCTOR_BUDGET: Duration = Duration::from_secs(2);
 
 pub(crate) fn render(report: &Report, mode: Mode) -> String {
+    let lines = |rows: Vec<(CheckStatus, &str, &str)>| {
+        rows.iter()
+            .map(|(status, name, detail)| format!("{} {name}: {}", status.as_str(), escape(detail)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     match mode {
         Mode::Json => json!({
             "summary": report.summary.iter().map(summary_json).collect::<Vec<_>>(),
             "checks": report.checks.iter().map(check_json).collect::<Vec<_>>(),
         })
         .to_string(),
-        Mode::Verbose => report
-            .checks
-            .iter()
-            .map(|check| {
-                format!(
-                    "{} {}: {}",
-                    check.status.as_str(),
-                    check.name,
-                    escape(&check.detail)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Mode::Summary => report
-            .summary
-            .iter()
-            .map(|line| {
-                format!(
-                    "{} {}: {}",
-                    line.status.as_str(),
-                    line.component,
-                    escape(&line.detail)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Mode::Verbose => lines(
+            report
+                .checks
+                .iter()
+                .map(|check| (check.status, check.name.as_str(), check.detail.as_str()))
+                .collect(),
+        ),
+        Mode::Summary => lines(
+            report
+                .summary
+                .iter()
+                .map(|line| (line.status, line.component.as_str(), line.detail.as_str()))
+                .collect(),
+        ),
     }
 }
 
 fn multiplexer_rows(reading: MuxReading) -> (Vec<Check>, Vec<Summary>) {
-    match reading {
+    let (status, detail, short) = match reading {
         Ok((name, context)) => (
-            vec![Check::new(
-                "multiplexer",
-                CheckStatus::Ok,
-                format!(
-                    "{name} session={} window={} pane={}",
-                    context.session, context.window_id, context.pane_id
-                ),
-            )],
-            vec![Summary::new(
-                "multiplexer",
-                CheckStatus::Ok,
-                format!(
-                    "{name} (session {}, pane {})",
-                    context.session, context.pane_id
-                ),
-            )],
+            CheckStatus::Ok,
+            format!(
+                "{name} session={} window={} pane={}",
+                context.session, context.window_id, context.pane_id
+            ),
+            format!(
+                "{name} (session {}, pane {})",
+                context.session, context.pane_id
+            ),
         ),
-        Err(cause) => (
-            vec![Check::new(
-                "multiplexer",
-                CheckStatus::Error,
-                cause.to_string(),
-            )],
-            vec![Summary::new(
-                "multiplexer",
-                CheckStatus::Error,
-                cause.to_string(),
-            )],
-        ),
-    }
+        Err(cause) => (CheckStatus::Error, cause.to_string(), cause.to_string()),
+    };
+    (
+        vec![Check::new("multiplexer", status, detail)],
+        vec![Summary::new("multiplexer", status, short)],
+    )
 }
 
 fn database_rows(settings: &Settings, schema: &SchemaState) -> (Check, Summary) {
-    match schema {
+    let (status, detail, short) = match schema {
         SchemaState::Current => {
             let path = crate::db::database_path(&settings.database_url)
                 .expect("a current schema was opened through a valid database URL");
-            (
-                Check::new(
-                    "database",
-                    CheckStatus::Ok,
-                    format!("cafleet {} at {path}", crate::cli::VERSION),
-                ),
-                Summary::new(
-                    "database",
-                    CheckStatus::Ok,
-                    format!("cafleet {}", crate::cli::VERSION),
-                ),
-            )
+            let version = format!("cafleet {}", crate::cli::VERSION);
+            (CheckStatus::Ok, format!("{version} at {path}"), version)
         }
         schema => {
             let cause = schema
                 .require_current()
                 .expect_err("a schema that is not current is unavailable")
                 .to_string();
-            (
-                Check::new("database", CheckStatus::Error, cause.clone()),
-                Summary::new("database", CheckStatus::Error, cause),
-            )
+            (CheckStatus::Error, cause.clone(), cause)
         }
-    }
+    };
+    (
+        Check::new("database", status, detail),
+        Summary::new("database", status, short),
+    )
 }
 
 fn escape(detail: &str) -> String {
@@ -604,36 +563,31 @@ fn probe_run(source: Option<&str>, row: &MemberRunRegistry, deadline: Instant) -
 /// The most runs probed at once, which bounds the open file descriptors.
 const PROBE_WORKERS: usize = 16;
 
-/// Probes `rows` on up to [`PROBE_WORKERS`] threads, each opening its own read-only connection,
-/// and returns the runs in `rows` order.
+/// Probes `rows` on up to [`PROBE_WORKERS`] threads, each probing a contiguous share through its
+/// own read-only connections, and returns the runs in `rows` order.
 fn probe_runs(
     source: Option<&str>,
     rows: &[&MemberRunRegistry],
     deadline: Instant,
 ) -> Vec<MemberRun> {
-    use std::sync::Mutex;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::atomic::Ordering;
-    let next = AtomicUsize::new(0);
-    let probed = Mutex::new((0..rows.len()).map(|_| None).collect::<Vec<_>>());
+    let chunk = rows.len().div_ceil(PROBE_WORKERS).max(1);
     std::thread::scope(|scope| {
-        for _ in 0..PROBE_WORKERS.min(rows.len()) {
-            scope.spawn(|| {
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(row) = rows.get(index) else { break };
-                    let run = probe_run(source, row, deadline);
-                    probed.lock().expect("no probe worker panicked")[index] = Some(run);
-                }
-            });
-        }
-    });
-    probed
-        .into_inner()
-        .expect("no probe worker panicked")
-        .into_iter()
-        .map(|run| run.expect("every queued run was probed"))
-        .collect()
+        let workers = rows
+            .chunks(chunk)
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|row| probe_run(source, row, deadline))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>();
+        workers
+            .into_iter()
+            .flat_map(crate::coding_agent::hermes::joined)
+            .collect()
+    })
 }
 
 fn member_checks(
@@ -701,26 +655,20 @@ fn member_checks(
 }
 
 fn runtime_check(run: &MemberRun) -> Check {
-    let detail = if run.state == MemberState::CheckFailed {
-        format!(
-            "member {} {}: {}",
-            run.member_id,
-            run.state.label(),
-            run.phrases.join("; ")
-        )
-    } else {
-        format!(
-            "member {} {}: {}{}",
-            run.member_id,
-            run.state.label(),
-            run.phrases.join("; "),
-            run_suffix(
-                run.state.next_commands(),
-                &run.member_id.to_string(),
-                &director_label(&[run.director_member_id])
-            )
-        )
+    let suffix = match run.state {
+        MemberState::CheckFailed => String::new(),
+        state => run_suffix(
+            state.next_commands(),
+            &run.member_id.to_string(),
+            &director_label(&[run.director_member_id]),
+        ),
     };
+    let detail = format!(
+        "member {} {}: {}{suffix}",
+        run.member_id,
+        run.state.label(),
+        run.phrases.join("; ")
+    );
     let mut check = Check::new(
         format!("member_runtime.{}", run.run_id),
         run.state.status(),
@@ -827,46 +775,56 @@ fn resolve_backends(probe: &dyn SpawnProbe, home: &Result<PathBuf, CafleetError>
         .collect()
 }
 
-/// What the Hermes rows read: the batch's two results, or why no `hermes` process ran.
-enum HermesReading {
-    Read {
-        config_path: Result<String, String>,
-        plugins: Result<Option<Value>, String>,
-    },
-    Unavailable {
-        detail: String,
-        problem: Option<String>,
-    },
+/// The Hermes batch's `config path` and `plugins` results.
+type HermesReading = (Result<String, String>, Result<Option<Value>, String>);
+
+/// Whether the Hermes batch may run: a resolved existing base and an executable.
+fn hermes_batch_runs(hermes: &Backend) -> bool {
+    hermes.executable.is_some() && hermes.paths.as_ref().is_ok_and(|base| base.exists())
 }
 
-/// The base the Hermes batch reads, or `None` when no `hermes` process may run.
-fn hermes_batch_base(hermes: &Backend) -> Option<&Path> {
-    let base = hermes.paths.as_ref().ok()?;
-    (hermes.executable.is_some() && base.exists()).then_some(base.as_path())
-}
-
-fn hermes_unavailable(hermes: &Backend) -> HermesReading {
-    match (&hermes.paths, &hermes.executable) {
-        (Err(cause), _) => HermesReading::Unavailable {
-            detail: format!("unavailable: configuration failed: {cause}"),
-            problem: None,
-        },
-        (_, None) => HermesReading::Unavailable {
-            detail: "unavailable: executable is absent".into(),
-            problem: None,
-        },
-        (Ok(base), Some(_)) => HermesReading::Unavailable {
-            detail: format!("unavailable: no Hermes home at {}", base.display()),
-            problem: Some(format!("no Hermes home at {}", base.display())),
-        },
+/// The `info` row of a check whose backend configuration failed or whose executable is absent.
+fn unavailable(
+    name: &str,
+    paths: &Result<PathBuf, CafleetError>,
+    available: bool,
+) -> Option<Check> {
+    match (paths, available) {
+        (Err(cause), _) => Some(Check::new(
+            name,
+            CheckStatus::Info,
+            format!("unavailable: configuration failed: {cause}"),
+        )),
+        (_, false) => Some(Check::new(
+            name,
+            CheckStatus::Info,
+            "unavailable: executable is absent",
+        )),
+        (Ok(_), true) => None,
     }
+}
+
+/// A Hermes row without a batch reading: unavailable, or no Hermes home at the base.
+fn hermes_row_without_reading(name: &str, hermes: &Backend) -> Check {
+    unavailable(name, &hermes.paths, hermes.executable.is_some()).unwrap_or_else(|| {
+        let base = hermes
+            .paths
+            .as_ref()
+            .expect("an available hermes has a base");
+        Check::new(
+            name,
+            CheckStatus::Info,
+            format!("unavailable: no Hermes home at {}", base.display()),
+        )
+        .problem(format!("no Hermes home at {}", base.display()), true)
+    })
 }
 
 fn agent_checks(
     conn: Option<&Connection>,
     schema: &SchemaState,
     backends: &[Backend],
-    hermes_reading: impl FnOnce() -> HermesReading,
+    hermes_reading: impl FnOnce() -> Option<HermesReading>,
 ) -> Vec<Check> {
     let mut hermes_reading = Some(hermes_reading);
     let mut checks = Vec::new();
@@ -875,31 +833,20 @@ fn agent_checks(
         let name = agent.name();
         let paths = &backend.paths;
         let available = backend.executable.is_some();
-        checks.push(match paths {
-            Ok(path) => Check::new(
-                format!("{name}.configuration"),
-                CheckStatus::Ok,
-                path.display().to_string(),
-            ),
-            Err(cause) => Check::new(
-                format!("{name}.configuration"),
-                CheckStatus::Error,
-                cause.to_string(),
-            ),
-        });
-        checks.push(if available {
-            Check::new(
-                format!("{name}.executable"),
-                CheckStatus::Ok,
-                format!("{name} is on PATH"),
-            )
+        let (status, detail) = match paths {
+            Ok(path) => (CheckStatus::Ok, path.display().to_string()),
+            Err(cause) => (CheckStatus::Error, cause.to_string()),
+        };
+        checks.push(Check::new(format!("{name}.configuration"), status, detail));
+        let (status, detail) = if available {
+            (CheckStatus::Ok, format!("{name} is on PATH"))
         } else {
-            Check::new(
-                format!("{name}.executable"),
+            (
                 CheckStatus::Info,
                 format!("{name} is optional and absent from PATH"),
             )
-        });
+        };
+        checks.push(Check::new(format!("{name}.executable"), status, detail));
         if agent == CodingAgent::Opencode {
             let default_mode = agent
                 .resolve_policy(None)
@@ -917,9 +864,16 @@ fn agent_checks(
             checks.push(opencode_extension_check(paths, available));
         }
         if agent == CodingAgent::Hermes {
-            let reading = hermes_reading.take().expect("one hermes backend")();
-            checks.push(hermes_extension_check(&reading));
-            checks.push(hermes_plugin_enabled_check(reading));
+            match hermes_reading.take().expect("one hermes backend")() {
+                Some((config_path, plugins)) => {
+                    checks.push(hermes_extension_check(config_path));
+                    checks.push(hermes_plugin_enabled_check(plugins));
+                }
+                None => checks.extend(
+                    ["hermes.extension", "hermes.plugin_enabled"]
+                        .map(|name| hermes_row_without_reading(name, backend)),
+                ),
+            }
         }
         let install_name = format!("{name}.installation");
         checks.push(match (paths, schema) {
@@ -962,31 +916,23 @@ fn preset_check(
     } else {
         format!("{name}.preset.{mode}")
     };
-    match (paths, available) {
-        (Err(cause), _) => Check::new(
+    if let Some(row) = unavailable(&check_name, paths, available) {
+        return row;
+    }
+    let preset = agent
+        .required_preset(
+            paths.as_ref().expect("an available backend has a base"),
+            mode,
+        )
+        .expect("OpenCode has a required preset for every launch policy");
+    match std::fs::read(&preset) {
+        Ok(_) => Check::new(check_name, CheckStatus::Ok, preset.display().to_string()),
+        Err(cause) => Check::fixable(
             check_name,
-            CheckStatus::Info,
-            format!("unavailable: configuration failed: {cause}"),
+            CheckStatus::Error,
+            format!("{}: {cause}", preset.display()),
+            format!("preset {} is unreadable: {cause}", preset.display()),
         ),
-        (_, false) => Check::new(
-            check_name,
-            CheckStatus::Info,
-            "unavailable: executable is absent",
-        ),
-        (Ok(path), true) => {
-            let preset = agent
-                .required_preset(path, mode)
-                .expect("OpenCode has a required preset for every launch policy");
-            match std::fs::read(&preset) {
-                Ok(_) => Check::new(check_name, CheckStatus::Ok, preset.display().to_string()),
-                Err(cause) => Check::fixable(
-                    check_name,
-                    CheckStatus::Error,
-                    format!("{}: {cause}", preset.display()),
-                    format!("preset {} is unreadable: {cause}", preset.display()),
-                ),
-            }
-        }
     }
 }
 
@@ -1033,20 +979,12 @@ fn extension_files(root: &Path, prefix: &str) -> Vec<(PathBuf, &'static [u8])> {
 
 fn opencode_extension_check(paths: &Result<PathBuf, CafleetError>, available: bool) -> Check {
     const NAME: &str = "opencode.extension";
-    let base = match (paths, available) {
-        (Err(cause), _) => {
-            return Check::new(
-                NAME,
-                CheckStatus::Info,
-                format!("unavailable: configuration failed: {cause}"),
-            );
-        }
-        (_, false) => {
-            return Check::new(NAME, CheckStatus::Info, "unavailable: executable is absent");
-        }
-        (Ok(base), true) => base,
-    };
-    let plugins = crate::assets::opencode_plugins_dir(base);
+    if let Some(row) = unavailable(NAME, paths, available) {
+        return row;
+    }
+    let plugins = crate::assets::opencode_plugins_dir(
+        paths.as_ref().expect("an available backend has a base"),
+    );
     let files = extension_files(&plugins, crate::assets::OPENCODE_EXTENSION_PREFIX);
     let ok_detail = files
         .iter()
@@ -1061,26 +999,9 @@ fn opencode_extension_check(paths: &Result<PathBuf, CafleetError>, available: bo
     )
 }
 
-fn unavailable_hermes_row(name: &str, detail: &str, problem: &Option<String>) -> Check {
-    let check = Check::new(name, CheckStatus::Info, detail);
-    match problem {
-        Some(phrase) => check.problem(phrase, true),
-        None => check,
-    }
-}
-
-fn hermes_extension_check(reading: &HermesReading) -> Check {
+fn hermes_extension_check(config_path: Result<String, String>) -> Check {
     const NAME: &str = "hermes.extension";
-    let config_path = match reading {
-        HermesReading::Unavailable { detail, problem } => {
-            return unavailable_hermes_row(NAME, detail, problem);
-        }
-        HermesReading::Read { config_path, .. } => config_path,
-    };
-    let plugin_dir = config_path
-        .as_deref()
-        .map_err(Clone::clone)
-        .and_then(crate::coding_agent::hermes::plugin_dir);
+    let plugin_dir = config_path.and_then(|path| crate::coding_agent::hermes::plugin_dir(&path));
     match plugin_dir {
         Ok(plugin_dir) => extension_check(
             NAME,
@@ -1095,16 +1016,10 @@ fn hermes_extension_check(reading: &HermesReading) -> Check {
     }
 }
 
-fn hermes_plugin_enabled_check(reading: HermesReading) -> Check {
+fn hermes_plugin_enabled_check(plugins: Result<Option<Value>, String>) -> Check {
     use crate::coding_agent::hermes::PLUGIN_NAME;
     use crate::coding_agent::hermes::PLUGINS_DISABLED_KEY;
     const NAME: &str = "hermes.plugin_enabled";
-    let plugins = match reading {
-        HermesReading::Unavailable { detail, problem } => {
-            return unavailable_hermes_row(NAME, &detail, &problem);
-        }
-        HermesReading::Read { plugins, .. } => plugins,
-    };
     let state = match plugins.and_then(crate::coding_agent::hermes::plugin_state) {
         Ok(state) => state,
         Err(cause) => {
@@ -1374,8 +1289,7 @@ mod tests {
             .expect("every diagnostic has its stable name")
     }
 
-    /// The backend rows for `probe`, with the Hermes rows read as the batch-less state
-    /// `gather` derives from the probe.
+    /// The backend rows for `probe`, with no Hermes batch read.
     fn checks_for(
         conn: Option<&Connection>,
         schema: &SchemaState,
@@ -1383,12 +1297,7 @@ mod tests {
         home: &Path,
     ) -> Vec<Check> {
         let backends = resolve_backends(probe, &Ok(home.to_path_buf()));
-        let hermes = backends
-            .iter()
-            .find(|backend| backend.agent == CodingAgent::Hermes)
-            .expect("the registry includes hermes");
-        let reading = hermes_unavailable(hermes);
-        agent_checks(conn, schema, &backends, move || reading)
+        agent_checks(conn, schema, &backends, || None)
     }
 
     #[test]

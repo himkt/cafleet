@@ -1,6 +1,5 @@
 use crate::broker;
 use crate::broker::MemberKind;
-use crate::broker::MemberRecord;
 use crate::config::Settings;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
@@ -24,17 +23,7 @@ fn effect_error(member_id: i64, cause: CafleetError, started: bool) -> CafleetEr
     } else {
         format!("keys were not dispatched to member {member_id}.")
     };
-    CafleetError::WithDiagnostics {
-        cause: Box::new(cause),
-        diagnostics: vec![diagnostic],
-    }
-}
-
-fn load_member(conn: &Connection, member_id: i64) -> Result<MemberRecord, CafleetError> {
-    let fleet = broker::active_member_fleet(conn, member_id)?
-        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    broker::get_member(conn, member_id, fleet)?
-        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))
+    cause.with_diagnostic(diagnostic)
 }
 
 pub(crate) fn press_member(
@@ -48,7 +37,7 @@ pub(crate) fn press_member(
         .remaining()
         .map_err(|cause| effect_error(member_id, cause, false))?;
     let mux = with_database_budget(conn, deadline, |conn| {
-        let member = load_member(conn, member_id)?;
+        let member = broker::active_member(conn, member_id)?;
         crate::runtime::mux_for_fleet(conn, member.fleet_id, Some(deadline))
     })
     .map_err(|cause| effect_error(member_id, cause, false))?;
@@ -65,7 +54,9 @@ pub(crate) fn press_member_with_mux(
 ) -> Result<KeyAcknowledgment, CafleetError> {
     let mut started = false;
     let result = (|| {
-        let member = with_database_budget(conn, deadline, |conn| load_member(conn, member_id))?;
+        let member = with_database_budget(conn, deadline, |conn| {
+            broker::active_member(conn, member_id)
+        })?;
         if member.kind == MemberKind::Director {
             return Err(CafleetError::App(
                 "cannot press keys in the Director's own pane".into(),
@@ -93,18 +84,12 @@ pub(crate) fn press_member_with_mux(
         .ok_or_else(|| {
             CafleetError::App(format!("member {member_id}'s pane input remained busy"))
         })?;
-        if locked.member.fleet_id != member.fleet_id
-            || locked.member.kind != member.kind
-            || locked.member.placement != member.placement
-        {
-            return Err(CafleetError::App(format!(
-                "member {member_id} placement changed before key dispatch"
-            )));
-        }
         mux.validate_key_target(placement, deadline)
             .map_err(|cause| CafleetError::App(cause.to_string()))?;
         deadline.remaining()?;
-        let current = with_database_budget(conn, deadline, |conn| load_member(conn, member_id))?;
+        let current = with_database_budget(conn, deadline, |conn| {
+            broker::active_member(conn, member_id)
+        })?;
         if current.fleet_id != member.fleet_id
             || current.kind != member.kind
             || current.placement != member.placement

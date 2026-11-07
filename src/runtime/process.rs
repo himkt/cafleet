@@ -1,3 +1,4 @@
+#[cfg(test)]
 use crate::broker::runtime::CleanupState;
 use crate::runtime::*;
 use filedescriptor::FileDescriptor;
@@ -208,6 +209,19 @@ impl ProcessObservations for NativeProcessObservations {
     }
 }
 
+/// Sends `signal` to `pid`; a process that is already gone counts as signalled.
+fn signal_pid(pid: i64, signal: nix::sys::signal::Signal) -> Result<()> {
+    let pid = nix::unistd::Pid::from_raw(i32::try_from(pid).map_err(io_error)?);
+    match nix::sys::signal::kill(pid, signal) {
+        Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
+        Err(cause) => Err(io_error(cause)),
+    }
+}
+
+fn running(process: &ProcessIdentity) -> Result<bool> {
+    Ok(process.matches()? && !stopped(process.pid)?)
+}
+
 pub(super) fn recover_descendants(
     run: &crate::broker::runtime::RunRecord,
     clock: ShutdownClock,
@@ -216,12 +230,11 @@ pub(super) fn recover_descendants(
     let Some(child) = run.child_process()? else {
         return Ok(outcome);
     };
-    if !child.matches()? || stopped(child.pid)? {
-        if !group_members(i32::try_from(child.pid).map_err(io_error)?)?.is_empty() {
-            outcome.cleanup_state = CleanupState::Incomplete;
-            outcome.diagnostics.push(
-                "descendant ownership cannot be anchored to the recorded child generation".into(),
-            );
+    let group = i32::try_from(child.pid).map_err(io_error)?;
+    if !running(&child)? {
+        if !group_members(group)?.is_empty() {
+            outcome
+                .fail("descendant ownership cannot be anchored to the recorded child generation");
         }
         return Ok(outcome);
     }
@@ -237,15 +250,12 @@ pub(super) fn recover_descendants(
                 Ok(found || process.matches()?)
             })?;
         if !anchored {
-            if !group_members(i32::try_from(child.pid).map_err(io_error)?)?.is_empty() {
-                outcome.cleanup_state = CleanupState::Incomplete;
-                outcome
-                    .diagnostics
-                    .push("descendant ownership lost its recorded process generation".into());
+            if !group_members(group)?.is_empty() {
+                outcome.fail("descendant ownership lost its recorded process generation");
             }
             break;
         }
-        for pid in group_members(i32::try_from(child.pid).map_err(io_error)?)? {
+        for pid in group_members(group)? {
             if let Some(process) = ProcessIdentity::read(pid)? {
                 if let Some(previous) = owned.get(&pid) {
                     ensure(
@@ -258,14 +268,8 @@ pub(super) fn recover_descendants(
             }
         }
         for process in owned.values() {
-            if process.matches()? && !stopped(process.pid)? {
-                match nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(i32::try_from(process.pid).map_err(io_error)?),
-                    signal,
-                ) {
-                    Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
-                    Err(cause) => return Err(io_error(cause)),
-                }
+            if running(process)? {
+                signal_pid(process.pid, signal)?;
             }
         }
         let until = if signal == nix::sys::signal::Signal::SIGTERM {
@@ -274,11 +278,9 @@ pub(super) fn recover_descendants(
             clock.storage_deadline()
         };
         while Instant::now() < until {
-            let alive = owned
-                .values()
-                .try_fold(false, |alive, process| -> Result<bool> {
-                    Ok(alive || (process.matches()? && !stopped(process.pid)?))
-                })?;
+            let alive = owned.values().try_fold(false, |alive, process| {
+                Ok::<_, CafleetError>(alive || running(process)?)
+            })?;
             if !alive {
                 break;
             }
@@ -286,15 +288,29 @@ pub(super) fn recover_descendants(
         }
     }
     for process in owned.values() {
-        if process.matches()? && !stopped(process.pid)? {
-            outcome.cleanup_state = CleanupState::Incomplete;
-            outcome
-                .diagnostics
-                .push("verified descendants remain after the original cleanup deadline".into());
+        if running(process)? {
+            outcome.fail("verified descendants remain after the original cleanup deadline");
             break;
         }
     }
     Ok(outcome)
+}
+
+fn std_child(child: &mut Box<dyn Child + Send + Sync>) -> Result<&mut std::process::Child> {
+    child
+        .as_mut()
+        .as_any_mut()
+        .downcast_mut::<std::process::Child>()
+        .ok_or_else(|| error("Unix portable-pty child type invariant violated"))
+}
+
+fn pty_size(size: TerminalSize) -> PtySize {
+    PtySize {
+        rows: size.rows,
+        cols: size.cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
 }
 
 struct MasterFd<'a>(&'a dyn MasterPty);
@@ -323,12 +339,7 @@ impl PtySession {
     pub(crate) fn prepare(size: TerminalSize) -> Result<Self> {
         size.validate()?;
         let pair = portable_pty::native_pty_system()
-            .openpty(PtySize {
-                rows: size.rows,
-                cols: size.cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+            .openpty(pty_size(size))
             .map_err(io_error)?;
         ensure(
             pair.master.as_raw_fd().is_some(),
@@ -389,14 +400,7 @@ impl PtySession {
             return Ok(None);
         }
         self.refresh_owned()?;
-        let child = self
-            .child
-            .as_mut()
-            .expect("checked child")
-            .as_mut()
-            .as_any_mut()
-            .downcast_mut::<std::process::Child>()
-            .ok_or_else(|| error("Unix portable-pty child type invariant violated"))?;
+        let child = std_child(self.child.as_mut().expect("checked child"))?;
         if let Some(status) = child.try_wait().map_err(io_error)? {
             self.exit = Some(match status.signal() {
                 Some(signal) => ChildExit::Signal(signal),
@@ -469,18 +473,8 @@ impl PtySession {
             && self.exit.is_none()
             && let Some(child) = self.child.as_mut()
         {
-            let owned = child
-                .as_mut()
-                .as_any_mut()
-                .downcast_mut::<std::process::Child>()
-                .ok_or_else(|| error("Unix portable-pty child type invariant violated"))?;
-            match nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(i32::try_from(owned.id()).map_err(io_error)?),
-                signal,
-            ) {
-                Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
-                Err(cause) => return Err(io_error(cause)),
-            }
+            let owned = std_child(child)?;
+            signal_pid(i64::from(owned.id()), signal)?;
         }
         self.refresh_owned()?;
         for process in self.owned.values() {
@@ -495,13 +489,7 @@ impl PtySession {
                 if stopped(process.pid)? {
                     continue;
                 }
-                match nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(i32::try_from(process.pid).map_err(io_error)?),
-                    signal,
-                ) {
-                    Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
-                    Err(cause) => return Err(io_error(cause)),
-                }
+                signal_pid(process.pid, signal)?;
             }
         }
         Ok(())
@@ -552,21 +540,17 @@ impl PtySession {
     pub(crate) fn shutdown(&mut self, clock: ShutdownClock) -> ShutdownOutcome {
         let clock = self.begin_shutdown(clock);
         let mut diagnostics = Vec::new();
-        if let Err(cause) = self.signal_verified(nix::sys::signal::Signal::SIGTERM) {
-            diagnostics.push(cause.message().into_owned());
-        }
+        note(
+            &mut diagnostics,
+            self.signal_verified(nix::sys::signal::Signal::SIGTERM),
+        );
         while Instant::now() < clock.child_deadline() {
-            if let Err(cause) = self.try_wait() {
-                diagnostics.push(cause.message().into_owned());
+            if note(&mut diagnostics, self.try_wait()).is_none() {
                 break;
             }
-            match self.survivors() {
-                Ok(false) => break,
-                Ok(true) => {}
-                Err(cause) => {
-                    diagnostics.push(cause.message().into_owned());
-                    break;
-                }
+            match note(&mut diagnostics, self.survivors()) {
+                Some(true) => {}
+                Some(false) | None => break,
             }
             let mut bytes = [0; 16384];
             match self.try_read(&mut bytes) {
@@ -585,12 +569,11 @@ impl PtySession {
                 ),
             );
         }
-        if let Err(cause) = self.signal_verified(nix::sys::signal::Signal::SIGKILL) {
-            diagnostics.push(cause.message().into_owned());
-        }
-        if let Err(cause) = self.close() {
-            diagnostics.push(cause.message().into_owned());
-        }
+        note(
+            &mut diagnostics,
+            self.signal_verified(nix::sys::signal::Signal::SIGKILL),
+        );
+        note(&mut diagnostics, self.close());
         while Instant::now() < clock.storage_deadline() {
             let waited = self.try_wait();
             let alive = self.survivors();
@@ -604,10 +587,8 @@ impl PtySession {
             }
             nap_until(clock.storage_deadline());
         }
-        match self.survivors() {
-            Ok(true) => diagnostics.push("owned descendants remain unconfirmed".into()),
-            Err(cause) => diagnostics.push(cause.message().into_owned()),
-            Ok(false) => {}
+        if note(&mut diagnostics, self.survivors()) == Some(true) {
+            diagnostics.push("owned descendants remain unconfirmed".into());
         }
         if self.child.is_some() && self.native.is_none() {
             diagnostics.push(
@@ -643,12 +624,7 @@ impl PtyIo for PtySession {
         self.master
             .as_ref()
             .ok_or_else(|| error("PTY is closed"))?
-            .resize(PtySize {
-                rows: size.rows,
-                cols: size.cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+            .resize(pty_size(size))
             .map_err(io_error)
     }
     fn close(&mut self) -> Result<()> {

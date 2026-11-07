@@ -1212,20 +1212,15 @@ fn inspect_permission_with_host(
         let deadline = submission_deadline(conn, deadline)?;
         let (run, placement, original) = with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction()?;
-            let interaction_exists = tx
-                .query_row(
-                    "SELECT 1 FROM member_interactions WHERE interaction_id=?1",
-                    [input.interaction_id],
-                    |_| Ok(()),
-                )
-                .optional()?
-                .is_some();
-            if !interaction_exists {
-                return Err(CafleetError::App(format!(
-                    "Interaction {} not found",
-                    input.interaction_id
-                )));
-            }
+            tx.query_row(
+                "SELECT 1 FROM member_interactions WHERE interaction_id=?1",
+                [input.interaction_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                CafleetError::App(format!("Interaction {} not found", input.interaction_id))
+            })?;
             let view = storage::get_event(&tx, input.event_id)?;
             let run = selected_run_reporting(
                 &tx,

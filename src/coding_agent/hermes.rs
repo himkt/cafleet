@@ -28,25 +28,15 @@ pub(crate) trait HermesConfig: Sync {
     fn set(&self, key: &str, value: &str, deadline: Instant) -> Result<(), String>;
 }
 
-/// A `hermes` process that ran to completion.
-struct HermesOutput {
-    exit_code: i32,
-    stdout: String,
-    stderr: String,
-}
+/// A completed `hermes` process: its exit code, stdout and stderr.
+type HermesOutput = (i32, String, String);
 
-impl HermesOutput {
-    /// The stdout of a command that exited 0, or its stderr text as the cause.
-    fn succeeded(self) -> Result<String, String> {
-        if self.exit_code == 0 {
-            return Ok(self.stdout);
-        }
-        let stderr = self.stderr.trim();
-        Err(if stderr.is_empty() {
-            format!("exited with code {}", self.exit_code)
-        } else {
-            stderr.to_owned()
-        })
+/// The stdout of a command that exited 0, or its stderr text as the cause.
+fn succeeded((exit_code, stdout, stderr): HermesOutput) -> Result<String, String> {
+    match (exit_code, stderr.trim()) {
+        (0, _) => Ok(stdout),
+        (code, "") => Err(format!("exited with code {code}")),
+        (_, stderr) => Err(stderr.to_owned()),
     }
 }
 
@@ -66,38 +56,35 @@ impl HermesCli {
             .status
             .code()
             .ok_or_else(|| format!("hermes {} ended by {}", args.join(" "), output.status))?;
-        Ok(HermesOutput {
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|_| format!("hermes {} printed non-UTF-8 output", args.join(" ")))?;
+        Ok((
             exit_code,
-            stdout: String::from_utf8(output.stdout)
-                .map_err(|_| format!("hermes {} printed non-UTF-8 output", args.join(" ")))?,
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        })
+            stdout,
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ))
     }
 }
 
 impl HermesConfig for HermesCli {
     fn config_path(&self, deadline: Instant) -> Result<String, String> {
-        self.run(&["config", "path"], deadline)?
-            .succeeded()
-            .map(|stdout| stdout.trim().to_owned())
+        succeeded(self.run(&["config", "path"], deadline)?).map(|stdout| stdout.trim().to_owned())
     }
 
     fn get(&self, key: &str, deadline: Instant) -> Result<Option<Value>, String> {
         let output = self.run(&["config", "get", "--json", key], deadline)?;
         let not_set = format!("Config key not set: {key}");
-        if output.exit_code == 1 && output.stderr.lines().any(|line| line.trim() == not_set) {
+        if output.0 == 1 && output.2.lines().any(|line| line.trim() == not_set) {
             return Ok(None);
         }
-        let stdout = output.succeeded()?;
+        let stdout = succeeded(output)?;
         serde_json::from_str(&stdout)
             .map(Some)
             .map_err(|cause| format!("{key} printed no JSON value: {cause}"))
     }
 
     fn set(&self, key: &str, value: &str, deadline: Instant) -> Result<(), String> {
-        self.run(&["config", "set", key, value], deadline)?
-            .succeeded()
-            .map(drop)
+        succeeded(self.run(&["config", "set", key, value], deadline)?).map(drop)
     }
 }
 
@@ -203,18 +190,16 @@ pub(crate) fn enable_plugin(
     if missing.is_empty() {
         return Ok(false);
     }
-    let written = read_plugin_state(hermes, Instant::now() + budget)?;
-    if written.missing().contains(&PLUGINS_ENABLED_KEY) {
-        return Err(format!(
+    match read_plugin_state(hermes, Instant::now() + budget)?
+        .missing()
+        .first()
+    {
+        None => Ok(true),
+        Some(&PLUGINS_ENABLED_KEY) => Err(format!(
             "{PLUGINS_ENABLED_KEY} still lacks {PLUGIN_NAME} after the write"
-        ));
+        )),
+        Some(key) => Err(format!("{key} is still not true after the write")),
     }
-    if written.missing().contains(&GATEWAY_INJECTION_KEY) {
-        return Err(format!(
-            "{GATEWAY_INJECTION_KEY} is still not true after the write"
-        ));
-    }
-    Ok(true)
 }
 
 /// The member run's Hermes session identity, stored in `member_runs.native_session_json`.

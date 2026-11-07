@@ -162,8 +162,7 @@ fn validate_input(
             "explicit input has no preview message",
         )?;
     }
-    input.permission_response =
-        crate::broker::runtime::inputs::validate_input_response(conn, &run, &input)?;
+    input.permission_response = validate_input_response(conn, &run, &input)?;
     delivery_projection(&input)?;
     Ok(input)
 }
@@ -204,16 +203,13 @@ pub(crate) fn begin_deferred_attempt(
             "member_input_operations.state",
             "a deferred attempt starts from its queued receipt",
         )?;
-        let changed = conn.execute(
+        update_input(
+            conn,
+            input_id,
             "UPDATE member_input_operations SET state='in_progress',updated_at=?1,delivery_method=?2,delivery_reason=?3 WHERE input_id=?4 AND state='ready'",
             params![now_stamp(), method.as_str(), reason, input_id],
-        )?;
-        require(
-            changed == 1,
-            "member_input_operations.state",
-            "input CAS failed",
-        )?;
-        get_input(conn, input_id)
+            CAS_FAILED,
+        )
     })
 }
 
@@ -248,16 +244,13 @@ pub(crate) fn requeue_zero_byte_immediate(
             "only an immediate ordinary attempt returns to the queue",
         )?;
         let now = now_stamp();
-        let changed = conn.execute(
+        update_input(
+            conn,
+            input_id,
             "UPDATE member_input_operations SET state='ready',updated_at=?1,delivery_method=NULL,delivery_reason=NULL,deferred_at=?1,defer_reason=?2 WHERE input_id=?3 AND state='in_progress'",
             params![now, defer_reason, input_id],
-        )?;
-        require(
-            changed == 1,
-            "member_input_operations.state",
-            "input CAS failed",
-        )?;
-        get_input(conn, input_id)
+            CAS_FAILED,
+        )
     })
 }
 
@@ -345,16 +338,13 @@ pub(crate) fn settle_zero_byte_deferred(
             "member_input_operations.state",
             "deferred input state changed",
         )?;
-        let changed = conn.execute(
+        update_input(
+            conn,
+            input_id,
             "UPDATE member_input_operations SET state='settled',disposition='not_submitted',updated_at=?1,delivery_method=NULL,delivery_reason=?2 WHERE input_id=?3 AND state=?4",
             params![now_stamp(), reason, input_id, expected.as_str()],
-        )?;
-        require(
-            changed == 1,
-            "member_input_operations.state",
-            "input CAS failed",
-        )?;
-        get_input(conn, input_id)
+            CAS_FAILED,
+        )
     })
 }
 
@@ -506,24 +496,34 @@ pub(crate) fn record_input_state(
             "member_input_operations.state",
             "input state changed",
         )?;
-        let changed = if next == InputState::Ready {
-            conn.execute(
-                "UPDATE member_input_operations SET state=?1,updated_at=?2,delivery_method=NULL,delivery_reason=NULL WHERE input_id=?3 AND state=?4",
-                params![next.as_str(),now_stamp(),input_id,expected.as_str()],
-            )?
+        let sql = if next == InputState::Ready {
+            "UPDATE member_input_operations SET state=?1,updated_at=?2,delivery_method=NULL,delivery_reason=NULL WHERE input_id=?3 AND state=?4"
         } else {
-            conn.execute(
-                "UPDATE member_input_operations SET state=?1,updated_at=?2 WHERE input_id=?3 AND state=?4",
-                params![next.as_str(),now_stamp(),input_id,expected.as_str()],
-            )?
+            "UPDATE member_input_operations SET state=?1,updated_at=?2 WHERE input_id=?3 AND state=?4"
         };
-        require(
-            changed == 1,
-            "member_input_operations.state",
-            "input CAS failed",
-        )?;
-        get_input(conn, input_id)
+        update_input(
+            conn,
+            input_id,
+            sql,
+            params![next.as_str(), now_stamp(), input_id, expected.as_str()],
+            CAS_FAILED,
+        )
     })
+}
+
+const CAS_FAILED: &str = "input CAS failed";
+
+/// Applies one compare-and-set `UPDATE` to an input row and returns the updated input.
+fn update_input(
+    conn: &Connection,
+    input_id: i64,
+    sql: &str,
+    params: impl rusqlite::Params,
+    failure: &str,
+) -> Result<InputOperation, CafleetError> {
+    let changed = conn.execute(sql, params)?;
+    require(changed == 1, "member_input_operations.state", failure)?;
+    get_input(conn, input_id)
 }
 
 pub(crate) fn record_input_uncertain(
@@ -539,47 +539,39 @@ pub(crate) fn record_input_uncertain(
             "member_input_operations.state",
             "input state changed",
         )?;
-        let changed = conn.execute(
+        update_input(
+            conn,
+            input_id,
             "UPDATE member_input_operations SET state='uncertain',updated_at=?1,uncertain_cause=?2 WHERE input_id=?3 AND state='in_progress'",
             params![now_stamp(), cause.as_str(), input_id],
-        )?;
-        require(
-            changed == 1,
-            "member_input_operations.state",
-            "input CAS failed",
-        )?;
-        get_input(conn, input_id)
+            CAS_FAILED,
+        )
     })
 }
 
-pub(crate) fn settle_input_in_transaction(
+/// Settles `input_id` of `run`, whose ownership the caller's transaction has validated.
+pub(super) fn settle_input_in_transaction(
     conn: &Connection,
-    owner: &RunOwner,
+    run: &RunRecord,
     input_id: i64,
     expected: InputState,
     disposition: InputDisposition,
     evidence_ref: &str,
 ) -> Result<InputOperation, CafleetError> {
-    require(
-        !conn.is_autocommit(),
-        "transaction",
-        "input settlement requires an active ownership transaction",
-    )?;
     nonblank(evidence_ref, "evidence_ref")?;
     require(
         expected != InputState::Settled,
         "state",
         "settled operations retain their disposition",
     )?;
-    let run = validate_owner(conn, owner)?;
-    let input = owned_input(conn, &run, input_id)?;
+    let input = owned_input(conn, run, input_id)?;
     require(
         input.state == expected,
         "member_input_operations.state",
         "input state changed",
     )?;
     if input.kind == InputKind::Preview && disposition == InputDisposition::Submitted {
-        stamp_preview(conn, &run, &input)?;
+        stamp_preview(conn, run, &input)?;
     }
     settle(conn, input_id, expected, disposition, Some(evidence_ref))
 }
@@ -591,17 +583,14 @@ fn settle(
     disposition: InputDisposition,
     evidence_ref: Option<&str>,
 ) -> Result<InputOperation, CafleetError> {
-    let changed = conn.execute(
+    update_input(
+        conn,
+        input_id,
         "UPDATE member_input_operations SET state='settled',disposition=?1,evidence_ref=?2,updated_at=?3
          WHERE input_id=?4 AND state=?5",
         params![disposition.as_str(),evidence_ref,now_stamp(),input_id,expected.as_str()],
-    )?;
-    require(
-        changed == 1,
-        "member_input_operations.state",
         "settlement CAS failed",
-    )?;
-    get_input(conn, input_id)
+    )
 }
 
 pub(crate) fn settle_preview(
@@ -1036,28 +1025,10 @@ pub(crate) fn reserve_permission_response(
             return Ok(PermissionReservation::Retained(receipt));
         }
         let run = validate_owner(&tx, owner)?;
-        require(
-            run.owner_kind == OwnerKind::Runner
-                && run.status == RunStatus::Running
-                && historical_ownership(&tx, &run)?.is_none(),
-            "member_runs",
-            "new response requires active running runner ownership",
-        )?;
         let metadata = &request.metadata;
-        require(
-            metadata.expected_owner_epoch == run.owner_epoch
-                && metadata.director_member_id == run.director_member_id,
-            "permission_response",
-            "current epoch and pinned Director required",
-        )?;
         let event = get_event(&tx, metadata.event_id)?;
-        require(
-            permission_event_matches(&event, run.run_id, metadata, true),
-            "permission_response",
-            "current open inbox permission event required",
-        )?;
         validate_current_capability(&tx, &run, metadata, &event, capability)?;
-        inputs::require_capacity(&tx, run.run_id)?;
+        require_capacity(&tx, run.run_id)?;
         let digest = permission_response_digest(run.run_id, metadata)?;
         let now = now_stamp();
         tx.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,?2,'permission_response',?3,'in_progress',?4,?4)",params![run.run_id,request.operation_key,digest,now])?;
@@ -1188,19 +1159,13 @@ pub(crate) fn rearm_permission_response(
     })
 }
 
-pub(crate) fn release_permission_claim_in_transaction(
+pub(super) fn release_permission_claim_in_transaction(
     conn: &Connection,
     owner: &RunOwner,
     input_id: i64,
     proof: &ZeroByteRetirement<'_>,
     deadline: Instant,
 ) -> Result<PermissionReceipt, CafleetError> {
-    require(
-        !conn.is_autocommit(),
-        "transaction",
-        "claim release requires an active ownership transaction",
-    )?;
-    validate_owner(conn, owner)?;
     let receipt = get_permission_response(conn, input_id)?;
     validate_proof(owner, &receipt, proof)?;
     require(
@@ -1223,21 +1188,20 @@ pub(crate) fn release_permission_claim_in_transaction(
     get_permission_response(conn, input_id)
 }
 
-pub(crate) fn settle_permission_response_in_transaction(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the settlement entry passes its validated owner, run and retirement proof"
+)]
+fn settle_permission_response_in_transaction(
     conn: &Connection,
     owner: &RunOwner,
+    run: &RunRecord,
     expected_input: &InputOperation,
     disposition: InputDisposition,
     evidence_ref: &str,
     proof: Option<&ZeroByteRetirement<'_>>,
     deadline: Instant,
 ) -> Result<PermissionReceipt, CafleetError> {
-    require(
-        !conn.is_autocommit(),
-        "transaction",
-        "permission settlement requires an active ownership transaction",
-    )?;
-    validate_owner(conn, owner)?;
     let receipt = get_permission_response(conn, expected_input.input_id)?;
     require(
         receipt.input.same_identity(expected_input) && receipt.input.state == expected_input.state,
@@ -1247,9 +1211,9 @@ pub(crate) fn settle_permission_response_in_transaction(
     if let Some(proof) = proof {
         validate_proof(owner, &receipt, proof)?;
     }
-    inputs::settle_input_in_transaction(
+    settle_input_in_transaction(
         conn,
-        owner,
+        run,
         expected_input.input_id,
         expected_input.state,
         disposition,
@@ -1285,10 +1249,17 @@ pub(crate) fn settle_any_input_in_transaction(
     proof: Option<&ZeroByteRetirement<'_>>,
     deadline: Instant,
 ) -> Result<InputOperation, CafleetError> {
+    require(
+        !conn.is_autocommit(),
+        "transaction",
+        "input settlement requires an active ownership transaction",
+    )?;
+    let run = validate_owner(conn, owner)?;
     if expected_input.kind == InputKind::PermissionResponse {
         settle_permission_response_in_transaction(
             conn,
             owner,
+            &run,
             expected_input,
             disposition,
             evidence_ref,
@@ -1297,9 +1268,9 @@ pub(crate) fn settle_any_input_in_transaction(
         )
         .map(|receipt| receipt.input)
     } else {
-        inputs::settle_input_in_transaction(
+        settle_input_in_transaction(
             conn,
-            owner,
+            &run,
             expected_input.input_id,
             expected_input.state,
             disposition,

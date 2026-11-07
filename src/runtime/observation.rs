@@ -764,12 +764,25 @@ impl ObservationController {
         else {
             return Ok(());
         };
+        self.apply(screen, &observed, writer, &now)
+    }
+    fn apply(
+        &mut self,
+        screen: &ScreenSnapshot,
+        observed: &ScreenObservation,
+        writer: &EventWriter,
+        now: &ObservationMoment,
+    ) -> Result<()> {
         let update = self
             .tracker
-            .observe(&observed, now.monotonic, &now.observed_at)?;
+            .observe(observed, now.monotonic, &now.observed_at)?;
         self.retain(update)?;
-        self.update_request(screen, &observed)?;
-        self.route(writer, &now)
+        self.update_request(screen, observed)?;
+        self.route(writer, now)
+    }
+    /// No retained transition, unsaved gap or degraded writer holds new observation work back.
+    fn quiet(&self, writer: &EventWriter) -> bool {
+        self.pending.is_none() && self.gap.is_none() && !writer.status().degraded
     }
     pub(crate) fn poll(
         &mut self,
@@ -832,9 +845,7 @@ impl ObservationController {
         }
         if self.started
             && !self.terminal_fenced
-            && self.pending.is_none()
-            && self.gap.is_none()
-            && !writer.status().degraded
+            && self.quiet(writer)
             && let Some(record) = self
                 .delivery_results
                 .get_mut()
@@ -850,9 +861,7 @@ impl ObservationController {
             self.retain(self.update(vec![value]))?;
             self.route(writer, &now)?;
         }
-        if self.pending.is_none()
-            && self.gap.is_none()
-            && !writer.status().degraded
+        if self.quiet(writer)
             && self
                 .delivery_results
                 .get_mut()
@@ -883,9 +892,7 @@ impl ObservationController {
         }
         if self.started
             && self.exit_recorded.is_none()
-            && self.pending.is_none()
-            && self.gap.is_none()
-            && !writer.status().degraded
+            && self.quiet(writer)
             && self.next_deadline.is_some_and(|at| now.monotonic >= at)
         {
             let Some(value) = self.observation(
@@ -898,12 +905,7 @@ impl ObservationController {
             else {
                 return Ok(self.status());
             };
-            let update = self
-                .tracker
-                .observe(&value, now.monotonic, &now.observed_at)?;
-            self.retain(update)?;
-            self.update_request(current, &value)?;
-            self.route(writer, &now)?;
+            self.apply(current, &value, writer, &now)?;
         }
         Ok(self.status())
     }
@@ -5664,7 +5666,7 @@ pub(crate) mod native_capture {
                 Settings::for_database(Path::new(crate::db::database_path(&config.database_url)?));
             let conn = crate::db::connect(&settings.database_url)?;
             let descriptor = load_descriptor(&conn, &config.descriptor_path)?;
-            let run = storage::get_run(&conn, descriptor.run_id)?;
+            let run = storage::get_run(&conn, descriptor.identity.run_id)?;
             ensure(
                 run.run_id == config.expected_run_id
                     && run.launch_nonce == config.expected_launch_nonce,
@@ -7625,8 +7627,8 @@ pub(crate) mod native_capture {
                 )?;
                 let descriptor: LaunchDescriptor = driver_read(&config.descriptor_path)?;
                 ensure(
-                    descriptor.run_id == config.expected_run_id
-                        && descriptor.launch_nonce == config.expected_launch_nonce
+                    descriptor.identity.run_id == config.expected_run_id
+                        && descriptor.identity.launch_nonce == config.expected_launch_nonce
                         && descriptor.spawn.argv[0]
                             == self.case.native_executable.path.to_string_lossy(),
                     "generated descriptor binding changed",
@@ -9771,7 +9773,7 @@ pub(crate) mod native_capture {
                 ));
                 let conn = crate::db::connect(&settings.database_url).unwrap();
                 let descriptor = load_descriptor(&conn, &config.descriptor_path).unwrap();
-                let run = storage::get_run(&conn, descriptor.run_id).unwrap();
+                let run = storage::get_run(&conn, descriptor.identity.run_id).unwrap();
                 assert_eq!(run.run_id, config.expected_run_id);
                 assert_eq!(run.launch_nonce, config.expected_launch_nonce);
                 let catalog = ProfileCatalog::bundled();
@@ -9995,14 +9997,7 @@ impl AnnotationTracker {
                     return true;
                 }
                 let since = *state.absent_since.get_or_insert(now);
-                if elapsed(now, since, Duration::from_millis(250)) {
-                    return false;
-                }
-                earliest(
-                    &mut update.next_deadline,
-                    since + Duration::from_millis(250),
-                );
-                true
+                !settled(now, since, BOUNDARY_SETTLE, &mut update.next_deadline)
             });
         }
     }
@@ -10022,14 +10017,7 @@ impl AnnotationTracker {
             return true;
         }
         let since = *state.candidate_since.get_or_insert(now);
-        if elapsed(now, since, Duration::from_millis(100)) {
-            return true;
-        }
-        earliest(
-            &mut update.next_deadline,
-            since + Duration::from_millis(100),
-        );
-        false
+        settled(now, since, CANDIDATE_SETTLE, &mut update.next_deadline)
     }
     fn mark_emitted(&mut self, block: &AnnotationBlock) -> bool {
         let state = self
@@ -10052,6 +10040,21 @@ impl AnnotationTracker {
 struct Candidate {
     fingerprint: SemanticFingerprint,
     since: Instant,
+}
+impl Candidate {
+    /// When `fingerprint` was first seen, restarting the candidate when the fingerprint changes.
+    fn since(slot: &mut Option<Self>, fingerprint: &SemanticFingerprint, now: Instant) -> Instant {
+        match slot {
+            Some(candidate) if &candidate.fingerprint == fingerprint => candidate.since,
+            _ => {
+                *slot = Some(Self {
+                    fingerprint: fingerprint.clone(),
+                    since: now,
+                });
+                now
+            }
+        }
+    }
 }
 struct Active {
     sequence: i64,
@@ -10079,8 +10082,22 @@ pub(crate) struct EpisodeTracker {
     current_evidence: Option<Value>,
     annotations: AnnotationTracker,
 }
-fn elapsed(now: Instant, since: Instant, duration: Duration) -> bool {
-    now.saturating_duration_since(since) >= duration
+const CANDIDATE_SETTLE: Duration = Duration::from_millis(100);
+const BOUNDARY_SETTLE: Duration = Duration::from_millis(250);
+const OBSCURITY_SETTLE: Duration = Duration::from_secs(2);
+
+/// Whether `settle` has passed since `since`; otherwise schedules that instant as a deadline.
+fn settled(
+    now: Instant,
+    since: Instant,
+    settle: Duration,
+    next_deadline: &mut Option<Instant>,
+) -> bool {
+    if now.saturating_duration_since(since) >= settle {
+        return true;
+    }
+    earliest(next_deadline, since + settle);
+    false
 }
 fn wall_time(value: &str) -> Result<()> {
     let parsed = chrono::DateTime::parse_from_rfc3339(value)
@@ -10230,6 +10247,12 @@ impl EpisodeTracker {
                     block.raw_evidence["observed_mode"].as_str(),
                 )
             };
+            let observation = |automatic_review, observed_mode| EffectivePolicyObservation {
+                automatic_review,
+                observed_mode,
+                rule_id: block.rule_id.clone(),
+                observed_at: at.into(),
+            };
             match block.kind {
                 ObservationKind::AutomaticReviewAvailable => {
                     self.annotations.unavailable_emitted.clear();
@@ -10240,12 +10263,8 @@ impl EpisodeTracker {
                     if !unavailable_policy
                         && (first || self.annotations.last_policy.as_ref() != Some(&state))
                     {
-                        update.effective_policy = Some(EffectivePolicyObservation {
-                            automatic_review: AutomaticReview::Available,
-                            observed_mode: mode,
-                            rule_id: block.rule_id.clone(),
-                            observed_at: at.into(),
-                        });
+                        update.effective_policy =
+                            Some(observation(AutomaticReview::Available, mode));
                         self.annotations.last_policy = Some(state);
                     }
                 }
@@ -10276,12 +10295,8 @@ impl EpisodeTracker {
                     ));
                     if !unavailable_policy {
                         let mode = observed_mode()?;
-                        update.effective_policy = Some(EffectivePolicyObservation {
-                            automatic_review: AutomaticReview::Unavailable,
-                            observed_mode: mode.clone(),
-                            rule_id: block.rule_id.clone(),
-                            observed_at: at.into(),
-                        });
+                        update.effective_policy =
+                            Some(observation(AutomaticReview::Unavailable, mode.clone()));
                         self.annotations.last_policy = Some((AutomaticReview::Unavailable, mode));
                         unavailable_policy = true;
                     }
@@ -10353,18 +10368,8 @@ impl EpisodeTracker {
                 }
                 update.eligibility = InputEligibility::Hold(GateReason::Interaction);
             } else {
-                if self
-                    .candidate
-                    .as_ref()
-                    .is_none_or(|c| &c.fingerprint != fingerprint)
-                {
-                    self.candidate = Some(Candidate {
-                        fingerprint: fingerprint.clone(),
-                        since: now,
-                    });
-                }
-                let since = self.candidate.as_ref().expect("candidate installed").since;
-                if elapsed(now, since, Duration::from_millis(100)) {
+                let since = Candidate::since(&mut self.candidate, fingerprint, now);
+                if settled(now, since, CANDIDATE_SETTLE, &mut update.next_deadline) {
                     if let Some(closed) = self.close(InteractionCloseReason::Superseded, None, at) {
                         update.transitions.push(closed);
                     }
@@ -10374,7 +10379,6 @@ impl EpisodeTracker {
                     update.eligibility = InputEligibility::Hold(GateReason::Interaction);
                 } else {
                     update.eligibility = InputEligibility::Hold(GateReason::Candidate);
-                    update.next_deadline = Some(since + Duration::from_millis(100));
                 }
             }
             return Ok(update);
@@ -10392,15 +10396,13 @@ impl EpisodeTracker {
             self.obscured = false;
             if self.active.is_some() {
                 let since = *self.boundary.get_or_insert(now);
-                if elapsed(now, since, Duration::from_millis(250)) {
+                if settled(now, since, BOUNDARY_SETTLE, &mut update.next_deadline) {
                     if let Some(closed) =
                         self.close(InteractionCloseReason::NotVisible, Some(&evidence), at)
                     {
                         update.transitions.push(closed);
                     }
                     self.boundary = None;
-                } else {
-                    update.next_deadline = Some(since + Duration::from_millis(250));
                 }
             }
         } else {
@@ -10409,19 +10411,17 @@ impl EpisodeTracker {
                 let sequence = active.sequence;
                 let class = active.class;
                 let since = *self.obscurity.get_or_insert(now);
-                if !self.obscured {
-                    if elapsed(now, since, Duration::from_secs(2)) {
-                        update.transitions.push(self.draft(
-                            RuntimeEventKind::InteractionObscured,
-                            Some((sequence, class)),
-                            evidence.clone(),
-                            None,
-                            at,
-                        ));
-                        self.obscured = true;
-                    } else {
-                        update.next_deadline = Some(since + Duration::from_secs(2));
-                    }
+                if !self.obscured
+                    && settled(now, since, OBSCURITY_SETTLE, &mut update.next_deadline)
+                {
+                    update.transitions.push(self.draft(
+                        RuntimeEventKind::InteractionObscured,
+                        Some((sequence, class)),
+                        evidence.clone(),
+                        None,
+                        at,
+                    ));
+                    self.obscured = true;
                 }
             }
         }
@@ -10432,22 +10432,8 @@ impl EpisodeTracker {
                 .as_ref()
                 .expect("validated refusal fingerprint");
             if self.last_refusal.as_ref() != Some(fingerprint) {
-                if self
-                    .refusal_candidate
-                    .as_ref()
-                    .is_none_or(|candidate| &candidate.fingerprint != fingerprint)
-                {
-                    self.refusal_candidate = Some(Candidate {
-                        fingerprint: fingerprint.clone(),
-                        since: now,
-                    });
-                }
-                let since = self
-                    .refusal_candidate
-                    .as_ref()
-                    .expect("refusal candidate installed")
-                    .since;
-                if elapsed(now, since, Duration::from_millis(100)) {
+                let since = Candidate::since(&mut self.refusal_candidate, fingerprint, now);
+                if settled(now, since, CANDIDATE_SETTLE, &mut update.next_deadline) {
                     let episode = self
                         .active
                         .as_ref()
@@ -10464,25 +10450,15 @@ impl EpisodeTracker {
                     ));
                     self.last_refusal = Some(fingerprint.clone());
                     self.refusal_candidate = None;
-                } else {
-                    earliest(
-                        &mut update.next_deadline,
-                        since + Duration::from_millis(100),
-                    );
                 }
             }
         } else {
             self.refusal_candidate = None;
             if value.verified_noninteraction && self.last_refusal.is_some() {
                 let since = *self.refusal_boundary.get_or_insert(now);
-                if elapsed(now, since, Duration::from_millis(250)) {
+                if settled(now, since, BOUNDARY_SETTLE, &mut update.next_deadline) {
                     self.last_refusal = None;
                     self.refusal_boundary = None;
-                } else {
-                    earliest(
-                        &mut update.next_deadline,
-                        since + Duration::from_millis(250),
-                    );
                 }
             } else {
                 self.refusal_boundary = None;

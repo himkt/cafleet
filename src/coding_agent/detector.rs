@@ -18,7 +18,8 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(try_from = "String")]
 pub(crate) enum ObservationKind {
     Interaction(InteractionClass),
     PermissionDenied,
@@ -30,6 +31,13 @@ pub(crate) enum ObservationKind {
     AutomaticRefusal,
     AutomaticReviewUnavailable,
     AutomaticReviewAvailable,
+}
+
+impl TryFrom<String> for ObservationKind {
+    type Error = CafleetError;
+    fn try_from(value: String) -> Result<Self> {
+        Self::parse(&value)
+    }
 }
 
 impl ObservationKind {
@@ -83,7 +91,7 @@ pub(crate) enum MatchEvidence {
 pub(crate) struct SemanticFingerprint {
     parts: Vec<SemanticPart>,
 }
-type SemanticPart = (String, String, Option<String>, Vec<String>);
+type SemanticPart = (&'static str, Option<String>, Vec<String>);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScreenRegion {
@@ -109,7 +117,6 @@ pub(crate) struct ScreenObservation {
 }
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct AnnotationFingerprint {
-    backend: String,
     rule_id: String,
     shown: String,
 }
@@ -189,9 +196,6 @@ struct LogicalLine {
     start: u16,
     end: u16,
     boundaries: Vec<(u16, u16)>,
-}
-fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
-    clipped_logical_lines(screen, &BTreeMap::new())
 }
 /// `clips` maps a panel row to its separator column; such a row keeps only the cells left of
 /// the separator and always ends its logical line.
@@ -297,7 +301,7 @@ impl ScreenLines {
             }
         }
         Ok(Self {
-            full: logical_lines(screen)?,
+            full: clipped_logical_lines(screen, &BTreeMap::new())?,
             clipped,
         })
     }
@@ -774,7 +778,6 @@ impl Detector {
                 AnnotationBlock {
                     kind: matched.rule.kind,
                     fingerprint: AnnotationFingerprint {
-                        backend: self.backend.name().into(),
                         rule_id: matched.rule.id.clone(),
                         shown: normalized_shown(
                             matched.operation.as_deref().unwrap_or(&matched.excerpt),
@@ -846,14 +849,7 @@ impl Detector {
         matched.sort_by(|a, b| a.rule.id.cmp(&b.rule.id));
         let mut parts = matched
             .iter()
-            .map(|m| {
-                (
-                    self.backend.name().into(),
-                    m.rule.kind.name().into(),
-                    m.operation.clone(),
-                    m.choices.clone(),
-                )
-            })
+            .map(|m| (m.rule.kind.name(), m.operation.clone(), m.choices.clone()))
             .collect::<Vec<SemanticPart>>();
         parts.sort();
         parts.dedup();

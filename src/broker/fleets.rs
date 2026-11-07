@@ -119,31 +119,22 @@ pub(crate) fn require_live_fleet(
     let director = fleet.director_member_id.ok_or_else(|| CafleetError::App(format!(
         "fleet {fleet_id} has no root Director recorded; re-create the fleet with 'cafleet fleet create'."
     )))?;
-    let status: Option<MemberStatus> = conn
+    let director_state: Option<(MemberStatus, Option<String>)> = conn
         .query_row(
-            "SELECT status FROM members WHERE member_id=?1 AND fleet_id=?2",
+            "SELECT m.status, p.mux_pane_id FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id WHERE m.member_id=?1 AND m.fleet_id=?2",
             params![director, fleet_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    if status != Some(MemberStatus::Active) {
-        return Err(CafleetError::App(format!(
-            "fleet {fleet_id}'s root Director (member {director}) is not active."
-        )));
-    }
-    let pane: Option<Option<String>> = conn
-        .query_row(
-            "SELECT mux_pane_id FROM member_placements WHERE member_id=?1",
-            [director],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if !matches!(pane, Some(Some(ref value)) if !value.is_empty()) {
-        return Err(CafleetError::App(format!(
+    match director_state {
+        Some((MemberStatus::Active, Some(pane))) if !pane.is_empty() => Ok(fleet),
+        Some((MemberStatus::Active, _)) => Err(CafleetError::App(format!(
             "fleet {fleet_id}'s root Director (member {director}) has no concrete placement."
-        )));
+        ))),
+        _ => Err(CafleetError::App(format!(
+            "fleet {fleet_id}'s root Director (member {director}) is not active."
+        ))),
     }
-    Ok(fleet)
 }
 
 pub(crate) fn list_fleets(conn: &Connection) -> Result<Vec<FleetSummary>, CafleetError> {
@@ -166,14 +157,12 @@ pub(crate) fn list_fleets(conn: &Connection) -> Result<Vec<FleetSummary>, Caflee
 }
 
 pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<usize, CafleetError> {
-    let fleet = require_fleet(conn, fleet_id)?;
+    require_fleet(conn, fleet_id)?;
     let now = now_stamp();
-    if fleet.deleted_at.is_none() {
-        conn.execute(
-            "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
-            params![now, fleet_id],
-        )?;
-    }
+    conn.execute(
+        "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2 AND deleted_at IS NULL",
+        params![now, fleet_id],
+    )?;
     let deregistered_count = conn.execute(
         "UPDATE members SET status='deregistered', deregistered_at=?1 WHERE fleet_id=?2 AND status='active'",
         params![now, fleet_id],

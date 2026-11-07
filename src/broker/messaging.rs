@@ -18,19 +18,6 @@ pub(crate) const MESSAGE_COLUMNS: &str =
 pub(crate) const PENDING_PREVIEW: &str =
     "status_state='input_required' AND notified_at IS NULL AND from_member_id!=to_member_id";
 
-pub(crate) fn message_row(
-    conn: &Connection,
-    message_id: i64,
-) -> Result<Option<MessageRecord>, CafleetError> {
-    conn.query_row(
-        &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE message_id=?1"),
-        [message_id],
-        map_message_row,
-    )
-    .optional()
-    .map_err(crate::error::CafleetError::from)
-}
-
 pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRecord> {
     Ok(MessageRecord {
         message_id: row.get(0)?,
@@ -47,8 +34,13 @@ pub(crate) fn get_message(
     conn: &Connection,
     message_id: i64,
 ) -> Result<MessageRecord, CafleetError> {
-    message_row(conn, message_id)?
-        .ok_or_else(|| CafleetError::App(format!("Message {message_id} not found")))
+    conn.query_row(
+        &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE message_id=?1"),
+        [message_id],
+        map_message_row,
+    )
+    .optional()?
+    .ok_or_else(|| CafleetError::App(format!("Message {message_id} not found")))
 }
 
 fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetError> {
@@ -114,14 +106,13 @@ pub(crate) fn oldest_pending_preview(
              WHERE to_member_id=?1 AND {PENDING_PREVIEW} \
              ORDER BY created_at, message_id"
     ))?;
-    let rows = statement.query_map([member_id], map_message_row)?;
-    for row in rows {
-        let message = row?;
-        if !attempted.contains(&message.message_id) {
-            return Ok(Some(message));
-        }
-    }
-    Ok(None)
+    let mut rows = statement.query_map([member_id], map_message_row)?;
+    rows.find(|row| {
+        row.as_ref()
+            .map_or(true, |message| !attempted.contains(&message.message_id))
+    })
+    .transpose()
+    .map_err(CafleetError::from)
 }
 
 pub(crate) fn poll_messages(
@@ -199,16 +190,16 @@ fn listen_snapshot_with_clock(
         );
         let cleanup = conn
             .progress_handler(0, None::<fn() -> bool>)
-            .map_err(crate::error::CafleetError::from);
-        let cleanup = cleanup.map_err(|cleanup| {
-            if result.is_err() {
-                CafleetError::App(format!(
-                    "removing listener progress handler failed: {cleanup}"
-                ))
-            } else {
-                cleanup
-            }
-        });
+            .map_err(|cleanup| {
+                let cleanup = CafleetError::from(cleanup);
+                if result.is_err() {
+                    CafleetError::App(format!(
+                        "removing listener progress handler failed: {cleanup}"
+                    ))
+                } else {
+                    cleanup
+                }
+            });
         CafleetError::merge_cleanup(result, cleanup)
     })
 }
@@ -230,22 +221,18 @@ fn read_listen_snapshot(
             Ok(snapshot)
         },
     );
-    let result = match result {
-        Err(_) if interrupted.load(Ordering::Relaxed) => Err(CafleetError::DeadlineExceeded),
-        result => result,
+    let error = match result {
+        Ok(snapshot) => return Ok(snapshot),
+        Err(_) if interrupted.load(Ordering::Relaxed) => CafleetError::DeadlineExceeded,
+        Err(error) => error,
     };
-    match result {
-        Ok(snapshot) => Ok(snapshot),
-        Err(error) => {
-            let cleanup = tx
-                .rollback()
-                .map_err(crate::error::CafleetError::from)
-                .map_err(|cleanup| {
-                    CafleetError::App(format!("rolling back listener snapshot failed: {cleanup}"))
-                });
-            CafleetError::merge_cleanup(Err(error), cleanup)
-        }
-    }
+    let cleanup = tx.rollback().map_err(|cleanup| {
+        CafleetError::App(format!(
+            "rolling back listener snapshot failed: {}",
+            CafleetError::from(cleanup)
+        ))
+    });
+    CafleetError::merge_cleanup(Err(error), cleanup)
 }
 
 fn select_listen_snapshot(
@@ -344,12 +331,9 @@ pub(crate) fn ack_message(
     if let Some(message) = updated {
         return Ok(message);
     }
-    let Some(message) = message_row(conn, message_id)? else {
-        return Err(CafleetError::App(format!("Message {message_id} not found")));
-    };
     Err(CafleetError::App(format!(
         "Cannot ACK message in state {}",
-        message.status.as_str()
+        get_message(conn, message_id)?.status.as_str()
     )))
 }
 

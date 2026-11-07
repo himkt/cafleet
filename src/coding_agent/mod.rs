@@ -32,8 +32,9 @@ pub(crate) trait SpawnProbe {
     fn env_var(&self, name: &str) -> Result<Option<String>, CafleetError>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Deserialize)]
 #[value(rename_all = "lower")]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum CodingAgent {
     Claude,
     Codex,
@@ -438,8 +439,16 @@ impl CodingAgent {
 
 const OUTPUT_BYTES: usize = 4096;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(try_from = "String")]
 pub(crate) struct NativeVersion(semver::Version);
+
+impl TryFrom<String> for NativeVersion {
+    type Error = &'static str;
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        Self::parse(&text).ok_or("canonical SemVer version required")
+    }
+}
 
 impl NativeVersion {
     pub(crate) fn parse(text: &str) -> Option<Self> {

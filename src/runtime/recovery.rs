@@ -240,6 +240,7 @@ struct BorrowedPane<'a> {
     placement: &'a Placement,
     guard: &'a PaneLock,
 }
+#[cfg(test)]
 #[expect(
     clippy::too_many_arguments,
     reason = "borrowed recovery binds the caller's fixed run, placement and held guard"
@@ -255,21 +256,18 @@ pub(crate) fn recover_member_with_held_pane_lock(
     held: &PaneLock,
     host: &mut impl RecoveryHost,
 ) -> Result<RecoveryCompletion> {
-    ensure(
-        member_id == expected_run.member_id,
-        "borrowed recovery member identity mismatch",
-    )?;
+    let borrowed = BorrowedPane {
+        run: expected_run,
+        placement: expected_placement,
+        guard: held,
+    };
     recover(
         conn,
         settings,
         member_id,
         attestation,
         deadline,
-        Some(BorrowedPane {
-            run: expected_run,
-            placement: expected_placement,
-            guard: held,
-        }),
+        Some(borrowed),
         host,
     )
 }
@@ -282,15 +280,18 @@ pub(crate) fn recover_member_under_pane_lock(
     deadline: Instant,
     held: &PaneLock,
 ) -> Result<RecoveryCompletion> {
-    recover_member_with_held_pane_lock(
+    let borrowed = BorrowedPane {
+        run: expected_run,
+        placement: expected_placement,
+        guard: held,
+    };
+    recover(
         conn,
         settings,
         member_id,
-        expected_run,
-        expected_placement,
         None,
         deadline,
-        held,
+        Some(borrowed),
         &mut NativeRecoveryHost,
     )
 }
@@ -321,6 +322,12 @@ fn recover(
     borrowed: Option<BorrowedPane<'_>>,
     host: &mut impl RecoveryHost,
 ) -> Result<RecoveryCompletion> {
+    if let Some(expected) = &borrowed {
+        ensure(
+            member_id == expected.run.member_id,
+            "borrowed recovery member identity mismatch",
+        )?;
+    }
     let clock = ShutdownClock::new(Instant::now()).clipped(until);
     check_deadline(Instant::now(), until)?;
     ensure(member_id > 0, "positive recovery member ID required")?;
@@ -337,31 +344,26 @@ fn recover(
     }
     validate_attestation(&run, attestation)?;
     host.checkpoint(RecoveryBoundary::AfterSnapshot, &run, until)?;
-    let acquired_pane = if borrowed.is_none() {
-        if let Some(target) = pinned.as_ref().filter(|item| item.mux_pane_id.is_some()) {
-            loop {
-                check_deadline(Instant::now(), until)?;
-                if let Some(guard) = PaneLock::try_acquire(&settings.database_url, target)? {
-                    break Some(guard);
-                }
-                if matches!(
-                    with_database_deadline(conn, until, |conn| RunLock::acquire(
-                        conn,
-                        &run.owner()
-                    )),
-                    Ok(None)
-                ) {
-                    return completion(run, RecoveryOutcome::LiveOrUnreachable);
-                }
-                std::thread::sleep(
-                    Duration::from_millis(5).min(until.saturating_duration_since(Instant::now())),
-                );
+    let unborrowed_pane = pinned
+        .as_ref()
+        .filter(|item| borrowed.is_none() && item.mux_pane_id.is_some());
+    let acquired_pane = match unborrowed_pane {
+        Some(target) => loop {
+            check_deadline(Instant::now(), until)?;
+            if let Some(guard) = PaneLock::try_acquire(&settings.database_url, target)? {
+                break Some(guard);
             }
-        } else {
-            None
-        }
-    } else {
-        None
+            if matches!(
+                with_database_deadline(conn, until, |conn| RunLock::acquire(conn, &run.owner())),
+                Ok(None)
+            ) {
+                return completion(run, RecoveryOutcome::LiveOrUnreachable);
+            }
+            std::thread::sleep(
+                Duration::from_millis(5).min(until.saturating_duration_since(Instant::now())),
+            );
+        },
+        None => None,
     };
     let pane_proof = borrowed
         .as_ref()
@@ -430,6 +432,11 @@ fn recover(
     }
     host.checkpoint(RecoveryBoundary::BeforeTakeover, &run, until)?;
     let process = host.current_process()?;
+    let recheck = |conn: &Connection| -> Result<()> {
+        check_pane()?;
+        let current = check_snapshot(conn, &run, pinned.as_ref())?;
+        validate_attestation(&current, attestation)
+    };
     if path_failure.is_some() || unknown {
         return reconcile_missing_runtime(
             conn,
@@ -438,19 +445,11 @@ fn recover(
             &process,
             attestation.filter(|_| unknown),
             until,
-            |conn| {
-                check_pane()?;
-                let current = check_snapshot(conn, &run, pinned.as_ref())?;
-                validate_attestation(&current, attestation)
-            },
+            recheck,
         );
     }
     let lock = lock.expect("verified ordinary recovery lock");
-    let current = lock.transfer_to_reconciler_checked(conn, &run, process, until, |conn| {
-        check_pane()?;
-        let current = check_snapshot(conn, &run, pinned.as_ref())?;
-        validate_attestation(&current, attestation)
-    })?;
+    let current = lock.transfer_to_reconciler_checked(conn, &run, process, until, recheck)?;
     if current.is_settled() {
         return completion(current, RecoveryOutcome::Recovered);
     }
@@ -489,7 +488,7 @@ impl RecoveryHost for NativeRecoveryHost {
         ))
     }
     fn health(&mut self, run: &RunRecord, until: Instant) -> Result<RecoveryHealth> {
-        match crate::runtime::control::request(run, "health", until) {
+        match crate::runtime::control::request(run, LifecycleRequest::health(run), until) {
             Ok(value) => match HealthSnapshot::decode(value, run) {
                 Ok(health) => Ok(RecoveryHealth::Matching(health)),
                 Err(cause) => Ok(RecoveryHealth::Mismatched(cause.message().into_owned())),
@@ -562,19 +561,7 @@ fn reconcile_missing_runtime(
         let target = match established {
             Some(status) => status,
             None => {
-                let maximum = storage::latest_event_seq(&tx, run.run_id)?;
-                let ceiling = maximum.map_or(run.event_seq_reserved_through, |value| {
-                    value.max(run.event_seq_reserved_through)
-                });
-                let sequences = storage::reserve_event_sequences_in_transaction(
-                    &tx,
-                    &run,
-                    storage::SequenceReservation::RecoveryRange {
-                        ceiling,
-                        count: 256,
-                    },
-                )?;
-                let first = *sequences.start();
+                let first = *reserve_recovery_range(&tx, &run, 256)?.start();
                 run = storage::get_run(&tx, run.run_id)?;
                 for transition in loss_transitions(&tx, &run, first, true)? {
                     let (event, inserted) = storage::persist_transition_in_transaction(
@@ -595,16 +582,8 @@ fn reconcile_missing_runtime(
         storage::settle_lost_deferred_in_transaction(&tx, &run)?;
         let unpublished = storage::unpublished_delivery_results(&tx, run.run_id)?;
         if !unpublished.is_empty() {
-            let ceiling = storage::latest_event_seq(&tx, run.run_id)?
-                .map_or(run.event_seq_reserved_through, |value| {
-                    value.max(run.event_seq_reserved_through)
-                });
             let count = i64::try_from(unpublished.len()).expect("bounded unresolved inputs");
-            let sequences = storage::reserve_event_sequences_in_transaction(
-                &tx,
-                &run,
-                storage::SequenceReservation::RecoveryRange { ceiling, count },
-            )?;
+            let sequences = reserve_recovery_range(&tx, &run, count)?;
             run = storage::get_run(&tx, run.run_id)?;
             let evidence = storage::evidence::run_metadata(&run, "runtime-recovery", 0)?;
             for (event_seq, receipt) in sequences.zip(unpublished) {
@@ -635,6 +614,23 @@ fn reconcile_missing_runtime(
         report.status = run.status;
         Ok(RecoveryCompletion { report, run })
     })
+}
+
+/// `count` recovery sequences above both the reserved ceiling and the latest committed event.
+fn reserve_recovery_range(
+    conn: &Connection,
+    run: &RunRecord,
+    count: i64,
+) -> Result<std::ops::RangeInclusive<i64>> {
+    let ceiling = storage::latest_event_seq(conn, run.run_id)?
+        .map_or(run.event_seq_reserved_through, |value| {
+            value.max(run.event_seq_reserved_through)
+        });
+    storage::reserve_event_sequences_in_transaction(
+        conn,
+        run,
+        storage::SequenceReservation::RecoveryRange { ceiling, count },
+    )
 }
 
 fn reconcile_retained_runtime(

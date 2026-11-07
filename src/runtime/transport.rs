@@ -306,11 +306,7 @@ impl Transport {
         let count = write_pending(&mut self.display, self.limits.bytes_per_tick, |bytes| {
             display.try_write(bytes)
         })?;
-        match display.try_flush() {
-            Ok(()) => {}
-            Err(cause) if cause.kind() == ErrorKind::WouldBlock => {}
-            Err(cause) => return Err(io_error(cause)),
-        }
+        flush_nonblocking(display)?;
         Ok(count)
     }
     pub(crate) fn resize(&mut self, pty: &mut impl PtyIo, size: TerminalSize) -> Result<()> {
@@ -608,11 +604,7 @@ impl Transport {
                 remaining.display -= written;
                 check_deadline(Instant::now(), deadline)?;
             }
-            match display.try_flush() {
-                Ok(()) => {}
-                Err(cause) if cause.kind() == ErrorKind::WouldBlock => {}
-                Err(cause) => return Err(io_error(cause)),
-            }
+            flush_nonblocking(display)?;
             check_deadline(Instant::now(), deadline)?;
             let ended = if interrupted {
                 Some("terminal input interrupted")
@@ -752,6 +744,13 @@ enum State {
 
 /// Decides how many forwarded outer-terminal bytes count as manual input.
 /// It never holds bytes: forwarding happens before and independently of it.
+fn flush_nonblocking(display: &mut impl Display) -> Result<()> {
+    match display.try_flush() {
+        Err(cause) if cause.kind() != ErrorKind::WouldBlock => Err(io_error(cause)),
+        _ => Ok(()),
+    }
+}
+
 #[derive(Default)]
 pub(super) struct ReplyClassifier {
     state: State,
@@ -1010,11 +1009,15 @@ impl TerminalState {
             sequence: 0,
         })
     }
-    pub(crate) fn feed(&mut self, bytes: &[u8]) -> Result<()> {
+    fn advance_sequence(&mut self, by: u64) -> Result<()> {
         self.sequence = self
             .sequence
-            .checked_add(bytes.len() as u64)
+            .checked_add(by)
             .ok_or_else(|| error("terminal sequence exhausted"))?;
+        Ok(())
+    }
+    pub(crate) fn feed(&mut self, bytes: &[u8]) -> Result<()> {
+        self.advance_sequence(bytes.len() as u64)?;
         self.parser.process(bytes);
         Ok(())
     }
@@ -1071,10 +1074,7 @@ impl TerminalState {
     }
     pub(crate) fn resize(&mut self, size: TerminalSize) -> Result<()> {
         size.validate()?;
-        self.sequence = self
-            .sequence
-            .checked_add(1)
-            .ok_or_else(|| error("terminal sequence exhausted"))?;
+        self.advance_sequence(1)?;
         self.parser.set_size(
             size.rows.try_into().expect("validated rows"),
             size.cols.try_into().expect("validated cols"),
