@@ -28,7 +28,7 @@ use std::time::Instant;
 
 pub(crate) trait SpawnProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf>;
-    fn home_dir(&self) -> PathBuf;
+    fn home_dir(&self) -> Result<PathBuf, CafleetError>;
     fn env_var(&self, name: &str) -> Result<Option<String>, CafleetError>;
 }
 
@@ -138,7 +138,7 @@ impl CodingAgent {
         probe: &dyn SpawnProbe,
         mode: &str,
     ) -> Result<PathBuf, CafleetError> {
-        let config = self.config_dir(&|name| probe.env_var(name), &probe.home_dir())?;
+        let config = self.config_dir(&|name| probe.env_var(name), &probe.home_dir()?)?;
         let executable = probe.resolve_binary(self.name()).ok_or_else(|| {
             CafleetError::App(format!("binary {} not found on PATH", self.name()))
         })?;
@@ -666,8 +666,8 @@ pub(crate) mod test_support {
         fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
             self.binaries.get(name).cloned()
         }
-        fn home_dir(&self) -> PathBuf {
-            self.home.clone()
+        fn home_dir(&self) -> Result<PathBuf, CafleetError> {
+            Ok(self.home.clone())
         }
         fn env_var(&self, name: &str) -> Result<Option<String>, CafleetError> {
             Ok(self.env.get(name).cloned())

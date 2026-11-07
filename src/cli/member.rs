@@ -419,8 +419,9 @@ fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> 
     let deadline = Instant::now() + Duration::from_secs(10);
     let hermes = (backend == crate::coding_agent::CodingAgent::Hermes)
         .then(|| {
-            backend
-                .config_dir(&|name| SystemProbe.env_var(name), &SystemProbe.home_dir())
+            SystemProbe
+                .home_dir()
+                .and_then(|home| backend.config_dir(&|name| SystemProbe.env_var(name), &home))
                 .map(|base| crate::coding_agent::hermes::HermesCli::new(executable.clone(), base))
         })
         .transpose()?;

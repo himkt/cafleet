@@ -100,10 +100,7 @@ pub(crate) fn install_agent(
     hermes: HermesSetup<'_>,
     out: &mut dyn Write,
 ) -> Result<(), CafleetError> {
-    let mut report = |line: String| {
-        writeln!(out, "{line}")
-            .map_err(|error| CafleetError::App(format!("failed to write setup output: {error}")))
-    };
+    let mut report = |line: String| crate::cli::output_result(writeln!(out, "{line}"));
     let fail = |error: std::io::Error| {
         CafleetError::App(format!(
             "failed to install skills into {}: {error}",

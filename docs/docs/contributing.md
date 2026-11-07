@@ -56,7 +56,7 @@ State intended behavior directly and describe growing groups through their selec
 
 ## Extend a coding-agent backend
 
-Implement a typed permission adapter as the single source of truth for launch-policy choices/default, literal argv mapping, native-version eligibility and versioned detector/composer/answer profiles. A new profile is added only when an observed native change requires different rules or plans, with `min_version` set to the first native version requiring it; [profile selection](https://github.com/himkt/cafleet/blob/main/SPEC.md#profile-selection-by-minimum-version) owns the profile stack, capability independence and coverage. Preserve omitted defaults, native/managed restrictions and sandbox boundaries.
+Implement a typed permission adapter as the single source of truth for launch-policy choices/default, literal argv mapping and versioned detector/composer/answer profiles. A new profile is added only when an observed native change requires different rules or plans, with `min_version` set to the first native version requiring it; [profile selection](https://github.com/himkt/cafleet/blob/main/SPEC.md#profile-selection-by-minimum-version) owns the profile stack, capability independence and coverage. Preserve omitted defaults, native/managed restrictions and sandbox boundaries.
 
 The following herdr references are pinned to commit `5608de0608918aba2f9d501e7793b984a0ca9cfa`. They provide implementation patterns; each CAFleet profile still requires its own native contract and acceptance evidence.
 

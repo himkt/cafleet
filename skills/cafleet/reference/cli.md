@@ -82,7 +82,7 @@ Send/create require exactly one positional body or `--file PATH`; `--file -` rea
 |---|---|
 | tmux server | `--mux-server`; everything before the last two commas of `TMUX`; `tmux display-message -p '#{socket_path}'` |
 | herdr session | `--mux-server`; `HERDR_SESSION`; the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; `default` |
-| Director pane | `--pane`; `TMUX_PANE` (tmux); `herdr --session <server> pane current` when `HERDR_PANE_ID` is set (herdr) |
+| Director pane | `--pane`; `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr) |
 
 Each failure exits 1 before any write:
 

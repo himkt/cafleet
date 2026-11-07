@@ -14,6 +14,7 @@ use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::Multiplexer;
+use crate::multiplexer::MuxBackend;
 use crate::output::format_fleet_create;
 use crate::output::format_fleet_delete;
 use crate::output::format_fleet_list;
@@ -119,7 +120,7 @@ fn create(
 ) -> Result<(), CafleetError> {
     let env = std::env::vars().collect::<std::collections::HashMap<_, _>>();
     let lookup = |name: &str| env.get(name).filter(|value| !value.is_empty()).cloned();
-    let backend = crate::multiplexer::resolve_multiplexer_name(lookup).map_err(|_| {
+    let backend = MuxBackend::detect(lookup).map_err(|_| {
         CafleetError::App("cafleet fleet create must be run inside a tmux or herdr session".into())
     })?;
     let pane = match pane {
@@ -131,18 +132,19 @@ fn create(
         Some(server) => server,
         None => crate::multiplexer::caller_server(backend, lookup, runner.as_ref())?,
     };
-    let mux = crate::multiplexer::multiplexer_for_server(backend, &server, runner)?;
+    let mux = backend.for_server(&server, runner);
     mux.ensure_available()?;
     let context = mux.pane_context(&pane)?.ok_or_else(|| {
         CafleetError::App(format!(
-            "pane {pane} was not found on the {backend} server {server}; pass --pane and --mux-server for the Director's pane"
+            "pane {pane} was not found on the {} server {server}; pass --pane and --mux-server for the Director's pane",
+            backend.name()
         ))
     })?;
     let fleet = broker::create_fleet(
         conn,
         Some(name),
         &NewPlacement {
-            backend: backend.into(),
+            backend: backend.name().into(),
             mux_session: context.session,
             mux_window_id: context.window_id,
             mux_pane_id: Some(context.pane_id),
@@ -158,7 +160,7 @@ fn create(
 /// The caller's own pane; a Hermes terminal tool runs in the shared gateway, so its pane
 /// variables may name another session's pane.
 fn caller_pane(
-    backend: &str,
+    backend: MuxBackend,
     lookup: impl Fn(&str) -> Option<String>,
 ) -> Result<String, CafleetError> {
     if lookup("HERMES_SESSION_ID").is_some() {
@@ -167,15 +169,14 @@ fn caller_pane(
         ));
     }
     let (variable, missing) = match backend {
-        "tmux" => (
+        MuxBackend::Tmux => (
             "TMUX_PANE",
             "cafleet fleet create must be run inside a tmux or herdr session",
         ),
-        "herdr" => (
+        MuxBackend::Herdr => (
             "HERDR_PANE_ID",
             "cafleet fleet create cannot identify its herdr pane because HERDR_PANE_ID is not set; pass --pane <pane-id>",
         ),
-        other => unreachable!("detection returns a supported multiplexer, not {other}"),
     };
     lookup(variable).ok_or_else(|| CafleetError::App(missing.into()))
 }

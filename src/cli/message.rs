@@ -759,7 +759,10 @@ fn process_parent_and_argv0(pid: i64) -> Result<Option<(i64, String)>, CafleetEr
         .next()
         .and_then(|field| field.parse().ok())
         .ok_or_else(|| CafleetError::App(format!("ps printed no parent for {pid}: {line}")))?;
-    Ok(Some((parent, fields.next().unwrap_or_default().to_owned())))
+    let argv0 = fields
+        .next()
+        .ok_or_else(|| CafleetError::App(format!("ps printed no command for {pid}: {line}")))?;
+    Ok(Some((parent, argv0.to_owned())))
 }
 
 struct CodexForwarding<'a> {

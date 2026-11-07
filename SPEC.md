@@ -442,7 +442,7 @@ help, even under a missing database.
 | Backend | `TMUX`/`HERDR_ENV` auto-detection (§6.5 Backend selection); a detection failure exits 1 with `cafleet fleet create must be run inside a tmux or herdr session` |
 | `mux_server` (tmux) | `--mux-server`; else everything before the last two commas of a non-empty `TMUX`, so a socket path containing `,` is kept whole; else `tmux display-message -p '#{socket_path}'` (the default server) |
 | `mux_server` (herdr) | `--mux-server`; else a non-empty `HERDR_SESSION`; else the `herdr session list` row whose socket equals `HERDR_SOCKET_PATH`; else `default` |
-| Director pane | `--pane`; else `TMUX_PANE` (tmux); else, for herdr with `HERDR_PANE_ID` set, `herdr --session <server> pane current` run with the caller's environment |
+| Director pane | `--pane`; else a non-empty `TMUX_PANE` (tmux) or `HERDR_PANE_ID` (herdr); a tmux caller without `TMUX_PANE` exits 1 with the detection-failure message |
 
 The pane is then read on the chosen server — `tmux -S <server> display-message -p -t <pane> '#{session_name}|#{window_id}|#{pane_id}'` or `herdr --session <server> pane current --pane <pane>` — and its session, window and pane are recorded with the server as the Director's placement (§6.5 Multiplexer context). tmux prints `||` and exits 0 for a missing pane, so a reply with an empty field, or whose `pane_id` differs from the requested pane, means the pane was not found. Each failure exits 1 before any write:
 
@@ -450,7 +450,7 @@ The pane is then read on the chosen server — `tmux -S <server> display-message
 |---|---|
 | tmux finds no server | `Error: no tmux server found; pass --mux-server <socket path>` |
 | The pane is not on the chosen server | `Error: pane <pane-id> was not found on the <backend> server <server>; pass --pane and --mux-server for the Director's pane` |
-| herdr without `--pane` and with `HERDR_PANE_ID` unset, where `pane current` would name the focused pane rather than the caller's | `Error: cafleet fleet create cannot identify its herdr pane because HERDR_PANE_ID is not set; pass --pane <pane-id>` |
+| herdr without `--pane` and with `HERDR_PANE_ID` unset | `Error: cafleet fleet create cannot identify its herdr pane because HERDR_PANE_ID is not set; pass --pane <pane-id>` |
 | `HERMES_SESSION_ID` is set and `--pane` is absent | `Error: cafleet fleet create cannot identify its pane inside a Hermes session; pass --pane <pane-id>` |
 
 A Hermes terminal tool runs in the shared Hermes gateway and may carry another pane's `TMUX_PANE`, hence the Hermes refusal. A Hermes Director finds its pane ID with Hermes's leading-`!` local shell, which runs in the client process with the pane's own environment (`! echo $TMUX_PANE` or `! echo $HERDR_PANE_ID`), then runs `cafleet fleet create … --pane <id>`.
@@ -1739,7 +1739,7 @@ argv in § Prompt dispatch and § Explicit key dispatch.
 |---|---|---|---|
 | Availability | `tmux` on `PATH` | `herdr` on `PATH` | `<backend> binary not found on PATH` |
 | Pane context (`fleet create` only) | <code>tmux display-message -p -t &lt;pane&gt; "#{session_name}&#124;#{window_id}&#124;#{pane_id}"</code>, split on the first two <code>&#124;</code> | `herdr pane current --pane <pane>`; `result.pane` supplies `workspace_id`, `tab_id`, `pane_id` | tmux: `unexpected tmux display-message output: <quoted>`; herdr: `herdr <context> missing '<key>' field`; an unknown pane fails per §6.3 `fleet create` |
-| Split | `tmux split-window -t <window_id> -P -F "#{pane_id}" -d [-e K=V]... <command>...`, then `tmux select-layout -t <window_id> main-vertical` | <code>herdr pane split &lt;pane&gt; --direction right&#124;down --no-focus --cwd &lt;cwd&gt; [--env K=V]...</code>, then `herdr pane run <new pane> "<shell-quoted command>"` | An empty or failed split is an unknown pane-cleanup outcome; tmux ignores a layout error; herdr closes the new pane when `pane run` fails |
+| Split | `tmux split-window -t <window_id> -P -F "#{pane_id}" -d <command>...`, then `tmux select-layout -t <window_id> main-vertical` | <code>herdr pane split &lt;pane&gt; --direction right&#124;down --no-focus --cwd &lt;cwd&gt;</code>, then `herdr pane run <new pane> "<shell-quoted command>"` | An empty or failed split is an unknown pane-cleanup outcome; tmux ignores a layout error; herdr closes the new pane when `pane run` fails |
 | Capture | `tmux capture-pane -p -e -t <pane> -S -<lines + 1000>` | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines <lines + 1000>` | `capture_pane: lines must be positive, got <lines>` before any process |
 | Close | `tmux kill-pane -t <pane>` | `herdr pane get <pane>`, `herdr pane close <pane>`, then the delete-time rebalance | An explicit ignore-missing teardown tolerates only a recognized pane-gone cause (tmux stderr `can't find pane` / `no such pane`, herdr error code `pane_not_found`) |
 
@@ -2910,7 +2910,7 @@ A rule that declares `panel_separator` matches against the clipped set, and its 
 
 Each operation's eligibility for the run's selected profile is independent (§ Profile selection by minimum version). Observing an empty composer supplies input-state evidence; executable submission additionally requires its measured literal/submit plan. An observation definition without a submission plan keeps its observation coverage and yields no executable composer capability. Synthetic plans run only in explicitly selected test services.
 
-NativeCapabilities reports empty-composer observation through `composer`, executable prompt submission through `prompt_submission`, and executable native-shell submission through `native_exec_submission`. Each operation field is `tested` exactly when the run's selected profile has a validated executable definition for that operation; otherwise it is `unknown`, and ordinary input for that operation uses delivery fallback. A catalog selected explicitly by test services describes its fixture coverage.
+Empty-composer observation, executable prompt submission and executable native-shell submission each have their own coverage. An operation's coverage is `tested` exactly when the run's selected profile has a validated executable definition for that operation; otherwise it is `unknown`, and ordinary input for that operation uses delivery fallback. A catalog selected explicitly by test services describes its fixture coverage.
 
 `capabilities.answers` holds two entry forms, distinguished by the `decision` key:
 

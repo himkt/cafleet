@@ -453,8 +453,8 @@ impl SpawnProbe for SystemProbe {
         find_executable_in(&std::env::var_os("PATH")?, name)
     }
 
-    fn home_dir(&self) -> PathBuf {
-        PathBuf::from(std::env::var("HOME").expect("HOME is set"))
+    fn home_dir(&self) -> Result<PathBuf, crate::error::CafleetError> {
+        crate::config::home_dir()
     }
 
     fn env_var(&self, name: &str) -> Result<Option<String>, crate::error::CafleetError> {
