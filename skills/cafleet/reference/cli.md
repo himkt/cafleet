@@ -221,7 +221,9 @@ Effort validation precedes side effects. An unlisted level exits 2 with `Error: 
 |---|---|
 | claude | low, medium, high, xhigh, max |
 | codex | minimal, low, medium, high, xhigh |
-| hermes | none, minimal, low, medium, high, xhigh, max, ultra (forwarded as `--reasoning`) |
+| hermes | none, minimal, low, medium, high, xhigh, max, ultra |
+
+Hermes forwards the level as `--reasoning`.
 
 Invalid OpenCode model: `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').`, exit 2.
 

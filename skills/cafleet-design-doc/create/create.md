@@ -58,4 +58,4 @@ Route ordinary-language feedback and existing user markers to the Drafter withou
 
 After user approval, send the Drafter exactly `ready (doc) — user approved; finalize`: incorporate accepted decisions, resolve coordination markers, set Status to Approved and keep implementation progress accurate. Verify the final artifact and apply host Git/publication rules. Honor abort without marking the design approved.
 
-Then end the team under the Director [Shutdown](../../cafleet/roles/director.md#shutdown), preserving resources outside this team's ownership.
+Delete owned ordinary members and verify the root-only roster, then delete the owned fleet under the Director [Shutdown](../../cafleet/roles/director.md#shutdown), preserving resources outside this team's ownership.
