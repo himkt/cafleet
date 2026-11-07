@@ -1102,6 +1102,16 @@ mod tests {
         (plugin, record)
     }
 
+    /// Returns the extension file and its executable record.
+    fn install_pi_extension(base: &Path) -> (PathBuf, PathBuf) {
+        let extensions = base.join("extensions");
+        let record = extensions.join("cafleet.executable");
+        let installed = install_embedded_extension("pi/", &extensions, &record);
+        let extension = extensions.join("cafleet.ts");
+        assert!(installed.contains(&extension));
+        (extension, record)
+    }
+
     /// Returns every installed plugin file under `plugin_dir`.
     fn install_hermes_plugin(plugin_dir: &Path) -> Vec<PathBuf> {
         install_embedded_extension(
@@ -1726,6 +1736,244 @@ mod tests {
         }
     }
 
+    mod pi {
+        use crate::cli::setup::tests::*;
+
+        fn pi_base(home: &Path) -> PathBuf {
+            home.join(".pi/agent")
+        }
+
+        fn pi_checks(probe: &FakeProbe, home: &Path) -> Vec<Check> {
+            checks_for(None, &SchemaState::Missing, probe, home)
+                .into_iter()
+                .filter(|check| check.name.starts_with("pi."))
+                .collect()
+        }
+
+        fn assert_installed_pi_assets(base: &Path) {
+            for (relative, bytes) in crate::assets::embedded_extension("pi/") {
+                let target = base.join("extensions").join(relative);
+                assert_eq!(
+                    std::fs::read(&target).unwrap(),
+                    bytes,
+                    "{}",
+                    target.display()
+                );
+            }
+            assert_eq!(
+                std::fs::read_to_string(base.join("extensions/cafleet.executable")).unwrap(),
+                running_cafleet_record()
+            );
+            for (relative, bytes) in crate::assets::SKILLS {
+                assert_eq!(
+                    std::fs::read(base.join("skills").join(relative)).unwrap(),
+                    *bytes
+                );
+            }
+        }
+
+        #[test]
+        fn pi_setup_installs_skills_extension_and_record_without_pi_on_path_and_is_repeatable() {
+            let home = tempfile::tempdir().unwrap();
+            let settings = settings(home.path());
+            let base = home.path().join("pi agent");
+            for _ in 0..2 {
+                let mut conn = prepare_database(&settings).unwrap();
+                install_selected(
+                    &mut conn,
+                    &[CodingAgent::Pi],
+                    &|name| Ok((name == "PI_CODING_AGENT_DIR").then(|| base.display().to_string())),
+                    home.path(),
+                    None,
+                )
+                .unwrap();
+                assert_installed_pi_assets(&base);
+                assert_eq!(installed_agents(&conn), ["pi"]);
+                let recorded: String = conn
+                    .query_row(
+                        "SELECT path FROM asset_installs WHERE coding_agent='pi'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(recorded, base.display().to_string());
+            }
+        }
+
+        #[test]
+        fn plain_setup_installs_pi_assets_under_the_default_base() {
+            let home = tempfile::tempdir().unwrap();
+            let settings = settings(home.path());
+            let mut conn = prepare_database(&settings).unwrap();
+            install_selected(&mut conn, &[], &|_| Ok(None), home.path(), None).unwrap();
+            assert_installed_pi_assets(&pi_base(home.path()));
+            assert!(installed_agents(&conn).contains(&"pi".to_owned()));
+        }
+
+        #[test]
+        fn pi_setup_rejects_an_invalid_base_before_writing_pi_assets() {
+            let home = tempfile::tempdir().unwrap();
+            let settings = settings(home.path());
+            let mut conn = prepare_database(&settings).unwrap();
+            let failure = install_selected(
+                &mut conn,
+                &[CodingAgent::Pi],
+                &|name| Ok((name == "PI_CODING_AGENT_DIR").then(|| "relative".into())),
+                home.path(),
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(
+                failure.message(),
+                "PI_CODING_AGENT_DIR must be an absolute path (got 'relative')"
+            );
+            assert!(installed_agents(&conn).is_empty());
+            assert!(!pi_base(home.path()).exists());
+        }
+
+        #[test]
+        fn pi_rows_follow_hermes_and_order_the_extension_between_executable_and_installation() {
+            let home = tempfile::tempdir().unwrap();
+            let checks = checks_for(
+                None,
+                &SchemaState::Missing,
+                &probe(home.path(), true, None),
+                home.path(),
+            );
+            let names = checks
+                .iter()
+                .map(|check| check.name.as_str())
+                .collect::<Vec<_>>();
+            let pi = names
+                .iter()
+                .position(|name| name.starts_with("pi."))
+                .unwrap();
+            assert!(
+                names[..pi].iter().any(|name| name.starts_with("hermes.")),
+                "{names:?}"
+            );
+            assert_eq!(
+                names[pi..],
+                [
+                    "pi.configuration",
+                    "pi.executable",
+                    "pi.extension",
+                    "pi.installation"
+                ]
+            );
+        }
+
+        #[test]
+        fn pi_extension_check_reports_each_extension_and_record_state() {
+            type Mutation = fn(&Path, &Path);
+            let cases: [(&str, Mutation, ExtensionState); 8] = [
+                ("installed", |_, _| {}, ExtensionState::Installed),
+                (
+                    "missing extension",
+                    |extension, _| std::fs::remove_file(extension).unwrap(),
+                    ExtensionState::Plugin(None),
+                ),
+                (
+                    "unreadable extension",
+                    |extension, _| {
+                        std::fs::remove_file(extension).unwrap();
+                        std::fs::create_dir(extension).unwrap();
+                    },
+                    ExtensionState::Plugin(None),
+                ),
+                (
+                    "tampered extension",
+                    |extension, _| std::fs::write(extension, "tampered").unwrap(),
+                    ExtensionState::Plugin(Some("differs from the embedded copy")),
+                ),
+                (
+                    "missing record",
+                    |_, record| std::fs::remove_file(record).unwrap(),
+                    ExtensionState::Record,
+                ),
+                (
+                    "record names a missing file",
+                    |_, record| std::fs::write(record, "/nonexistent/cafleet\n").unwrap(),
+                    ExtensionState::Record,
+                ),
+                (
+                    "record names a file that is not executable",
+                    |_, record| {
+                        let plain = record.with_file_name("not-executable");
+                        std::fs::write(&plain, "plain").unwrap();
+                        std::fs::write(record, format!("{}\n", plain.display())).unwrap();
+                    },
+                    ExtensionState::Record,
+                ),
+                (
+                    "empty record",
+                    |_, record| std::fs::write(record, "").unwrap(),
+                    ExtensionState::Record,
+                ),
+            ];
+            for (context, mutate, state) in &cases {
+                let home = tempfile::tempdir().unwrap();
+                let (extension, record) = install_pi_extension(&pi_base(home.path()));
+                mutate(&extension, &record);
+                let checks = pi_checks(&probe(home.path(), true, None), home.path());
+                assert_extension_check(
+                    find(&checks, "pi.extension"),
+                    state,
+                    "pi",
+                    &extension,
+                    &record,
+                    context,
+                );
+            }
+        }
+
+        #[test]
+        fn pi_extension_check_is_unavailable_without_the_executable_or_configuration() {
+            let home = tempfile::tempdir().unwrap();
+            install_pi_extension(&pi_base(home.path()));
+            let absent = pi_checks(&probe(home.path(), false, None), home.path());
+            let check = find(&absent, "pi.extension");
+            assert_eq!(check.status, CheckStatus::Info);
+            assert_eq!(check.detail, "unavailable: executable is absent");
+            assert!(check.problem.is_none());
+            let invalid = pi_checks(
+                &probe(home.path(), true, Some("PI_CODING_AGENT_DIR")),
+                home.path(),
+            );
+            let configuration = find(&invalid, "pi.configuration");
+            assert_eq!(configuration.status, CheckStatus::Error);
+            assert_eq!(
+                configuration.detail,
+                "PI_CODING_AGENT_DIR must be an absolute path (got 'relative')"
+            );
+            let check = find(&invalid, "pi.extension");
+            assert_eq!(check.status, CheckStatus::Info);
+            assert_eq!(
+                check.detail,
+                "unavailable: configuration failed: PI_CODING_AGENT_DIR must be an absolute path (got 'relative')"
+            );
+            assert!(check.problem.is_none());
+        }
+
+        #[test]
+        fn pi_extension_check_reads_a_relocated_base() {
+            let home = tempfile::tempdir().unwrap();
+            let base = home.path().join("relocated pi");
+            let (extension, record) = install_pi_extension(&base);
+            let probe = probe(home.path(), true, None)
+                .with_env("PI_CODING_AGENT_DIR", base.to_str().unwrap());
+            let checks = pi_checks(&probe, home.path());
+            assert_extension_check(
+                find(&checks, "pi.extension"),
+                &ExtensionState::Installed,
+                "pi",
+                &extension,
+                &record,
+                "relocated",
+            );
+        }
+    }
+
     mod doctor_summary {
         use crate::assets::test_support::ENABLED_KEY;
         use crate::assets::test_support::FakeHermes;
@@ -1952,6 +2200,10 @@ mod tests {
 
             fn opencode_extension(&self) -> (PathBuf, PathBuf) {
                 install_opencode_extension(&self.path("opencode"))
+            }
+
+            fn pi_extension(&self) -> (PathBuf, PathBuf) {
+                install_pi_extension(&self.path("pi"))
             }
 
             fn probe(&self) -> FakeProbe {
@@ -2247,6 +2499,7 @@ mod tests {
                 std::fs::write(agents.join(preset), "preset").unwrap();
             }
             install_opencode_extension(&opencode);
+            install_pi_extension(&home.path().join("pi"));
             for agent in CodingAgent::all() {
                 crate::broker::record_asset_install(
                     &mut conn,
@@ -2265,7 +2518,7 @@ mod tests {
                 profile.join("config.yaml").display(),
                 ready_plugins()
             );
-            let mut stubs = ["claude", "codex", "opencode"]
+            let mut stubs = ["claude", "codex", "opencode", "pi"]
                 .map(|name| (name, "exit 0".to_owned()))
                 .to_vec();
             stubs.push(("hermes", hermes));
@@ -2281,6 +2534,7 @@ mod tests {
                     "ok codex: ready".into(),
                     "ok opencode: ready".into(),
                     "ok hermes: ready".into(),
+                    "ok pi: ready".into(),
                     "ok members: none running".into(),
                 ]
             );
@@ -2345,16 +2599,18 @@ mod tests {
         }
 
         fn healthy_backends(scenario: &mut Scenario, conn: &mut Connection) {
-            for name in ["claude", "codex", "opencode"] {
+            for name in ["claude", "codex", "opencode", "pi"] {
                 scenario.executable(name);
             }
             scenario.hermes_ready();
             scenario.opencode_presets();
             scenario.opencode_extension();
+            scenario.pi_extension();
             for agent in [
                 CodingAgent::Claude,
                 CodingAgent::Opencode,
                 CodingAgent::Hermes,
+                CodingAgent::Pi,
             ] {
                 record(conn, scenario, agent, crate::cli::VERSION);
             }
@@ -2369,6 +2625,7 @@ mod tests {
                 ),
                 "ok opencode: ready".into(),
                 "ok hermes: ready".into(),
+                "ok pi: ready".into(),
             ]
         }
 
@@ -2550,6 +2807,7 @@ mod tests {
                         "error hermes: hermes plugin cafleet is not enabled: plugins.enabled; assets not installed at {} — run 'cafleet setup --coding-agent hermes'",
                         scenario.config(CodingAgent::Hermes)
                     ),
+                    "info pi: not installed (pi is not on PATH)".into(),
                     format!(
                         "warn members: 1 not responding: {} — run 'cafleet member recover ID --from-member-id {director}'",
                         runs.unresponsive.member_id
@@ -2755,6 +3013,7 @@ mod tests {
                         scenario.config(CodingAgent::Opencode)
                     ),
                     "info hermes: not installed (hermes is not on PATH)".into(),
+                    "info pi: not installed (pi is not on PATH)".into(),
                     "ok members: none running".into(),
                 ]
             );
@@ -2778,7 +3037,7 @@ mod tests {
             scenario.executable("claude");
             let views = scenario.views();
             let lines = &views.text;
-            assert_eq!(lines.len(), 7, "{lines:?}");
+            assert_eq!(lines.len(), 8, "{lines:?}");
             assert_eq!(lines[0], multiplexer_line());
             assert!(lines[1].starts_with("error database: "), "{}", lines[1]);
             assert_eq!(
@@ -2788,6 +3047,7 @@ mod tests {
                     "info codex: not installed (codex is not on PATH)",
                     "info opencode: not installed (opencode is not on PATH)",
                     "info hermes: not installed (hermes is not on PATH)",
+                    "info pi: not installed (pi is not on PATH)",
                     "info members: not checked (database unavailable)",
                 ]
             );
@@ -3139,6 +3399,61 @@ mod tests {
                 format!(
                     "error opencode: extension {} is missing or differs from the embedded copy — run 'cafleet setup --coding-agent opencode'",
                     plugin.display()
+                )
+            );
+        }
+
+        #[test]
+        fn doctor_folds_a_tampered_pi_extension_into_the_pi_summary() {
+            let (scenario, _conn) = healthy_scenario();
+            let (extension, _) = scenario.pi_extension();
+            std::fs::write(&extension, "tampered").unwrap();
+            let (summary, rows) = scenario.summary_and_rows(1);
+            assert_eq!(
+                named_row(&summary, "pi"),
+                format!(
+                    "error pi: extension {} is missing or differs from the embedded copy — run 'cafleet setup --coding-agent pi'",
+                    extension.display()
+                )
+            );
+            assert_eq!(
+                named_row(&rows, "pi.extension"),
+                format!(
+                    "error pi.extension: {}: differs from the embedded copy; run 'cafleet setup --coding-agent pi'",
+                    extension.display()
+                )
+            );
+        }
+
+        #[test]
+        fn doctor_folds_an_unusable_pi_record_and_a_missing_installation_into_one_summary() {
+            let mut scenario = Scenario::new(member_run_registry);
+            let _conn = scenario.connect();
+            scenario.executable("pi");
+            let (_, record) = scenario.pi_extension();
+            std::fs::write(&record, "").unwrap();
+            let (summary, _) = scenario.summary_and_rows(1);
+            assert_eq!(
+                named_row(&summary, "pi"),
+                format!(
+                    "error pi: extension executable record {} is unusable: the record is empty; assets not installed at {} — run 'cafleet setup --coding-agent pi'",
+                    record.display(),
+                    scenario.config(CodingAgent::Pi)
+                )
+            );
+        }
+
+        #[test]
+        fn doctor_reports_a_healthy_pi_backend_with_its_extension_path() {
+            let (scenario, _conn) = healthy_scenario();
+            let views = scenario.views();
+            views.assert_exit(0);
+            assert_eq!(named_row(&views.text, "pi"), "ok pi: ready");
+            assert_eq!(
+                named_row(&views.verbose, "pi.extension"),
+                format!(
+                    "ok pi.extension: {}",
+                    scenario.path("pi").join("extensions/cafleet.ts").display()
                 )
             );
         }
