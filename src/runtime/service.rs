@@ -2796,8 +2796,8 @@ pub(crate) mod test_support {
         use crate::runtime::service::test_support::observation_services::health;
         use crate::runtime::service::test_support::observation_services::private_write;
         use crate::runtime::service::test_support::observation_services::synthetic;
-        use crate::runtime::service::test_support::observation_services::wait_until;
         use crate::runtime::service::test_support::*;
+        use crate::runtime::writer::test_support::wait_until_within;
         use std::sync::Arc;
         use std::sync::OnceLock;
 
@@ -2973,7 +2973,7 @@ pub(crate) mod test_support {
         }
         pub(crate) fn assert_fired(fixture: &ServiceFixture, expected: &str) {
             let path = fixture.fixture._dir.path().join("observation-fault-fired");
-            wait_until(|| path.exists());
+            wait_until_within(Duration::from_secs(30), || path.exists());
             assert_eq!(std::fs::read_to_string(path).unwrap(), expected);
             assert!(
                 !fixture
@@ -2996,7 +2996,9 @@ pub(crate) mod test_support {
             }
         }
         pub(crate) fn assert_durable_gap(fixture: &ServiceFixture) {
-            wait_until(|| count(fixture, "runner_degraded") >= 2);
+            wait_until_within(Duration::from_secs(30), || {
+                count(fixture, "runner_degraded") >= 2
+            });
             let payloads: Vec<String> = fixture.fixture.conn.prepare(
         "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='runner_degraded' ORDER BY event_seq",
     ).unwrap().query_map([fixture.fixture.run.run_id], |row| row.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
